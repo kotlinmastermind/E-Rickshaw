@@ -257,3 +257,32 @@ async def delete_driver_account(
     await db.commit()
     return {"message": "Chauffeur account deactivated and personal details anonymized."}
 
+class DriverDeviceTokenPayload(BaseModel):
+    fcm_token: str
+    device_os: str = "ANDROID"
+
+@router.post("/device-token")
+async def register_driver_device_token(
+    payload: DriverDeviceTokenPayload,
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import DeviceToken
+    from sqlalchemy import select
+    stmt = select(DeviceToken).where(DeviceToken.fcm_token == payload.fcm_token)
+    res = await db.execute(stmt)
+    token_obj = res.scalar_one_or_none()
+    if not token_obj:
+        token_obj = DeviceToken(
+            user_id=user.id,
+            fcm_token=payload.fcm_token,
+            device_os=payload.device_os
+        )
+        db.add(token_obj)
+    else:
+        token_obj.user_id = user.id
+        token_obj.device_os = payload.device_os
+    await db.commit()
+    return {"message": "Driver device token registered."}
+
+

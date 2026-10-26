@@ -120,6 +120,35 @@ class RideService:
         await self.db.commit()
         await self.db.refresh(ride)
 
+        # Broadcast High-Priority Dispatch Push Notification to all Online Drivers
+        try:
+            from backend.domain.models import DeviceToken, DriverAvailability, DriverProfile
+            stmt_drivers = (
+                select(DeviceToken.fcm_token)
+                .join(DriverProfile, DriverProfile.user_id == DeviceToken.user_id)
+                .join(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
+                .where(DriverAvailability.is_online == True)
+            )
+            res_tokens = await self.db.execute(stmt_drivers)
+            fcm_tokens = res_tokens.scalars().all()
+            for token in fcm_tokens:
+                await self.notifier.send_push_notification(
+                    device_token=token,
+                    title="NEW VIP RIDE REQUEST 🚖",
+                    body=f"Pickup: {pickup_address[:35]} • Fare: ₹{ride.final_fare_cents // 100}",
+                    data={
+                        "type": "NEW_RIDE_DISPATCH",
+                        "ride_id": ride.id,
+                        "pickup_address": pickup_address,
+                        "destination_address": destination_address,
+                        "fare_rupees": str(ride.final_fare_cents // 100),
+                        "priority": "high",
+                        "sound": "ride_dispatch_alert"
+                    }
+                )
+        except Exception:
+            pass
+
         return {
             "ride_id": ride.id,
             "status": ride.status,

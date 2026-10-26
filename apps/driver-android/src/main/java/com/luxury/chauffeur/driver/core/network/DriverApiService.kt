@@ -95,4 +95,12 @@ interface DriverApiService {
 
     @POST("api/v1/rides/{id}/finish")
     suspend fun finishTrip(@Path("id") rideId: String, @Body payload: FinishTripPayload): Response<Map<String, Any>>
+
+    @POST("api/v1/drivers/device-token")
+    suspend fun registerDeviceToken(@Body payload: DriverDeviceTokenPayload): Response<Map<String, Any>>
 }
+
+data class DriverDeviceTokenPayload(
+    @SerializedName("fcm_token") val fcmToken: String,
+    @SerializedName("device_os") val deviceOs: String = "ANDROID"
+)

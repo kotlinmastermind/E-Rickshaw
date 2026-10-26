@@ -90,6 +90,7 @@ dependencies {
     val firebaseBom = platform(libs.firebase.bom)
     implementation(firebaseBom)
     implementation(libs.firebase.auth)
+    implementation(libs.firebase.messaging)
     
     implementation(libs.play.services.maps)
     implementation(libs.play.services.location)
