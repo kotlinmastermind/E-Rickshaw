@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 
 object DriverApiClient {
     // Cloud Render URL (Production deployment)
-    const val RENDER_BASE_URL: String = "https://e-rickshaw-api.onrender.com/"
+    const val RENDER_BASE_URL: String = "https://e-rickshaw-z32z.onrender.com/"
 
     // Local host machine URL for Android Emulator
     const val LOCAL_EMULATOR_BASE_URL: String = "http://10.0.2.2:8000/"
