@@ -15,6 +15,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.luxury.chauffeur.customer.core.designsystem.*
+import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.customer.feature.map.LuxuryMapView
 
 import com.luxury.chauffeur.customer.core.network.*
 import kotlinx.coroutines.launch
@@ -131,28 +133,30 @@ fun LocationScreen(
                 .padding(padding)
                 .padding(horizontal = 20.dp)
         ) {
-            // Simulated Luxury Map View Header
+            // Real Google Maps Vector Tiles Surface
             Surface(
                 shape = RoundedCornerShape(LuxuryDimensions.RadiusMedium),
                 color = LuxuryColors.DeepGraphite,
                 border = BorderStroke(1.dp, LuxuryColors.CardBorder),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(160.dp)
+                    .height(180.dp)
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box {
+                    val destPlace = selectedDestination ?: luxuryDestinations.first()
+                    LuxuryMapView(
+                        modifier = Modifier.fillMaxSize(),
+                        pickupLatLng = LatLng(18.9220, 72.8347),
+                        pickupTitle = pickupAddress,
+                        destLatLng = LatLng(destPlace.lat, destPlace.lng),
+                        destTitle = destPlace.name
+                    )
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                    ) {
                         GoldBadge("GPS LOCATION ACTIVE")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = pickupAddress,
-                            style = LuxuryTypography.BodyRegular.copy(fontWeight = FontWeight.SemiBold),
-                            maxLines = 1
-                        )
-                        Text(
-                            text = "Accuracy: High (±4m) • Chauffeurs nearby: 8 online",
-                            style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp)
-                        )
                     }
                 }
             }

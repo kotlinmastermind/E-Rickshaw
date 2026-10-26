@@ -104,16 +104,45 @@ class GoogleMapsProvider(MapsProvider):
     ) -> RouteDetails:
         if not self.api_key:
             return await self.fallback.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
-        url = "https://maps.googleapis.com/maps/api/directions/json"
-        params = {
-            "origin": f"{origin_lat},{origin_lng}",
-            "destination": f"{dest_lat},{dest_lng}",
-            "mode": "driving",
-            "key": self.api_key
+
+        # 1. Try Google Routes API v2 (modern recommended endpoint)
+        routes_url = f"https://routes.googleapis.com/directions/v2:computeRoutes?key={self.api_key}"
+        routes_headers = {
+            "Content-Type": "application/json",
+            "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"
+        }
+        routes_payload = {
+            "origin": {"location": {"latLng": {"latitude": origin_lat, "longitude": origin_lng}}},
+            "destination": {"location": {"latLng": {"latitude": dest_lat, "longitude": dest_lng}}},
+            "travelMode": "DRIVE",
+            "routingPreference": "TRAFFIC_AWARE"
         }
         async with httpx.AsyncClient() as client:
             try:
-                resp = await client.get(url, params=params, timeout=10.0)
+                resp = await client.post(routes_url, json=routes_payload, headers=routes_headers, timeout=8.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    routes = data.get("routes", [])
+                    if routes:
+                        r = routes[0]
+                        dist_km = r.get("distanceMeters", 0) / 1000.0
+                        dur_str = r.get("duration", "0s").rstrip("s")
+                        dur_min = float(dur_str) / 60.0
+                        poly = r.get("polyline", {}).get("encodedPolyline", "")
+                        return RouteDetails(distance_km=dist_km, duration_minutes=dur_min, polyline=poly)
+            except Exception:
+                pass
+
+            # 2. Fallback to Google Directions API (v1)
+            try:
+                dir_url = "https://maps.googleapis.com/maps/api/directions/json"
+                params = {
+                    "origin": f"{origin_lat},{origin_lng}",
+                    "destination": f"{dest_lat},{dest_lng}",
+                    "mode": "driving",
+                    "key": self.api_key
+                }
+                resp = await client.get(dir_url, params=params, timeout=8.0)
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get("routes"):
@@ -124,20 +153,53 @@ class GoogleMapsProvider(MapsProvider):
                         return RouteDetails(distance_km=dist_km, duration_minutes=dur_min, polyline=poly)
             except Exception:
                 pass
+
         return await self.fallback.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
 
     async def autocomplete_places(self, query: str) -> List[Dict[str, Any]]:
         if not self.api_key or not query.strip():
             return await self.fallback.autocomplete_places(query)
-        url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
-        params = {
+
+        # 1. Try Google Places API (New)
+        new_places_url = f"https://places.googleapis.com/v1/places:autocomplete?key={self.api_key}"
+        new_places_payload = {
             "input": query,
-            "key": self.api_key,
-            "components": "country:in"
+            "includedRegionCodes": ["in"],
+            "languageCode": "en"
         }
         async with httpx.AsyncClient() as client:
             try:
-                resp = await client.get(url, params=params, timeout=5.0)
+                resp = await client.post(new_places_url, json=new_places_payload, timeout=5.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    sugg = data.get("suggestions", [])
+                    if sugg:
+                        results = []
+                        for s in sugg:
+                            p = s.get("placePrediction", {})
+                            text = p.get("text", {}).get("text", "")
+                            main_t = p.get("structuredFormat", {}).get("mainText", {}).get("text", text)
+                            pid = p.get("placeId", "")
+                            results.append({
+                                "place_id": pid,
+                                "name": main_t,
+                                "address": text,
+                                "lat": 19.0760,
+                                "lng": 72.8777
+                            })
+                        return results
+            except Exception:
+                pass
+
+            # 2. Fallback to Legacy Places Autocomplete API
+            try:
+                legacy_url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+                params = {
+                    "input": query,
+                    "key": self.api_key,
+                    "components": "country:in"
+                }
+                resp = await client.get(legacy_url, params=params, timeout=5.0)
                 if resp.status_code == 200:
                     data = resp.json()
                     preds = data.get("predictions", [])
@@ -154,6 +216,7 @@ class GoogleMapsProvider(MapsProvider):
                         ]
             except Exception:
                 pass
+
         return await self.fallback.autocomplete_places(query)
 
     async def reverse_geocode(self, lat: float, lng: float) -> str:

@@ -14,6 +14,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.luxury.chauffeur.customer.core.designsystem.*
 import com.luxury.chauffeur.customer.core.network.ApiClient
+import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.customer.feature.map.LuxuryMapView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -152,34 +154,39 @@ fun LiveTrackingScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Simulated Map Surface
+                // Real Google Maps Live Tracking Surface
                 Surface(
                     shape = RoundedCornerShape(LuxuryDimensions.RadiusMedium),
                     color = LuxuryColors.DeepGraphite,
                     border = BorderStroke(1.dp, LuxuryColors.CardBorder),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(240.dp)
+                        .height(260.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("LIVE GPS TELEMETRY", style = LuxuryTypography.TitleGold)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("18.9217° N, 72.8332° E • Heading: 142° SE", style = LuxuryTypography.BodySubtle)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            // Display OTP passcode banner
-                            Surface(
-                                shape = RoundedCornerShape(LuxuryDimensions.RadiusSmall),
-                                color = LuxuryColors.CardSurface,
-                                border = BorderStroke(1.dp, LuxuryColors.ChampagneGold)
+                    Box {
+                        LuxuryMapView(
+                            modifier = Modifier.fillMaxSize(),
+                            pickupLatLng = LatLng(18.9217, 72.8332),
+                            pickupTitle = "Pickup: The Taj Mahal Palace",
+                            destLatLng = LatLng(19.0974, 72.8744),
+                            destTitle = "Dest: CSM T2 VIP Terminal",
+                            driverLatLng = LatLng(18.9400, 72.8300)
+                        )
+                        // Floating passcode overlay
+                        Surface(
+                            shape = RoundedCornerShape(LuxuryDimensions.RadiusSmall),
+                            color = LuxuryColors.CardSurface.copy(alpha = 0.92f),
+                            border = BorderStroke(1.dp, LuxuryColors.ChampagneGold),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(
-                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text("TRIP START PASSCODE", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp))
-                                    Text(startOtp, style = LuxuryTypography.OtpDigits.copy(fontSize = 24.sp))
-                                }
+                                Text("TRIP START PASSCODE: ", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
+                                Text(startOtp, style = LuxuryTypography.OtpDigits.copy(fontSize = 18.sp))
                             }
                         }
                     }

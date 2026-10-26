@@ -91,6 +91,9 @@ dependencies {
     implementation(firebaseBom)
     implementation(libs.firebase.auth)
     
+    implementation(libs.play.services.maps)
+    implementation(libs.play.services.location)
+    
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)

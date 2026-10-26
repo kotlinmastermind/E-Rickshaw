@@ -9,14 +9,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.android.gms.maps.model.LatLng
 import com.luxury.chauffeur.driver.core.designsystem.*
 import com.luxury.chauffeur.driver.core.network.DriverApiClient
 import com.luxury.chauffeur.driver.core.network.StartTripPayload
 import com.luxury.chauffeur.driver.core.network.FinishTripPayload
+import com.luxury.chauffeur.driver.feature.map.DriverMapView
+import com.luxury.chauffeur.driver.feature.map.NavigationHelper
 import kotlinx.coroutines.launch
 
 enum class ChauffeurTripStage {
@@ -35,11 +39,18 @@ fun ActiveChauffeurTripScreen(
     onTripFinished: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var stage by remember { mutableStateOf(ChauffeurTripStage.NAVIGATING_TO_PICKUP) }
     var enteredOtp by remember { mutableStateOf("") }
     var otpError by remember { mutableStateOf<String?>(null) }
     var cashCollectedConfirmed by remember { mutableStateOf(false) }
     var isActionLoading by remember { mutableStateOf(false) }
+
+    // Navigation targets based on trip stage
+    val isPickupPhase = stage == ChauffeurTripStage.NAVIGATING_TO_PICKUP || stage == ChauffeurTripStage.ARRIVED_AT_PICKUP
+    val targetLat = if (isPickupPhase) 18.9217 else 19.0974
+    val targetLng = if (isPickupPhase) 72.8332 else 72.8744
+    val targetLabel = if (isPickupPhase) pickupAddress else destinationAddress
 
     Scaffold(
         containerColor = DriverColors.MidnightBlack
@@ -73,36 +84,68 @@ fun ActiveChauffeurTripScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Simulated Google Navigation Banner & Turn-by-Turn Telemetry
+                // Real Google Maps Navigation & Turn-by-Turn Telemetry
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = DriverColors.CockpitDark,
                     border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(200.dp)
+                        .height(240.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = if (stage == ChauffeurTripStage.NAVIGATING_TO_PICKUP || stage == ChauffeurTripStage.ARRIVED_AT_PICKUP)
-                                    "PICKUP: $pickupAddress"
-                                else
-                                    "DESTINATION: $destinationAddress",
-                                style = DriverTypography.Body.copy(fontWeight = FontWeight.Bold),
-                                modifier = Modifier.padding(horizontal = 16.dp)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = when (stage) {
-                                    ChauffeurTripStage.NAVIGATING_TO_PICKUP -> "In 200m, turn left onto Marine Drive • ETA: 3 min"
-                                    ChauffeurTripStage.ARRIVED_AT_PICKUP -> "Vehicle parked at Portico Entrance"
-                                    ChauffeurTripStage.OTP_VERIFICATION -> "Waiting for guest security verification"
-                                    ChauffeurTripStage.TRIP_IN_PROGRESS -> "Take Western Express Flyover • 18.2 km remaining"
-                                    ChauffeurTripStage.TRIP_FINISHED -> "VIP Passenger Disembarked"
-                                },
-                                style = DriverTypography.Body.copy(color = DriverColors.ChauffeurGold, fontSize = 13.sp)
-                            )
+                    Box {
+                        DriverMapView(
+                            modifier = Modifier.fillMaxSize(),
+                            pickupLatLng = LatLng(18.9217, 72.8332),
+                            pickupTitle = "Pickup: $pickupAddress",
+                            destLatLng = LatLng(19.0974, 72.8744),
+                            destTitle = "Dest: $destinationAddress"
+                        )
+
+                        // Floating Turn-by-Turn GPS Navigation Action Button
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = DriverColors.CockpitDark.copy(alpha = 0.94f),
+                            border = BorderStroke(1.dp, DriverColors.ChauffeurGold),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (isPickupPhase) "TO PICKUP: $pickupAddress" else "TO DEST: $destinationAddress",
+                                        style = DriverTypography.Body.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = when (stage) {
+                                            ChauffeurTripStage.NAVIGATING_TO_PICKUP -> "Turn left onto Marine Drive • ETA: 3 min"
+                                            ChauffeurTripStage.ARRIVED_AT_PICKUP -> "Vehicle at Portico Entrance"
+                                            ChauffeurTripStage.OTP_VERIFICATION -> "Waiting for guest verification"
+                                            ChauffeurTripStage.TRIP_IN_PROGRESS -> "Western Express Flyover • 18 km"
+                                            ChauffeurTripStage.TRIP_FINISHED -> "VIP Passenger Disembarked"
+                                        },
+                                        style = DriverTypography.Body.copy(color = DriverColors.ChauffeurGold, fontSize = 10.sp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        NavigationHelper.launchGoogleMapsNavigation(context, targetLat, targetLng, targetLabel)
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = DriverColors.ChauffeurGold, contentColor = DriverColors.MidnightBlack),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Text("NAVIGATE", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                }
+                            }
                         }
                     }
                 }

@@ -51,3 +51,10 @@
 -dontwarn com.google.firebase.**
 -keep class com.google.firebase.** { *; }
 
+# Google Play Services Maps & Location
+-dontwarn com.google.android.gms.**
+-keep class com.google.android.gms.maps.** { *; }
+-keep interface com.google.android.gms.maps.** { *; }
+-keep class com.google.android.gms.location.** { *; }
+
+
