@@ -15,13 +15,15 @@ router = APIRouter(tags=["Health & Observability"])
 _START_TIME = time.time()
 
 @router.get("/health/live")
+@router.get("/healthz")
+@router.get("/health")
 async def liveness():
     """
     Load balancer liveness probe. Returns immediately if the FastAPI worker process is active.
     """
     return {
         "status": "LIVE",
-        "service": "luxury-ride-backend",
+        "service": "e-rickshaw-api",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
