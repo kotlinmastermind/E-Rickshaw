@@ -141,6 +141,73 @@ class AuthService:
             }
         }
 
+    async def verify_firebase_auth(
+        self, phone_number: str, role: str = "customer",
+        firebase_uid: Optional[str] = None, id_token: Optional[str] = None,
+        ip_address: Optional[str] = None, user_agent: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Exchanges verified Firebase Phone Auth credential for platform JWT session."""
+        phone = phone_number.strip()
+        if len(phone) < 10:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid telephone format.")
+
+        stmt = select(User).where(User.phone_number == phone)
+        res = await self.db.execute(stmt)
+        user = res.scalar_one_or_none()
+
+        if not user:
+            user = User(
+                phone_number=phone,
+                role=role,
+                is_active=True,
+                is_verified=True
+            )
+            self.db.add(user)
+            await self.db.flush()
+
+            if role == "customer":
+                profile = CustomerProfile(user_id=user.id)
+                self.db.add(profile)
+            elif role == "driver":
+                profile = DriverProfile(
+                    user_id=user.id,
+                    license_number=f"DL-{user.id[:8].upper()}",
+                    approval_status="PENDING"
+                )
+                self.db.add(profile)
+            await self.db.flush()
+
+        # Create Session record
+        token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
+        session = Session(
+            user_id=user.id,
+            token_hash=token_hash,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            is_revoked=False,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        )
+        self.db.add(session)
+        await self.db.commit()
+        await self.db.refresh(user)
+
+        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
+        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
+
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "user": {
+                "id": user.id,
+                "phone_number": user.phone_number,
+                "full_name": user.full_name,
+                "role": user.role,
+                "is_verified": user.is_verified
+            }
+        }
+
     async def refresh_token_rotation(self, refresh_token_str: str) -> Dict[str, Any]:
         """Validates refresh token, rotates tokens, and invalidates old credentials if compromised."""
         from backend.infrastructure.security.crypto import decode_jwt_token

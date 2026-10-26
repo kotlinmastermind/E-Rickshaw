@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "77155333800",
+    "project_id": "e-rickshaw-platform",
+    "storage_bucket": "e-rickshaw-platform.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:77155333800:android:ee7fb5ef2739d5c674f49d",
+        "android_client_info": {
+          "package_name": "com.luxury.chauffeur.customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBCd1pDJ_1KeajQKHUQG-8QqlB5OpwmmOo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

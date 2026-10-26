@@ -49,3 +49,8 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+
+# Firebase
+-dontwarn com.google.firebase.**
+-keep class com.google.firebase.** { *; }
+

@@ -40,6 +40,26 @@ async def verify_otp(payload: OtpVerifyPayload, request: Request, db: AsyncSessi
         user_agent=ua
     )
 
+class FirebaseVerifyPayload(BaseModel):
+    phone_number: str = Field(..., json_schema_extra={"example": "+919876543210"})
+    role: str = Field(default="customer")
+    firebase_uid: Optional[str] = None
+    id_token: Optional[str] = None
+
+@router.post("/firebase/verify", dependencies=[Depends(auth_rate_limiter)])
+async def verify_firebase(payload: FirebaseVerifyPayload, request: Request, db: AsyncSession = Depends(get_db)):
+    service = AuthService(db)
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    return await service.verify_firebase_auth(
+        phone_number=payload.phone_number,
+        role=payload.role,
+        firebase_uid=payload.firebase_uid,
+        id_token=payload.id_token,
+        ip_address=ip,
+        user_agent=ua
+    )
+
 @router.post("/token/refresh", dependencies=[Depends(auth_rate_limiter)])
 async def refresh_token(payload: TokenRefreshPayload, db: AsyncSession = Depends(get_db)):
     """Rotates refresh tokens and provides a newly signed short-lived access token."""

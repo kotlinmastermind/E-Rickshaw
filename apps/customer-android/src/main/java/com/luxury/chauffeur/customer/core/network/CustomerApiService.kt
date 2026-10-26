@@ -202,12 +202,22 @@ data class PromoValidateResponse(
     @SerializedName("final_fare_cents") val finalFareCents: Int
 )
 
+data class FirebaseVerifyPayload(
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("role") val role: String = "customer",
+    @SerializedName("firebase_uid") val firebaseUid: String? = null,
+    @SerializedName("id_token") val idToken: String? = null
+)
+
 interface CustomerApiService {
     @POST("api/v1/auth/otp/request")
     suspend fun requestOtp(@Body payload: OtpRequestPayload): Response<Map<String, Any>>
 
     @POST("api/v1/auth/otp/verify")
     suspend fun verifyOtp(@Body payload: OtpVerifyPayload): Response<TokenResponse>
+
+    @POST("api/v1/auth/firebase/verify")
+    suspend fun verifyFirebaseAuth(@Body payload: FirebaseVerifyPayload): Response<TokenResponse>
 
     @GET("api/v1/customers/profile")
     suspend fun getProfile(): Response<CustomerProfileDto>

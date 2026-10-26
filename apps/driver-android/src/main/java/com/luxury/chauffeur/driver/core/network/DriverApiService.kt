@@ -58,12 +58,22 @@ data class FinishTripPayload(
     @SerializedName("actual_duration_minutes") val actualDurationMinutes: Double
 )
 
+data class DriverFirebaseVerifyPayload(
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("role") val role: String = "driver",
+    @SerializedName("firebase_uid") val firebaseUid: String? = null,
+    @SerializedName("id_token") val idToken: String? = null
+)
+
 interface DriverApiService {
     @POST("api/v1/auth/otp/request")
     suspend fun requestOtp(@Body payload: DriverOtpRequestPayload): Response<Map<String, Any>>
 
     @POST("api/v1/auth/otp/verify")
     suspend fun verifyOtp(@Body payload: DriverOtpVerifyPayload): Response<DriverTokenResponse>
+
+    @POST("api/v1/auth/firebase/verify")
+    suspend fun verifyFirebaseAuth(@Body payload: DriverFirebaseVerifyPayload): Response<DriverTokenResponse>
 
     @GET("api/v1/drivers/profile")
     suspend fun getProfile(): Response<DriverProfileDto>
