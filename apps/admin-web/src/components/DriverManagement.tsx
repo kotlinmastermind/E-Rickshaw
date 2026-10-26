@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { fetchWithAuth } from '../services/api';
 
 interface Chauffeur {
   id: string;
@@ -45,7 +46,40 @@ export const DriverManagement: React.FC = () => {
   const [selectedDriver, setSelectedDriver] = useState<Chauffeur | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
 
-  const updateApproval = (driverId: string, status: 'APPROVED' | 'REJECTED') => {
+  useEffect(() => {
+    fetchWithAuth('/admin/drivers').then(data => {
+      if (data) {
+        const list = Array.isArray(data) ? data : (data.items || data.drivers || []);
+        if (list.length > 0) {
+          setDrivers(list.map((i: any) => ({
+            id: i.driver_id || i.id,
+            name: i.full_name || i.name || "Chauffeur",
+            license_number: i.license_number || "DL-PENDING-001",
+            vehicle: i.vehicle_name || i.vehicle || "E-Rickshaw Fleet EV",
+            rating: i.rating_average ?? i.rating ?? 5.0,
+            total_trips: i.total_trips ?? 0,
+            approval_status: i.approval_status || "PENDING",
+            documents: [
+              { type: "Commercial License", filename: "license.pdf", verified: i.approval_status === "APPROVED" },
+              { type: "Vehicle Registration", filename: "rc_doc.pdf", verified: i.approval_status === "APPROVED" }
+            ]
+          })));
+        }
+      }
+    });
+  }, []);
+
+  const updateApproval = async (driverId: string, status: 'APPROVED' | 'REJECTED') => {
+    try {
+      await fetchWithAuth(`/admin/drivers/${driverId}/approval`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          approval_status: status,
+          rejection_reason: status === 'REJECTED' ? rejectionReason : null
+        })
+      });
+    } catch (_e) {}
+
     setDrivers(prev => prev.map(d => {
       if (d.id === driverId) {
         return { ...d, approval_status: status };
