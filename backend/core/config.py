@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: Optional[str] = None
     TWILIO_FROM_NUMBER: Optional[str] = None
     FAST2SMS_API_KEY: Optional[str] = None
+    FAST2SMS_OTP_ID: Optional[str] = None
 
     # FCM Notifications
     FCM_CREDENTIALS_PATH: Optional[str] = None

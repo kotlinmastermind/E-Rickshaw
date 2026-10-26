@@ -28,6 +28,8 @@ services:
         value: mock
       - key: FAST2SMS_API_KEY
         sync: false
+      - key: FAST2SMS_OTP_ID
+        sync: false
       - key: GOOGLE_MAPS_API_KEY
         sync: false
       - key: RAZORPAY_KEY_ID

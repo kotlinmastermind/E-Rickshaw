@@ -59,10 +59,13 @@ class TwilioSMSProvider(SMSProvider):
 class Fast2SMSSMSProvider(SMSProvider):
     """
     Fast2SMS Gateway integration (India domestic SMS).
-    Supports direct Quick transactional route for OTP delivery.
+    Supports:
+      1. Modern Fast2SMS Smart OTP API (direct delivery via OTP ID template)
+      2. Quick transactional route (/dev/bulkV2) fallback
     """
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, otp_id: Optional[str] = None):
         self.api_key = api_key
+        self.otp_id = otp_id
 
     async def send_otp(self, phone_number: str, otp_code: str) -> bool:
         if not self.api_key:
@@ -70,6 +73,32 @@ class Fast2SMSSMSProvider(SMSProvider):
             return False
         clean_phone = phone_number.replace("+91", "").replace("+", "").strip()
         import httpx
+
+        # Priority 1: Fast2SMS Smart OTP Endpoint
+        if self.otp_id:
+            url = "https://www.fast2sms.com/dev/otp/send"
+            headers = {
+                "authorization": self.api_key,
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "otp_id": self.otp_id,
+                "mobile": clean_phone,
+                "otp": otp_code
+            }
+            async with httpx.AsyncClient() as client:
+                try:
+                    resp = await client.post(url, json=payload, headers=headers, timeout=10.0)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("return") is True:
+                            logger.info(f"Fast2SMS Smart OTP successfully dispatched to {clean_phone}")
+                            return True
+                    logger.warning(f"Fast2SMS Smart OTP returned status {resp.status_code}: {resp.text}")
+                except Exception as e:
+                    logger.error(f"Fast2SMS Smart OTP request failed: {e}")
+
+        # Priority 2: Standard bulkV2 route
         url = "https://www.fast2sms.com/dev/bulkV2"
         headers = {
             "authorization": self.api_key,
@@ -87,7 +116,7 @@ class Fast2SMSSMSProvider(SMSProvider):
                     data = resp.json()
                     is_success = data.get("return", False) is True
                     if is_success:
-                        logger.info("Fast2SMS OTP dispatched successfully")
+                        logger.info("Fast2SMS OTP dispatched successfully via bulkV2")
                     else:
                         logger.error(f"Fast2SMS API rejected request: {data}")
                     return is_success
@@ -107,5 +136,8 @@ def get_sms_provider() -> SMSProvider:
             from_number=settings.TWILIO_FROM_NUMBER or ""
         )
     elif settings.SMS_PROVIDER == "fast2sms" and getattr(settings, "FAST2SMS_API_KEY", None):
-        return Fast2SMSSMSProvider(api_key=settings.FAST2SMS_API_KEY)
+        return Fast2SMSSMSProvider(
+            api_key=settings.FAST2SMS_API_KEY,
+            otp_id=getattr(settings, "FAST2SMS_OTP_ID", None)
+        )
     return _mock_sms_instance
