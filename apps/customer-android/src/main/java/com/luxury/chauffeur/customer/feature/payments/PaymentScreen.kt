@@ -1,5 +1,7 @@
 package com.luxury.chauffeur.customer.feature.payments
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -7,10 +9,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.luxury.chauffeur.customer.core.designsystem.*
+import com.luxury.chauffeur.customer.core.network.ApiClient
+import com.luxury.chauffeur.customer.core.network.PaymentIntentRequest
+import kotlinx.coroutines.launch
 
 @Composable
 fun PaymentScreen(
@@ -18,6 +24,8 @@ fun PaymentScreen(
     amountRupees: Int,
     onPaymentAndReviewCompleted: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var selectedMethod by remember { mutableStateOf("UPI") }
     var isProcessing by remember { mutableStateOf(false) }
     var paymentSettled by remember { mutableStateOf(false) }
@@ -143,14 +151,47 @@ fun PaymentScreen(
                         isLoading = isProcessing,
                         onClick = {
                             isProcessing = true
-                            paymentSettled = true
-                            isProcessing = false
+                            if (selectedMethod == "UPI") {
+                                val upiUri = Uri.parse("upi://pay?pa=luxurychauffeur@icici&pn=Luxury%20Ride&am=$amountRupees.00&cu=INR&tn=Ride-$rideId")
+                                val upiIntent = Intent(Intent.ACTION_VIEW, upiUri)
+                                try {
+                                    context.startActivity(Intent.createChooser(upiIntent, "Pay via UPI App (GPay / PhonePe / Paytm)"))
+                                } catch (_: Exception) {}
+                            }
+                            scope.launch {
+                                try {
+                                    ApiClient.getService().createPaymentIntent(
+                                        PaymentIntentRequest(
+                                            rideId = rideId,
+                                            idempotencyKey = "pay_${rideId}_${System.currentTimeMillis()}"
+                                        )
+                                    )
+                                } catch (_: Exception) {}
+                                isProcessing = false
+                                paymentSettled = true
+                            }
                         }
                     )
                 } else {
                     LuxuryButton(
                         text = "SUBMIT RATING & RETURN HOME",
-                        onClick = onPaymentAndReviewCompleted
+                        isLoading = isProcessing,
+                        onClick = {
+                            isProcessing = true
+                            scope.launch {
+                                try {
+                                    ApiClient.getService().rateDriver(
+                                        rideId,
+                                        com.luxury.chauffeur.customer.core.network.RateDriverRequest(
+                                            rating = selectedRating,
+                                            feedback = feedbackText
+                                        )
+                                    )
+                                } catch (_: Exception) {}
+                                isProcessing = false
+                                onPaymentAndReviewCompleted()
+                            }
+                        }
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
