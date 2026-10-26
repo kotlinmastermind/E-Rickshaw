@@ -4,7 +4,7 @@ services:
     runtime: python
     region: singapore
     plan: free
-    buildCommand: pip install --upgrade pip && pip install -r backend/requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r backend/requirements.txt && alembic upgrade head
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health/live
     envVars:
@@ -24,3 +24,26 @@ services:
         generateValue: true
       - key: API_V1_STR
         value: /api/v1
+      - key: SMS_PROVIDER
+        value: mock
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+
+  - type: static_site
+    name: e-rickshaw-admin
+    rootDir: apps/admin-web
+    buildCommand: npm install && npm run build
+    publishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://e-rickshaw-api.onrender.com/api/v1

@@ -143,6 +143,65 @@ data class NotificationDto(
     @SerializedName("created_at") val createdAt: String
 )
 
+data class SharedEstimateRequest(
+    @SerializedName("category_id") val categoryId: String,
+    @SerializedName("pickup_latitude") val pickupLatitude: Double,
+    @SerializedName("pickup_longitude") val pickupLongitude: Double,
+    @SerializedName("destination_latitude") val destinationLatitude: Double,
+    @SerializedName("destination_longitude") val destinationLongitude: Double,
+    @SerializedName("seats_requested") val seatsRequested: Int = 1
+)
+
+data class SharedEstimateResponse(
+    @SerializedName("estimate_id") val estimateId: String,
+    @SerializedName("solo_fare_cents") val soloFareCents: Int,
+    @SerializedName("shared_discount_percentage") val sharedDiscountPercentage: Double,
+    @SerializedName("shared_fare_cents") val sharedFareCents: Int,
+    @SerializedName("guest_savings_cents") val guestSavingsCents: Int,
+    @SerializedName("currency") val currency: String,
+    @SerializedName("seats_requested") val seatsRequested: Int,
+    @SerializedName("total_payable_cents") val totalPayableCents: Int,
+    @SerializedName("expires_at") val expiresAt: String
+)
+
+data class BookSharedRideRequest(
+    @SerializedName("category_id") val categoryId: String,
+    @SerializedName("estimate_id") val estimateId: String,
+    @SerializedName("pickup_address") val pickupAddress: String,
+    @SerializedName("pickup_latitude") val pickupLatitude: Double,
+    @SerializedName("pickup_longitude") val pickupLongitude: Double,
+    @SerializedName("destination_address") val destinationAddress: String,
+    @SerializedName("destination_latitude") val destinationLatitude: Double,
+    @SerializedName("destination_longitude") val destinationLongitude: Double,
+    @SerializedName("seats_reserved") val seatsReserved: Int = 1,
+    @SerializedName("fallback_policy") val fallbackPolicy: String = "CREATE_NEW_POOL"
+)
+
+data class WalletDto(
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("balance_cents") val balanceCents: Int,
+    @SerializedName("currency") val currency: String,
+    @SerializedName("is_frozen") val isFrozen: Boolean
+)
+
+data class TopupWalletRequest(
+    @SerializedName("amount_cents") val amountCents: Int,
+    @SerializedName("idempotency_key") val idempotencyKey: String,
+    @SerializedName("payment_reference") val paymentReference: String? = null
+)
+
+data class PromoValidateRequest(
+    @SerializedName("code") val code: String,
+    @SerializedName("fare_cents") val fareCents: Int
+)
+
+data class PromoValidateResponse(
+    @SerializedName("valid") val valid: Boolean,
+    @SerializedName("code") val code: String,
+    @SerializedName("discount_cents") val discountCents: Int,
+    @SerializedName("final_fare_cents") val finalFareCents: Int
+)
+
 interface CustomerApiService {
     @POST("api/v1/auth/otp/request")
     suspend fun requestOtp(@Body payload: OtpRequestPayload): Response<Map<String, Any>>
@@ -165,8 +224,14 @@ interface CustomerApiService {
     @POST("api/v1/fares/estimate")
     suspend fun calculateFareEstimate(@Body payload: FareEstimateRequest): Response<FareEstimateResponse>
 
+    @POST("api/v1/pools/estimate")
+    suspend fun getSharedEstimate(@Body payload: SharedEstimateRequest): Response<SharedEstimateResponse>
+
     @POST("api/v1/rides/request")
     suspend fun requestRide(@Body payload: RideRequestPayload): Response<Map<String, Any>>
+
+    @POST("api/v1/pools/book")
+    suspend fun bookSharedRide(@Body payload: BookSharedRideRequest): Response<Map<String, Any>>
 
     @GET("api/v1/rides/{id}")
     suspend fun getRideDetails(@Path("id") rideId: String): Response<RideResponseDto>
@@ -185,4 +250,13 @@ interface CustomerApiService {
 
     @GET("api/v1/customers/notifications")
     suspend fun getNotifications(): Response<List<NotificationDto>>
+
+    @GET("api/v1/wallets/me")
+    suspend fun getWallet(): Response<WalletDto>
+
+    @POST("api/v1/wallets/topup")
+    suspend fun topupWallet(@Body payload: TopupWalletRequest): Response<Map<String, Any>>
+
+    @POST("api/v1/promos/validate")
+    suspend fun validatePromo(@Body payload: PromoValidateRequest): Response<PromoValidateResponse>
 }

@@ -31,11 +31,12 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: Optional[str] = "rzp_test_secret_chauffeur_mock"
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = "whsec_luxury_payment_hmac_test_2026"
 
-    # SMS Provider (Twilio / AWS SNS / Console Logger)
-    SMS_PROVIDER: str = "mock"  # "twilio" or "mock"
+    # SMS Provider (Twilio / Fast2SMS / Console Logger)
+    SMS_PROVIDER: str = "mock"  # "twilio", "fast2sms", or "mock"
     TWILIO_ACCOUNT_SID: Optional[str] = None
     TWILIO_AUTH_TOKEN: Optional[str] = None
     TWILIO_FROM_NUMBER: Optional[str] = None
+    FAST2SMS_API_KEY: Optional[str] = None
 
     # FCM Notifications
     FCM_CREDENTIALS_PATH: Optional[str] = None
@@ -50,7 +51,9 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:8080",
-        "http://10.0.2.2:8000"  # Android Emulator Host
+        "http://10.0.2.2:8000",  # Android Emulator Host
+        "https://e-rickshaw-admin.onrender.com",
+        "https://e-rickshaw-api.onrender.com"
     ]
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="allow")

@@ -14,7 +14,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.luxury.chauffeur.driver.core.designsystem.*
+import com.luxury.chauffeur.driver.core.network.DriverApiClient
+import com.luxury.chauffeur.driver.core.network.DriverAvailabilityPayload
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun DriverDashboardScreen(
@@ -23,12 +26,17 @@ fun DriverDashboardScreen(
     onNavigateEarnings: () -> Unit,
     onNavigateProfile: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     var isOnline by remember { mutableStateOf(true) }
     var incomingRideOffer by remember { mutableStateOf<Map<String, String>?>(null) }
     var offerCountdown by remember { mutableIntStateOf(15) }
 
-    // Simulated dispatch offer trigger when chauffeur is online
+    // Sync online/offline status with backend & poll/simulate offers
     LaunchedEffect(isOnline) {
+        try {
+            DriverApiClient.getService().setAvailability(DriverAvailabilityPayload(isOnline))
+        } catch (_: Exception) {}
+
         if (isOnline) {
             delay(4000)
             incomingRideOffer = mapOf(
@@ -239,7 +247,12 @@ fun DriverDashboardScreen(
                                         val pick = offer["pickup"] ?: ""
                                         val dest = offer["destination"] ?: ""
                                         incomingRideOffer = null
-                                        onAcceptRide(rideId, pick, dest)
+                                        scope.launch {
+                                            try {
+                                                DriverApiClient.getService().acceptRide(rideId)
+                                            } catch (_: Exception) {}
+                                            onAcceptRide(rideId, pick, dest)
+                                        }
                                     },
                                     shape = RoundedCornerShape(12.dp),
                                     colors = ButtonDefaults.buttonColors(

@@ -127,9 +127,53 @@ class GoogleMapsProvider(MapsProvider):
         return await self.fallback.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
 
     async def autocomplete_places(self, query: str) -> List[Dict[str, Any]]:
+        if not self.api_key or not query.strip():
+            return await self.fallback.autocomplete_places(query)
+        url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+        params = {
+            "input": query,
+            "key": self.api_key,
+            "components": "country:in"
+        }
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(url, params=params, timeout=5.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    preds = data.get("predictions", [])
+                    if preds:
+                        return [
+                            {
+                                "place_id": p.get("place_id", f"poi_{idx}"),
+                                "name": p.get("structured_formatting", {}).get("main_text", p.get("description")),
+                                "address": p.get("description", ""),
+                                "lat": 19.0760,
+                                "lng": 72.8777
+                            }
+                            for idx, p in enumerate(preds)
+                        ]
+            except Exception:
+                pass
         return await self.fallback.autocomplete_places(query)
 
     async def reverse_geocode(self, lat: float, lng: float) -> str:
+        if not self.api_key:
+            return await self.fallback.reverse_geocode(lat, lng)
+        url = "https://maps.googleapis.com/maps/api/geocode/json"
+        params = {
+            "latlng": f"{lat},{lng}",
+            "key": self.api_key
+        }
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(url, params=params, timeout=5.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    results = data.get("results", [])
+                    if results:
+                        return results[0].get("formatted_address", "")
+            except Exception:
+                pass
         return await self.fallback.reverse_geocode(lat, lng)
 
 _maps_instance: Optional[MapsProvider] = None

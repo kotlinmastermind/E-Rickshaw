@@ -16,8 +16,8 @@ object DriverApiClient {
     // Local host machine URL for Android Emulator
     const val LOCAL_EMULATOR_BASE_URL: String = "http://10.0.2.2:8000/"
 
-    // Base URL currently used by Retrofit (default: Render Cloud)
-    var baseUrl: String = RENDER_BASE_URL
+    // Base URL currently used by Retrofit (default: Local Emulator for dev, can switch to Render Cloud)
+    var baseUrl: String = LOCAL_EMULATOR_BASE_URL
 
     private var tokenManager: DriverTokenManager? = null
     private var service: DriverApiService? = null
@@ -25,6 +25,19 @@ object DriverApiClient {
     fun initialize(context: Context) {
         tokenManager = DriverTokenManager.getInstance(context)
         service = createService()
+    }
+
+    fun updateBaseUrl(newUrl: String) {
+        baseUrl = if (newUrl.endsWith("/")) newUrl else "$newUrl/"
+        service = createService()
+    }
+
+    fun useLocalEmulator() {
+        updateBaseUrl(LOCAL_EMULATOR_BASE_URL)
+    }
+
+    fun useCloudProduction() {
+        updateBaseUrl(RENDER_BASE_URL)
     }
 
     fun getService(): DriverApiService {

@@ -1,3 +1,5 @@
+import os
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./luxury_ride.db"
 import pytest
 import pytest_asyncio
 from backend.infrastructure.database.session import async_session_maker, init_db

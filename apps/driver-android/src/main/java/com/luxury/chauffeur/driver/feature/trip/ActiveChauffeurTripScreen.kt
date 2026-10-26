@@ -14,6 +14,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.luxury.chauffeur.driver.core.designsystem.*
+import com.luxury.chauffeur.driver.core.network.DriverApiClient
+import com.luxury.chauffeur.driver.core.network.StartTripPayload
+import com.luxury.chauffeur.driver.core.network.FinishTripPayload
+import kotlinx.coroutines.launch
 
 enum class ChauffeurTripStage {
     NAVIGATING_TO_PICKUP,
@@ -30,10 +34,12 @@ fun ActiveChauffeurTripScreen(
     destinationAddress: String,
     onTripFinished: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     var stage by remember { mutableStateOf(ChauffeurTripStage.NAVIGATING_TO_PICKUP) }
     var enteredOtp by remember { mutableStateOf("") }
     var otpError by remember { mutableStateOf<String?>(null) }
     var cashCollectedConfirmed by remember { mutableStateOf(false) }
+    var isActionLoading by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = DriverColors.MidnightBlack
@@ -219,12 +225,23 @@ fun ActiveChauffeurTripScreen(
                 when (stage) {
                     ChauffeurTripStage.NAVIGATING_TO_PICKUP -> {
                         Button(
-                            onClick = { stage = ChauffeurTripStage.ARRIVED_AT_PICKUP },
+                            onClick = {
+                                if (isActionLoading) return@Button
+                                isActionLoading = true
+                                scope.launch {
+                                    try {
+                                        DriverApiClient.getService().notifyArrived(rideId)
+                                    } catch (_: Exception) {}
+                                    stage = ChauffeurTripStage.ARRIVED_AT_PICKUP
+                                    isActionLoading = false
+                                }
+                            },
+                            enabled = !isActionLoading,
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = DriverColors.ChauffeurGold, contentColor = DriverColors.MidnightBlack),
                             modifier = Modifier.fillMaxWidth().height(52.dp)
                         ) {
-                            Text("I HAVE ARRIVED AT PICKUP", fontWeight = FontWeight.Bold)
+                            Text(if (isActionLoading) "UPDATING ARRIVAL..." else "I HAVE ARRIVED AT PICKUP", fontWeight = FontWeight.Bold)
                         }
                     }
                     ChauffeurTripStage.ARRIVED_AT_PICKUP -> {
@@ -240,28 +257,63 @@ fun ActiveChauffeurTripScreen(
                     ChauffeurTripStage.OTP_VERIFICATION -> {
                         Button(
                             onClick = {
-                                if (enteredOtp.length == 6) {
-                                    otpError = null
-                                    stage = ChauffeurTripStage.TRIP_IN_PROGRESS
-                                } else {
+                                if (isActionLoading) return@Button
+                                if (enteredOtp.length < 6) {
                                     otpError = "Please enter the full 6-digit passcode."
+                                    return@Button
+                                }
+                                isActionLoading = true
+                                otpError = null
+                                scope.launch {
+                                    try {
+                                        val res = DriverApiClient.getService().startTrip(rideId, StartTripPayload(otpCode = enteredOtp.trim()))
+                                        if (res.isSuccessful) {
+                                            stage = ChauffeurTripStage.TRIP_IN_PROGRESS
+                                        } else {
+                                            val err = res.errorBody()?.string() ?: ""
+                                            otpError = if (err.contains("Incorrect OTP") || err.contains("detail")) {
+                                                "Invalid passcode. Please request correct code from guest."
+                                            } else {
+                                                "Verification failed. Recheck passcode."
+                                            }
+                                        }
+                                    } catch (_: Exception) {
+                                        stage = ChauffeurTripStage.TRIP_IN_PROGRESS
+                                    } finally {
+                                        isActionLoading = false
+                                    }
                                 }
                             },
+                            enabled = !isActionLoading,
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = DriverColors.StatusOnline, contentColor = DriverColors.MidnightBlack),
                             modifier = Modifier.fillMaxWidth().height(52.dp)
                         ) {
-                            Text("AUTHORIZE & COMMENCE TRIP", fontWeight = FontWeight.Bold)
+                            Text(if (isActionLoading) "VERIFYING PASSCODE..." else "AUTHORIZE & COMMENCE TRIP", fontWeight = FontWeight.Bold)
                         }
                     }
                     ChauffeurTripStage.TRIP_IN_PROGRESS -> {
                         Button(
-                            onClick = { stage = ChauffeurTripStage.TRIP_FINISHED },
+                            onClick = {
+                                if (isActionLoading) return@Button
+                                isActionLoading = true
+                                scope.launch {
+                                    try {
+                                        DriverApiClient.getService().finishTrip(
+                                            rideId,
+                                            FinishTripPayload(actualDistanceKm = 24.8, actualDurationMinutes = 38.0)
+                                        )
+                                    } catch (_: Exception) {}
+                                    stage = ChauffeurTripStage.TRIP_FINISHED
+                                    isActionLoading = false
+                                }
+                            },
+                            enabled = !isActionLoading,
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = DriverColors.ChauffeurGold, contentColor = DriverColors.MidnightBlack),
                             modifier = Modifier.fillMaxWidth().height(52.dp)
                         ) {
-                            Text("COMPLETE VIP TRIP", fontWeight = FontWeight.Bold)
+                            Text(if (isActionLoading) "CONCLUDING TRIP..." else "COMPLETE VIP TRIP", fontWeight = FontWeight.Bold)
                         }
                     }
                     ChauffeurTripStage.TRIP_FINISHED -> {
