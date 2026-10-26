@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:8000/api/v1";
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || "https://e-rickshaw-z32z.onrender.com/api/v1";
 
 export async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
   const token = localStorage.getItem("admin_token") || "mock_admin_token";

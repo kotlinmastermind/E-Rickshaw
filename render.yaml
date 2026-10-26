@@ -35,11 +35,12 @@ services:
       - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
 
-  - type: static_site
+  - type: web
     name: e-rickshaw-admin
+    runtime: static
     rootDir: apps/admin-web
     buildCommand: npm install && npm run build
-    publishPath: dist
+    staticPublishPath: dist
     routes:
       - type: rewrite
         source: /*
