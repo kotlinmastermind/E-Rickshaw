@@ -30,3 +30,11 @@
 # Jetpack Compose
 -keep class androidx.compose.material3.** { *; }
 -dontwarn androidx.compose.**
+
+# OkHttp & Okio
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn javax.annotation.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
