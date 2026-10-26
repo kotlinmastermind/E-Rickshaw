@@ -1,0 +1,6050 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Premium Luxury Ride-Hailing Platform",
+    "description": "Production-grade API for the Premium Luxury Ride-Hailing Platform Phase 1 MVP.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health/live": {
+      "get": {
+        "tags": [
+          "Health & Observability"
+        ],
+        "summary": "Liveness",
+        "description": "Load balancer liveness probe. Returns immediately if the FastAPI worker process is active.",
+        "operationId": "liveness_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "Health & Observability"
+        ],
+        "summary": "Readiness",
+        "description": "Load balancer readiness probe. Verifies database read/write readiness and Redis availability.",
+        "operationId": "readiness_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/metrics": {
+      "get": {
+        "tags": [
+          "Health & Observability"
+        ],
+        "summary": "Operational Metrics",
+        "description": "Detailed operational diagnostics endpoint for internal SRE monitoring and Admin System Health.",
+        "operationId": "operational_metrics_health_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Operational Metrics Health Metrics Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/test-crash": {
+      "post": {
+        "tags": [
+          "Health & Observability"
+        ],
+        "summary": "Trigger Test Crash",
+        "description": "Synthetic crash endpoint to verify crash reporting and exception telemetry pipeline.",
+        "operationId": "trigger_test_crash_health_test_crash_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/otp/request": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Request Otp",
+        "operationId": "request_otp_api_v1_auth_otp_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/otp/verify": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Verify Otp",
+        "operationId": "verify_otp_api_v1_auth_otp_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpVerifyPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/token/refresh": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Refresh Token",
+        "description": "Rotates refresh tokens and provides a newly signed short-lived access token.",
+        "operationId": "refresh_token_api_v1_auth_token_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRefreshPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get Me",
+        "operationId": "get_me_api_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Logout",
+        "description": "Terminates active session and blacklists it across distributed instances.",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/logout-all": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Logout All",
+        "description": "Terminates all active sessions across all devices for the current user.",
+        "operationId": "logout_all_api_v1_auth_logout_all_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/customers/profile": {
+      "get": {
+        "tags": [
+          "Customer Profiles"
+        ],
+        "summary": "Get Profile",
+        "operationId": "get_profile_api_v1_customers_profile_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Customer Profiles"
+        ],
+        "summary": "Update Profile",
+        "operationId": "update_profile_api_v1_customers_profile_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/customers/device-token": {
+      "post": {
+        "tags": [
+          "Customer Profiles"
+        ],
+        "summary": "Register Device Token",
+        "operationId": "register_device_token_api_v1_customers_device_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTokenPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/customers/notifications": {
+      "get": {
+        "tags": [
+          "Customer Profiles"
+        ],
+        "summary": "Get Notifications",
+        "operationId": "get_notifications_api_v1_customers_notifications_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/profile": {
+      "get": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Get Driver Profile",
+        "operationId": "get_driver_profile_api_v1_drivers_profile_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Update Driver Profile",
+        "operationId": "update_driver_profile_api_v1_drivers_profile_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriverProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/documents": {
+      "get": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Get Documents",
+        "operationId": "get_documents_api_v1_drivers_documents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Upload Document",
+        "operationId": "upload_document_api_v1_drivers_documents_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_document_api_v1_drivers_documents_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/availability": {
+      "post": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Toggle Availability",
+        "operationId": "toggle_availability_api_v1_drivers_availability_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AvailabilityPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/location": {
+      "post": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Update Location",
+        "operationId": "update_location_api_v1_drivers_location_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocationPingPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/earnings": {
+      "get": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Get Earnings",
+        "operationId": "get_earnings_api_v1_drivers_earnings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/wallet": {
+      "get": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Get Wallet",
+        "operationId": "get_wallet_api_v1_drivers_wallet_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/heat-map": {
+      "get": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Get Heat Map",
+        "operationId": "get_heat_map_api_v1_drivers_heat_map_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/scheduled/opportunities": {
+      "get": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Get Scheduled Opportunities",
+        "operationId": "get_scheduled_opportunities_api_v1_drivers_scheduled_opportunities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/scheduled/{ride_id}/reserve": {
+      "post": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Reserve Scheduled Ride",
+        "operationId": "reserve_scheduled_ride_api_v1_drivers_scheduled__ride_id__reserve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/drivers/auto-accept": {
+      "post": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Toggle Auto Accept",
+        "operationId": "toggle_auto_accept_api_v1_drivers_auto_accept_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoAcceptPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/route-optimization": {
+      "post": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Optimize Route",
+        "operationId": "optimize_route_api_v1_drivers_route_optimization_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteOptPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/daily-target": {
+      "get": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Get Daily Target",
+        "operationId": "get_daily_target_api_v1_drivers_daily_target_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "target_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/drivers/payouts/request": {
+      "post": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Request Payout",
+        "operationId": "request_payout_api_v1_drivers_payouts_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayoutRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/drivers/payouts/history": {
+      "get": {
+        "tags": [
+          "Driver Operations"
+        ],
+        "summary": "Get Payout History",
+        "operationId": "get_payout_history_api_v1_drivers_payouts_history_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/vehicles/categories": {
+      "get": {
+        "tags": [
+          "Vehicles & Categories"
+        ],
+        "summary": "List Vehicle Categories",
+        "operationId": "list_vehicle_categories_api_v1_vehicles_categories_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/location/autocomplete": {
+      "get": {
+        "tags": [
+          "Location & Maps"
+        ],
+        "summary": "Autocomplete",
+        "operationId": "autocomplete_api_v1_location_autocomplete_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Search landmark or address query",
+              "title": "Q"
+            },
+            "description": "Search landmark or address query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/location/reverse-geocode": {
+      "post": {
+        "tags": [
+          "Location & Maps"
+        ],
+        "summary": "Reverse Geocode",
+        "operationId": "reverse_geocode_api_v1_location_reverse_geocode_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReverseGeocodePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/location/route": {
+      "get": {
+        "tags": [
+          "Location & Maps"
+        ],
+        "summary": "Get Route",
+        "operationId": "get_route_api_v1_location_route_get",
+        "parameters": [
+          {
+            "name": "origin_lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Origin Lat"
+            }
+          },
+          {
+            "name": "origin_lng",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Origin Lng"
+            }
+          },
+          {
+            "name": "dest_lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Dest Lat"
+            }
+          },
+          {
+            "name": "dest_lng",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "title": "Dest Lng"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/fares/estimate": {
+      "post": {
+        "tags": [
+          "Fare Calculation"
+        ],
+        "summary": "Calculate Fare Estimate",
+        "operationId": "calculate_fare_estimate_api_v1_fares_estimate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FareEstimateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/request": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Create Ride Request",
+        "operationId": "create_ride_request_api_v1_rides_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RideRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/rides/schedule": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Schedule Ride",
+        "operationId": "schedule_ride_api_v1_rides_schedule_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleRidePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/rides/{ride_id}/stops": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Add Stop To Ride",
+        "operationId": "add_stop_to_ride_api_v1_rides__ride_id__stops_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddStopPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Get Ride Stops",
+        "operationId": "get_ride_stops_api_v1_rides__ride_id__stops_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/waiting/start": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Start Waiting",
+        "operationId": "start_waiting_api_v1_rides__ride_id__waiting_start_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/waiting/stop": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Stop Waiting",
+        "operationId": "stop_waiting_api_v1_rides__ride_id__waiting_stop_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/accept": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Accept Ride",
+        "operationId": "accept_ride_api_v1_rides__ride_id__accept_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/arrive": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Driver Arrived",
+        "operationId": "driver_arrived_api_v1_rides__ride_id__arrive_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/start": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Start Trip",
+        "operationId": "start_trip_api_v1_rides__ride_id__start_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRidePayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/finish": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Finish Trip",
+        "operationId": "finish_trip_api_v1_rides__ride_id__finish_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinishRidePayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/cancel": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Cancel Ride",
+        "operationId": "cancel_ride_api_v1_rides__ride_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRidePayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/rate": {
+      "post": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Rate Driver",
+        "operationId": "rate_driver_api_v1_rides__ride_id__rate_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateDriverPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}": {
+      "get": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Get Ride Details",
+        "operationId": "get_ride_details_api_v1_rides__ride_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/track": {
+      "get": {
+        "tags": [
+          "Ride Lifecycle & Booking"
+        ],
+        "summary": "Track Ride Location",
+        "operationId": "track_ride_location_api_v1_rides__ride_id__track_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payments/intent": {
+      "post": {
+        "tags": [
+          "Payments & Settlements"
+        ],
+        "summary": "Create Payment Intent",
+        "operationId": "create_payment_intent_api_v1_payments_intent_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentIntentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/payments/cash-collect": {
+      "post": {
+        "tags": [
+          "Payments & Settlements"
+        ],
+        "summary": "Confirm Cash Collected",
+        "operationId": "confirm_cash_collected_api_v1_payments_cash_collect_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashCollectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/payments/webhook": {
+      "post": {
+        "tags": [
+          "Payments & Settlements"
+        ],
+        "summary": "Payment Webhook",
+        "operationId": "payment_webhook_api_v1_payments_webhook_post",
+        "parameters": [
+          {
+            "name": "X-Razorpay-Signature",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Razorpay-Signature"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/dashboard/stats": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Get Dashboard Stats",
+        "operationId": "get_dashboard_stats_api_v1_admin_dashboard_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List Users",
+        "operationId": "list_users_api_v1_admin_users_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/users/{user_id}/status": {
+      "put": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Update User Status",
+        "operationId": "update_user_status_api_v1_admin_users__user_id__status_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserStatusUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/drivers": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List Drivers",
+        "operationId": "list_drivers_api_v1_admin_drivers_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "approval_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Approval Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/drivers/{driver_id}/approval": {
+      "put": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Review Driver",
+        "operationId": "review_driver_api_v1_admin_drivers__driver_id__approval_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "driver_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Driver Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriverApprovalUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/rides": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List Rides",
+        "operationId": "list_rides_api_v1_admin_rides_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/rides/{ride_id}": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Get Ride Admin Details",
+        "operationId": "get_ride_admin_details_api_v1_admin_rides__ride_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/fares": {
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Create Fare Rule",
+        "operationId": "create_fare_rule_api_v1_admin_fares_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFareRulePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/support/tickets": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List All Support Tickets",
+        "operationId": "list_all_support_tickets_api_v1_admin_support_tickets_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/support/tickets/{ticket_id}/status": {
+      "put": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Update Support Ticket Status",
+        "operationId": "update_support_ticket_status_api_v1_admin_support_tickets__ticket_id__status_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          },
+          {
+            "name": "status_val",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Status Val"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/support/tickets/{ticket_id}/internal-note": {
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Add Internal Support Note",
+        "operationId": "add_internal_support_note_api_v1_admin_support_tickets__ticket_id__internal_note_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          },
+          {
+            "name": "note",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Note"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/broadcasts": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List Broadcast Notifications",
+        "operationId": "list_broadcast_notifications_api_v1_admin_broadcasts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Send Broadcast Notification",
+        "operationId": "send_broadcast_notification_api_v1_admin_broadcasts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BroadcastPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/heat-map/monitor": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Get Admin Heat Map",
+        "operationId": "get_admin_heat_map_api_v1_admin_heat_map_monitor_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/surge/rules": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List Surge Rules",
+        "operationId": "list_surge_rules_api_v1_admin_surge_rules_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Create Surge Rule",
+        "operationId": "create_surge_rule_api_v1_admin_surge_rules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SurgeRulePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/geofences": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List Geofences",
+        "operationId": "list_geofences_api_v1_admin_geofences_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Create Geofence",
+        "operationId": "create_geofence_api_v1_admin_geofences_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeofencePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/geofences/verify-point": {
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Verify Point In Geofence",
+        "operationId": "verify_point_in_geofence_api_v1_admin_geofences_verify_point_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyPointPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/payouts": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List Payouts",
+        "operationId": "list_payouts_api_v1_admin_payouts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payouts/{payout_id}/approve": {
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Approve Payout",
+        "operationId": "approve_payout_api_v1_admin_payouts__payout_id__approve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payout_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Payout Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payouts/{payout_id}/reject": {
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Reject Payout",
+        "operationId": "reject_payout_api_v1_admin_payouts__payout_id__reject_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payout_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Payout Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayoutRejectPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/payouts/{payout_id}/settle": {
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Settle Payout",
+        "operationId": "settle_payout_api_v1_admin_payouts__payout_id__settle_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "payout_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Payout Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayoutSettlePayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/commissions": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List Commission Rules",
+        "operationId": "list_commission_rules_api_v1_admin_commissions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Create Commission Rule",
+        "operationId": "create_commission_rule_api_v1_admin_commissions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommissionRulePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/reports": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Get Admin Reports",
+        "operationId": "get_admin_reports_api_v1_admin_reports_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/audit-logs": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Get Admin Audit Logs",
+        "operationId": "get_admin_audit_logs_api_v1_admin_audit_logs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "actor_role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Role"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "name": "target_resource",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Resource"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/backups": {
+      "get": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "List Database Backups",
+        "operationId": "list_database_backups_api_v1_admin_backups_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/backups/trigger": {
+      "post": {
+        "tags": [
+          "Platform Administration"
+        ],
+        "summary": "Trigger Database Backup",
+        "operationId": "trigger_database_backup_api_v1_admin_backups_trigger_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/wallets/me": {
+      "get": {
+        "tags": [
+          "Wallet & Ledger"
+        ],
+        "summary": "Get My Wallet",
+        "operationId": "get_my_wallet_api_v1_wallets_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/wallets/top-up": {
+      "post": {
+        "tags": [
+          "Wallet & Ledger"
+        ],
+        "summary": "Top Up Wallet",
+        "operationId": "top_up_wallet_api_v1_wallets_top_up_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TopUpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/wallets/history": {
+      "get": {
+        "tags": [
+          "Wallet & Ledger"
+        ],
+        "summary": "Get Wallet History",
+        "operationId": "get_wallet_history_api_v1_wallets_history_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/wallets/admin/compensate": {
+      "post": {
+        "tags": [
+          "Wallet & Ledger"
+        ],
+        "summary": "Create Compensating Transaction",
+        "operationId": "create_compensating_transaction_api_v1_wallets_admin_compensate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompensateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/promos/validate": {
+      "post": {
+        "tags": [
+          "Promos, Passes & Referrals"
+        ],
+        "summary": "Validate Promo",
+        "operationId": "validate_promo_api_v1_promos_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/promos": {
+      "post": {
+        "tags": [
+          "Promos, Passes & Referrals"
+        ],
+        "summary": "Create Promo Code",
+        "operationId": "create_promo_code_api_v1_admin_promos_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/passes/catalog": {
+      "get": {
+        "tags": [
+          "Promos, Passes & Referrals"
+        ],
+        "summary": "Get Pass Catalog",
+        "operationId": "get_pass_catalog_api_v1_passes_catalog_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/passes/purchase": {
+      "post": {
+        "tags": [
+          "Promos, Passes & Referrals"
+        ],
+        "summary": "Purchase Pass",
+        "operationId": "purchase_pass_api_v1_passes_purchase_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PassPurchaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/passes/my-passes": {
+      "get": {
+        "tags": [
+          "Promos, Passes & Referrals"
+        ],
+        "summary": "Get My Passes",
+        "operationId": "get_my_passes_api_v1_passes_my_passes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/passes": {
+      "post": {
+        "tags": [
+          "Promos, Passes & Referrals"
+        ],
+        "summary": "Admin Create Pass",
+        "operationId": "admin_create_pass_api_v1_admin_passes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PassCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/referrals/my-code": {
+      "get": {
+        "tags": [
+          "Promos, Passes & Referrals"
+        ],
+        "summary": "Get My Referral Info",
+        "operationId": "get_my_referral_info_api_v1_referrals_my_code_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/referrals/claim": {
+      "post": {
+        "tags": [
+          "Promos, Passes & Referrals"
+        ],
+        "summary": "Claim Referral",
+        "operationId": "claim_referral_api_v1_referrals_claim_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferralClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/support/tickets": {
+      "get": {
+        "tags": [
+          "Support Desk"
+        ],
+        "summary": "List My Tickets",
+        "operationId": "list_my_tickets_api_v1_support_tickets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Support Desk"
+        ],
+        "summary": "Create Ticket",
+        "operationId": "create_ticket_api_v1_support_tickets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TicketCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/support/tickets/{ticket_id}": {
+      "get": {
+        "tags": [
+          "Support Desk"
+        ],
+        "summary": "Get Ticket Details",
+        "operationId": "get_ticket_details_api_v1_support_tickets__ticket_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/support/tickets/{ticket_id}/messages": {
+      "post": {
+        "tags": [
+          "Support Desk"
+        ],
+        "summary": "Reply To Ticket",
+        "operationId": "reply_to_ticket_api_v1_support_tickets__ticket_id__messages_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rides/{ride_id}/chat/messages": {
+      "post": {
+        "tags": [
+          "Ride In-App Chat"
+        ],
+        "summary": "Send Ride Message",
+        "operationId": "send_ride_message_api_v1_rides__ride_id__chat_messages_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessagePayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Ride In-App Chat"
+        ],
+        "summary": "Get Ride Messages",
+        "operationId": "get_ride_messages_api_v1_rides__ride_id__chat_messages_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ride_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ride Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/favorites": {
+      "get": {
+        "tags": [
+          "Favorite Locations"
+        ],
+        "summary": "List Favorites",
+        "operationId": "list_favorites_api_v1_favorites_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Favorite Locations"
+        ],
+        "summary": "Add Favorite",
+        "operationId": "add_favorite_api_v1_favorites_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/favorites/{fav_id}": {
+      "put": {
+        "tags": [
+          "Favorite Locations"
+        ],
+        "summary": "Update Favorite",
+        "operationId": "update_favorite_api_v1_favorites__fav_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fav_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fav Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Favorite Locations"
+        ],
+        "summary": "Delete Favorite",
+        "operationId": "delete_favorite_api_v1_favorites__fav_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "fav_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fav Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pools/estimate": {
+      "post": {
+        "tags": [
+          "Shared Rides & Pooling"
+        ],
+        "summary": "Get Shared Estimate",
+        "description": "Returns deterministic fare estimate for shared ride option with savings breakdown,\nseat scaling, and pricing policy version snapshot.",
+        "operationId": "get_shared_estimate_api_v1_pools_estimate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SharedEstimateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pools/matches": {
+      "post": {
+        "tags": [
+          "Shared Rides & Pooling"
+        ],
+        "summary": "Find Pool Matches",
+        "description": "Evaluates candidate trips for route detour compatibility, pickup ETA,\nand seat capacity with explainable rejection reasons without exposing PII.",
+        "operationId": "find_pool_matches_api_v1_pools_matches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MatchPoolsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pools/book": {
+      "post": {
+        "tags": [
+          "Shared Rides & Pooling"
+        ],
+        "summary": "Book Shared Ride",
+        "description": "Atomically allocates seats in a pooled trip, creates booking and ride,\ncalculates deterministic fare split, and enforces capacity invariants.",
+        "operationId": "book_shared_ride_api_v1_pools_book_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BookSharedRideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pools/{trip_id}": {
+      "get": {
+        "tags": [
+          "Shared Rides & Pooling"
+        ],
+        "summary": "Get Pool Trip",
+        "description": "Returns complete pooled trip manifest, scheduled pickup/dropoff stops,\nand financial reconciliation summary verifying conservation of monetary totals.",
+        "operationId": "get_pool_trip_api_v1_pools__trip_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "trip_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trip Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pools/bookings/{booking_id}/occupancy": {
+      "post": {
+        "tags": [
+          "Shared Rides & Pooling"
+        ],
+        "summary": "Update Occupancy",
+        "description": "Updates passenger occupancy state machine (BOARDED, ALIGHTED, NO_SHOW, CANCELLED)\nwith transaction-safe capacity validation and audit event recording.",
+        "operationId": "update_occupancy_api_v1_pools_bookings__booking_id__occupancy_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "booking_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Booking Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OccupancyTransitionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddStopPayload": {
+        "properties": {
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          },
+          "sequence_order": {
+            "type": "integer",
+            "title": "Sequence Order",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "required": [
+          "address",
+          "latitude",
+          "longitude"
+        ],
+        "title": "AddStopPayload"
+      },
+      "AutoAcceptPayload": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "max_distance_km": {
+            "type": "number",
+            "title": "Max Distance Km",
+            "default": 5.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "AutoAcceptPayload"
+      },
+      "AvailabilityPayload": {
+        "properties": {
+          "is_online": {
+            "type": "boolean",
+            "title": "Is Online"
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_online"
+        ],
+        "title": "AvailabilityPayload"
+      },
+      "Body_upload_document_api_v1_drivers_documents_post": {
+        "properties": {
+          "document_type": {
+            "type": "string",
+            "title": "Document Type",
+            "description": "DRIVING_LICENSE, VEHICLE_REGISTRATION, INSURANCE, IDENTITY_PROOF"
+          },
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_type",
+          "file"
+        ],
+        "title": "Body_upload_document_api_v1_drivers_documents_post"
+      },
+      "BookSharedRideRequest": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "title": "Category Id"
+          },
+          "estimate_id": {
+            "type": "string",
+            "title": "Estimate Id"
+          },
+          "pickup_address": {
+            "type": "string",
+            "minLength": 3,
+            "title": "Pickup Address"
+          },
+          "pickup_latitude": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Pickup Latitude"
+          },
+          "pickup_longitude": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Pickup Longitude"
+          },
+          "destination_address": {
+            "type": "string",
+            "minLength": 3,
+            "title": "Destination Address"
+          },
+          "destination_latitude": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Destination Latitude"
+          },
+          "destination_longitude": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Destination Longitude"
+          },
+          "seats_reserved": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Seats Reserved",
+            "default": 1
+          },
+          "target_pooled_trip_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Pooled Trip Id"
+          },
+          "fallback_policy": {
+            "type": "string",
+            "title": "Fallback Policy",
+            "default": "CREATE_NEW_POOL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category_id",
+          "estimate_id",
+          "pickup_address",
+          "pickup_latitude",
+          "pickup_longitude",
+          "destination_address",
+          "destination_latitude",
+          "destination_longitude"
+        ],
+        "title": "BookSharedRideRequest"
+      },
+      "BroadcastPayload": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "example": "Monsoon Fleet Operations Notice"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "example": "Expect increased surge multipliers across Mumbai South."
+          },
+          "target_role": {
+            "type": "string",
+            "title": "Target Role",
+            "default": "ALL"
+          },
+          "channel": {
+            "type": "string",
+            "title": "Channel",
+            "default": "IN_APP"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "message"
+        ],
+        "title": "BroadcastPayload"
+      },
+      "CancelRidePayload": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 3,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "CancelRidePayload"
+      },
+      "CashCollectRequest": {
+        "properties": {
+          "ride_id": {
+            "type": "string",
+            "title": "Ride Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ride_id"
+        ],
+        "title": "CashCollectRequest"
+      },
+      "ChatMessagePayload": {
+        "properties": {
+          "message_text": {
+            "type": "string",
+            "title": "Message Text",
+            "example": "I am waiting at the east foyer gate."
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_text"
+        ],
+        "title": "ChatMessagePayload"
+      },
+      "CommissionRulePayload": {
+        "properties": {
+          "rule_name": {
+            "type": "string",
+            "title": "Rule Name"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "commission_percentage": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Commission Percentage"
+          },
+          "fixed_cut_cents": {
+            "type": "integer",
+            "title": "Fixed Cut Cents",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_name",
+          "commission_percentage"
+        ],
+        "title": "CommissionRulePayload"
+      },
+      "CompensateRequest": {
+        "properties": {
+          "original_tx_id": {
+            "type": "string",
+            "title": "Original Tx Id"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "original_tx_id",
+          "reason"
+        ],
+        "title": "CompensateRequest"
+      },
+      "CreateFareRulePayload": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "title": "Category Id"
+          },
+          "base_fare_cents": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Base Fare Cents"
+          },
+          "per_km_cents": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Per Km Cents"
+          },
+          "per_minute_cents": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Per Minute Cents"
+          },
+          "minimum_fare_cents": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Minimum Fare Cents"
+          },
+          "surge_multiplier": {
+            "type": "number",
+            "minimum": 1.0,
+            "title": "Surge Multiplier",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "category_id",
+          "base_fare_cents",
+          "per_km_cents",
+          "per_minute_cents",
+          "minimum_fare_cents"
+        ],
+        "title": "CreateFareRulePayload"
+      },
+      "CustomerProfileUpdate": {
+        "properties": {
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name",
+            "example": "Lord Sterling"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "example": "sterling@luxury.io"
+          },
+          "emergency_contact_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Contact Phone",
+            "example": "+919811122233"
+          },
+          "preferred_payment_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Payment Method",
+            "example": "UPI"
+          }
+        },
+        "type": "object",
+        "title": "CustomerProfileUpdate"
+      },
+      "DeviceTokenPayload": {
+        "properties": {
+          "fcm_token": {
+            "type": "string",
+            "title": "Fcm Token"
+          },
+          "device_os": {
+            "type": "string",
+            "title": "Device Os",
+            "default": "ANDROID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fcm_token"
+        ],
+        "title": "DeviceTokenPayload"
+      },
+      "DriverApprovalUpdate": {
+        "properties": {
+          "approval_status": {
+            "type": "string",
+            "title": "Approval Status",
+            "example": "APPROVED"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "approval_status"
+        ],
+        "title": "DriverApprovalUpdate"
+      },
+      "DriverProfileUpdate": {
+        "properties": {
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "title": "DriverProfileUpdate"
+      },
+      "FareEstimateRequest": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "title": "Category Id"
+          },
+          "pickup_latitude": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Pickup Latitude"
+          },
+          "pickup_longitude": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Pickup Longitude"
+          },
+          "destination_latitude": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Destination Latitude"
+          },
+          "destination_longitude": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Destination Longitude"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category_id",
+          "pickup_latitude",
+          "pickup_longitude",
+          "destination_latitude",
+          "destination_longitude"
+        ],
+        "title": "FareEstimateRequest"
+      },
+      "FavoriteCreateRequest": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "example": "Penthouse HQ"
+          },
+          "address": {
+            "type": "string",
+            "title": "Address",
+            "example": "One BKC, G Block, Bandra Kurla Complex, Mumbai"
+          },
+          "latitude": {
+            "type": "number",
+            "title": "Latitude",
+            "example": 19.0657
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude",
+            "example": 72.8688
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "address",
+          "latitude",
+          "longitude"
+        ],
+        "title": "FavoriteCreateRequest"
+      },
+      "FavoriteUpdateRequest": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "type": "object",
+        "title": "FavoriteUpdateRequest"
+      },
+      "FinishRidePayload": {
+        "properties": {
+          "actual_distance_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Distance Km"
+          },
+          "actual_duration_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Duration Minutes"
+          }
+        },
+        "type": "object",
+        "title": "FinishRidePayload"
+      },
+      "GeofencePayload": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "zone_type": {
+            "type": "string",
+            "title": "Zone Type",
+            "default": "RESTRICTED"
+          },
+          "coordinates": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Coordinates"
+          },
+          "surge_multiplier": {
+            "type": "number",
+            "title": "Surge Multiplier",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "coordinates"
+        ],
+        "title": "GeofencePayload"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IntermediateStopInput": {
+        "properties": {
+          "address": {
+            "type": "string",
+            "title": "Address"
+          },
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          }
+        },
+        "type": "object",
+        "required": [
+          "address",
+          "latitude",
+          "longitude"
+        ],
+        "title": "IntermediateStopInput"
+      },
+      "LocationPingPayload": {
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          }
+        },
+        "type": "object",
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "LocationPingPayload"
+      },
+      "MatchPoolsRequest": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "title": "Category Id"
+          },
+          "pickup_latitude": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Pickup Latitude"
+          },
+          "pickup_longitude": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Pickup Longitude"
+          },
+          "destination_latitude": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Destination Latitude"
+          },
+          "destination_longitude": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Destination Longitude"
+          },
+          "seats_requested": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Seats Requested",
+            "default": 1
+          },
+          "max_detour_km": {
+            "type": "number",
+            "maximum": 25.0,
+            "minimum": 0.5,
+            "title": "Max Detour Km",
+            "default": 5.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "category_id",
+          "pickup_latitude",
+          "pickup_longitude",
+          "destination_latitude",
+          "destination_longitude"
+        ],
+        "title": "MatchPoolsRequest"
+      },
+      "MessageCreateRequest": {
+        "properties": {
+          "message_text": {
+            "type": "string",
+            "title": "Message Text",
+            "example": "Thank you, our concierge is reviewing this."
+          },
+          "is_internal_only": {
+            "type": "boolean",
+            "title": "Is Internal Only",
+            "default": false
+          },
+          "attachment_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_text"
+        ],
+        "title": "MessageCreateRequest"
+      },
+      "OccupancyTransitionRequest": {
+        "properties": {
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "description": "BOARDED, ALIGHTED, NO_SHOW, CANCELLED"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_type"
+        ],
+        "title": "OccupancyTransitionRequest"
+      },
+      "OtpRequestPayload": {
+        "properties": {
+          "phone_number": {
+            "type": "string",
+            "title": "Phone Number",
+            "example": "+919876543210"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone_number"
+        ],
+        "title": "OtpRequestPayload"
+      },
+      "OtpVerifyPayload": {
+        "properties": {
+          "phone_number": {
+            "type": "string",
+            "title": "Phone Number",
+            "example": "+919876543210"
+          },
+          "otp_code": {
+            "type": "string",
+            "maxLength": 6,
+            "minLength": 4,
+            "title": "Otp Code",
+            "example": "123456"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "customer",
+            "example": "customer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phone_number",
+          "otp_code"
+        ],
+        "title": "OtpVerifyPayload"
+      },
+      "PassCreateRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "price_cents": {
+            "type": "integer",
+            "title": "Price Cents"
+          },
+          "validity_days": {
+            "type": "integer",
+            "title": "Validity Days"
+          },
+          "max_rides": {
+            "type": "integer",
+            "title": "Max Rides"
+          },
+          "discount_percentage": {
+            "type": "number",
+            "title": "Discount Percentage"
+          },
+          "max_discount_per_ride_cents": {
+            "type": "integer",
+            "title": "Max Discount Per Ride Cents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "description",
+          "price_cents",
+          "validity_days",
+          "max_rides",
+          "discount_percentage",
+          "max_discount_per_ride_cents"
+        ],
+        "title": "PassCreateRequest"
+      },
+      "PassPurchaseRequest": {
+        "properties": {
+          "pass_id": {
+            "type": "string",
+            "title": "Pass Id"
+          },
+          "payment_method": {
+            "type": "string",
+            "title": "Payment Method",
+            "default": "WALLET"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pass_id"
+        ],
+        "title": "PassPurchaseRequest"
+      },
+      "PaymentIntentRequest": {
+        "properties": {
+          "ride_id": {
+            "type": "string",
+            "title": "Ride Id"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ride_id",
+          "idempotency_key"
+        ],
+        "title": "PaymentIntentRequest"
+      },
+      "PayoutRejectPayload": {
+        "properties": {
+          "rejection_reason": {
+            "type": "string",
+            "minLength": 3,
+            "title": "Rejection Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rejection_reason"
+        ],
+        "title": "PayoutRejectPayload"
+      },
+      "PayoutRequestPayload": {
+        "properties": {
+          "amount_cents": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Cents",
+            "example": 1000000
+          },
+          "account_number_mask": {
+            "type": "string",
+            "title": "Account Number Mask",
+            "default": "**** 9988",
+            "example": "**** 9988"
+          },
+          "ifsc": {
+            "type": "string",
+            "title": "Ifsc",
+            "default": "HDFC0001234",
+            "example": "HDFC0001234"
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount_cents"
+        ],
+        "title": "PayoutRequestPayload"
+      },
+      "PayoutSettlePayload": {
+        "properties": {
+          "settlement_reference": {
+            "type": "string",
+            "minLength": 3,
+            "title": "Settlement Reference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "settlement_reference"
+        ],
+        "title": "PayoutSettlePayload"
+      },
+      "PromoCreateRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "discount_type": {
+            "type": "string",
+            "title": "Discount Type",
+            "default": "PERCENTAGE"
+          },
+          "discount_value": {
+            "type": "number",
+            "title": "Discount Value",
+            "default": 20.0
+          },
+          "max_discount_cents": {
+            "type": "integer",
+            "title": "Max Discount Cents",
+            "default": 50000
+          },
+          "minimum_fare_cents": {
+            "type": "integer",
+            "title": "Minimum Fare Cents",
+            "default": 100000
+          },
+          "usage_limit_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage Limit Total",
+            "default": 1000
+          },
+          "usage_limit_per_customer": {
+            "type": "integer",
+            "title": "Usage Limit Per Customer",
+            "default": 2
+          },
+          "applicable_category_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicable Category Id"
+          },
+          "valid_days": {
+            "type": "integer",
+            "title": "Valid Days",
+            "default": 30
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "PromoCreateRequest"
+      },
+      "PromoValidateRequest": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "example": "ROYAL100"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "fare_cents": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Fare Cents",
+            "example": 100000
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "fare_cents"
+        ],
+        "title": "PromoValidateRequest"
+      },
+      "RateDriverPayload": {
+        "properties": {
+          "rating": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Rating"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rating"
+        ],
+        "title": "RateDriverPayload"
+      },
+      "ReferralClaimRequest": {
+        "properties": {
+          "referral_code": {
+            "type": "string",
+            "title": "Referral Code",
+            "example": "REF-LUXURY77"
+          }
+        },
+        "type": "object",
+        "required": [
+          "referral_code"
+        ],
+        "title": "ReferralClaimRequest"
+      },
+      "ReverseGeocodePayload": {
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          }
+        },
+        "type": "object",
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "ReverseGeocodePayload"
+      },
+      "RideRequestPayload": {
+        "properties": {
+          "estimate_id": {
+            "type": "string",
+            "title": "Estimate Id"
+          },
+          "pickup_address": {
+            "type": "string",
+            "title": "Pickup Address"
+          },
+          "destination_address": {
+            "type": "string",
+            "title": "Destination Address"
+          },
+          "payment_method": {
+            "type": "string",
+            "title": "Payment Method",
+            "default": "UPI"
+          },
+          "is_scheduled": {
+            "type": "boolean",
+            "title": "Is Scheduled",
+            "default": false
+          },
+          "scheduled_pickup_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Pickup Time"
+          },
+          "promo_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promo Code"
+          },
+          "stops": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/IntermediateStopInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stops"
+          }
+        },
+        "type": "object",
+        "required": [
+          "estimate_id",
+          "pickup_address",
+          "destination_address"
+        ],
+        "title": "RideRequestPayload"
+      },
+      "RouteOptPayload": {
+        "properties": {
+          "origin_lat": {
+            "type": "number",
+            "title": "Origin Lat"
+          },
+          "origin_lng": {
+            "type": "number",
+            "title": "Origin Lng"
+          },
+          "stops": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Stops"
+          },
+          "destination_lat": {
+            "type": "number",
+            "title": "Destination Lat"
+          },
+          "destination_lng": {
+            "type": "number",
+            "title": "Destination Lng"
+          }
+        },
+        "type": "object",
+        "required": [
+          "origin_lat",
+          "origin_lng",
+          "stops",
+          "destination_lat",
+          "destination_lng"
+        ],
+        "title": "RouteOptPayload"
+      },
+      "ScheduleRidePayload": {
+        "properties": {
+          "estimate_id": {
+            "type": "string",
+            "title": "Estimate Id"
+          },
+          "pickup_address": {
+            "type": "string",
+            "title": "Pickup Address"
+          },
+          "destination_address": {
+            "type": "string",
+            "title": "Destination Address"
+          },
+          "scheduled_pickup_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled Pickup Time"
+          },
+          "payment_method": {
+            "type": "string",
+            "title": "Payment Method",
+            "default": "UPI"
+          },
+          "promo_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promo Code"
+          },
+          "stops": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/IntermediateStopInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stops"
+          }
+        },
+        "type": "object",
+        "required": [
+          "estimate_id",
+          "pickup_address",
+          "destination_address",
+          "scheduled_pickup_time"
+        ],
+        "title": "ScheduleRidePayload"
+      },
+      "SharedEstimateRequest": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "title": "Category Id"
+          },
+          "pickup_latitude": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Pickup Latitude"
+          },
+          "pickup_longitude": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Pickup Longitude"
+          },
+          "destination_latitude": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Destination Latitude"
+          },
+          "destination_longitude": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Destination Longitude"
+          },
+          "seats_requested": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Seats Requested",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "required": [
+          "category_id",
+          "pickup_latitude",
+          "pickup_longitude",
+          "destination_latitude",
+          "destination_longitude"
+        ],
+        "title": "SharedEstimateRequest"
+      },
+      "StartRidePayload": {
+        "properties": {
+          "otp_code": {
+            "type": "string",
+            "maxLength": 6,
+            "minLength": 6,
+            "title": "Otp Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "otp_code"
+        ],
+        "title": "StartRidePayload"
+      },
+      "SurgeRulePayload": {
+        "properties": {
+          "zone_name": {
+            "type": "string",
+            "title": "Zone Name"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "multiplier": {
+            "type": "number",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Multiplier"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "zone_name",
+          "multiplier",
+          "reason"
+        ],
+        "title": "SurgeRulePayload"
+      },
+      "TicketCreateRequest": {
+        "properties": {
+          "subject": {
+            "type": "string",
+            "title": "Subject",
+            "example": "Luggage assistance query"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "default": "RIDE_INQUIRY",
+            "example": "RIDE_INQUIRY"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "example": "I left an umbrella in the Mercedes S680."
+          },
+          "ride_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ride Id"
+          },
+          "priority": {
+            "type": "string",
+            "title": "Priority",
+            "default": "NORMAL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject",
+          "description"
+        ],
+        "title": "TicketCreateRequest"
+      },
+      "TokenRefreshPayload": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "TokenRefreshPayload"
+      },
+      "TopUpRequest": {
+        "properties": {
+          "amount_cents": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Amount Cents",
+            "example": 500000
+          },
+          "payment_method": {
+            "type": "string",
+            "title": "Payment Method",
+            "default": "UPI",
+            "example": "UPI"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key",
+            "example": "topup-uuid-12345"
+          }
+        },
+        "type": "object",
+        "required": [
+          "amount_cents"
+        ],
+        "title": "TopUpRequest"
+      },
+      "UserStatusUpdate": {
+        "properties": {
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_active"
+        ],
+        "title": "UserStatusUpdate"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VerifyPointPayload": {
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "title": "Longitude"
+          }
+        },
+        "type": "object",
+        "required": [
+          "latitude",
+          "longitude"
+        ],
+        "title": "VerifyPointPayload"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

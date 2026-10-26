@@ -1,0 +1,23 @@
+# Build stage
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY apps/admin-web/package*.json ./
+RUN npm ci
+
+COPY apps/admin-web/ ./
+RUN npm run build
+
+# Production static serving stage
+FROM nginx:1.25-alpine
+
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY deployment/reverse-proxy/admin-nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+    CMD wget -q -O - http://localhost/ || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

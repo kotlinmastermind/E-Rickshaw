@@ -1,0 +1,41 @@
+# Virtual Environments & Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.db
+*.sqlite3
+luxury_ride.db
+
+# Node & Frontend
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+
+# Android & Gradle
+.gradle/
+build/
+*.apk
+*.aab
+local.properties
+.idea/
+*.iml
+
+# Environment & Secrets
+.env
+*.env.local
+*.pem
+*.key
+*.jks
+keystore.properties
+backups/
+*.bak
+
+# Cache, Logs & OS
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.pytest_cache/
+

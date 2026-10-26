@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: luxury_postgres
+    environment:
+      POSTGRES_USER: luxury_user
+      POSTGRES_PASSWORD: luxury_secure_dev_pass_2026
+      POSTGRES_DB: luxury_ride_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U luxury_user -d luxury_ride_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: luxury_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile.backend
+    container_name: luxury_backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://luxury_user:luxury_secure_dev_pass_2026@postgres:5432/luxury_ride_db
+      DATABASE_URL_SYNC: postgresql://luxury_user:luxury_secure_dev_pass_2026@postgres:5432/luxury_ride_db
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      DEBUG: "True"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  admin-web:
+    build:
+      context: ../../
+      dockerfile: deployment/docker/Dockerfile.admin
+    container_name: luxury_admin_web
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
