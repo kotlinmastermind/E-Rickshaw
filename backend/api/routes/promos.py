@@ -212,3 +212,39 @@ async def claim_referral(
         "reward_cents": rec.referred_reward_cents,
         "reward_trigger": "FIRST_COMPLETED_TRIP"
     }
+
+# ----------------- Part 4 Eligibility & Expiry Reminders (Features 98 & 99) -----------------
+class PromoEligibilityRequest(BaseModel):
+    code: str
+    fare_cents: int
+    category_id: Optional[str] = None
+
+@router.post("/promos/check-eligibility")
+async def check_promo_eligibility(
+    payload: PromoEligibilityRequest,
+    user: User = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
+    service = SettlementAdvancedService(db)
+    return await service.check_promo_eligibility(
+        customer_id=user.id,
+        code_str=payload.code,
+        fare_cents=payload.fare_cents,
+        category_id=payload.category_id
+    )
+
+@router.get("/promos/expiring-soon")
+async def get_expiring_promos_and_passes(
+    user: User = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
+    stmt = select(CustomerProfile).where(CustomerProfile.user_id == user.id)
+    res = await db.execute(stmt)
+    prof = res.scalars().first()
+    customer_id = prof.id if prof else user.id
+
+    service = SettlementAdvancedService(db)
+    return await service.get_expiring_promos_for_customer(customer_id)
+

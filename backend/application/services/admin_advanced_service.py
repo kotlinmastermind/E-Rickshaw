@@ -17,7 +17,7 @@ from fastapi import HTTPException, status
 
 from backend.domain.models import (
     GeofenceZone, SurgeRule, CommissionRule, DriverPayoutRequest,
-    BroadcastNotification, Wallet, User, DriverProfile
+    BroadcastNotification, Wallet, User, DriverProfile, AdministrativeAuditLog, WalletTransaction
 )
 from backend.application.services.wallet_service import WalletService
 
@@ -108,17 +108,25 @@ class AdminAdvancedService:
         category_id: Optional[str],
         multiplier: float,
         reason: str,
-        admin_user_id: Optional[str] = None
+        admin_user_id: Optional[str] = None,
+        starts_at: Optional[datetime] = None,
+        ends_at: Optional[datetime] = None,
     ) -> SurgeRule:
         now = datetime.now(timezone.utc)
+        starts_at = starts_at or now
+        ends_at = ends_at or (starts_at + timedelta(days=7))
+        if starts_at.tzinfo is None: starts_at = starts_at.replace(tzinfo=timezone.utc)
+        if ends_at.tzinfo is None: ends_at = ends_at.replace(tzinfo=timezone.utc)
+        if ends_at <= starts_at or not 1.0 <= multiplier <= 5.0 or len(reason.strip()) < 5:
+            raise HTTPException(status_code=422, detail="Use a multiplier from 1 to 5, a clear reason, and an end after the start.")
         rule = SurgeRule(
             zone_id=zone_id,
             category_id=category_id,
             multiplier=multiplier,
             max_multiplier=multiplier * 1.5,
             reason=reason,
-            starts_at=now,
-            ends_at=now + timedelta(days=7),
+            starts_at=starts_at,
+            ends_at=ends_at,
             is_active=True,
             created_by=admin_user_id
         )
@@ -140,16 +148,27 @@ class AdminAdvancedService:
         percentage: float,
         admin_user_id: Optional[str] = None
     ) -> CommissionRule:
+        current_time = datetime.now(timezone.utc)
+        latest_version = (await session.execute(select(func.max(CommissionRule.version)).where(
+            CommissionRule.category_id == category_id))).scalar() or 0
+        active_rules = (await session.execute(select(CommissionRule).where(
+            CommissionRule.category_id == category_id, CommissionRule.is_active.is_(True)).with_for_update())).scalars().all()
+        for previous in active_rules:
+            previous.is_active = False
+            previous.effective_until = current_time
         rule = CommissionRule(
             category_id=category_id,
+            version=latest_version + 1,
             platform_commission_percentage=percentage,
             driver_share_percentage=max(0.0, 100.0 - percentage),
-            effective_from=datetime.now(timezone.utc),
+            effective_from=current_time,
             is_active=True,
             created_by=admin_user_id
         )
         session.add(rule)
         await session.flush()
+        if admin_user_id:
+            session.add(AdministrativeAuditLog(admin_user_id=admin_user_id, action="COMMISSION_RULE_ACTIVATED", target_resource="commission_rules", target_id=rule.id, changes_json=json.dumps({"version": rule.version, "commission_percent": percentage, "category_id": category_id})))
         return rule
 
     @staticmethod
@@ -176,9 +195,15 @@ class AdminAdvancedService:
         if payout.status != "REQUESTED":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot approve payout in status {payout.status}")
 
+        holds = (await session.execute(select(WalletTransaction).where(
+            WalletTransaction.source == "PAYOUT_HOLD", WalletTransaction.reference_id == payout.id))).scalars().all()
+        if len(holds) != 1 or holds[0].amount_cents != payout.amount_cents:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payout hold is missing or does not match the immutable wallet ledger; investigate before approval.")
+
         payout.status = "APPROVED"
         payout.reviewed_by = admin_user_id
         payout.reviewed_at = datetime.now(timezone.utc)
+        session.add(AdministrativeAuditLog(admin_user_id=admin_user_id, action="PAYOUT_APPROVED", target_resource="driver_payout_requests", target_id=payout.id, changes_json=json.dumps({"amount_cents": payout.amount_cents})))
         await session.flush()
         return payout
 
@@ -191,6 +216,11 @@ class AdminAdvancedService:
         if payout.status not in ["REQUESTED", "APPROVED"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot reject payout in status {payout.status}")
 
+        holds = (await session.execute(select(WalletTransaction).where(
+            WalletTransaction.source == "PAYOUT_HOLD", WalletTransaction.reference_id == payout.id))).scalars().all()
+        if len(holds) != 1 or holds[0].amount_cents != payout.amount_cents:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payout hold is missing or does not match the immutable wallet ledger; investigate before rejection.")
+
         drv_prof = await session.get(DriverProfile, payout.driver_id)
         driver_user_id = drv_prof.user_id if drv_prof else payout.driver_id
 
@@ -201,13 +231,15 @@ class AdminAdvancedService:
             transaction_type="CREDIT",
             source="PAYOUT_REVERSAL",
             reference_id=payout.id,
-            description=f"Refund for rejected payout: {rejection_reason}"
+            description=f"Refund for rejected payout: {rejection_reason}",
+            idempotency_key=f"payout_reversal_{payout.id}"
         )
 
         payout.status = "REJECTED"
         payout.rejection_reason = rejection_reason
         payout.reviewed_by = admin_user_id
         payout.reviewed_at = datetime.now(timezone.utc)
+        session.add(AdministrativeAuditLog(admin_user_id=admin_user_id, action="PAYOUT_REJECTED", target_resource="driver_payout_requests", target_id=payout.id, changes_json=json.dumps({"reason": rejection_reason})))
         await session.flush()
         return payout
 
@@ -222,8 +254,11 @@ class AdminAdvancedService:
 
         payout.status = "PAID"
         payout.payout_reference = settlement_ref
+        payout.settlement_reference = settlement_ref
         payout.reviewed_by = admin_user_id
         payout.updated_at = datetime.now(timezone.utc)
+        payout.reviewed_at = payout.updated_at
+        session.add(AdministrativeAuditLog(admin_user_id=admin_user_id, action="PAYOUT_SETTLED", target_resource="driver_payout_requests", target_id=payout.id, changes_json=json.dumps({"settlement_reference": settlement_ref})))
         await session.flush()
         return payout
 

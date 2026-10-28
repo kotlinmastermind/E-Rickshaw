@@ -6,20 +6,53 @@ from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_driver
 from backend.domain.models import User
 from backend.application.services.driver_service import DriverService
+from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
+from backend.application.services.cascading_dispatch_service import CascadingDispatchService
 
 router = APIRouter(prefix="/drivers", tags=["Driver Operations"])
+
+@router.get("/dispatch/offers")
+async def get_dispatch_offers(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
+    return await DriverTripOperationsService(db).get_offers(user.id)
+
+@router.get("/dispatch/preferences")
+async def get_dispatch_preferences(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
+    return await DriverTripOperationsService(db).get_preferences(user.id)
+
+@router.put("/dispatch/preferences")
+async def update_dispatch_preferences(payload: DispatchPreferencesPayload, user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
+    return await DriverTripOperationsService(db).update_preferences(user.id, payload.model_dump())
+
+@router.post("/dispatch/offers/{ride_id}/reject")
+async def reject_dispatch_offer(ride_id: str, payload: RejectOfferPayload, user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
+    return await CascadingDispatchService(db).reject_offer_and_cascade(user.id, ride_id, payload.reason)
 
 class AvailabilityPayload(BaseModel):
     is_online: bool
 
 class LocationPingPayload(BaseModel):
-    latitude: float
-    longitude: float
-    heading: Optional[float] = None
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    heading: Optional[float] = Field(None, ge=0, le=360)
+    speed_mps: Optional[float] = Field(None, ge=0, le=100)
+    accuracy_m: Optional[float] = Field(None, ge=0, le=5000)
+    is_mock_location: bool = False
+    location_source: str = Field("FUSED", pattern="^(FUSED|GPS|NETWORK)$")
 
 class DriverProfileUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
+
+class DispatchPreferencesPayload(BaseModel):
+    minimum_fare_cents: int = Field(0, ge=0, le=100000000)
+    maximum_pickup_distance_km: float = Field(20, gt=0, le=200)
+    vehicle_categories: List[str] = Field(default_factory=list, max_length=20)
+    navigation_provider: str = Field("GOOGLE_MAPS", pattern="^(GOOGLE_MAPS|WAZE|SYSTEM)$")
+    voice_guidance_enabled: bool = True
+    reroute_on_closure_enabled: bool = True
+
+class RejectOfferPayload(BaseModel):
+    reason: str = Field(..., pattern="^(TOO_FAR|FARE_TOO_LOW|WRONG_CATEGORY|UNAVAILABLE|OTHER|DISPATCH_TIMEOUT|PILOT_DECLINED|PASSENGER_MISMATCH|LOW_BATTERY)$")
 
 @router.get("/profile")
 async def get_driver_profile(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
@@ -82,7 +115,8 @@ async def update_location(
     db: AsyncSession = Depends(get_db)
 ):
     service = DriverService(db)
-    return await service.update_location(user.id, payload.latitude, payload.longitude, payload.heading)
+    return await service.update_location(user.id, payload.latitude, payload.longitude, payload.heading,
+        payload.speed_mps, payload.accuracy_m, payload.is_mock_location, payload.location_source)
 
 @router.get("/earnings")
 async def get_earnings(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
@@ -282,6 +316,8 @@ async def register_driver_device_token(
     else:
         token_obj.user_id = user.id
         token_obj.device_os = payload.device_os
+        token_obj.is_active = True
+        token_obj.last_error_at = None
     await db.commit()
     return {"message": "Driver device token registered."}
 

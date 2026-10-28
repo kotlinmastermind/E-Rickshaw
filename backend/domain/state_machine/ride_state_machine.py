@@ -6,6 +6,7 @@ class RideStatus(str, Enum):
     ASSIGNED = "ASSIGNED"
     ARRIVED = "ARRIVED"
     IN_PROGRESS = "IN_PROGRESS"
+    PAUSED = "PAUSED"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
@@ -43,6 +44,9 @@ class RideStateMachine:
         (RideStatus.ARRIVED, RideStatus.CANCELLED): {ActorRole.CUSTOMER, ActorRole.DRIVER, ActorRole.ADMIN},
 
         (RideStatus.IN_PROGRESS, RideStatus.COMPLETED): {ActorRole.DRIVER},
+        (RideStatus.IN_PROGRESS, RideStatus.PAUSED): {ActorRole.DRIVER},
+        (RideStatus.PAUSED, RideStatus.IN_PROGRESS): {ActorRole.DRIVER},
+        (RideStatus.PAUSED, RideStatus.COMPLETED): {ActorRole.DRIVER},
         # Once a ride is IN_PROGRESS, only an emergency administrative override can cancel it.
         (RideStatus.IN_PROGRESS, RideStatus.CANCELLED): {ActorRole.ADMIN},
     }

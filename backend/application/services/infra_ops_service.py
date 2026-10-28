@@ -3,7 +3,7 @@ import json
 import logging
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -467,7 +467,7 @@ interface GeneratedApiClient {{
     # -------------------------------------------------------------------------
     # 467. Per-route API latency dashboards
     # -------------------------------------------------------------------------
-    async def get_route_latencies(() -> List[RouteLatencyMetric]:
+    async def get_route_latencies(self) -> List[RouteLatencyMetric]:
         stmt = select(RouteLatencyMetric).order_by(RouteLatencyMetric.avg_latency_ms.desc()).limit(20)
         res = await self.db.execute(stmt)
         metrics = list(res.scalars().all())
@@ -585,7 +585,7 @@ interface GeneratedApiClient {{
     # -------------------------------------------------------------------------
     # 473. Dependency vulnerability reporting
     # -------------------------------------------------------------------------
-    async def get_vulnerabilities() -> List[DependencyVulnerabilityReport]:
+    async def get_vulnerabilities(self) -> List[DependencyVulnerabilityReport]:
         stmt = select(DependencyVulnerabilityReport).order_by(DependencyVulnerabilityReport.severity)
         res = await self.db.execute(stmt)
         vulns = list(res.scalars().all())
@@ -632,7 +632,7 @@ interface GeneratedApiClient {{
     # -------------------------------------------------------------------------
     # 475. Feature flag management
     # -------------------------------------------------------------------------
-    async def get_feature_flags() -> List[FeatureFlag]:
+    async def get_feature_flags(self) -> List[FeatureFlag]:
         stmt = select(FeatureFlag).order_by(FeatureFlag.flag_key)
         res = await self.db.execute(stmt)
         flags = list(res.scalars().all())

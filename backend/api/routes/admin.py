@@ -1,4 +1,5 @@
 from typing import Optional, List, Dict, Any
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,11 +7,22 @@ from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_admin
 from backend.domain.models import User
 from backend.application.services.admin_service import AdminService
+from backend.application.services.shared_ride_analytics_service import SharedRideAnalyticsService
+from backend.application.services.admin_governance_service import AdminGovernanceService
 
 router = APIRouter(prefix="/admin", tags=["Platform Administration"])
 
+@router.get("/shared-rides/analytics")
+async def get_shared_ride_operational_analytics(
+    days: int = Query(30, ge=1, le=365),
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    return await SharedRideAnalyticsService(db).get_operational_analytics(days)
+
 class UserStatusUpdate(BaseModel):
     is_active: bool
+    reason: str = Field(min_length=10, max_length=1000)
 
 class DriverApprovalUpdate(BaseModel):
     approval_status: str = Field(..., json_schema_extra={"example": "APPROVED"})  # APPROVED, REJECTED, SUSPENDED
@@ -23,6 +35,7 @@ class CreateFareRulePayload(BaseModel):
     per_minute_cents: int = Field(..., ge=0)
     minimum_fare_cents: int = Field(..., ge=0)
     surge_multiplier: float = Field(default=1.0, ge=1.0)
+    fare_cap_cents: Optional[int] = Field(default=None, ge=0)
 
 @router.get("/dashboard/stats")
 async def get_dashboard_stats(admin: User = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
@@ -35,11 +48,11 @@ async def list_users(
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    active: Optional[bool] = Query(None),
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    service = AdminService(db)
-    return await service.list_users(role=role, search=search, page=page, limit=limit)
+    return await AdminGovernanceService(db).list_users(role=role or "", search=search or "", active=active, page=page, limit=limit)
 
 @router.put("/users/{user_id}/status")
 async def update_user_status(
@@ -49,7 +62,7 @@ async def update_user_status(
     db: AsyncSession = Depends(get_db)
 ):
     service = AdminService(db)
-    return await service.update_user_status(admin_id=admin.id, user_id=user_id, is_active=payload.is_active)
+    return await AdminGovernanceService(db).set_customer_status(admin.id, user_id, payload.is_active, payload.reason)
 
 @router.get("/drivers")
 async def list_drivers(
@@ -57,8 +70,7 @@ async def list_drivers(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    service = AdminService(db)
-    return await service.list_drivers(approval_status=approval_status)
+    return await AdminGovernanceService(db).list_drivers(approval_status or "")
 
 @router.put("/drivers/{driver_id}/approval")
 async def review_driver(
@@ -67,6 +79,12 @@ async def review_driver(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
+    if payload.approval_status.upper() == "APPROVED":
+        from sqlalchemy import select
+        from backend.domain.models import DriverDocument
+        documents = (await db.execute(select(DriverDocument).where(DriverDocument.driver_id == driver_id))).scalars().all()
+        if not documents or any(doc.verification_status != "VERIFIED" for doc in documents):
+            raise HTTPException(status_code=409, detail="Every required driver document must be verified before approval.")
     service = AdminService(db)
     return await service.review_driver_approval(
         admin_id=admin.id,
@@ -77,14 +95,14 @@ async def review_driver(
 
 @router.get("/rides")
 async def list_rides(
+    ride_id: Optional[str] = Query(None, max_length=64),
     status: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    service = AdminService(db)
-    return await service.list_rides(status=status, page=page, limit=limit)
+    return await AdminGovernanceService(db).list_rides(ride_id or "", status or "", page, limit)
 
 @router.get("/rides/{ride_id}")
 async def get_ride_admin_details(
@@ -92,9 +110,14 @@ async def get_ride_admin_details(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    service = AdminService(db)
-    timeline = await service.get_ride_timeline(ride_id)
-    return {"ride_id": ride_id, "timeline": timeline}
+    return await AdminGovernanceService(db).ride_timeline(ride_id)
+
+@router.get("/fares")
+async def list_fare_rules(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    return await AdminGovernanceService(db).list_fare_rules()
 
 @router.post("/fares")
 async def create_fare_rule(
@@ -102,16 +125,13 @@ async def create_fare_rule(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    service = AdminService(db)
-    return await service.create_or_update_fare_rule(
-        admin_id=admin.id,
-        category_id=payload.category_id,
-        base_fare_cents=payload.base_fare_cents,
-        per_km_cents=payload.per_km_cents,
-        per_minute_cents=payload.per_minute_cents,
-        minimum_fare_cents=payload.minimum_fare_cents,
-        surge_multiplier=payload.surge_multiplier
-    )
+    service = AdminGovernanceService(db)
+    return await service.create_fare_draft(admin.id, {
+        "category_id": payload.category_id, "base_fare_cents": payload.base_fare_cents,
+        "per_km_cents": payload.per_km_cents, "per_minute_cents": payload.per_minute_cents,
+        "minimum_fare_cents": payload.minimum_fare_cents, "surge_multiplier": payload.surge_multiplier,
+        "fare_cap_cents": getattr(payload, "fare_cap_cents", None), "effective_from": datetime.now(timezone.utc),
+    })
 
 # ==================== PHASE 2 ADMIN FEATURES ====================
 from backend.application.services.admin_advanced_service import AdminAdvancedService
@@ -125,10 +145,13 @@ class BroadcastPayload(BaseModel):
     channel: str = "IN_APP"
 
 class SurgeRulePayload(BaseModel):
-    zone_name: str
+    zone_name: Optional[str] = None
+    zone_id: Optional[str] = None
     category_id: Optional[str] = None
     multiplier: float = Field(..., ge=1.0, le=5.0)
     reason: str
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
 
 class GeofencePayload(BaseModel):
     name: str
@@ -145,6 +168,7 @@ class CommissionRulePayload(BaseModel):
     category_id: Optional[str] = None
     commission_percentage: float = Field(..., ge=0.0, le=100.0)
     fixed_cut_cents: int = 0
+    reason: str = Field(..., min_length=12, max_length=1000)
 
 class PayoutRejectPayload(BaseModel):
     rejection_reason: str = Field(..., min_length=3)
@@ -169,13 +193,24 @@ async def list_all_support_tickets(
     return [
         {
             "id": t.id,
+            "ticket_number": t.ticket_number,
+            "complaint_reference_number": t.complaint_reference_number,
             "user_id": t.user_id,
             "ride_id": t.ride_id,
             "subject": t.subject,
             "category": t.category,
             "status": t.status,
             "priority": t.priority,
-            "assigned_to": t.assigned_to,
+            "assigned_squad": t.assigned_squad,
+            "language_preference": t.language_preference,
+            "is_escalated": t.is_escalated,
+            "escalation_reason": t.escalation_reason,
+            "lost_item_category": t.lost_item_category,
+            "lost_item_status": t.lost_item_status,
+            "csat_score": t.csat_score,
+            "data_retention_days": t.data_retention_days,
+            "refund_amount_cents": t.refund_amount_cents,
+            "assigned_to": t.assigned_admin_id,
             "created_at": t.created_at.isoformat()
         }
         for t in tickets
@@ -217,50 +252,150 @@ async def send_broadcast_notification(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    bc = await AdminAdvancedService.send_broadcast(
-        session=db,
-        admin_user_id=admin.id,
-        title=payload.title,
-        message=payload.message,
-        target_role=payload.target_role,
-        channel=payload.channel
-    )
-    await db.commit()
-    return {
-        "status": "SENT",
-        "broadcast_id": bc.id,
-        "recipient_count": bc.dispatched_count,
-        "dispatched_count": bc.dispatched_count,
-        "sent_at": bc.sent_at.isoformat() if bc.sent_at else None
-    }
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    result = await AdminFinanceSupportService(db).create_broadcast(
+        admin.id, payload.title, payload.message, payload.target_role, None, {}, None, False)
+    return {**result, "broadcast_id": result["id"], "recipient_count": result["eligible_count"]}
 
 @router.get("/broadcasts")
 async def list_broadcast_notifications(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    bcs = await AdminAdvancedService.list_broadcasts(db)
-    return [
-        {
-            "id": b.id,
-            "title": b.title,
-            "message": b.message,
-            "target_role": b.target_audience,
-            "target_audience": b.target_audience,
-            "recipient_count": b.dispatched_count,
-            "dispatched_count": b.dispatched_count,
-            "sent_at": b.sent_at.isoformat() if b.sent_at else None
-        }
-        for b in bcs
-    ]
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).broadcasts()
 
-# 3. Heat Map Monitor
+class LocationRetentionUpdatePayload(BaseModel):
+    category: str
+    retention_ttl_days: int = Field(..., ge=7, le=1095)
+
+class LocationRetentionPurgePayload(BaseModel):
+    category: str = "DRIVER_RAW_TELEMETRY"
+    dry_run: bool = True
+
+class AdminRoadRestrictionPayload(BaseModel):
+    title: str = Field(..., min_length=3, max_length=128)
+    description: str = Field(..., min_length=5, max_length=512)
+    restriction_type: str = Field("ROAD_CLOSURE", pattern="^(ROAD_CLOSURE|VIP_CORRIDOR|MONSOON_WATERLOGGING|ZERO_EMISSION_ONLY)$")
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    radius_meters: float = Field(500.0, ge=50, le=10000)
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+
+# 3. Heat Map Monitor (Feature 440: Time Filtered Demand & Supply)
 @router.get("/heat-map/monitor")
 async def get_admin_heat_map(
+    window_hours: int = Query(2, ge=1, le=72),
+    metric: str = Query("demand", pattern="^(demand|supply)$"),
+    minimum_count: int = Query(5, ge=5, le=100),
+    time_filter: str = Query("ALL_DAY", pattern="^(ALL_DAY|MORNING_RUSH|AFTERNOON_LULL|EVENING_GALA|LATE_NIGHT)$"),
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    return await DispatchAdvancedService.get_privacy_preserving_heatmap(db)
+    from backend.application.services.location_ops_service import LocationOpsService
+    return await LocationOpsService(db).get_demand_heatmap_filtered(time_filter, window_hours, metric, minimum_count)
+
+# Feature 441. Driver density map with privacy aggregation
+@router.get("/location-ops/driver-density")
+async def driver_density_map(
+    resolution_km: float = Query(2.0, ge=0.5, le=10.0),
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.location_ops_service import LocationOpsService
+    return await LocationOpsService(db).get_driver_density_privacy_grid(resolution_km)
+
+# Feature 444. Driver GPS spoofing risk signals
+@router.get("/location-ops/spoof-signals")
+async def get_spoofing_signals(
+    driver_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.location_ops_service import LocationOpsService
+    return await LocationOpsService(db).get_driver_spoofing_signals(driver_id, limit)
+
+# Feature 447. Location data retention controls
+@router.get("/location-ops/retention-controls")
+async def get_location_retention_controls(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.location_ops_service import LocationOpsService
+    return await LocationOpsService(db).get_location_retention_controls()
+
+@router.put("/location-ops/retention-controls")
+async def update_location_retention_controls(
+    payload: LocationRetentionUpdatePayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.location_ops_service import LocationOpsService
+    return await LocationOpsService(db).update_location_retention_controls(payload.category, payload.retention_ttl_days)
+
+@router.post("/location-ops/retention-purge")
+async def purge_location_records(
+    payload: LocationRetentionPurgePayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.location_ops_service import LocationOpsService
+    return await LocationOpsService(db).run_location_retention_purge(payload.category, payload.dry_run)
+
+# Feature 448. Location event quality dashboard
+@router.get("/location-ops/quality")
+async def location_quality_dashboard(
+    window_hours: int = Query(24, ge=1, le=168),
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.location_ops_service import LocationOpsService
+    return await LocationOpsService(db).admin_location_quality(window_hours)
+
+# Feature 426. Live map provider health check
+@router.get("/location-ops/provider-health")
+async def location_provider_health(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.location_ops_service import LocationOpsService
+    return await LocationOpsService(db).get_live_map_provider_health()
+
+# Feature 436. Road restrictions management
+@router.get("/location-ops/road-restrictions")
+async def list_admin_road_restrictions(
+    latitude: float = Query(28.6139, ge=-90, le=90),
+    longitude: float = Query(77.2090, ge=-180, le=180),
+    radius_km: float = Query(50.0, ge=1.0, le=200.0),
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.location_ops_service import LocationOpsService
+    return await LocationOpsService(db).list_road_restrictions(latitude, longitude, radius_km)
+
+@router.post("/location-ops/road-restrictions")
+async def create_road_restriction(
+    payload: AdminRoadRestrictionPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import RoadRestriction
+    row = RoadRestriction(
+        title=payload.title,
+        description=payload.description,
+        restriction_type=payload.restriction_type,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        radius_meters=payload.radius_meters,
+        starts_at=payload.starts_at or datetime.now(timezone.utc),
+        ends_at=payload.ends_at
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return {"created": True, "id": row.id, "title": row.title}
 
 # 4. Surge Pricing Config
 @router.post("/surge/rules")
@@ -269,13 +404,21 @@ async def create_surge_rule(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
+    zone_id = payload.zone_id
+    if zone_id is None and payload.zone_name:
+        from sqlalchemy import select
+        from backend.domain.models import GeofenceZone
+        zone = (await db.execute(select(GeofenceZone).where(GeofenceZone.name == payload.zone_name))).scalar_one_or_none()
+        zone_id = zone.id if zone else None
     rule = await AdminAdvancedService.create_surge_rule(
         session=db,
-        zone_id=None,
+        zone_id=zone_id,
         category_id=payload.category_id,
         multiplier=payload.multiplier,
         reason=payload.reason,
-        admin_user_id=admin.id
+        admin_user_id=admin.id,
+        starts_at=payload.starts_at,
+        ends_at=payload.ends_at,
     )
     await db.commit()
     return {"status": "CREATED", "rule_id": rule.id, "multiplier": rule.multiplier}
@@ -306,15 +449,11 @@ async def create_geofence(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    zone = await AdminAdvancedService.create_geofence(
-        session=db,
-        name=payload.name,
-        zone_type=payload.zone_type,
-        coordinates=payload.coordinates,
-        surge_multiplier=payload.surge_multiplier
-    )
-    await db.commit()
-    return {"status": "CREATED", "zone_id": zone.id, "name": zone.name}
+    result = await AdminGovernanceService(db).save_geofence(admin.id, None, {
+        "name": payload.name, "zone_type": payload.zone_type, "coordinates": payload.coordinates,
+        "surge_multiplier": payload.surge_multiplier, "is_active": True,
+    })
+    return {**result, "status": "CREATED", "zone_id": result["id"]}
 
 @router.get("/geofences")
 async def list_geofences(
@@ -407,32 +546,19 @@ async def create_commission_rule(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    rule = await AdminAdvancedService.create_commission_rule(
-        session=db,
-        category_id=payload.category_id,
-        percentage=payload.commission_percentage,
-        admin_user_id=admin.id
-    )
-    await db.commit()
-    return {"status": "CREATED", "rule_id": rule.id, "commission_percentage": rule.platform_commission_percentage}
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    rule = await AdminFinanceSupportService(db).create_commission_draft(
+        admin.id, payload.category_id, payload.commission_percentage, None, payload.reason)
+    return {"status": "PENDING_APPROVAL", "rule_id": rule["id"], "version": rule["version"], "commission_percentage": payload.commission_percentage}
 
 @router.get("/commissions")
 async def list_commission_rules(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    rules = await AdminAdvancedService.list_commission_rules(db)
-    return [
-        {
-            "id": r.id,
-            "category_id": r.category_id,
-            "version": r.version,
-            "commission_percentage": r.platform_commission_percentage,
-            "driver_share_percentage": r.driver_share_percentage,
-            "is_active": r.is_active
-        }
-        for r in rules
-    ]
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    rules = await AdminFinanceSupportService(db).commission_rules()
+    return [{**r, "commission_percentage": r["commission_percent"]} for r in rules]
 
 # 8. Phase 3: Analytics Reports
 @router.get("/reports")
@@ -499,4 +625,100 @@ async def trigger_database_backup(
     await db.commit()
 
     return snapshot_meta
+
+# ----------------- Part 4 Disputes, Refunds & Corporate (Features 89, 94, 95, 100) -----------------
+class ResolveDisputePayload(BaseModel):
+    resolution: str  # APPROVE_REFUND or REJECT
+    resolution_notes: str
+    refund_amount_cents: Optional[int] = None
+
+@router.get("/disputes")
+async def list_all_disputes(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import FareDispute
+    stmt = select(FareDispute).order_by(desc(FareDispute.created_at))
+    res = await db.execute(stmt)
+    disputes = res.scalars().all()
+    return [
+        {
+            "id": d.id,
+            "ride_id": d.ride_id,
+            "customer_id": d.customer_id,
+            "dispute_reason": d.dispute_reason,
+            "claimed_amount_rupees": round(d.claimed_amount_cents / 100, 2),
+            "customer_comment": d.customer_comment,
+            "status": d.status,
+            "admin_resolution_notes": d.admin_resolution_notes,
+            "created_at": d.created_at.isoformat()
+        }
+        for d in disputes
+    ]
+
+@router.post("/disputes/{dispute_id}/resolve")
+async def resolve_fare_dispute(
+    dispute_id: str,
+    payload: ResolveDisputePayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
+    service = SettlementAdvancedService(db)
+    return await service.admin_resolve_dispute(
+        dispute_id=dispute_id,
+        admin_id=admin.id,
+        resolution=payload.resolution,
+        resolution_notes=payload.resolution_notes,
+        refund_amount_cents=payload.refund_amount_cents
+    )
+
+@router.get("/refunds")
+async def list_all_refunds(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import PaymentRefund
+    stmt = select(PaymentRefund).order_by(desc(PaymentRefund.created_at))
+    res = await db.execute(stmt)
+    refunds = res.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "payment_id": r.payment_id,
+            "ride_id": r.ride_id,
+            "customer_id": r.customer_id,
+            "amount_rupees": round(r.amount_cents / 100, 2),
+            "is_partial": r.is_partial,
+            "status": r.status,
+            "arn_reference": r.arn_reference,
+            "reason": r.reason,
+            "created_at": r.created_at.isoformat()
+        }
+        for r in refunds
+    ]
+
+@router.get("/corporate-billings")
+async def list_corporate_billings(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import Ride
+    stmt = select(Ride).where(Ride.payment_method == "CORPORATE_BILLING").order_by(desc(Ride.requested_at))
+    res = await db.execute(stmt)
+    rides = res.scalars().all()
+    return [
+        {
+            "ride_id": r.id,
+            "cost_center": r.business_cost_center or "CC-CORP-EXEC",
+            "project_code": r.business_project_code or "PRJ-GLOBAL",
+            "tax_id": r.business_tax_id or "27AAACG1234F1Z8",
+            "billing_ref": r.corporate_billing_ref or f"CORP-{r.id[:8].upper()}",
+            "amount_rupees": round((r.final_fare_cents or r.estimated_fare_cents) / 100, 2),
+            "passenger_name": r.passenger_name or "Executive Passenger",
+            "date": r.requested_at.isoformat()
+        }
+        for r in rides
+    ]
+
 

@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import uuid
 from datetime import datetime, timezone, timedelta
 from backend.application.services.pool_service import PoolService
 from backend.domain.models import PooledTrip, PooledBooking, PooledTripStop, FareRule, VehicleCategory, User, CustomerProfile
@@ -46,7 +47,7 @@ async def test_atomic_seat_reservation_and_overbooking_prevention():
 
         # Create test customer
         cust_user = User(
-            phone_number=f"+91987770{int(datetime.now().timestamp()) % 10000:04d}",
+            phone_number=f"+9198{uuid.uuid4().int % 100000000:08d}",
             role="customer",
             full_name="Pool Test Passenger 1"
         )
@@ -131,7 +132,7 @@ async def test_conservation_of_monetary_totals_in_fare_split():
         cat_id = rule.category_id
 
         # Create passenger
-        user = User(phone_number=f"+9198778{int(datetime.now().timestamp()) % 10000:04d}", role="customer")
+        user = User(phone_number=f"+9198{uuid.uuid4().int % 100000000:08d}", role="customer")
         session.add(user)
         await session.flush()
         cust = CustomerProfile(user_id=user.id)
@@ -178,7 +179,8 @@ async def test_passenger_occupancy_lifecycle_state_machine():
         rule = (await session.execute(FareRule.__table__.select().where(FareRule.is_active == True))).first()
         cat_id = rule.category_id
 
-        user = User(phone_number=f"+9198779{int(datetime.now().timestamp()) % 10000:04d}", role="customer")
+        import uuid
+        user = User(phone_number=f"+9198{uuid.uuid4().int % 100000000:08d}", role="customer")
         session.add(user)
         await session.flush()
         cust = CustomerProfile(user_id=user.id)

@@ -47,6 +47,7 @@ class RideService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid fare estimate snapshot.")
 
         now = datetime.now(timezone.utc)
+
         expires_at = estimate.expires_at if estimate.expires_at.tzinfo else estimate.expires_at.replace(tzinfo=timezone.utc)
         if now > expires_at:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Fare estimate has expired. Please recalculate.")
@@ -120,32 +121,34 @@ class RideService:
         await self.db.commit()
         await self.db.refresh(ride)
 
-        # Broadcast High-Priority Dispatch Push Notification to all Online Drivers
+        # Persist a generic dispatch wake-up notice. The delivery worker applies the
+        # driver's consent, quiet hours, rate caps and provider retry policy.
         try:
-            from backend.domain.models import DeviceToken, DriverAvailability, DriverProfile
-            stmt_drivers = (
-                select(DeviceToken.fcm_token)
-                .join(DriverProfile, DriverProfile.user_id == DeviceToken.user_id)
-                .join(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
-                .where(DriverAvailability.is_online == True)
-            )
-            res_tokens = await self.db.execute(stmt_drivers)
-            fcm_tokens = res_tokens.scalars().all()
-            for token in fcm_tokens:
-                await self.notifier.send_push_notification(
-                    device_token=token,
-                    title="NEW VIP RIDE REQUEST 🚖",
-                    body=f"Pickup: {pickup_address[:35]} • Fare: ₹{ride.final_fare_cents // 100}",
-                    data={
-                        "type": "NEW_RIDE_DISPATCH",
-                        "ride_id": ride.id,
-                        "pickup_address": pickup_address,
-                        "destination_address": destination_address,
-                        "fare_rupees": str(ride.final_fare_cents // 100),
-                        "priority": "high",
-                        "sound": "ride_dispatch_alert"
-                    }
-                )
+            from backend.domain.models import DriverAvailability, DriverProfile, Notification
+            stmt_drivers = select(DriverProfile.user_id).join(
+                DriverAvailability, DriverAvailability.driver_id == DriverProfile.id
+            ).where(DriverAvailability.is_online.is_(True)).distinct()
+            driver_user_ids = (await self.db.execute(stmt_drivers)).scalars().all()
+            for driver_user_id in driver_user_ids:
+                self.db.add(Notification(
+                    user_id=driver_user_id,
+                    title="New dispatch activity",
+                    body="Open the driver app to check for matching offers.",
+                    event_type="DISPATCH_REFRESH",
+                    data_json=json.dumps({"type": "DISPATCH_REFRESH"}),
+                    dedupe_key=f"dispatch-refresh:{ride.id}:{driver_user_id}",
+                    delivery_status="QUEUED",
+                ))
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+
+        # Realtime message is a wake-up hint only; API polling returns eligible offers.
+        try:
+            from backend.api.routes.ws import ws_manager
+            dispatch_ws = {"type": "DISPATCH_REFRESH", "timestamp": ride.requested_at.isoformat()}
+            for d_uid in list(ws_manager.driver_channels.keys()):
+                await ws_manager.dispatch_to_driver(d_uid, dispatch_ws)
         except Exception:
             pass
 
@@ -176,6 +179,19 @@ class RideService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chauffeur account is pending verification approval.")
 
         now = datetime.now(timezone.utc)
+
+        # An authenticated driver can accept only their own live, persisted offer.
+        offer_result = await self.db.execute(
+            select(RideAssignment).where(
+                RideAssignment.ride_id == ride_id,
+                RideAssignment.driver_id == driver.id,
+                RideAssignment.status == "OFFERED",
+                RideAssignment.expires_at > now,
+            ).with_for_update()
+        )
+        offer = offer_result.scalar_one_or_none()
+        if offer is None:
+            raise HTTPException(status_code=409, detail="This dispatch offer expired or is no longer assigned to you.")
 
         # Atomic conditional update
         update_stmt = (
@@ -209,14 +225,16 @@ class RideService:
         await self.db.execute(avail_stmt)
 
         # Record assignment & state event
-        assignment = RideAssignment(
-            ride_id=ride_id,
-            driver_id=driver.id,
-            status="ACCEPTED",
-            offered_at=now,
-            responded_at=now
-        )
-        self.db.add(assignment)
+        offer.status = "ACCEPTED"
+        offer.is_accepted = True
+        offer.responded_at = now
+
+        # Clear Redis offer safety key
+        try:
+            from backend.infrastructure.cache.redis_client import redis_client
+            await redis_client.delete(f"dispatch:offer:{ride_id}:{driver.id}")
+        except Exception:
+            pass
 
         event = RideStatusEvent(
             ride_id=ride_id,
@@ -228,6 +246,9 @@ class RideService:
         )
         self.db.add(event)
         await self.db.commit()
+
+        # Broadcast live status update to WebSocket subscribers
+        await self._broadcast_ride_update(ride_id, RideStatus.ASSIGNED.value)
 
         # Fetch updated ride
         ride = await self.get_ride_by_id(ride_id)
@@ -264,6 +285,8 @@ class RideService:
         self.db.add(event)
         await self.db.commit()
 
+        await self._broadcast_ride_update(ride.id, RideStatus.ARRIVED.value)
+
         return {"ride_id": ride.id, "status": ride.status, "arrived_at": now.isoformat()}
 
     async def start_trip_with_otp(self, driver_user_id: str, ride_id: str, otp_code: str) -> Dict[str, Any]:
@@ -272,6 +295,20 @@ class RideService:
 
         if ride.assigned_driver_id != driver.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized for this ride.")
+
+        from backend.domain.models import RideOperationalEvent
+        start_check_result = await self.db.execute(select(RideOperationalEvent).where(
+            RideOperationalEvent.ride_id == ride.id,
+            RideOperationalEvent.actor_user_id == driver_user_id,
+            RideOperationalEvent.action == "START_CHECKLIST"
+        ).order_by(RideOperationalEvent.created_at.desc()).limit(1))
+        start_check = start_check_result.scalar_one_or_none()
+        try:
+            checks = json.loads(start_check.details_json) if start_check else {}
+        except (TypeError, json.JSONDecodeError):
+            checks = {}
+        if not all(checks.get(key) is True for key in ("passenger_present", "vehicle_safe", "belongings_checked", "route_confirmed")):
+            raise HTTPException(status_code=409, detail="Complete and save all pre-departure checks before passenger verification.")
 
         RideStateMachine.validate_transition(ride.status, RideStatus.IN_PROGRESS.value, ActorRole.DRIVER.value)
 
@@ -294,6 +331,8 @@ class RideService:
         self.db.add(event)
         await self.db.commit()
 
+        await self._broadcast_ride_update(ride.id, RideStatus.IN_PROGRESS.value)
+
         return {"ride_id": ride.id, "status": ride.status, "started_at": now.isoformat()}
 
     async def finish_trip(
@@ -308,6 +347,22 @@ class RideService:
 
         if ride.assigned_driver_id != driver.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized for this ride.")
+
+        checklist_result = await self.db.execute(select(RideOperationalEvent).where(
+            RideOperationalEvent.ride_id == ride.id,
+            RideOperationalEvent.actor_user_id == driver_user_id,
+            RideOperationalEvent.action == "COMPLETION_CHECKLIST"
+        ).order_by(RideOperationalEvent.created_at.desc()).limit(1))
+        completion_checklist = checklist_result.scalar_one_or_none()
+        try:
+            checks = json.loads(completion_checklist.details_json) if completion_checklist else {}
+        except (TypeError, json.JSONDecodeError):
+            checks = {}
+        if not all(checks.get(key) is True for key in ("passenger_belongings_returned", "vehicle_cabin_checked", "dropoff_safe", "fare_explained")):
+            raise HTTPException(status_code=409, detail="Complete and save all trip completion checks before finishing.")
+
+        if ride.status != RideStatus.IN_PROGRESS.value:
+            raise HTTPException(status_code=409, detail="Only an active, unpaused trip can be completed.")
 
         RideStateMachine.validate_transition(ride.status, RideStatus.COMPLETED.value, ActorRole.DRIVER.value)
 
@@ -383,6 +438,8 @@ class RideService:
         self.db.add(event)
         await self.db.commit()
 
+        await self._broadcast_ride_update(ride.id, RideStatus.COMPLETED.value, ride.final_fare_cents)
+
         return {
             "ride_id": ride.id,
             "status": ride.status,
@@ -432,6 +489,8 @@ class RideService:
         )
         self.db.add(event)
         await self.db.commit()
+
+        await self._broadcast_ride_update(ride.id, RideStatus.CANCELLED.value)
 
         return {"ride_id": ride.id, "status": ride.status, "cancelled_at": now.isoformat()}
 
@@ -498,3 +557,19 @@ class RideService:
         if not driver:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found.")
         return driver
+
+    async def _broadcast_ride_update(self, ride_id: str, status: str, final_fare_cents: Optional[int] = None):
+        try:
+            from backend.api.routes.ws import ws_manager
+            payload = {
+                "ride_id": ride_id,
+                "status": status,
+                "driver_latitude": 18.9400,
+                "driver_longitude": 72.8300,
+                "heading": 45.0,
+                "final_fare_cents": final_fare_cents
+            }
+            await ws_manager.broadcast_ride_update(ride_id, payload)
+        except Exception:
+            pass
+

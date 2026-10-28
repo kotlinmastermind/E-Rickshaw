@@ -70,7 +70,50 @@ class LocalPrivateStorageProvider(StorageProvider):
 
         return (target_path, detected_mime, file_size, sha256_hash)
 
-_storage_instance = LocalPrivateStorageProvider(settings.STORAGE_LOCAL_DIR)
+class SupabaseCloudStorageProvider(StorageProvider):
+    """
+    Cloud object storage provider using Supabase Storage buckets.
+    Persists driver KYC files in the cloud with fallback to local private storage.
+    """
+    def __init__(self, fallback: LocalPrivateStorageProvider):
+        self.fallback = fallback
+        self.supabase_url = os.getenv("SUPABASE_URL") or getattr(settings, "SUPABASE_URL", None)
+        self.supabase_key = os.getenv("SUPABASE_KEY") or getattr(settings, "SUPABASE_KEY", None)
+        self.bucket = "driver-documents"
+
+    async def save_driver_document(self, driver_id: str, document_type: str, file: UploadFile) -> Tuple[str, str, int, str]:
+        # Perform local validation & save first
+        local_path, detected_mime, file_size, sha256_hash = await self.fallback.save_driver_document(driver_id, document_type, file)
+        
+        # If Supabase credentials are configured, persist to remote cloud bucket
+        if self.supabase_url and self.supabase_key:
+            try:
+                import httpx
+                ext = "pdf" if detected_mime == "application/pdf" else ("png" if detected_mime == "image/png" else "jpg")
+                remote_object_name = f"{driver_id}/{document_type.lower()}_{sha256_hash[:12]}.{ext}"
+                upload_url = f"{self.supabase_url.rstrip('/')}/storage/v1/object/{self.bucket}/{remote_object_name}"
+                
+                with open(local_path, "rb") as f:
+                    file_bytes = f.read()
+                    
+                headers = {
+                    "apikey": self.supabase_key,
+                    "Authorization": f"Bearer {self.supabase_key}",
+                    "Content-Type": detected_mime,
+                    "x-upsert": "true"
+                }
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(upload_url, content=file_bytes, headers=headers, timeout=12.0)
+                    if resp.status_code in [200, 201]:
+                        cloud_ref = f"{self.supabase_url.rstrip('/')}/storage/v1/object/public/{self.bucket}/{remote_object_name}"
+                        return (cloud_ref, detected_mime, file_size, sha256_hash)
+            except Exception:
+                pass # Gracefully return local path on network fallback
+                
+        return (local_path, detected_mime, file_size, sha256_hash)
+
+_local_storage = LocalPrivateStorageProvider(settings.STORAGE_LOCAL_DIR)
+_storage_instance = SupabaseCloudStorageProvider(_local_storage)
 
 def get_storage_provider() -> StorageProvider:
     return _storage_instance

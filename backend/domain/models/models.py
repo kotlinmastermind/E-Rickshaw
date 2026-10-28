@@ -976,6 +976,8 @@ class RideAssignment(Base):
     escalation_level: Mapped[int] = mapped_column(Integer, default=0)
     responded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_accepted: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, default=None)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     ride: Mapped["Ride"] = relationship(back_populates="assignments")
 

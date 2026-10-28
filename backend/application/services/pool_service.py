@@ -8,7 +8,7 @@ from sqlalchemy import select, update
 from fastapi import HTTPException, status
 
 from backend.domain.models import (
-    PooledTrip, PooledBooking, PooledTripStop, PassengerOccupancyEvent,
+    PooledTrip, PooledBooking, PooledTripStop, PassengerOccupancyEvent, PooledTripMessage, SharedRidePreference,
     Ride, FareRule, FareEstimate, CustomerProfile, DriverProfile, VehicleCategory,
     AuditLog
 )
@@ -38,6 +38,12 @@ class PoolService:
                 detail="Seat reservation must be between 1 and 4 seats."
             )
 
+        category = await self.db.get(VehicleCategory, category_id)
+        if not category or not category.is_active:
+            raise HTTPException(status_code=404, detail="Shared-ride vehicle category is unavailable.")
+        if seats_requested > category.capacity:
+            raise HTTPException(status_code=400, detail=f"This vehicle category supports up to {category.capacity} passengers.")
+
         rule = await self.fare_service.get_active_rule_for_category(category_id)
         route = await self.maps_provider.get_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
 
@@ -46,7 +52,8 @@ class PoolService:
         time_charge = round(route.duration_minutes * rule.per_minute_cents)
         solo_subtotal = rule.base_fare_cents + distance_charge + time_charge
         solo_before_surge = max(solo_subtotal, rule.minimum_fare_cents)
-        solo_fare_cents = round(solo_before_surge * rule.surge_multiplier)
+        surge_multiplier = max(rule.surge_multiplier or 1.0, await self.fare_service.get_surge_multiplier(category_id, pickup_lat, pickup_lng))
+        solo_fare_cents = round(solo_before_surge * surge_multiplier)
 
         # Shared discount: default 25% discount off solo fare
         discount_pct = getattr(rule, "shared_discount_percentage", 25.0)
@@ -71,7 +78,7 @@ class PoolService:
             distance_km=route.distance_km,
             estimated_duration_minutes=route.duration_minutes,
             estimated_fare_cents=final_shared_fare_cents,
-            surge_multiplier=rule.surge_multiplier,
+            surge_multiplier=surge_multiplier,
             expires_at=expires_at
         )
         self.db.add(estimate)
@@ -90,7 +97,19 @@ class PoolService:
             "solo_fare_cents": solo_fare_cents,
             "shared_fare_cents": final_shared_fare_cents,
             "shared_discount_percentage": discount_pct,
+            "surge_multiplier": surge_multiplier,
             "savings_cents": savings_cents,
+            "guest_savings_cents": savings_cents,
+            "total_payable_cents": final_shared_fare_cents,
+            "solo_fare_per_seat_cents": solo_fare_cents,
+            "reservation_expires_in_seconds": 900,
+            "fare_allocation": {
+                "solo_fare_cents": solo_fare_cents,
+                "shared_discount_percentage": discount_pct,
+                "seat_multiplier": seat_multiplier,
+                "shared_fare_cents": final_shared_fare_cents,
+                "savings_cents": savings_cents,
+            },
             "currency": "INR",
             "expires_at": expires_at.isoformat(),
             "route_polyline": route.polyline
@@ -109,11 +128,17 @@ class PoolService:
         capacity constraints, and returns eligible trips or explainable rejection reasons.
         Does not leak sensitive customer data.
         """
-        # Fetch candidate pooled trips that are OPEN or ACTIVE
+        # Only not-yet-departed pools accept new matches. Stable creation ordering
+        # ensures equal-detour requests do not continually favor the newest pool.
+        category = await self.db.get(VehicleCategory, category_id)
+        if not category or not category.is_active:
+            raise HTTPException(status_code=404, detail="Shared-ride vehicle category is unavailable.")
+        if seats_requested < 1 or seats_requested > category.capacity:
+            raise HTTPException(status_code=400, detail=f"Requested seats exceed this category's passenger capacity ({category.capacity}).")
         stmt = select(PooledTrip).where(
             PooledTrip.vehicle_category_id == category_id,
-            PooledTrip.status.in_(["OPEN", "ACTIVE"])
-        )
+            PooledTrip.status == "OPEN"
+        ).order_by(PooledTrip.created_at.asc(), PooledTrip.id.asc())
         res = await self.db.execute(stmt)
         candidate_trips = res.scalars().all()
 
@@ -148,7 +173,8 @@ class PoolService:
                     "detour_km": 0.0,
                     "pickup_eta_minutes": 3.0,
                     "available_seats": trip_remaining_seats,
-                    "driver_assigned": trip.driver_id is not None
+                    "driver_assigned": trip.driver_id is not None,
+                    "created_at": trip.created_at.isoformat() if trip.created_at else ""
                 })
                 continue
 
@@ -177,17 +203,20 @@ class PoolService:
                 "detour_km": detour_km,
                 "pickup_eta_minutes": pickup_eta,
                 "available_seats": trip_remaining_seats,
-                "driver_assigned": trip.driver_id is not None
+                "driver_assigned": trip.driver_id is not None,
+                "created_at": trip.created_at.isoformat() if trip.created_at else ""
             })
 
         # Rank eligible candidates by least detour distance
-        eligible_candidates.sort(key=lambda c: c["detour_km"])
+        eligible_candidates.sort(key=lambda c: (c["detour_km"], c["created_at"], c["trip_id"]))
 
         return {
             "matches_found": len(eligible_candidates),
             "candidates": eligible_candidates,
             "rejections_evaluated": len(rejection_logs),
-            "rejection_reasons": rejection_logs
+            "rejection_reasons": rejection_logs,
+            "fairness_policy": "Eligible pools rank by lowest detour, then oldest open pool, then stable trip-id tie break.",
+            "maximum_detour_km": max_detour_km,
         }
 
     async def book_shared_ride(
@@ -201,7 +230,9 @@ class PoolService:
         dest_lat: float, dest_lng: float,
         seats_reserved: int = 1,
         target_pooled_trip_id: Optional[str] = None,
-        fallback_policy: str = "CREATE_NEW_POOL"  # CREATE_NEW_POOL, FAIL
+        fallback_policy: str = "FAIL",  # CREATE_NEW_POOL, FAIL
+        share_stop_details_with_co_passengers: bool = False,
+        maximum_detour_km: float = 5.0,
     ) -> Dict[str, Any]:
         """
         Atomically books a shared ride, performs capacity validation, seat reservation,
@@ -219,6 +250,8 @@ class PoolService:
         est_stmt = select(FareEstimate).where(FareEstimate.id == estimate_id)
         est_res = await self.db.execute(est_stmt)
         estimate = est_res.scalars().first()
+        if not estimate:
+            raise HTTPException(status_code=404, detail="Fare estimate not found. Recalculate the shared fare.")
         exp = estimate.expires_at
         if exp.tzinfo is None:
             exp = exp.replace(tzinfo=timezone.utc)
@@ -231,40 +264,45 @@ class PoolService:
         fare_rule = rule_res.scalars().first()
         if not fare_rule:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fare rule not found.")
+        category = await self.db.get(VehicleCategory, category_id)
+        if not category or not category.is_active or estimate.category_id != category_id:
+            raise HTTPException(status_code=409, detail="The estimated vehicle category is no longer eligible for shared rides.")
+        if seats_reserved < 1 or seats_reserved > 4 or seats_reserved > category.capacity:
+            raise HTTPException(status_code=400, detail=f"Requested seats exceed this category's passenger capacity ({category.capacity}).")
 
-        # Determine target pooled trip atomically
+        # Re-evaluate route compatibility on the server at commit time; the client
+        # cannot force an unrelated pool by supplying an arbitrary trip id.
+        pool_matches = await self.find_route_matches(
+            category_id=category_id, pickup_lat=pickup_lat, pickup_lng=pickup_lng,
+            dest_lat=dest_lat, dest_lng=dest_lng, seats_requested=seats_reserved,
+            max_detour_km=maximum_detour_km,
+        )
+        compatible_ids = [str(item["trip_id"]) for item in pool_matches["candidates"]]
+        if target_pooled_trip_id and target_pooled_trip_id not in compatible_ids and fallback_policy != "CREATE_NEW_POOL":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The selected pool no longer meets route, detour or seat requirements. Refresh matches or explicitly allow another pool.")
+        ordered_ids = ([target_pooled_trip_id] if target_pooled_trip_id in compatible_ids else []) + [item for item in compatible_ids if item != target_pooled_trip_id]
         pooled_trip: Optional[PooledTrip] = None
-        if target_pooled_trip_id:
+        for candidate_id in ordered_ids:
             trip_stmt = select(PooledTrip).where(
-                PooledTrip.id == target_pooled_trip_id
-            ).with_for_update()
-            trip_res = await self.db.execute(trip_stmt)
-            candidate = trip_res.scalars().first()
-            if candidate and candidate.status in ["OPEN", "ACTIVE"]:
-                if candidate.reserved_seats + seats_reserved <= candidate.max_seats:
-                    pooled_trip = candidate
-                elif fallback_policy == "FAIL":
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Selected pool capacity is fully booked. Fallback policy prevented new pool creation without customer consent."
-                    )
-
-        if not pooled_trip:
-            # Check for any available open pool
-            open_stmt = select(PooledTrip).where(
+                PooledTrip.id == candidate_id,
                 PooledTrip.vehicle_category_id == category_id,
                 PooledTrip.status == "OPEN",
-                (PooledTrip.max_seats - PooledTrip.reserved_seats) >= seats_reserved
-            ).with_for_update().limit(1)
-            open_res = await self.db.execute(open_stmt)
-            pooled_trip = open_res.scalars().first()
+                PooledTrip.max_seats <= category.capacity,
+                (PooledTrip.max_seats - PooledTrip.reserved_seats) >= seats_reserved,
+            ).with_for_update()
+            candidate = (await self.db.execute(trip_stmt)).scalars().first()
+            if candidate:
+                pooled_trip = candidate
+                break
 
         if not pooled_trip:
+            if fallback_policy != "CREATE_NEW_POOL":
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No compatible open pool is available. Explicitly allow a new shared pool or refresh matches.")
             # Create a new PooledTrip
             pooled_trip = PooledTrip(
                 vehicle_category_id=category_id,
                 status="OPEN",
-                max_seats=4,
+                max_seats=category.capacity,
                 reserved_seats=0,
                 current_occupancy=0,
                 pricing_policy_version=fare_rule.version
@@ -281,6 +319,9 @@ class PoolService:
 
         # Fare allocation calculations (exact minor units / cents)
         total_fare_cents = estimate.estimated_fare_cents
+        solo_subtotal = fare_rule.base_fare_cents + round(estimate.distance_km * fare_rule.per_km_cents) + round(estimate.estimated_duration_minutes * fare_rule.per_minute_cents)
+        solo_per_seat_cents = round(max(solo_subtotal, fare_rule.minimum_fare_cents) * estimate.surge_multiplier)
+        savings_cents = max(0, solo_per_seat_cents * seats_reserved - total_fare_cents)
         discount_factor = max(0.0, 1.0 - (getattr(fare_rule, "shared_discount_percentage", 25.0) / 100.0))
         base_split_cents = round(fare_rule.base_fare_cents * discount_factor)
         distance_time_cents = max(0, total_fare_cents - base_split_cents)
@@ -328,10 +369,11 @@ class PoolService:
             allocated_fare_cents=total_fare_cents,
             base_fare_split_cents=base_split_cents,
             distance_time_fare_cents=distance_time_cents,
-            discount_cents=round(total_fare_cents * 0.25),
+            discount_cents=savings_cents,
             driver_earnings_cents=driver_earnings_cents,
             platform_commission_cents=platform_commission_cents,
-            pickup_eta_minutes=5.0
+            pickup_eta_minutes=5.0,
+            share_stop_details_with_co_passengers=share_stop_details_with_co_passengers
         )
         self.db.add(booking)
         await self.db.flush()
@@ -409,9 +451,19 @@ class PoolService:
             "allocated_fare_cents": booking.allocated_fare_cents,
             "driver_earnings_cents": booking.driver_earnings_cents,
             "platform_commission_cents": booking.platform_commission_cents,
+            "discount_cents": booking.discount_cents,
             "pickup_eta_minutes": booking.pickup_eta_minutes,
             "start_otp": start_otp,
-            "trip_status": pooled_trip.status
+            "trip_status": pooled_trip.status,
+            "shared_fare_explanation": {
+                "solo_fare_per_seat_cents": solo_per_seat_cents,
+                "seats_reserved": seats_reserved,
+                "shared_discount_cents": booking.discount_cents,
+                "allocated_fare_cents": booking.allocated_fare_cents,
+                "driver_earnings_cents": booking.driver_earnings_cents,
+                "platform_commission_cents": booking.platform_commission_cents,
+                "conservation_verified": booking.allocated_fare_cents == booking.driver_earnings_cents + booking.platform_commission_cents,
+            }
         }
 
     async def update_passenger_occupancy(
@@ -448,8 +500,8 @@ class PoolService:
         seats = booking.seats_reserved
 
         if event_type == "BOARDED":
-            if booking.booking_status == "BOARDED":
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passenger already boarded.")
+            if booking.booking_status != "CONFIRMED":
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Cannot board a booking in {booking.booking_status} state.")
             if trip.current_occupancy + seats > trip.max_seats:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -466,6 +518,8 @@ class PoolService:
             booking.booking_status = "COMPLETED"
 
         elif event_type in ["NO_SHOW", "CANCELLED"]:
+            if booking.booking_status != "CONFIRMED":
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Cannot record {event_type.lower()} for a booking in {booking.booking_status} state.")
             if booking.booking_status == "BOARDED":
                 trip.current_occupancy = max(0, trip.current_occupancy - seats)
             trip.reserved_seats = max(0, trip.reserved_seats - seats)
@@ -518,7 +572,29 @@ class PoolService:
             "trip_status": trip.status
         }
 
-    async def get_pooled_trip_details(self, trip_id: str) -> Dict[str, Any]:
+    async def _authorize_trip(self, trip: PooledTrip, current_user: User) -> Optional[PooledBooking]:
+        role = (current_user.role or "").lower()
+        if role == "admin":
+            return None
+        if role == "customer":
+            profile = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == current_user.id))).scalar_one_or_none()
+            if not profile:
+                raise HTTPException(status_code=403, detail="Shared trip participant access required.")
+            booking = (await self.db.execute(select(PooledBooking).where(PooledBooking.pooled_trip_id == trip.id, PooledBooking.customer_id == profile.id).order_by(PooledBooking.created_at.asc()))).scalars().first()
+            if not booking:
+                raise HTTPException(status_code=403, detail="Shared trip participant access required.")
+            return booking
+        if role == "driver":
+            profile = (await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == current_user.id))).scalar_one_or_none()
+            if not profile:
+                raise HTTPException(status_code=403, detail="Shared trip participant access required.")
+            assigned_ride = (await self.db.execute(select(Ride.id).where(Ride.pooled_trip_id == trip.id, Ride.assigned_driver_id == profile.id).limit(1))).first()
+            if trip.driver_id != profile.id and not assigned_ride:
+                raise HTTPException(status_code=403, detail="Shared trip participant access required.")
+            return None
+        raise HTTPException(status_code=403, detail="Shared trip participant access required.")
+
+    async def get_pooled_trip_details(self, trip_id: str, current_user: Optional[User] = None) -> Dict[str, Any]:
         """
         Retrieves complete operational pooled trip status, current occupancy manifest,
         and scheduled stops.
@@ -528,6 +604,8 @@ class PoolService:
         trip = trip_res.scalars().first()
         if not trip:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pooled trip not found.")
+
+        own_booking = await self._authorize_trip(trip, current_user) if current_user else None
 
         bookings_stmt = select(PooledBooking).where(PooledBooking.pooled_trip_id == trip_id)
         bookings_res = await self.db.execute(bookings_stmt)
@@ -539,9 +617,12 @@ class PoolService:
         stops_res = await self.db.execute(stops_stmt)
         stops = stops_res.scalars().all()
 
-        total_fare_cents = sum(b.allocated_fare_cents for b in bookings)
-        total_driver_cents = sum(b.driver_earnings_cents for b in bookings)
-        total_commission_cents = sum(b.platform_commission_cents for b in bookings)
+        financial_bookings = bookings if current_user and current_user.role.lower() in {"admin", "driver"} else ([own_booking] if own_booking else bookings)
+        total_fare_cents = sum(b.allocated_fare_cents for b in financial_bookings if b)
+        total_driver_cents = sum(b.driver_earnings_cents for b in financial_bookings if b)
+        total_commission_cents = sum(b.platform_commission_cents for b in financial_bookings if b)
+
+        is_driver_or_admin = not current_user or current_user.role.lower() in {"admin", "driver"}
 
         # Conservation verification
         assert total_fare_cents == total_driver_cents + total_commission_cents, "Monetary conservation invariant violated"
@@ -549,7 +630,7 @@ class PoolService:
         return {
             "trip_id": trip.id,
             "category_id": trip.vehicle_category_id,
-            "driver_id": trip.driver_id,
+            "driver_id": trip.driver_id if is_driver_or_admin else None,
             "status": trip.status,
             "max_seats": trip.max_seats,
             "reserved_seats": trip.reserved_seats,
@@ -557,14 +638,15 @@ class PoolService:
             "pricing_policy_version": trip.pricing_policy_version,
             "manifest": [
                 {
-                    "booking_id": b.id,
-                    "ride_id": b.ride_id,
-                    "customer_id": b.customer_id,
+                    "booking_id": b.id if is_driver_or_admin or (own_booking and own_booking.id == b.id) else None,
+                    "ride_id": b.ride_id if is_driver_or_admin or (own_booking and own_booking.id == b.id) else None,
+                    "customer_id": None,
                     "seats_reserved": b.seats_reserved,
                     "booking_status": b.booking_status,
-                    "allocated_fare_cents": b.allocated_fare_cents,
-                    "driver_earnings_cents": b.driver_earnings_cents,
-                    "platform_commission_cents": b.platform_commission_cents
+                    "is_mine": bool(own_booking and own_booking.id == b.id),
+                    "allocated_fare_cents": b.allocated_fare_cents if is_driver_or_admin or (own_booking and own_booking.id == b.id) else None,
+                    "driver_earnings_cents": b.driver_earnings_cents if is_driver_or_admin or (own_booking and own_booking.id == b.id) else None,
+                    "platform_commission_cents": b.platform_commission_cents if is_driver_or_admin or (own_booking and own_booking.id == b.id) else None
                 }
                 for b in bookings
             ],
@@ -574,9 +656,9 @@ class PoolService:
                     "booking_id": s.booking_id,
                     "stop_type": s.stop_type,
                     "sequence_order": s.sequence_order,
-                    "address": s.address,
-                    "latitude": s.latitude,
-                    "longitude": s.longitude,
+                    "address": s.address if is_driver_or_admin or not own_booking or own_booking.id == s.booking_id or next((b.share_stop_details_with_co_passengers for b in bookings if b.id == s.booking_id), False) else f"Private {s.stop_type.lower()} stop",
+                    "latitude": s.latitude if is_driver_or_admin or not own_booking or own_booking.id == s.booking_id or next((b.share_stop_details_with_co_passengers for b in bookings if b.id == s.booking_id), False) else None,
+                    "longitude": s.longitude if is_driver_or_admin or not own_booking or own_booking.id == s.booking_id or next((b.share_stop_details_with_co_passengers for b in bookings if b.id == s.booking_id), False) else None,
                     "status": s.status
                 }
                 for s in stops
@@ -588,3 +670,104 @@ class PoolService:
                 "conservation_verified": True
             }
         }
+
+    async def get_seat_availability(self, trip_id: str) -> Dict[str, Any]:
+        trip = await self.db.get(PooledTrip, trip_id)
+        if not trip:
+            raise HTTPException(status_code=404, detail="Shared pool is no longer available.")
+        return {
+            "trip_id": trip.id,
+            "status": trip.status,
+            "max_seats": trip.max_seats,
+            "reserved_seats": trip.reserved_seats,
+            "available_seats": max(0, trip.max_seats - trip.reserved_seats),
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+            "accepting_matches": trip.status == "OPEN",
+        }
+
+    async def get_customer_detour_preference(self, current_user: User) -> Dict[str, Any]:
+        profile = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == current_user.id))).scalar_one_or_none()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Customer profile not found.")
+        preference = (await self.db.execute(select(SharedRidePreference).where(SharedRidePreference.customer_id == profile.id))).scalar_one_or_none()
+        return {"maximum_detour_km": preference.maximum_detour_km if preference else 5.0}
+
+    async def set_customer_detour_preference(self, current_user: User, maximum_detour_km: float) -> Dict[str, Any]:
+        profile = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == current_user.id))).scalar_one_or_none()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Customer profile not found.")
+        preference = (await self.db.execute(select(SharedRidePreference).where(SharedRidePreference.customer_id == profile.id).with_for_update())).scalar_one_or_none()
+        if preference:
+            preference.maximum_detour_km = maximum_detour_km
+        else:
+            preference = SharedRidePreference(customer_id=profile.id, maximum_detour_km=maximum_detour_km)
+            self.db.add(preference)
+        await self.db.commit()
+        return {"maximum_detour_km": preference.maximum_detour_km, "updated_at": preference.updated_at.isoformat() if preference.updated_at else None}
+
+    async def get_shared_trip_for_ride(self, ride_id: str, current_user: User) -> Dict[str, Any]:
+        ride = await self.db.get(Ride, ride_id)
+        if not ride or not ride.pooled_trip_id:
+            raise HTTPException(status_code=404, detail="Shared trip was not found for this ride.")
+        if current_user.role.lower() == "customer":
+            profile = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == current_user.id))).scalar_one_or_none()
+            if not profile or not (await self.db.execute(select(PooledBooking.id).where(PooledBooking.ride_id == ride.id, PooledBooking.customer_id == profile.id))).first():
+                raise HTTPException(status_code=403, detail="Ride participant access required.")
+        elif current_user.role.lower() == "driver":
+            profile = (await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == current_user.id))).scalar_one_or_none()
+            if not profile or ride.assigned_driver_id != profile.id:
+                raise HTTPException(status_code=403, detail="Ride participant access required.")
+        details = await self.get_pooled_trip_details(ride.pooled_trip_id, current_user)
+        own = next((row for row in details["manifest"] if row.get("ride_id") == ride_id), None)
+        details["own_booking_id"] = own.get("booking_id") if own else None
+        details["ride_id"] = ride_id
+        return details
+
+    async def list_trip_messages(self, trip_id: str, current_user: User) -> List[Dict[str, Any]]:
+        trip = await self.db.get(PooledTrip, trip_id)
+        if not trip:
+            raise HTTPException(status_code=404, detail="Shared trip not found.")
+        await self._authorize_trip(trip, current_user)
+        rows = (await self.db.execute(select(PooledTripMessage).where(PooledTripMessage.pooled_trip_id == trip_id).order_by(PooledTripMessage.created_at.desc()).limit(100))).scalars().all()
+        return [{"id": m.id, "sender": "You" if m.sender_user_id == current_user.id else ("Chauffeur" if m.sender_role.lower() == "driver" else "Passenger"), "message": m.message, "created_at": m.created_at.isoformat() if m.created_at else None} for m in reversed(rows)]
+
+    async def send_trip_message(self, trip_id: str, current_user: User, message: str) -> Dict[str, Any]:
+        trip = await self.db.get(PooledTrip, trip_id)
+        if not trip:
+            raise HTTPException(status_code=404, detail="Shared trip not found.")
+        own_booking = await self._authorize_trip(trip, current_user)
+        clean_message = message.strip()
+        if len(clean_message) < 1 or len(clean_message) > 1000:
+            raise HTTPException(status_code=400, detail="Message must contain 1 to 1000 characters.")
+        row = PooledTripMessage(pooled_trip_id=trip_id, booking_id=own_booking.id if own_booking else None, sender_user_id=current_user.id, sender_role=current_user.role.upper(), message=clean_message)
+        self.db.add(row)
+        await self.db.commit()
+        await self.db.refresh(row)
+        return {"id": row.id, "sender": "You", "message": row.message, "created_at": row.created_at.isoformat()}
+
+    async def cancel_customer_booking(self, booking_id: str, current_user: User) -> Dict[str, Any]:
+        profile = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == current_user.id))).scalar_one_or_none()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Customer profile not found.")
+        booking = (await self.db.execute(select(PooledBooking).where(PooledBooking.id == booking_id).with_for_update())).scalars().first()
+        if not booking or booking.customer_id != profile.id:
+            raise HTTPException(status_code=404, detail="Shared booking not found.")
+        if booking.booking_status != "CONFIRMED":
+            raise HTTPException(status_code=409, detail=f"This booking cannot be cancelled from {booking.booking_status} status.")
+        ride = await self.db.get(Ride, booking.ride_id)
+        trip = (await self.db.execute(select(PooledTrip).where(PooledTrip.id == booking.pooled_trip_id).with_for_update())).scalars().first()
+        if not ride or not trip or ride.status not in {"REQUESTED", "ASSIGNED"}:
+            raise HTTPException(status_code=409, detail="Cancellation closes when the shared ride begins.")
+        before = trip.current_occupancy
+        trip.reserved_seats = max(0, trip.reserved_seats - booking.seats_reserved)
+        if booking.booking_status == "BOARDED":
+            trip.current_occupancy = max(0, trip.current_occupancy - booking.seats_reserved)
+        if trip.status == "FULL":
+            trip.status = "ACTIVE" if trip.current_occupancy else "OPEN"
+        booking.booking_status = "CANCELLED"
+        ride.status = "CANCELLED"
+        event = PassengerOccupancyEvent(pooled_trip_id=trip.id, booking_id=booking.id, event_type="CANCELLED", occupancy_before=before, occupancy_after=trip.current_occupancy, actor_id=current_user.id, notes="Customer cancelled before trip start.")
+        self.db.add(event)
+        self.db.add(AuditLog(actor_id=current_user.id, actor_role="customer", action="POOL_BOOKING_CANCELLED", target_resource="pooled_bookings", target_id=booking.id, status="SUCCESS", metadata_json="{}"))
+        await self.db.commit()
+        return {"booking_id": booking.id, "booking_status": booking.booking_status, "trip_id": trip.id, "fare_adjustment_cents": 0, "fare_adjustment_status": "NO_ADJUSTMENT_POSTED", "policy": "Cancellation was accepted before trip start. No fare adjustment is posted by this cancellation path."}

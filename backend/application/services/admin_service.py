@@ -78,6 +78,11 @@ class AdminService:
                     "full_name": u.full_name,
                     "role": u.role,
                     "is_active": u.is_active,
+                    "email_verified": u.email_verified,
+                    "mfa_enabled": u.mfa_enabled,
+                    "biometric_enabled": u.biometric_enabled,
+                    "has_pin": bool(u.app_lock_pin_hash),
+                    "has_passkey": bool(u.passkey_credential_id),
                     "created_at": u.created_at.isoformat()
                 }
                 for u in users
@@ -146,7 +151,12 @@ class AdminService:
         return {"driver_id": driver_id, "approval_status": status}
 
     async def list_rides(self, status: Optional[str] = None, page: int = 1, limit: int = 20) -> Dict[str, Any]:
-        query = select(Ride)
+        from sqlalchemy.orm import selectinload
+        query = select(Ride).options(
+            selectinload(Ride.customer).selectinload(CustomerProfile.user),
+            selectinload(Ride.driver).selectinload(DriverProfile.user),
+            selectinload(Ride.events)
+        )
         if status:
             query = query.where(Ride.status == status)
         query = query.order_by(desc(Ride.requested_at)).offset((page - 1) * limit).limit(limit)
@@ -159,6 +169,8 @@ class AdminService:
                 {
                     "id": r.id,
                     "customer_id": r.customer_id,
+                    "guest_name": r.customer.user.full_name if (r.customer and r.customer.user and r.customer.user.full_name) else "Distinguished Guest",
+                    "driver_name": r.driver.user.full_name if (r.driver and r.driver.user and r.driver.user.full_name) else (r.assigned_driver_id or "Unassigned"),
                     "assigned_driver_id": r.assigned_driver_id,
                     "status": r.status,
                     "pickup_address": r.pickup_address,
@@ -166,11 +178,46 @@ class AdminService:
                     "estimated_fare_cents": r.estimated_fare_cents,
                     "final_fare_cents": r.final_fare_cents,
                     "requested_at": r.requested_at.isoformat(),
-                    "completed_at": r.completed_at.isoformat() if r.completed_at else None
+                    "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                    "timeline": [
+                        {
+                            "time": e.created_at.strftime("%H:%M:%S UTC"),
+                            "actor": e.trigger_actor,
+                            "event": e.new_status,
+                            "notes": e.notes or ""
+                        }
+                        for e in (r.events or [])
+                    ]
                 }
                 for r in rides
             ]
         }
+
+    async def list_fare_rules(self) -> List[Dict[str, Any]]:
+        stmt = (
+            select(FareRule, VehicleCategory)
+            .join(VehicleCategory, FareRule.category_id == VehicleCategory.id)
+            .where(FareRule.is_active == True)
+            .order_by(VehicleCategory.sort_order.asc())
+        )
+        res = await self.db.execute(stmt)
+        rows = res.all()
+        return [
+            {
+                "id": rule.id,
+                "category_id": rule.category_id,
+                "category_code": cat.code,
+                "category_name": cat.name,
+                "version": rule.version,
+                "base_fare_cents": rule.base_fare_cents,
+                "per_km_cents": rule.per_km_cents,
+                "per_minute_cents": rule.per_minute_cents,
+                "minimum_fare_cents": rule.minimum_fare_cents,
+                "surge_multiplier": rule.surge_multiplier,
+                "is_active": rule.is_active
+            }
+            for rule, cat in rows
+        ]
 
     async def get_ride_timeline(self, ride_id: str) -> List[Dict[str, Any]]:
         stmt = select(RideStatusEvent).where(RideStatusEvent.ride_id == ride_id).order_by(RideStatusEvent.created_at.asc())

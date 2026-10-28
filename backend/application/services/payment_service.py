@@ -1,10 +1,11 @@
 import json
+import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from fastapi import HTTPException, status
-from backend.domain.models import Payment, PaymentEvent, Ride
+from backend.domain.models import Payment, PaymentEvent, PaymentWebhookInbox, Ride
 from backend.integrations.payments.provider import get_payment_provider, CashPaymentProvider
 
 class PaymentService:
@@ -60,31 +61,74 @@ class PaymentService:
         if not verification.is_valid:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature.")
 
-        data = json.loads(raw_body.decode("utf-8"))
-        order_id = data.get("order_id")
+        try:
+            data = json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verified webhook body is not valid JSON.")
+        digest = hashlib.sha256(raw_body).hexdigest()
+        existing = (await self.db.execute(select(PaymentWebhookInbox).where(PaymentWebhookInbox.event_digest == digest))).scalar_one_or_none()
+        if existing:
+            return {"status": existing.status, "inbox_id": existing.id, "duplicate": True}
+        order_id = data.get("order_id") or data.get("payload", {}).get("payment", {}).get("entity", {}).get("order_id")
+        payment_entity = data.get("payload", {}).get("payment", {}).get("entity", {})
+        safe_payload = {
+            "event": str(data.get("event") or "payment.captured")[:80],
+            "order_id": order_id,
+            "payment_id": payment_entity.get("id") or verification.payment_id,
+            "payload": {"payment": {"entity": {"id": payment_entity.get("id") or verification.payment_id, "order_id": order_id}}},
+        }
+        inbox = PaymentWebhookInbox(provider_name="RAZORPAY", event_digest=digest,
+            payload_json=json.dumps(safe_payload, separators=(",", ":")), signature_verified=True,
+            status="FAILED", attempts=0)
+        self.db.add(inbox)
+        await self.db.flush()
         if not order_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing order reference in webhook payload.")
+            inbox.last_error = "Verified event has no payment order reference."
+            await self.db.commit()
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Verified webhook has no payment order reference; it was saved for investigation.")
 
         stmt = select(Payment).where(Payment.provider_order_id == order_id)
         res = await self.db.execute(stmt)
         payment = res.scalar_one_or_none()
         if not payment:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated payment record not found.")
+            inbox.last_error = "Associated payment record not found."
+            await self.db.commit()
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Associated payment record not found; the verified event was saved for investigation.")
+
+        webhook_event = data.get("event")
+        if webhook_event == "payment.failed":
+            payment.status = "FAILED"
+            payment.provider_payment_id = verification.payment_id
+            self.db.add(PaymentEvent(payment_id=payment.id, event_type="WEBHOOK_FAILED", payload_json=json.dumps(safe_payload)))
+            inbox.status, inbox.attempts = "PROCESSED", 1
+            inbox.last_attempt_at = datetime.now(timezone.utc)
+            await self.db.commit()
+            return {"status": "FAILED", "payment_id": payment.id}
+        if webhook_event and webhook_event != "payment.captured":
+            inbox.last_error = f"Verified event type is not supported for automatic processing: {str(webhook_event)[:100]}"
+            await self.db.commit()
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Verified webhook event type is unsupported; it was saved for investigation.")
 
         # Idempotency guard: If already CAPTURED, return gracefully
         if payment.status == "CAPTURED":
+            inbox.status = "PROCESSED"
+            inbox.attempts = 1
+            inbox.last_attempt_at = datetime.now(timezone.utc)
+            await self.db.commit()
             return {"status": "ALREADY_PROCESSED", "payment_id": payment.id}
 
         payment.status = "CAPTURED"
         payment.provider_payment_id = verification.payment_id
-        payment.provider_signature = signature_header
 
         event = PaymentEvent(
             payment_id=payment.id,
             event_type="WEBHOOK_CAPTURED",
-            payload_json=raw_body.decode("utf-8")
+            payload_json=json.dumps(safe_payload, separators=(",", ":"))
         )
         self.db.add(event)
+        inbox.status = "PROCESSED"
+        inbox.attempts = 1
+        inbox.last_attempt_at = datetime.now(timezone.utc)
         await self.db.commit()
 
         return {"status": "SUCCESS", "payment_id": payment.id, "amount_cents": payment.amount_cents}

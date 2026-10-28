@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 from typing import Dict, Any, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
@@ -104,33 +105,94 @@ class DriverService:
             "last_heartbeat": now.isoformat()
         }
 
-    async def update_location(self, user_id: str, lat: float, lng: float, heading: Optional[float] = None) -> Dict[str, Any]:
+    async def update_location(self, user_id: str, lat: float, lng: float, heading: Optional[float] = None,
+                              speed_mps: Optional[float] = None, accuracy_m: Optional[float] = None,
+                              is_mock_location: bool = False, location_source: str = "FUSED") -> Dict[str, Any]:
         driver = await self.get_or_create_profile(user_id)
+        now = datetime.now(timezone.utc)
+        flags = []
+        risk = 0.0
+        if is_mock_location:
+            flags.append("MOCK_LOCATION_REPORTED")
+            risk = max(risk, 0.9)
+        if speed_mps is not None and speed_mps > 65:
+            flags.append("IMPLAUSIBLE_SPEED")
+            risk = max(risk, 0.9)
+        if accuracy_m is not None and accuracy_m > 100:
+            flags.append("LOW_ACCURACY")
+        latest = (await self.db.execute(select(DriverLocation).where(DriverLocation.driver_id == driver.id)
+                                        .order_by(DriverLocation.recorded_at.desc()).limit(1))).scalars().first()
+        if latest and now > latest.recorded_at:
+            elapsed = max(0.1, (now - latest.recorded_at).total_seconds())
+            distance = self._location_distance_m(lat, lng, latest.latitude, latest.longitude)
+            if distance / elapsed > 75:
+                flags.append("IMPLAUSIBLE_DISPLACEMENT")
+                risk = max(risk, 0.85)
         loc = DriverLocation(
             driver_id=driver.id,
             latitude=lat,
             longitude=lng,
             heading=heading,
-            recorded_at=datetime.now(timezone.utc)
+            speed=speed_mps,
+            accuracy=accuracy_m,
+            spoof_risk_score=risk,
+            quality_flags_json=json.dumps(flags),
+            source=location_source,
+            recorded_at=now
         )
         self.db.add(loc)
+        availability = (await self.db.execute(select(DriverAvailability).where(DriverAvailability.driver_id == driver.id))).scalars().first()
+        if availability:
+            availability.last_heartbeat = now
         await self.db.commit()
-        return {"status": "RECORDED", "lat": lat, "lng": lng}
+        return {"status": "RECORDED", "accuracy_m": accuracy_m, "quality_flags": flags,
+                "risk_signal": bool(risk), "risk_action": "REVIEW_SIGNAL_ONLY"}
+
+    @staticmethod
+    def _location_distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+        import math
+        radius = 6371000
+        dlat, dlng = math.radians(lat2-lat1), math.radians(lng2-lng1)
+        a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1))*math.cos(math.radians(lat2))*math.sin(dlng/2)**2
+        return radius * 2 * math.atan2(math.sqrt(a), math.sqrt(max(0, 1-a)))
 
     async def get_earnings_summary(self, user_id: str) -> Dict[str, Any]:
         driver = await self.get_or_create_profile(user_id)
-        stmt = select(Ride).where(Ride.assigned_driver_id == driver.id, Ride.status == "COMPLETED")
+        stmt = select(Ride).where(Ride.assigned_driver_id == driver.id, Ride.status == "COMPLETED").order_by(Ride.completed_at.desc())
         res = await self.db.execute(stmt)
         rides = res.scalars().all()
 
         total_earnings_cents = sum(round((r.final_fare_cents or 0) * 0.8) for r in rides)
         trips_count = len(rides)
 
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_earnings_cents = sum(
+            round((r.final_fare_cents or 0) * 0.8)
+            for r in rides
+            if r.completed_at and r.completed_at.replace(tzinfo=timezone.utc if r.completed_at.tzinfo is None else None) >= today_start
+        )
+        weekly_earnings_cents = total_earnings_cents
+
+        recent_trips = []
+        for r in rides[:15]:
+            recent_trips.append({
+                "ride_id": r.id,
+                "date": r.completed_at.strftime("%b %d, %I:%M %p") if r.completed_at else "Recently",
+                "fare_rupees": round((r.final_fare_cents or 0) * 0.8 / 100),
+                "pickup": r.pickup_address,
+                "destination": r.destination_address
+            })
+
         return {
             "total_earnings_cents": total_earnings_cents,
+            "today_earnings_cents": today_earnings_cents,
+            "weekly_earnings_cents": weekly_earnings_cents,
             "currency": "INR",
             "completed_trips": trips_count,
             "wallet_balance_cents": driver.wallet_balance_cents,
             "rating_average": driver.rating_average,
-            "rating_count": driver.rating_count
+            "rating_count": driver.rating_count,
+            "recent_trips": recent_trips
         }
+

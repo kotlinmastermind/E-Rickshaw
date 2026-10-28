@@ -93,7 +93,7 @@ class RedisManager:
     to an in-memory TTL store, distributed locks, and observability statistics.
     """
     def __init__(self):
-        self.redis_url = getattr(settings, "REDIS_URL", "redis://localhost:6379/0")
+        self.redis_url = getattr(settings, "REDIS_URL", None)
         self._redis = None
         self._fallback = InMemoryCacheFallback()
         self.is_connected = False
@@ -101,6 +101,8 @@ class RedisManager:
         self._init_attempted = False
 
     async def _get_redis(self):
+        if not self.redis_url:
+            return None
         if self._redis is None and not self._init_attempted:
             self._init_attempted = True
             try:

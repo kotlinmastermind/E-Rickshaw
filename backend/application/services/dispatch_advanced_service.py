@@ -369,39 +369,45 @@ class DispatchAdvancedService:
 
     # ---------------- HEAT MAPS (PRIVACY-CONSCIOUS) ----------------
     @staticmethod
-    async def get_privacy_preserving_heatmap(session: AsyncSession) -> List[Dict[str, Any]]:
+    async def get_privacy_preserving_heatmap(session: AsyncSession, window_hours: int = 2,
+                                             metric: str = "demand", minimum_count: int = 5) -> Dict[str, Any]:
+        """Return rounded cells only when at least five independent records contribute."""
+        from backend.domain.models import DriverLocation
+        window_hours = min(72, max(1, int(window_hours)))
+        minimum_count = min(100, max(5, int(minimum_count)))
+        metric = metric.lower()
+        if metric not in {"demand", "supply"}:
+            raise HTTPException(status_code=422, detail="Metric must be demand or supply.")
         now = datetime.now(timezone.utc)
-        recent_window = now - timedelta(hours=2)
-
-        stmt = select(
-            func.round(Ride.pickup_latitude, 2).label("lat_bin"),
-            func.round(Ride.pickup_longitude, 2).label("lng_bin"),
-            func.count(Ride.id).label("demand_count")
-        ).where(
-            Ride.created_at >= recent_window
-        ).group_by("lat_bin", "lng_bin")
-
-        res = await session.execute(stmt)
-        clusters = []
-        for row in res.all():
-            lat, lng, count = row
-            if count >= 1:
-                intensity = min(1.0, max(0.2, count * 0.15))
-                clusters.append({
-                    "latitude": float(lat),
-                    "longitude": float(lng),
-                    "intensity": round(intensity, 2),
-                    "surge_factor": 1.2 if count >= 5 else 1.0
-                })
-
-        if not clusters:
-            clusters = [
-                {"latitude": 19.0760, "longitude": 72.8777, "intensity": 0.85, "surge_factor": 1.3},
-                {"latitude": 19.0896, "longitude": 72.8656, "intensity": 0.95, "surge_factor": 1.5},
-                {"latitude": 18.9220, "longitude": 72.8347, "intensity": 0.70, "surge_factor": 1.1}
-            ]
-
-        return clusters
+        recent_window = now - timedelta(hours=window_hours)
+        if metric == "demand":
+            stmt = select(func.round(Ride.pickup_latitude, 2).label("lat_bin"),
+                          func.round(Ride.pickup_longitude, 2).label("lng_bin"),
+                          func.count(Ride.id).label("record_count")).where(
+                Ride.requested_at >= recent_window, Ride.pickup_latitude.is_not(None), Ride.pickup_longitude.is_not(None)
+            ).group_by("lat_bin", "lng_bin")
+            rows = (await session.execute(stmt)).all()
+        else:
+            latest = select(DriverLocation.driver_id, func.max(DriverLocation.recorded_at).label("latest_at")).group_by(DriverLocation.driver_id).subquery()
+            stmt = select(func.round(DriverLocation.latitude, 2).label("lat_bin"),
+                          func.round(DriverLocation.longitude, 2).label("lng_bin"),
+                          func.count(DriverLocation.driver_id).label("record_count")).join(
+                latest, (latest.c.driver_id == DriverLocation.driver_id) & (latest.c.latest_at == DriverLocation.recorded_at)
+            ).join(DriverAvailability, DriverAvailability.driver_id == DriverLocation.driver_id).where(
+                DriverLocation.recorded_at >= now - timedelta(minutes=5), DriverAvailability.is_online.is_(True),
+                DriverAvailability.is_busy.is_(False)
+            ).group_by("lat_bin", "lng_bin")
+            rows = (await session.execute(stmt)).all()
+        cells = []
+        for lat, lng, count in rows:
+            if count < minimum_count:
+                continue
+            cells.append({"latitude": float(lat), "longitude": float(lng), "count": int(count),
+                          "intensity": round(min(1.0, max(0.1, count / max(minimum_count * 4, 1))), 2)})
+        return {"clusters": cells, "metric": metric, "window_hours": window_hours,
+                "minimum_group_size": minimum_count, "generated_at": now.isoformat(),
+                "privacy": "Coordinates are rounded to ~1.1 km cells; cells below the minimum group size are omitted. No individual locations are returned.",
+                "empty_reason": "No cells met the privacy threshold for this time window." if not cells else None}
 
     # ---------------- ROUTE OPTIMIZATION ----------------
     @staticmethod
@@ -483,15 +489,6 @@ class DispatchAdvancedService:
                 detail=f"Insufficient wallet balance. Available: ₹{wallet.balance_cents / 100:.2f}"
             )
 
-        await WalletService.debit_wallet(
-            session=session,
-            user_id=driver_prof.user_id,
-            amount_cents=amount_cents,
-            transaction_type="DEBIT",
-            source="PAYOUT_HOLD",
-            description="Driver payout request placed under review"
-        )
-
         payout = DriverPayoutRequest(
             driver_id=driver_prof.id,
             amount_cents=amount_cents,
@@ -501,4 +498,14 @@ class DispatchAdvancedService:
         )
         session.add(payout)
         await session.flush()
+        await WalletService.debit_wallet(
+            session=session,
+            user_id=driver_prof.user_id,
+            amount_cents=amount_cents,
+            transaction_type="DEBIT",
+            source="PAYOUT_HOLD",
+            reference_id=payout.id,
+            description="Driver payout request placed under review",
+            idempotency_key=f"payout_hold_{payout.id}",
+        )
         return payout

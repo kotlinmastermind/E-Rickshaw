@@ -5,16 +5,23 @@ import httpx
 from backend.core.config import settings
 
 class RouteDetails:
-    def __init__(self, distance_km: float, duration_minutes: float, polyline: str):
+    def __init__(self, distance_km: float, duration_minutes: float, polyline: str,
+                 provider: str = "APPROXIMATE", traffic_aware: bool = False, route_label: str = "Approximate"):
         self.distance_km = distance_km
         self.duration_minutes = duration_minutes
         self.polyline = polyline
+        self.provider = provider
+        self.traffic_aware = traffic_aware
+        self.route_label = route_label
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "distance_km": round(self.distance_km, 2),
             "duration_minutes": round(self.duration_minutes, 1),
-            "polyline": self.polyline
+            "polyline": self.polyline,
+            "provider": self.provider,
+            "traffic_aware": self.traffic_aware,
+            "route_label": self.route_label,
         }
 
 class MapsProvider(ABC):
@@ -34,6 +41,19 @@ class MapsProvider(ABC):
     async def reverse_geocode(self, lat: float, lng: float) -> str:
         pass
 
+    async def get_place_details(self, place_id: str) -> Dict[str, Any]:
+        return {"available": False, "provider_verified": False, "message": "Place coordinate verification requires a configured maps provider."}
+
+    async def get_route_alternatives(self, origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float) -> List[Dict[str, Any]]:
+        route = await self.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
+        return [{**route.to_dict(), "route_index": 0, "provider_mode": "APPROXIMATE_NOT_LIVE"}]
+
+    async def snap_to_road(self, latitude: float, longitude: float) -> Dict[str, Any]:
+        return {"available": False, "provider_verified": False, "message": "Road snapping requires a configured Roads API provider; the selected pin is unchanged."}
+
+    def provider_health(self) -> Dict[str, Any]:
+        return {"provider": "UNKNOWN", "status": "UNAVAILABLE", "configured": False, "live_data": False}
+
 class HaversineMockMapsProvider(MapsProvider):
     """
     Deterministic geometric routing engine utilizing the Haversine formula
@@ -47,6 +67,10 @@ class HaversineMockMapsProvider(MapsProvider):
         {"place_id": "poi_st_regis", "name": "The St. Regis Penthouse Suites", "address": "462 Senapati Bapat Marg, Lower Parel, Mumbai", "lat": 18.9934, "lng": 72.8242},
         {"place_id": "poi_worli_seaface", "name": "Worli Sea Face Luxury Boulevard", "address": "Worli Sea Face, Worli, Mumbai", "lat": 19.0134, "lng": 72.8152}
     ]
+
+    def provider_health(self) -> Dict[str, Any]:
+        return {"provider": "CURATED_DIRECTORY", "status": "OFFLINE_FALLBACK", "configured": False,
+                "live_data": False, "message": "Approximate curated places and geometric routes only; no live map provider is configured."}
 
     async def get_route(
         self,
@@ -74,30 +98,34 @@ class HaversineMockMapsProvider(MapsProvider):
     async def autocomplete_places(self, query: str) -> List[Dict[str, Any]]:
         q = query.lower().strip()
         if not q:
-            return self.LUXURY_POIS[:4]
+            return [{**p, "coordinates_verified": False, "provider_mode": "CURATED_DIRECTORY"} for p in self.LUXURY_POIS[:4]]
         matches = [p for p in self.LUXURY_POIS if q in p["name"].lower() or q in p["address"].lower()]
-        if not matches:
-            # Fallback dynamic result
-            return [{
-                "place_id": f"dyn_{abs(hash(query)) % 100000}",
-                "name": query.title(),
-                "address": f"{query.title()} Executive Enclave, Metropolitan District",
-                "lat": 19.0760,
-                "lng": 72.8777
-            }]
-        return matches
+        return [{**p, "coordinates_verified": False, "provider_mode": "CURATED_DIRECTORY"} for p in matches]
+
+    async def get_place_details(self, place_id: str) -> Dict[str, Any]:
+        place = next((p for p in self.LUXURY_POIS if p["place_id"] == place_id), None)
+        if not place:
+            return {"available": False, "provider_verified": False, "message": "This place is not in the offline curated directory. Adjust and confirm the pin on the map."}
+        return {**place, "available": True, "provider_verified": False, "provider_mode": "CURATED_DIRECTORY", "coordinate_disclosure": "Directory coordinates are approximate; confirm the map pin before booking."}
 
     async def reverse_geocode(self, lat: float, lng: float) -> str:
         closest = min(
             self.LUXURY_POIS,
             key=lambda p: (p["lat"] - lat)**2 + (p["lng"] - lng)**2
         )
-        return f"{closest['name']}, {closest['address']}"
+        # Never present a distant directory result as the address of the selected pin.
+        if (closest["lat"] - lat) ** 2 + (closest["lng"] - lng) ** 2 > 0.0004:
+            return f"Dropped pin ({lat:.5f}, {lng:.5f}) — address lookup unavailable"
+        return f"Approx. near {closest['name']}, {closest['address']}"
 
 class GoogleMapsProvider(MapsProvider):
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.fallback = HaversineMockMapsProvider()
+
+    def provider_health(self) -> Dict[str, Any]:
+        return {"provider": "GOOGLE_MAPS", "status": "CONFIGURED_UNVERIFIED", "configured": True, "live_data": "not_probed",
+                "message": "Credentials are present. This status does not verify API enablement, billing, quota, or live response health."}
 
     async def get_route(
         self, origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float
@@ -184,8 +212,8 @@ class GoogleMapsProvider(MapsProvider):
                                 "place_id": pid,
                                 "name": main_t,
                                 "address": text,
-                                "lat": 19.0760,
-                                "lng": 72.8777
+                                "coordinates_verified": False,
+                                "provider_mode": "GOOGLE_PLACES"
                             })
                         return results
             except Exception:
@@ -209,8 +237,8 @@ class GoogleMapsProvider(MapsProvider):
                                 "place_id": p.get("place_id", f"poi_{idx}"),
                                 "name": p.get("structured_formatting", {}).get("main_text", p.get("description")),
                                 "address": p.get("description", ""),
-                                "lat": 19.0760,
-                                "lng": 72.8777
+                                "coordinates_verified": False,
+                                "provider_mode": "GOOGLE_PLACES"
                             }
                             for idx, p in enumerate(preds)
                         ]
@@ -218,6 +246,68 @@ class GoogleMapsProvider(MapsProvider):
                 pass
 
         return await self.fallback.autocomplete_places(query)
+
+    async def get_place_details(self, place_id: str) -> Dict[str, Any]:
+        if not place_id or len(place_id) > 256:
+            return {"available": False, "provider_verified": False, "message": "Select a valid place suggestion and retry."}
+        url = f"https://places.googleapis.com/v1/places/{place_id}"
+        headers = {"X-Goog-Api-Key": self.api_key, "X-Goog-FieldMask": "id,displayName,formattedAddress,location"}
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(url, headers=headers, timeout=5.0)
+                if response.status_code == 200:
+                    data = response.json()
+                    location = data.get("location") or {}
+                    lat, lng = location.get("latitude"), location.get("longitude")
+                    if isinstance(lat, (int, float)) and isinstance(lng, (int, float)) and 6 <= lat <= 38 and 68 <= lng <= 98:
+                        return {"available": True, "provider_verified": True, "provider_mode": "GOOGLE_PLACES",
+                                "place_id": data.get("id"), "name": (data.get("displayName") or {}).get("text", ""),
+                                "address": data.get("formattedAddress", ""), "lat": float(lat), "lng": float(lng)}
+            except Exception:
+                pass
+        return await self.fallback.get_place_details(place_id)
+
+    async def get_route_alternatives(self, origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float) -> List[Dict[str, Any]]:
+        url = f"https://routes.googleapis.com/directions/v2:computeRoutes?key={self.api_key}"
+        headers = {"Content-Type": "application/json", "X-Goog-FieldMask": "routes.duration,routes.staticDuration,routes.distanceMeters,routes.polyline.encodedPolyline"}
+        payload = {"origin": {"location": {"latLng": {"latitude": origin_lat, "longitude": origin_lng}}},
+                   "destination": {"location": {"latLng": {"latitude": dest_lat, "longitude": dest_lng}}},
+                   "travelMode": "DRIVE", "routingPreference": "TRAFFIC_AWARE_OPTIMAL",
+                   "computeAlternativeRoutes": True}
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload, headers=headers, timeout=8.0)
+                if response.status_code == 200:
+                    routes = response.json().get("routes", [])
+                    if routes:
+                        return [{"distance_km": round(float(r.get("distanceMeters", 0)) / 1000.0, 2),
+                                 "duration_minutes": round(float(str(r.get("duration", "0s")).rstrip("s")) / 60.0, 1),
+                                 "static_duration_minutes": round(float(str(r.get("staticDuration", r.get("duration", "0s"))).rstrip("s")) / 60.0, 1),
+                                 "polyline": r.get("polyline", {}).get("encodedPolyline", ""),
+                                 "route_index": idx, "route_label": "Recommended" if idx == 0 else f"Alternative {idx}",
+                                 "provider": "GOOGLE_ROUTES", "traffic_aware": True, "provider_mode": "LIVE_PROVIDER_RESPONSE"}
+                                for idx, r in enumerate(routes[:3])]
+        except Exception:
+            pass
+        route = await self.fallback.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
+        return [{**route.to_dict(), "route_index": 0, "provider_mode": "APPROXIMATE_NOT_LIVE",
+                 "static_duration_minutes": route.duration_minutes,
+                 "disclosure": "Live routing is unavailable. This straight-line estimate is approximate and does not include traffic or road restrictions."}]
+
+    async def snap_to_road(self, latitude: float, longitude: float) -> Dict[str, Any]:
+        url = "https://roads.googleapis.com/v1/nearestRoads"
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, params={"points": f"{latitude},{longitude}", "key": self.api_key}, timeout=5.0)
+                if response.status_code == 200:
+                    points = response.json().get("snappedPoints", [])
+                    if points:
+                        location = points[0]["location"]
+                        return {"available": True, "provider_verified": True, "latitude": location["latitude"], "longitude": location["longitude"],
+                                "place_id": points[0].get("placeId"), "provider_mode": "GOOGLE_ROADS"}
+        except Exception:
+            pass
+        return {"available": False, "provider_verified": False, "message": "Road snapping is unavailable. Your original pin remains unchanged."}
 
     async def reverse_geocode(self, lat: float, lng: float) -> str:
         if not self.api_key:
