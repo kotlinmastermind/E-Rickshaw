@@ -5,6 +5,16 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    host: true
+    host: true,
+    proxy: {
+      '/api/v1': {
+        target: 'https://e-rickshaw-z32z.onrender.com',
+        changeOrigin: true
+      },
+      '/health': {
+        target: 'https://e-rickshaw-z32z.onrender.com',
+        changeOrigin: true
+      }
+    }
   }
 });

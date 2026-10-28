@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fetchWithAuth } from '../services/api';
 
 interface SubsystemHealth {
   status: string;
@@ -58,9 +59,8 @@ export const AdminSystemHealth: React.FC = () => {
 
   const fetchMetrics = async () => {
     try {
-      const res = await fetch('/health/metrics');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await fetchWithAuth('/health/metrics');
+      if (data) {
         setMetrics(data);
       }
     } catch (err) {
@@ -74,10 +74,13 @@ export const AdminSystemHealth: React.FC = () => {
     setTriggering(true);
     setTestCrashStatus(null);
     try {
-      const res = await fetch('/health/test-crash', { method: 'POST' });
-      const data = await res.json();
-      setTestCrashStatus(`Synthetic Exception Dispatched! Captured with Event ID: ${data.event_id}`);
-      await fetchMetrics();
+      const data = await fetchWithAuth('/health/test-crash', { method: 'POST' });
+      if (data && data.event_id) {
+        setTestCrashStatus(`Synthetic Exception Dispatched! Captured with Event ID: ${data.event_id}`);
+        await fetchMetrics();
+      } else {
+        setTestCrashStatus('Synthetic test dispatched.');
+      }
     } catch (err) {
       setTestCrashStatus('Failed to trigger test crash.');
     } finally {

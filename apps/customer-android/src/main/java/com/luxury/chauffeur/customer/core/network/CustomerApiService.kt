@@ -813,6 +813,48 @@ data class FirebaseVerifyPayload(
     @SerializedName("id_token") val idToken: String? = null
 )
 
+data class NearbyVehicleDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("driver_name") val driverName: String,
+    @SerializedName("driver_phone") val driverPhone: String? = null,
+    @SerializedName("rating") val rating: Double = 4.8,
+    @SerializedName("category_code") val categoryCode: String,
+    @SerializedName("vehicle_type_name") val vehicleTypeName: String,
+    @SerializedName("model_name") val modelName: String,
+    @SerializedName("license_plate") val licensePlate: String,
+    @SerializedName("icon_type") val iconType: String = "e_rickshaw",
+    @SerializedName("capacity") val capacity: Int = 4,
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double,
+    @SerializedName("bearing") val bearing: Float = 0f,
+    @SerializedName("battery_level") val batteryLevel: Int = 85,
+    @SerializedName("distance_km") val distanceKm: Double = 0.5,
+    @SerializedName("eta_minutes") val etaMinutes: Int = 3,
+    @SerializedName("status") val status: String = "AVAILABLE"
+)
+
+data class NearbyVehiclesResponse(
+    @SerializedName("customer_latitude") val customerLatitude: Double,
+    @SerializedName("customer_longitude") val customerLongitude: Double,
+    @SerializedName("radius_km") val radiusKm: Double,
+    @SerializedName("total_available") val totalAvailable: Int,
+    @SerializedName("vehicles") val vehicles: List<NearbyVehicleDto>
+)
+
+data class RoutePointDto(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double
+)
+
+data class RouteDetailsDto(
+    @SerializedName("distance_km") val distanceKm: Double,
+    @SerializedName("duration_minutes") val durationMinutes: Double,
+    @SerializedName("polyline") val polyline: String? = null,
+    @SerializedName("provider") val provider: String? = null,
+    @SerializedName("points") val points: List<RoutePointDto>? = null,
+    @SerializedName("route_label") val routeLabel: String? = null
+)
+
 interface CustomerApiService {
     @POST("api/v1/auth/otp/request")
     suspend fun requestOtp(@Body payload: OtpRequestPayload): Response<Map<String, Any>>
@@ -839,6 +881,22 @@ interface CustomerApiService {
         @Query("pet_friendly") petFriendly: Boolean? = null
     ): Response<List<VehicleCategoryDto>>
 
+    @GET("api/v1/vehicles/nearby")
+    suspend fun getNearbyVehicles(
+        @Query("latitude") latitude: Double,
+        @Query("longitude") longitude: Double,
+        @Query("radius_km") radiusKm: Double = 5.0,
+        @Query("category") category: String? = null
+    ): Response<NearbyVehiclesResponse>
+
+    @GET("api/v1/location/route")
+    suspend fun getRouteDetails(
+        @Query("origin_lat") originLat: Double,
+        @Query("origin_lng") originLng: Double,
+        @Query("dest_lat") destLat: Double,
+        @Query("dest_lng") destLng: Double
+    ): Response<RouteDetailsDto>
+
     @GET("api/v1/tourism/places")
     suspend fun getTourismPlaces(
         @Query("category") category: String? = null,
@@ -846,6 +904,7 @@ interface CustomerApiService {
         @Query("current_lng") currentLng: Double? = null,
         @Query("week_offset") weekOffset: Int = 0
     ): Response<TourismWeeklyResponse>
+
 
     @GET("api/v1/vehicles/categories/{code}/gallery")
     suspend fun getCategoryGallery(@Path("code") code: String): Response<VehicleGalleryDto>

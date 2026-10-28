@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
         }
 
         // Synchronize Firebase Cloud Messaging (FCM) device registration token
-        try {
+        if (!DriverApiClient.getToken().isNullOrBlank()) try {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
                 if (task.isSuccessful && task.result != null) {
                     val token = task.result
@@ -56,10 +56,25 @@ class MainActivity : ComponentActivity() {
             }
         } catch (_: Exception) {}
 
+        val dispatchRideId = intent?.getStringExtra("ride_id")
+        val dispatchPickup = intent?.getStringExtra("pickup_address")
+        val dispatchDest = intent?.getStringExtra("destination_address")
+        val dispatchFare = intent?.getStringExtra("fare_rupees")
+
         setContent {
             Surface(color = DriverColors.MidnightBlack) {
-                DriverAppNavigation()
+                DriverAppNavigation(
+                    initialRideId = dispatchRideId,
+                    initialPickup = dispatchPickup,
+                    initialDest = dispatchDest,
+                    initialFare = dispatchFare
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 }

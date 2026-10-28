@@ -37,9 +37,9 @@ fun DriverInfraAndFeatureFlagsDialog(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.85f)
-                .clip(RoundedCornerShape(LuxuryDriverDimensions.RadiusLarge)),
-            color = LuxuryDriverColors.ObsidianBlack,
-            border = BorderStroke(1.5.dp, LuxuryDriverColors.ChampagneGold)
+                .clip(RoundedCornerShape(16.dp)),
+            color = DriverColors.MidnightBlack,
+            border = BorderStroke(1.5.dp, DriverColors.ChauffeurGold)
         ) {
             Column(
                 modifier = Modifier
@@ -56,19 +56,19 @@ fun DriverInfraAndFeatureFlagsDialog(
                     Column {
                         Text(
                             text = "CHAUFFEUR RESILIENCE & DIAGNOSTICS",
-                            style = LuxuryDriverTypography.HeadlineMedium.copy(
-                                color = LuxuryDriverColors.ChampagneGold,
+                            style = DriverTypography.Title.copy(
+                                color = DriverColors.ChauffeurGold,
                                 fontSize = 16.sp
                             )
                         )
                         Text(
                             text = "Driver App Feature Flags & ANR Reporter",
-                            style = LuxuryDriverTypography.BodySubtle
+                            style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 12.sp)
                         )
                     }
                     Text(
                         text = "✕",
-                        style = LuxuryDriverTypography.TitleGold.copy(fontSize = 18.sp),
+                        style = DriverTypography.Subtitle.copy(fontSize = 18.sp),
                         modifier = Modifier.clickable { onDismiss() }
                     )
                 }
@@ -77,44 +77,51 @@ fun DriverInfraAndFeatureFlagsDialog(
 
                 if (statusMessage != null) {
                     Surface(
-                        color = LuxuryDriverColors.LuxuryEmerald.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(LuxuryDriverDimensions.RadiusSmall),
-                        border = BorderStroke(1.dp, LuxuryDriverColors.LuxuryEmerald),
+                        color = DriverColors.AlertSuccess.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, DriverColors.AlertSuccess),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 12.dp)
                     ) {
                         Text(
                             text = statusMessage!!,
-                            color = LuxuryDriverColors.LuxuryEmerald,
-                            style = LuxuryDriverTypography.BodySubtle,
+                            color = DriverColors.AlertSuccess,
+                            style = DriverTypography.Body.copy(fontSize = 12.sp),
                             modifier = Modifier.padding(10.dp)
                         )
                     }
                 }
 
                 // Active Feature Flags
-                LuxuryDriverCard(modifier = Modifier.fillMaxWidth()) {
-                    Text("CHAUFFEUR FEATURE FLAGS (Feature 475)", style = LuxuryDriverTypography.TitleGold.copy(fontSize = 13.sp))
-                    Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = DriverColors.SurfaceCard,
+                    border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("CHAUFFEUR FEATURE FLAGS (Feature 475)", style = DriverTypography.Subtitle.copy(fontSize = 13.sp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                    listOf(
-                        "FF_AUTOMATED_PAYOUT_PENNYDROP" to "Instant Bank Penny Drop Validation (Active)",
-                        "FF_DRIVER_FATIGUE_PREVENTION" to "Continuous Shift & Fatigue Monitoring (Active)",
-                        "FF_PREMIUM_MAYBACH_DISPATCH" to "Maybach & Phantom Dispatch Eligibility (Active)"
-                    ).forEach { (flagKey, flagTitle) ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = flagTitle, style = LuxuryDriverTypography.BodyRegular.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold))
-                                Text(text = flagKey, style = LuxuryDriverTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryDriverColors.GoldMuted))
+                        listOf(
+                            "FF_AUTOMATED_PAYOUT_PENNYDROP" to "Instant Bank Penny Drop Validation (Active)",
+                            "FF_DRIVER_FATIGUE_PREVENTION" to "Continuous Shift & Fatigue Monitoring (Active)",
+                            "FF_PREMIUM_MAYBACH_DISPATCH" to "Maybach & Phantom Dispatch Eligibility (Active)"
+                        ).forEach { (flagKey, flagTitle) ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = flagTitle, style = DriverTypography.Body.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold))
+                                    Text(text = flagKey, style = DriverTypography.Body.copy(fontSize = 10.sp, color = DriverColors.TextMuted))
+                                }
+                                GoldBadge("ENABLED")
                             }
-                            DriverGoldBadge("ENABLED")
                         }
                     }
                 }
@@ -122,39 +129,53 @@ fun DriverInfraAndFeatureFlagsDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Mobile Crash & ANR Reporting
-                LuxuryDriverCard(modifier = Modifier.fillMaxWidth()) {
-                    Text("REPORT MOBILE ANR / CRASH (Feature 474)", style = LuxuryDriverTypography.TitleGold.copy(fontSize = 13.sp))
-                    Text(
-                        text = "Transmit diagnostic log directly to fleet SRE team",
-                        style = LuxuryDriverTypography.BodySubtle.copy(fontSize = 11.sp)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = DriverColors.SurfaceCard,
+                    border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("REPORT MOBILE ANR / CRASH (Feature 474)", style = DriverTypography.Subtitle.copy(fontSize = 13.sp))
+                        Text(
+                            text = "Transmit diagnostic log directly to fleet SRE team",
+                            style = DriverTypography.Body.copy(fontSize = 11.sp, color = DriverColors.TextMuted)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                    OutlinedTextField(
-                        value = crashLogInput,
-                        onValueChange = { crashLogInput = it },
-                        label = { Text("ANR / Exception Details", color = LuxuryDriverColors.SubtleGray) },
-                        placeholder = { Text("e.g. GPS telemetry timeout during active trip navigation...", color = LuxuryDriverColors.SubtleGray) },
-                        textStyle = LuxuryDriverTypography.BodyRegular,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = LuxuryDriverColors.ChampagneGold,
-                            unfocusedBorderColor = LuxuryDriverColors.CardBorder,
-                            focusedTextColor = LuxuryDriverColors.PlatinumWhite,
-                            unfocusedTextColor = LuxuryDriverColors.PlatinumWhite
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                        maxLines = 3
-                    )
+                        OutlinedTextField(
+                            value = crashLogInput,
+                            onValueChange = { crashLogInput = it },
+                            label = { Text("ANR / Exception Details", color = DriverColors.TextMuted) },
+                            placeholder = { Text("e.g. GPS telemetry timeout during active trip navigation...", color = DriverColors.TextMuted) },
+                            textStyle = DriverTypography.Body,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = DriverColors.ChauffeurGold,
+                                unfocusedBorderColor = DriverColors.SurfaceBorder,
+                                focusedTextColor = DriverColors.TextPure,
+                                unfocusedTextColor = DriverColors.TextPure
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                            maxLines = 3
+                        )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                    LuxuryDriverButton(
-                        text = "Transmit Diagnostic Log",
-                        onClick = {
-                            statusMessage = "Diagnostic log transmitted to SRE operations team."
-                            Toast.makeText(context, "Log sent to SRE team", Toast.LENGTH_SHORT).show()
+                        Button(
+                            onClick = {
+                                statusMessage = "Diagnostic log transmitted to SRE operations team."
+                                Toast.makeText(context, "Log sent to SRE team", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DriverColors.ChauffeurGold,
+                                contentColor = DriverColors.MidnightBlack
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Transmit Diagnostic Log", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
-                    )
+                    }
                 }
             }
         }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fetchWithAuth } from '../services/api';
 
 interface ReportMetrics {
   period: string;
@@ -39,12 +40,8 @@ export const AdminReportsConsole: React.FC = () => {
   const fetchReports = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token') || '';
-      const res = await fetch('/api/v1/admin/reports', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await fetchWithAuth('/admin/reports');
+      if (data) {
         setMetrics(data);
       }
     } catch (err) {

@@ -9,10 +9,15 @@
       "client_info": {
         "mobilesdk_app_id": "1:77155333800:android:ee7fb5ef2739d5c674f49d",
         "android_client_info": {
-          "package_name": "com.luxury.chauffeur.driver"
+          "package_name": "com.luxury.chauffeur.customer"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "77155333800-la41jphoa50b9g150mne3dr2g9n6abb0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBCd1pDJ_1KeajQKHUQG-8QqlB5OpwmmOo"
@@ -20,7 +25,41 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "77155333800-la41jphoa50b9g150mne3dr2g9n6abb0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:77155333800:android:1d301c325ea329a474f49d",
+        "android_client_info": {
+          "package_name": "com.luxury.chauffeur.driver"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "77155333800-la41jphoa50b9g150mne3dr2g9n6abb0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBCd1pDJ_1KeajQKHUQG-8QqlB5OpwmmOo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "77155333800-la41jphoa50b9g150mne3dr2g9n6abb0.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

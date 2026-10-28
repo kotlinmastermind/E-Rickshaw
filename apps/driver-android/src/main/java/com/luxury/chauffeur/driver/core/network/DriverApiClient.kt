@@ -10,13 +10,10 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object DriverApiClient {
-    // Cloud Render URL (Production deployment)
+    // Cloud Render URL (Production online server)
     const val RENDER_BASE_URL: String = "https://e-rickshaw-z32z.onrender.com/"
 
-    // Local host machine URL for Android Emulator
-    const val LOCAL_EMULATOR_BASE_URL: String = "http://10.0.2.2:8000/"
-
-    // Base URL currently used by Retrofit (default: Render Cloud for production release)
+    // Base URL used by Retrofit (Strictly points to online Render cloud server)
     var baseUrl: String = RENDER_BASE_URL
 
     private var tokenManager: DriverTokenManager? = null
@@ -24,16 +21,13 @@ object DriverApiClient {
 
     fun initialize(context: Context) {
         tokenManager = DriverTokenManager.getInstance(context)
+        baseUrl = RENDER_BASE_URL
         service = createService()
     }
 
     fun updateBaseUrl(newUrl: String) {
         baseUrl = if (newUrl.endsWith("/")) newUrl else "$newUrl/"
         service = createService()
-    }
-
-    fun useLocalEmulator() {
-        updateBaseUrl(LOCAL_EMULATOR_BASE_URL)
     }
 
     fun useCloudProduction() {
@@ -47,9 +41,44 @@ object DriverApiClient {
         return service!!
     }
 
+    fun getToken(): String? = tokenManager?.getToken()
+
+    fun getWebSocketUrl(path: String): String {
+        val cleanBase = baseUrl.removeSuffix("/")
+        val wsBase = if (cleanBase.startsWith("https://")) {
+            cleanBase.replaceFirst("https://", "wss://")
+        } else {
+            cleanBase.replaceFirst("http://", "ws://")
+        }
+        val cleanPath = path.removePrefix("/")
+        return "$wsBase/$cleanPath"
+    }
+
+    fun getOkHttpClient(): OkHttpClient {
+        val loggingInterceptor = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BASIC
+        }
+        val authInterceptor = Interceptor { chain ->
+            val original = chain.request()
+            val requestBuilder = original.newBuilder()
+            tokenManager?.getToken()?.let { token ->
+                if (token.isNotBlank()) {
+                    requestBuilder.header("Authorization", "Bearer $token")
+                }
+            }
+            chain.proceed(requestBuilder.build())
+        }
+        return OkHttpClient.Builder()
+            .addInterceptor(authInterceptor)
+            .addInterceptor(loggingInterceptor)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.SECONDS)
+            .build()
+    }
+
     private fun createService(): DriverApiService {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = HttpLoggingInterceptor.Level.BASIC
         }
 
         val authInterceptor = Interceptor { chain ->
@@ -70,9 +99,10 @@ object DriverApiClient {
         val client = OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .build()
 
         val retrofit = Retrofit.Builder()
@@ -84,3 +114,4 @@ object DriverApiClient {
         return retrofit.create(DriverApiService::class.java)
     }
 }
+

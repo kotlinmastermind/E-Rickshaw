@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Server, Shield, Cpu, Activity, RefreshCw, AlertTriangle, CheckCircle,
-  Database, Zap, Key, Layers, Bug, Terminal, Lock, Globe, HardDrive,
-  FileCode, Clock, Play
+  Server, Shield, Cpu, Activity, RefreshCw, AlertTriangle,
+  Database, Zap, Layers, Bug, Terminal, Lock, Globe, HardDrive,
+  FileCode, Clock
 } from 'lucide-react';
 import { requestApi } from '../services/api';
 
@@ -376,6 +376,16 @@ export const AdminInfraOpsConsole: React.FC = () => {
                 </button>
               </div>
             ))}
+            {restoreDrills.length > 0 && (
+              <div style={{ marginTop: 12, borderTop: '1px solid #1e293b', paddingTop: 8 }}>
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: 6 }}>Recent Disaster Drills ({restoreDrills.length})</div>
+                {restoreDrills.slice(0, 3).map((d: any) => (
+                  <div key={d.id} style={{ fontSize: '0.75rem', color: '#cbd5e1', marginBottom: 4 }}>
+                    • {d.drill_name} - <span style={{ color: d.status === 'COMPLETED' ? '#34d399' : '#f59e0b' }}>{d.status}</span> (RTO: {d.rto_achieved_minutes}m, RPO: {d.rpo_achieved_minutes}m)
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={{ background: '#131c2a', padding: 20, borderRadius: 8, border: '1px solid #1e293b' }}>
@@ -479,6 +489,16 @@ export const AdminInfraOpsConsole: React.FC = () => {
                 </button>
               </div>
             ))}
+            {vulnerabilities.length > 0 && (
+              <div style={{ marginTop: 12, borderTop: '1px solid #1e293b', paddingTop: 8 }}>
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: 6 }}>Dependencies & CVE Audits ({vulnerabilities.length})</div>
+                {vulnerabilities.slice(0, 3).map((v: any) => (
+                  <div key={v.id} style={{ fontSize: '0.75rem', color: '#cbd5e1', marginBottom: 4 }}>
+                    • [{v.severity}] {v.package_name}: {v.cve_id} (<span style={{ color: '#38bdf8' }}>{v.status}</span>)
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={{ background: '#131c2a', padding: 20, borderRadius: 8, border: '1px solid #1e293b' }}>

@@ -24,8 +24,9 @@ class DriverFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d("DriverFCM", "New FCM registration token received: $token")
+        Log.d("DriverFCM", "FCM registration token refreshed")
         // Register token with backend
+        if (DriverApiClient.getToken().isNullOrBlank()) return
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 DriverApiClient.getService().registerDeviceToken(
@@ -43,21 +44,110 @@ class DriverFirebaseMessagingService : FirebaseMessagingService() {
         Log.d("DriverFCM", "Push dispatch message received from: ${remoteMessage.from}")
 
         val data = remoteMessage.data
-        val title = data["title"] ?: remoteMessage.notification?.title ?: "NEW VIP RIDE REQUEST 🚖"
-        val body = data["body"] ?: remoteMessage.notification?.body ?: "A passenger nearby has requested a luxury chauffeur trip."
-        val rideId = data["ride_id"] ?: System.currentTimeMillis().toString()
-        val pickup = data["pickup_address"] ?: "Mumbai Central"
-        val dest = data["destination_address"] ?: "Chhatrapati Shivaji Terminal"
-        val fare = data["fare_rupees"] ?: "1,600"
+        val eventType = data["type"] ?: data["event_type"] ?: "NEW_RIDE_DISPATCH"
+        val title = data["title"] ?: remoteMessage.notification?.title ?: "Pilot Cockpit Notice"
+        val body = data["body"] ?: remoteMessage.notification?.body ?: "Open cockpit to view details."
+        val rideId = data["ride_id"] ?: ""
+        val pickup = data["pickup_address"] ?: ""
+        val dest = data["destination_address"] ?: ""
+        val fare = data["fare_rupees"] ?: ""
 
-        triggerIncomingRideAlarmNotification(
-            title = title,
-            body = body,
-            rideId = rideId,
-            pickup = pickup,
-            dest = dest,
-            fare = fare
-        )
+        when (eventType.uppercase()) {
+            "RIDE_CANCELLED", "TRIP_CANCELLED" -> {
+                showInformationalNotification(
+                    notificationId = if (rideId.isNotBlank()) rideId.hashCode() else 2002,
+                    channelId = "driver_ride_updates_channel",
+                    channelName = "Trip Updates & Cancellations",
+                    title = "❌ Ride Cancelled by Customer",
+                    body = "Ride #${rideId.take(8)} was cancelled by the customer. You are back online for new offers."
+                )
+            }
+            "KYC_APPROVED", "DOCUMENTS_VERIFIED" -> {
+                showInformationalNotification(
+                    notificationId = 3001,
+                    channelId = "driver_compliance_channel",
+                    channelName = "KYC & Compliance Notifications",
+                    title = "🎉 Documents Verified & Approved!",
+                    body = "Your driver & vehicle KYC verification is complete. You may now switch online to receive rides."
+                )
+            }
+            "KYC_REJECTED", "DOCUMENTS_REJECTED" -> {
+                val reason = data["reason"] ?: "One or more documents require re-upload."
+                showInformationalNotification(
+                    notificationId = 3002,
+                    channelId = "driver_compliance_channel",
+                    channelName = "KYC & Compliance Notifications",
+                    title = "⚠️ Document Verification Action Required",
+                    body = "Reason: $reason. Tap to re-upload clear photos."
+                )
+            }
+            "PAYOUT_COMPLETED", "WALLET_PAYOUT" -> {
+                val amount = data["amount"] ?: fare
+                showInformationalNotification(
+                    notificationId = 4001,
+                    channelId = "driver_earnings_channel",
+                    channelName = "Earnings & Payouts",
+                    title = "💰 Bank Payout Successful",
+                    body = "Payout of ₹$amount has been credited to your linked bank account."
+                )
+            }
+            else -> {
+                // High-priority incoming dispatch offer with sound & vibration
+                triggerIncomingRideAlarmNotification(
+                    title = title,
+                    body = body,
+                    rideId = rideId,
+                    pickup = pickup,
+                    dest = dest,
+                    fare = fare
+                )
+            }
+        }
+    }
+
+    private fun showInformationalNotification(
+        notificationId: Int,
+        channelId: String,
+        channelName: String,
+        title: String,
+        body: String
+    ) {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                channelName,
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                enableVibration(true)
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(this, notificationId, openAppIntent, flags)
+
+        val builder = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+
+        try {
+            NotificationManagerCompat.from(this).notify(notificationId, builder.build())
+        } catch (_: SecurityException) {}
     }
 
     private fun triggerIncomingRideAlarmNotification(
@@ -149,3 +239,4 @@ class DriverFirebaseMessagingService : FirebaseMessagingService() {
         } catch (_: Exception) {}
     }
 }
+

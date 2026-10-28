@@ -7,12 +7,14 @@ import androidx.compose.material3.Surface
 import com.luxury.chauffeur.customer.core.designsystem.LuxuryColors
 import com.luxury.chauffeur.customer.core.network.ApiClient
 
+import androidx.compose.ui.graphics.Color
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ApiClient.initialize(this)
         setContent {
-            Surface(color = LuxuryColors.ObsidianBlack) {
+            Surface(color = Color.White) {
                 CustomerAppNavigation()
             }
         }

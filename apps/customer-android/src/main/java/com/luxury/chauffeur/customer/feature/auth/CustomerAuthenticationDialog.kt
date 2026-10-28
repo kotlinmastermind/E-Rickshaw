@@ -21,6 +21,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.luxury.chauffeur.customer.core.designsystem.*
 import com.luxury.chauffeur.customer.core.network.*
+import com.luxury.chauffeur.customer.core.security.TokenManager
 import kotlinx.coroutines.launch
 
 @Composable
@@ -32,7 +33,7 @@ fun CustomerAuthenticationDialog(
     val scope = rememberCoroutineScope()
 
     var authTab by remember { mutableStateOf("SIGNIN") } // SIGNUP, SIGNIN, FORGOT_PASSWORD
-    var loginMode by remember { mutableStateOf("PASSWORD") } // PASSWORD, OTP
+    var loginMode by remember { mutableStateOf("OTP") } // PASSWORD, OTP
 
     // Form states
     var fullName by remember { mutableStateOf("") }
@@ -47,9 +48,23 @@ fun CustomerAuthenticationDialog(
     var forgotOtpCode by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
 
-    var isSubmitting by remember { mutableStateOf(false) }
+        var isSubmitting by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    fun normalizePhoneNumber(input: String): String {
+        val clean = input.trim().replace(" ", "").replace("-", "")
+        if (clean.isBlank()) return ""
+        val digitsOnly = clean.filter { it.isDigit() }
+        return when {
+            clean.startsWith("+") -> clean
+            digitsOnly.length == 10 -> "+91$digitsOnly"
+            digitsOnly.length == 12 && digitsOnly.startsWith("91") -> "+$digitsOnly"
+            digitsOnly.length > 10 && digitsOnly.startsWith("91") -> "+$digitsOnly"
+            digitsOnly.length > 10 -> "+91${digitsOnly.take(10)}"
+            else -> "+91$digitsOnly"
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -261,15 +276,29 @@ fun CustomerAuthenticationDialog(
 
                                     Button(
                                         onClick = {
-                                            if (phoneNumber.length < 10) {
+                                            val clean = phoneNumber.trim().replace(" ", "").replace("-", "")
+                                            val formatted = normalizePhoneNumber(clean)
+                                            if (formatted.length < 10) {
                                                 errorMessage = "Enter a valid 10-digit mobile phone number first."
                                                 return@Button
                                             }
+                                            errorMessage = null
+                                            statusMessage = "Requesting passcode..."
                                             scope.launch {
                                                 try {
-                                                    val res = ApiClient.getService().requestOtp(OtpRequestPayload(phoneNumber))
-                                                    if (res.isSuccessful) {
-                                                        statusMessage = "OTP dispatched! Check phone or console."
+                                                    val res = ApiClient.getService().requestOtp(OtpRequestPayload(formatted))
+                                                    if (res.isSuccessful && res.body() != null) {
+                                                        val body = res.body()!!
+                                                        val code = (body["debug_otp"] ?: body["otp_code"] ?: body["otp"]) as? String
+                                                        if (!code.isNullOrBlank()) {
+                                                            otpCode = code
+                                                            statusMessage = "Passcode sent! OTP Code: $code"
+                                                        } else {
+                                                            statusMessage = "Passcode dispatched to $formatted!"
+                                                        }
+                                                    } else {
+                                                        val err = res.errorBody()?.string() ?: ""
+                                                        errorMessage = if (err.contains("detail")) err else "Failed to send OTP (HTTP " + res.code() + ")"
                                                     }
                                                 } catch (e: Exception) {
                                                     errorMessage = "Error requesting OTP: ${e.localizedMessage}"
@@ -292,28 +321,71 @@ fun CustomerAuthenticationDialog(
                             LuxuryButton(
                                 text = if (isSubmitting) "Authenticating..." else "Sign In",
                                 onClick = {
-                                    if (phoneNumber.isBlank()) {
-                                        errorMessage = "Please enter your username, email or phone number."
+                                    val clean = phoneNumber.trim().replace(" ", "").replace("-", "")
+                                    if (clean.isBlank()) {
+                                        errorMessage = "Please enter your mobile phone number."
                                         return@LuxuryButton
                                     }
+                                    val formatted = normalizePhoneNumber(clean)
                                     isSubmitting = true
                                     errorMessage = null
                                     scope.launch {
                                         try {
-                                            val res = ApiClient.getService().unifiedLogin(
-                                                UnifiedLoginRequestPayload(
-                                                    loginType = loginMode,
-                                                    identifier = phoneNumber,
-                                                    password = if (loginMode == "PASSWORD") password else null,
-                                                    otpCode = if (loginMode == "OTP") otpCode else null
+                                            if (loginMode == "OTP") {
+                                                if (otpCode.trim().length < 4) {
+                                                    errorMessage = "Please enter the 6-digit OTP code."
+                                                    isSubmitting = false
+                                                    return@launch
+                                                }
+                                                val res = ApiClient.getService().verifyOtp(
+                                                    OtpVerifyPayload(
+                                                        phoneNumber = formatted,
+                                                        otpCode = otpCode.trim(),
+                                                        role = "customer"
+                                                    )
                                                 )
-                                            )
-                                            if (res.isSuccessful && res.body() != null) {
-                                                Toast.makeText(context, "Sign In Successful!", Toast.LENGTH_SHORT).show()
-                                                onAuthenticationSuccess(res.body()!!.accessToken)
-                                                onDismiss()
+                                                if (res.isSuccessful && res.body() != null) {
+                                                    val tokenResp = res.body()!!
+                                                    TokenManager.getInstance(context).saveAuth(
+                                                        token = tokenResp.accessToken,
+                                                        userId = tokenResp.user.id,
+                                                        phone = tokenResp.user.phoneNumber,
+                                                        role = tokenResp.user.role,
+                                                        email = tokenResp.user.email,
+                                                        fullName = tokenResp.user.fullName
+                                                    )
+                                                    Toast.makeText(context, "Sign In Successful!", Toast.LENGTH_SHORT).show()
+                                                    onAuthenticationSuccess(tokenResp.accessToken)
+                                                    onDismiss()
+                                                } else {
+                                                    val err = res.errorBody()?.string() ?: ""
+                                                    errorMessage = if (err.contains("detail")) err else "Sign In failed: Invalid credentials or expired OTP."
+                                                }
                                             } else {
-                                                errorMessage = "Sign In failed: Invalid credentials or expired OTP."
+                                                val res = ApiClient.getService().unifiedLogin(
+                                                    UnifiedLoginRequestPayload(
+                                                        loginType = loginMode,
+                                                        identifier = formatted,
+                                                        password = password,
+                                                        otpCode = null
+                                                    )
+                                                )
+                                                if (res.isSuccessful && res.body() != null) {
+                                                    val tokenResp = res.body()!!
+                                                    TokenManager.getInstance(context).saveAuth(
+                                                        token = tokenResp.accessToken,
+                                                        userId = tokenResp.user.id,
+                                                        phone = tokenResp.user.phoneNumber,
+                                                        role = tokenResp.user.role,
+                                                        email = tokenResp.user.email,
+                                                        fullName = tokenResp.user.fullName
+                                                    )
+                                                    Toast.makeText(context, "Sign In Successful!", Toast.LENGTH_SHORT).show()
+                                                    onAuthenticationSuccess(tokenResp.accessToken)
+                                                    onDismiss()
+                                                } else {
+                                                    errorMessage = "Sign In failed: Invalid credentials or expired OTP."
+                                                }
                                             }
                                         } catch (e: Exception) {
                                             errorMessage = "Sign In Error: ${e.localizedMessage}"
@@ -447,8 +519,15 @@ fun CustomerAuthenticationDialog(
                                         scope.launch {
                                             try {
                                                 val res = ApiClient.getService().requestOtp(OtpRequestPayload(phoneNumber))
-                                                if (res.isSuccessful) {
-                                                    statusMessage = "OTP sent to $phoneNumber!"
+                                                if (res.isSuccessful && res.body() != null) {
+                                                    val body = res.body()!!
+                                                    val code = (body["debug_otp"] ?: body["otp_code"]) as? String
+                                                    if (!code.isNullOrBlank()) {
+                                                        otpCode = code
+                                                        statusMessage = "OTP sent to $phoneNumber! Code: $code"
+                                                    } else {
+                                                        statusMessage = "OTP sent to $phoneNumber!"
+                                                    }
                                                 }
                                             } catch (e: Exception) {
                                                 errorMessage = "OTP Error: ${e.localizedMessage}"
@@ -560,8 +639,15 @@ fun CustomerAuthenticationDialog(
                                                 val res = ApiClient.getService().requestForgotPasswordOtp(
                                                     ForgotPasswordOtpRequestPayload(forgotIdentifier)
                                                 )
-                                                if (res.isSuccessful) {
-                                                    statusMessage = "Recovery passcode sent to registered mobile/email."
+                                                if (res.isSuccessful && res.body() != null) {
+                                                    val body = res.body()!!
+                                                    val code = (body["debug_otp"] ?: body["otp_code"]) as? String
+                                                    if (!code.isNullOrBlank()) {
+                                                        forgotOtpCode = code
+                                                        statusMessage = "Recovery passcode sent! Code: $code"
+                                                    } else {
+                                                        statusMessage = "Recovery passcode sent to registered mobile/email."
+                                                    }
                                                 } else {
                                                     errorMessage = "Account not found for provided identifier."
                                                 }

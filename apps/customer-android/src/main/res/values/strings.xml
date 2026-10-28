@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Application Brand & Identity -->
+    <string name="app_name">E-Rickshaw</string>
+    <string name="app_tagline">Smart, Clean &amp; Affordable Electric Commute</string>
+
+    <!-- Authentication & Onboarding -->
+    <string name="auth_welcome_title">Welcome to E-Rickshaw</string>
+    <string name="auth_welcome_subtitle">Fast, eco-friendly electric rides starting at just ₹10</string>
+    <string name="auth_phone_label">Mobile Number</string>
+    <string name="auth_phone_placeholder">+91 98765 43210</string>
+    <string name="auth_request_otp">Send Verification Code</string>
+    <string name="auth_enter_otp">Enter 6-digit SMS Code</string>
+    <string name="auth_verify_otp">Verify &amp; Continue</string>
+    <string name="auth_resend_otp">Resend Code</string>
+    <string name="auth_resend_countdown">Resend in %1$ds</string>
+    <string name="auth_mode_phone">Phone OTP</string>
+    <string name="auth_mode_password">Email &amp; Password</string>
+    <string name="auth_mode_passkey">Biometric / Passkey</string>
+    <string name="auth_login">Sign In</string>
+    <string name="auth_register">Create New Account</string>
+    <string name="auth_logout">Sign Out</string>
+
+    <!-- Booking & Navigation -->
+    <string name="booking_where_to">Where to commute?</string>
+    <string name="booking_pickup_title">Pickup Location</string>
+    <string name="booking_destination_title">Destination</string>
+    <string name="booking_locating">Locating your current station…</string>
+    <string name="booking_search_destination">Search station, market, or landmark</string>
+    <string name="booking_select_vehicle">Select E-Rickshaw Ride</string>
+    <string name="booking_confirm_ride">Confirm E-Rickshaw Booking</string>
+    <string name="booking_finding_pilot">Locating nearby available pilots…</string>
+    <string name="booking_fare_estimate">Estimated Fare</string>
+    <string name="booking_multi_stop">Add Via Station</string>
+
+    <!-- Vehicle Categories & Tariffs -->
+    <string name="cat_standard_name">Standard E-Rickshaw</string>
+    <string name="cat_standard_desc">Electric 3-wheeler for quick city commutes and local transit</string>
+    <string name="cat_shared_name">Shared E-Rickshaw (Eco-Pool)</string>
+    <string name="cat_shared_desc">Per-seat shared ride on metro &amp; station feeder routes</string>
+    <string name="cat_auto_name">High-Speed Electric Auto</string>
+    <string name="cat_auto_desc">Enclosed L5M electric auto for fast, weather-shielded travel</string>
+    <string name="cat_cargo_name">E-Loader Cargo</string>
+    <string name="cat_cargo_desc">Electric cargo 3-wheeler for parcels, goods, and shopping</string>
+
+    <!-- Live Ride Tracking -->
+    <string name="tracking_pilot_assigned">Pilot Assigned</string>
+    <string name="tracking_pilot_en_route">Pilot is on the way</string>
+    <string name="tracking_pilot_arrived">Pilot has arrived at your pickup</string>
+    <string name="tracking_in_transit">In Transit to Destination</string>
+    <string name="tracking_trip_completed">Ride Completed</string>
+    <string name="tracking_start_otp">Start Ride OTP: %1$s</string>
+    <string name="tracking_call_pilot">Call Pilot</string>
+    <string name="tracking_chat_pilot">Chat with Pilot</string>
+    <string name="tracking_cancel_ride">Cancel Booking</string>
+    <string name="tracking_share_trip">Share Live Journey</string>
+
+    <!-- Payments & Wallets -->
+    <string name="payment_title">Fare Settlement</string>
+    <string name="payment_amount">Total Payable: ₹%1$d</string>
+    <string name="payment_upi">Pay via UPI App</string>
+    <string name="payment_cash">Pay Cash to Pilot</string>
+    <string name="payment_wallet">Pay from E-Wallet</string>
+    <string name="payment_processing">Processing digital payment…</string>
+    <string name="payment_success">Payment Successful!</string>
+    <string name="rate_trip_title">Rate Your Commute</string>
+    <string name="tip_pilot_title">Add Pilot Tip (Optional)</string>
+
+    <!-- Safety & Account -->
+    <string name="safety_sos">EMERGENCY SOS</string>
+    <string name="safety_sos_desc">Instantly dispatch emergency alert with live GPS to police &amp; trusted contacts</string>
+    <string name="safety_contacts">Trusted Emergency Contacts</string>
+    <string name="governance_app_lock">App Lock PIN</string>
+    <string name="governance_biometric">Biometric Unlock</string>
+    <string name="support_helpdesk">Customer Support &amp; Help</string>
+    <string name="support_call_help">Helpline: support@erickshaw.in</string>
+</resources>

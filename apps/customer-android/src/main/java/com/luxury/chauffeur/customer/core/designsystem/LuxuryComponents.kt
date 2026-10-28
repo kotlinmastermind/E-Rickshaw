@@ -90,3 +90,69 @@ fun GoldBadge(text: String, modifier: Modifier = Modifier) {
         )
     }
 }
+
+@Composable
+fun LuxuryGoldButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    isLoading: Boolean = false
+) {
+    LuxuryButton(
+        text = text,
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        isLoading = isLoading,
+        isSecondary = false
+    )
+}
+
+@Composable
+fun LuxurySecondaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    isLoading: Boolean = false
+) {
+    LuxuryButton(
+        text = text,
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        isLoading = isLoading,
+        isSecondary = true
+    )
+}
+
+@Composable
+fun LuxuryTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String = "",
+    modifier: Modifier = Modifier,
+    maxLines: Int = 1,
+    singleLine: Boolean = true
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = { Text(placeholder, color = LuxuryColors.SubtleGray) },
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = LuxuryColors.PlatinumWhite,
+            unfocusedTextColor = LuxuryColors.PlatinumWhite,
+            focusedBorderColor = LuxuryColors.ChampagneGold,
+            unfocusedBorderColor = LuxuryColors.CardBorder,
+            cursorColor = LuxuryColors.ChampagneGold,
+            focusedContainerColor = LuxuryColors.CardSurface,
+            unfocusedContainerColor = LuxuryColors.CardSurface
+        ),
+        shape = RoundedCornerShape(LuxuryDimensions.RadiusMedium),
+        maxLines = maxLines,
+        singleLine = singleLine,
+        modifier = modifier
+    )
+}
+

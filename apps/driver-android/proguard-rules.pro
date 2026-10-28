@@ -56,6 +56,8 @@
 
 # Google Play Services Maps & Location
 -dontwarn com.google.android.gms.**
+-keep class com.google.android.gms.common.** { *; }
+-keep class com.google.android.gms.tasks.** { *; }
 -keep class com.google.android.gms.maps.** { *; }
 -keep interface com.google.android.gms.maps.** { *; }
 -keep class com.google.android.gms.location.** { *; }

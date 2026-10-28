@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fetchWithAuth } from '../services/api';
 
 interface AuditLogEntry {
   id: string;
@@ -31,7 +32,6 @@ export const AdminAuditLogViewer: React.FC = () => {
   const fetchAuditLogs = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token') || '';
       const params = new URLSearchParams({
         page: page.toString(),
         limit: '25'
@@ -40,11 +40,8 @@ export const AdminAuditLogViewer: React.FC = () => {
       if (actionFilter) params.append('action', actionFilter);
       if (resourceFilter) params.append('target_resource', resourceFilter);
 
-      const res = await fetch(`/api/v1/admin/audit-logs?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await fetchWithAuth(`/admin/audit-logs?${params.toString()}`);
+      if (data) {
         setLogs(data.logs || []);
         setTotalCount(data.total_count || 0);
       }

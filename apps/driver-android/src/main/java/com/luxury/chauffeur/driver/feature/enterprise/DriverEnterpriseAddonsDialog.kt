@@ -19,12 +19,33 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.luxury.chauffeur.driver.core.designsystem.*
+import com.luxury.chauffeur.driver.core.network.DriverApiClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun DriverEnterpriseAddonsDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var liveAddons by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
+    var verifiedItems by remember { mutableStateOf(setOf("ADDON_INTERCITY_TOLL_FASTAG", "ADDON_ARMORED_ESCORT")) }
+    var isLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        isLoading = true
+        scope.launch(Dispatchers.IO) {
+            val res = runCatching { DriverApiClient.getService().getChauffeurAddons() }.getOrNull()
+            withContext(Dispatchers.Main) {
+                if (res?.isSuccessful == true && !res.body().isNullOrEmpty()) {
+                    liveAddons = res.body()!!
+                }
+                isLoading = false
+            }
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -59,7 +80,7 @@ fun DriverEnterpriseAddonsDialog(
                             )
                         )
                         Text(
-                            text = "Verification for Add-ons, Hourly & Intercity",
+                            text = "Verification for Add-ons, Hourly & Intercity (492-494)",
                             style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 12.sp)
                         )
                     }
@@ -83,24 +104,62 @@ fun DriverEnterpriseAddonsDialog(
                         Text("SPECIALTY VOYAGE ADD-ONS (Features 492-494)", style = DriverTypography.Subtitle.copy(fontSize = 13.sp))
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        listOf(
-                            "ADDON_ARMORED_ESCORT" to "Armed Security Detail Accompaniment (Active)",
-                            "ADDON_CHAMPAGNE_CRU" to "Chilled Dom Pérignon Champagne (Loaded)",
-                            "ADDON_INTERCITY_TOLL_FASTAG" to "Expressway Automatic FastTag (Prepaid)",
-                            "ADDON_HOURLY_CHAUFFEUR" to "4-Hour Standing Chauffeur Duty (Allocated)"
-                        ).forEach { (addonCode, addonTitle) ->
+                        val displayList = if (liveAddons.isNotEmpty()) {
+                            liveAddons.map {
+                                (it["addon_code"] as? String ?: "ADDON") to (it["title"] as? String ?: "Specialty Service")
+                            }
+                        } else {
+                            listOf(
+                                "ADDON_ARMORED_ESCORT" to "Armed Security Detail Accompaniment (Active)",
+                                "ADDON_CHAMPAGNE_CRU" to "Chilled Dom Pérignon Champagne (Loaded)",
+                                "ADDON_INTERCITY_TOLL_FASTAG" to "Expressway Automatic FastTag (Prepaid)",
+                                "ADDON_HOURLY_CHAUFFEUR" to "4-Hour Standing Chauffeur Duty (Allocated)"
+                            )
+                        }
+
+                        displayList.forEach { (addonCode, addonTitle) ->
+                            val isVerified = verifiedItems.contains(addonCode)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
+                                    .clickable {
+                                        verifiedItems = if (isVerified) {
+                                            verifiedItems - addonCode
+                                        } else {
+                                            verifiedItems + addonCode
+                                        }
+                                    }
+                                    .padding(vertical = 6.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = addonTitle, style = DriverTypography.Body.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold))
+                                    Text(
+                                        text = addonTitle,
+                                        style = DriverTypography.Body.copy(
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isVerified) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isVerified) DriverColors.TextPure else DriverColors.TextMuted
+                                        )
+                                    )
                                     Text(text = addonCode, style = DriverTypography.Body.copy(fontSize = 10.sp, color = DriverColors.TextMuted))
                                 }
-                                GoldBadge("VERIFIED")
+                                if (isVerified) {
+                                    GoldBadge("VERIFIED ✓")
+                                } else {
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = DriverColors.MidnightBlack,
+                                        border = BorderStroke(1.dp, DriverColors.SurfaceBorder)
+                                    ) {
+                                        Text(
+                                            text = "PENDING",
+                                            fontSize = 9.sp,
+                                            color = DriverColors.TextMuted,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -110,7 +169,7 @@ fun DriverEnterpriseAddonsDialog(
 
                 Button(
                     onClick = {
-                        Toast.makeText(context, "Add-on readiness verified", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "${verifiedItems.size} specialty add-ons verified for departure", Toast.LENGTH_SHORT).show()
                         onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(
@@ -120,7 +179,7 @@ fun DriverEnterpriseAddonsDialog(
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Confirm Specialty Readiness", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Confirm Specialty Readiness (${verifiedItems.size} Verified)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
         }

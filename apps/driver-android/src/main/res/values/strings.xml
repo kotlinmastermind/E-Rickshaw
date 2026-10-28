@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Application Brand & Identity -->
+    <string name="app_name">E-Rickshaw Partner</string>
+    <string name="driver_app_tagline">Pilot Cockpit &amp; Dispatch Console</string>
+
+    <!-- Pilot Authentication -->
+    <string name="driver_auth_title">Pilot Authentication</string>
+    <string name="driver_auth_subtitle">E-Rickshaw Partner &amp; Pilot Cockpit</string>
+    <string name="driver_phone_label">Registered Mobile Number</string>
+    <string name="driver_password_label">Password</string>
+    <string name="driver_login_btn">Pilot Cockpit Login</string>
+    <string name="driver_register_btn">Register as E-Rickshaw Pilot</string>
+    <string name="driver_vehicle_reg_title">Vehicle Registration</string>
+    <string name="driver_vehicle_type_standard">Standard E-Rickshaw</string>
+    <string name="driver_vehicle_type_share">Shared E-Rickshaw</string>
+    <string name="driver_vehicle_type_auto">High-Speed Electric Auto</string>
+    <string name="driver_vehicle_type_cargo">E-Loader Cargo</string>
+
+    <!-- Duty Status & Dashboard -->
+    <string name="driver_status_online">DUTY ACTIVE • READY FOR DISPATCH</string>
+    <string name="driver_status_offline">OFF DUTY • GO ONLINE TO RECEIVE TRIPS</string>
+    <string name="driver_toggle_online">Go Online</string>
+    <string name="driver_toggle_offline">Go Offline</string>
+    <string name="driver_today_earnings">Today\'s Earnings</string>
+    <string name="driver_rating_label">Pilot Rating</string>
+    <string name="driver_vehicle_plate">Vehicle Plate</string>
+
+    <!-- Incoming Dispatch Alert -->
+    <string name="dispatch_new_ride_title">INCOMING E-RICKSHAW DISPATCH</string>
+    <string name="dispatch_accept_ride">ACCEPT RIDE</string>
+    <string name="dispatch_decline_ride">Decline</string>
+    <string name="dispatch_pickup_label">Pickup Station</string>
+    <string name="dispatch_dest_label">Destination</string>
+    <string name="dispatch_est_fare">Estimated Fare: ₹%1$d</string>
+
+    <!-- Active Trip Execution -->
+    <string name="trip_navigate_pickup">Navigate to Commuter Pickup</string>
+    <string name="trip_arrived_pickup">I Have Arrived at Pickup</string>
+    <string name="trip_enter_otp">Enter 4-Digit Commuter OTP</string>
+    <string name="trip_start_ride">Start E-Rickshaw Ride</string>
+    <string name="trip_in_transit">Ride in Progress to Dropoff</string>
+    <string name="trip_complete_ride">Complete Ride &amp; Collect Fare</string>
+    <string name="trip_fare_collected">Cash Collected: ₹%1$d</string>
+
+    <!-- Wallet & Earnings -->
+    <string name="earnings_title">Pilot Earnings &amp; Wallet</string>
+    <string name="earnings_wallet_balance">Available Balance: ₹%1$d</string>
+    <string name="earnings_withdraw_btn">Instant Bank Payout</string>
+    <string name="earnings_trips_completed">%1$d Rides Completed Today</string>
+
+    <!-- Documents & KYC -->
+    <string name="kyc_title">Pilot Document Verification</string>
+    <string name="kyc_dl">Commercial Driving License / Badge</string>
+    <string name="kyc_rc">E-Rickshaw Registration Certificate (RC)</string>
+    <string name="kyc_insurance">Vehicle Commercial Insurance Policy</string>
+    <string name="kyc_status_approved">VERIFIED &amp; APPROVED</string>
+    <string name="kyc_status_pending">UNDER REVIEW</string>
+
+    <!-- Safety & Support -->
+    <string name="driver_safety_sos">COCKPIT EMERGENCY SOS</string>
+    <string name="driver_support_hotline">Partner Support: support@erickshaw.in</string>
+
+    <!-- Onboarding, KYC & Vehicle Specs -->
+    <string name="driver_city_label">Operating City</string>
+    <string name="driver_vehicle_model_label">Vehicle Model (e.g. Mahindra Treo / Piaggio Ape)</string>
+    <string name="driver_vehicle_plate_label">Vehicle Plate Number (e.g. DL-01-AB-1234)</string>
+    <string name="kyc_selfie">Driver Selfie (Live Photo)</string>
+    <string name="kyc_vehicle_photo">Vehicle Photos (Front &amp; Interior)</string>
+    <string name="kyc_aadhaar_pan">Aadhaar Card / PAN Card</string>
+    <string name="kyc_rejected_status">VERIFICATION REJECTED</string>
+    <string name="kyc_rejection_reason_label">Rejection Reason:</string>
+    <string name="kyc_blocked_online_title">KYC Verification Required</string>
+    <string name="kyc_blocked_online_msg">Your profile documents are pending approval by our compliance team. You cannot go online until all documents are approved.</string>
+    <string name="kyc_check_status_btn">Review Compliance Documents</string>
+
+    <!-- Ride Request & Dispatch -->
+    <string name="dispatch_customer_rating">Customer Rating</string>
+    <string name="dispatch_auto_reject_timeout">Offer expired and auto-rejected</string>
+
+    <!-- Ride Summary & Fare Breakdown -->
+    <string name="summary_title">TRIP SETTLEMENT &amp; SUMMARY</string>
+    <string name="summary_base_fare">Base Fare</string>
+    <string name="summary_distance_fare">Distance Fare (%1$s km)</string>
+    <string name="summary_time_fare">Ride Duration (%1$s min)</string>
+    <string name="summary_waiting_fare">Waiting Charges</string>
+    <string name="summary_platform_commission">Platform Commission (20%)</string>
+    <string name="summary_driver_payout">Chauffeur Net Payout</string>
+    <string name="summary_confirm_payment">Confirm Cash / UPI Received</string>
+
+    <!-- Background Location & Battery Optimization -->
+    <string name="battery_optimization_title">Disable Battery Optimization</string>
+    <string name="battery_optimization_msg">To ensure reliable GPS tracking while the app is in background, please exclude this app from aggressive battery optimization.</string>
+    <string name="battery_optimization_btn">Adjust Battery Settings</string>
+    <string name="bg_location_title">Background Location Access</string>
+    <string name="bg_location_msg">Please set location permission to \"Allow all the time\" so customers can see your arrival even when the app is minimized.</string>
+    <string name="bg_location_btn">Open Location Settings</string>
+</resources>

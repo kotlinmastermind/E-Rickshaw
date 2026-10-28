@@ -13,7 +13,7 @@ val localProps = Properties().apply {
         FileInputStream(f).use { load(it) }
     }
 }
-val mapsApiKey: String = (localProps.getProperty("MAPS_API_KEY") ?: System.getenv("MAPS_API_KEY") ?: "AIzaSy_MOCK_DEVELOPMENT_KEY").trim()
+val mapsApiKey: String = (localProps.getProperty("MAPS_API_KEY") ?: System.getenv("MAPS_API_KEY") ?: "AIzaSyBCd1pDJ_1KeajQKHUQG-8QqlB5OpwmmOo").trim()
 
 android {
     namespace = "com.luxury.chauffeur.customer"
@@ -46,6 +46,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -101,6 +102,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.runtime)
+    implementation("io.coil-kt:coil-compose:2.6.0")
 
     implementation(libs.retrofit)
     implementation(libs.converter.gson)

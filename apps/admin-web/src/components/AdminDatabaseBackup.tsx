@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fetchWithAuth } from '../services/api';
 
 interface BackupSnapshot {
   filename: string;
@@ -21,12 +22,8 @@ export const AdminDatabaseBackup: React.FC = () => {
   const fetchBackups = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token') || '';
-      const res = await fetch('/api/v1/admin/backups', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await fetchWithAuth('/admin/backups');
+      if (data) {
         setBackups(data || []);
       }
     } catch (err) {
@@ -40,13 +37,10 @@ export const AdminDatabaseBackup: React.FC = () => {
     setTriggering(true);
     setLastSnapshotResult(null);
     try {
-      const token = localStorage.getItem('token') || '';
-      const res = await fetch('/api/v1/admin/backups/trigger', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
+      const data = await fetchWithAuth('/admin/backups/trigger', {
+        method: 'POST'
       });
-      if (res.ok) {
-        const data = await res.json();
+      if (data) {
         setLastSnapshotResult(data);
         await fetchBackups();
       }

@@ -13,7 +13,7 @@ val localProps = Properties().apply {
         FileInputStream(f).use { load(it) }
     }
 }
-val mapsApiKey: String = (localProps.getProperty("MAPS_API_KEY") ?: System.getenv("MAPS_API_KEY") ?: "AIzaSy_MOCK_DEVELOPMENT_KEY").trim()
+val mapsApiKey: String = (localProps.getProperty("MAPS_API_KEY") ?: System.getenv("MAPS_API_KEY") ?: "AIzaSyBCd1pDJ_1KeajQKHUQG-8QqlB5OpwmmOo").trim()
 
 android {
     namespace = "com.luxury.chauffeur.driver"
@@ -46,6 +46,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -89,6 +90,7 @@ dependencies {
     
     val firebaseBom = platform(libs.firebase.bom)
     implementation(firebaseBom)
+    //implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.messaging)
     
