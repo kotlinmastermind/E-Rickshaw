@@ -418,7 +418,7 @@ export const FleetAccessibilityConsole: React.FC = () => {
                       Certified Service / Guide Animals permitted in passenger footwell
                     </td>
                     <td style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                      Portico door opening, luggage/chair transfer escort, discreet boarding guidance
+                      Portico door opening, luggage/chair transfer assistance, discreet boarding guidance
                     </td>
                   </tr>
                 ))}

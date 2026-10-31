@@ -603,7 +603,7 @@ class DriverFinancialService:
             q3 = DriverIncentiveProgress(
                 driver_id=driver.id,
                 program_code="AIRPORT_EXCELLENCE_STREAK",
-                program_name="Airport Private Aviation Escort Streak",
+                program_name="Airport Private Aviation Ride Streak",
                 tier_name="SOVEREIGN_GOLD",
                 target_trips=10,
                 current_trips=8,

@@ -346,10 +346,107 @@ def sync_missing_columns(connection):
                     connection.execute(text(f"ALTER TABLE commission_rules ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
 
                 pg_support_cols = {
-                    "sla_due_at": "TIMESTAMP WITH TIME ZONE"
+                    "complaint_reference_number": "VARCHAR(64)",
+                    "language_preference": "VARCHAR(10) DEFAULT 'en'",
+                    "assigned_squad": "VARCHAR(64) DEFAULT 'VIP_CONCIERGE'",
+                    "is_escalated": "BOOLEAN DEFAULT FALSE",
+                    "escalation_reason": "VARCHAR(255)",
+                    "escalated_at": "TIMESTAMP WITH TIME ZONE",
+                    "sla_due_at": "TIMESTAMP WITH TIME ZONE",
+                    "last_staff_update_at": "TIMESTAMP WITH TIME ZONE",
+                    "lost_item_category": "VARCHAR(64)",
+                    "lost_item_description": "TEXT",
+                    "lost_item_status": "VARCHAR(32)",
+                    "csat_score": "INTEGER",
+                    "csat_comment": "TEXT",
+                    "resolved_at": "TIMESTAMP WITH TIME ZONE",
+                    "data_retention_days": "INTEGER DEFAULT 365",
+                    "refund_amount_cents": "INTEGER",
+                    "fare_review_evidence": "TEXT",
+                    "cancellation_reason_code": "VARCHAR(50)",
+                    "fee_waiver_requested": "BOOLEAN DEFAULT FALSE",
+                    "duplicate_of_ticket_id": "VARCHAR(36)"
                 }
                 for col_name, col_type in pg_support_cols.items():
                     connection.execute(text(f"ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+
+                pg_support_msg_cols = {
+                    "read_at": "TIMESTAMP WITH TIME ZONE"
+                }
+                for col_name, col_type in pg_support_msg_cols.items():
+                    connection.execute(text(f"ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+
+                pg_payout_cols = {
+                    "exception_notes": "TEXT",
+                    "settlement_reference": "VARCHAR(128)"
+                }
+                for col_name, col_type in pg_payout_cols.items():
+                    connection.execute(text(f"ALTER TABLE driver_payout_requests ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+
+                pg_broadcast_cols = {
+                    "channel": "VARCHAR(20) DEFAULT 'IN_APP'",
+                    "audience_filter_json": "TEXT",
+                    "localized_content_json": "TEXT",
+                    "delivery_success_count": "INTEGER DEFAULT 0",
+                    "delivery_failure_count": "INTEGER DEFAULT 0",
+                    "opt_out_count": "INTEGER DEFAULT 0",
+                    "is_emergency": "BOOLEAN DEFAULT FALSE",
+                    "preview_json": "TEXT"
+                }
+                for col_name, col_type in pg_broadcast_cols.items():
+                    connection.execute(text(f"ALTER TABLE broadcast_notifications ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+
+                pg_ride_assignment_cols = {
+                    "expires_at": "TIMESTAMP WITH TIME ZONE",
+                    "escalation_level": "INTEGER DEFAULT 0",
+                    "is_accepted": "BOOLEAN DEFAULT FALSE",
+                    "metadata_json": "TEXT"
+                }
+                for col_name, col_type in pg_ride_assignment_cols.items():
+                    connection.execute(text(f"ALTER TABLE ride_assignments ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+
+                pg_driver_rating_cols = {
+                    "cleanliness_score": "INTEGER",
+                    "comfort_score": "INTEGER",
+                    "service_quality_score": "INTEGER",
+                    "navigation_score": "INTEGER",
+                    "feedback_tags_json": "TEXT",
+                    "private_feedback": "TEXT",
+                    "tip_cents": "INTEGER DEFAULT 0"
+                }
+                for col_name, col_type in pg_driver_rating_cols.items():
+                    connection.execute(text(f"ALTER TABLE driver_ratings ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+
+                pg_device_token_cols = {
+                    "is_active": "BOOLEAN DEFAULT TRUE",
+                    "last_error_at": "TIMESTAMP WITH TIME ZONE"
+                }
+                for col_name, col_type in pg_device_token_cols.items():
+                    connection.execute(text(f"ALTER TABLE device_tokens ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+
+                pg_notification_cols = {
+                    "channel": "VARCHAR(16) DEFAULT 'IN_APP'",
+                    "critical": "BOOLEAN DEFAULT FALSE",
+                    "dedupe_key": "VARCHAR(160)",
+                    "action_url": "VARCHAR(512)",
+                    "scheduled_at": "TIMESTAMP WITH TIME ZONE",
+                    "next_attempt_at": "TIMESTAMP WITH TIME ZONE",
+                    "attempt_count": "INTEGER DEFAULT 0",
+                    "last_attempt_at": "TIMESTAMP WITH TIME ZONE",
+                    "last_error": "VARCHAR(500)"
+                }
+                for col_name, col_type in pg_notification_cols.items():
+                    connection.execute(text(f"ALTER TABLE notifications ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
+
+                pg_payment_refund_cols = {
+                    "approval_status": "VARCHAR(24) DEFAULT 'APPROVED'",
+                    "requested_by_admin_id": "VARCHAR(36)",
+                    "reviewed_by_admin_id": "VARCHAR(36)",
+                    "reviewed_at": "TIMESTAMP WITH TIME ZONE",
+                    "review_reason": "TEXT"
+                }
+                for col_name, col_type in pg_payment_refund_cols.items():
+                    connection.execute(text(f"ALTER TABLE payment_refunds ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
             else:
                 inspector = inspect(connection)
                 tables = inspector.get_table_names()

@@ -40,16 +40,12 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: Optional[str] = "rzp_test_secret_chauffeur_mock"
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = "whsec_luxury_payment_hmac_test_2026"
 
-    # SMS Provider (Fast2SMS / Twilio / Mock)
-    SMS_PROVIDER: str = "fast2sms"
-    TWILIO_ACCOUNT_SID: Optional[str] = None
-    TWILIO_AUTH_TOKEN: Optional[str] = None
-    TWILIO_FROM_NUMBER: Optional[str] = None
-    FAST2SMS_API_KEY: Optional[str] = None
-    FAST2SMS_OTP_ID: Optional[str] = None
+    # Primary SMS Gateway: Google Firebase Authentication (Free 10,000 Telecom SMS/month)
+    SMS_PROVIDER: str = "firebase"
 
     # FCM Notifications
-    FCM_CREDENTIALS_PATH: Optional[str] = None
+    FCM_CREDENTIALS_PATH: Optional[str] = "backend/firebase-service-account.json"
+    FIREBASE_SERVICE_ACCOUNT_JSON: Optional[str] = None
 
     # Storage
     STORAGE_LOCAL_DIR: str = "./uploads/documents"

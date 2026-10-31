@@ -75,7 +75,7 @@ To maintain high security for our distinguished clientele:
         "category": "LOST_FOUND",
         "content_markdown": """### Rapid Lost Property Retrieval
 
-All Grand Chauffeur vehicles undergo a 20-point post-ride inspection after every escort.
+All Grand Chauffeur vehicles undergo a 20-point post-ride inspection after every trip.
 
 1. **File an In-App Claim**: Report your item with category and description immediately to place an operational hold on the vehicle.
 2. **Chauffeur Inspection**: The chauffeur verifies the rear console, door bins, and luggage compartment.
@@ -101,7 +101,7 @@ We audit all route metrics against real-time GPS telemetry and highway toll tran
     },
     {
         "slug": "airport-vip-meet-and-greet",
-        "title": "Airport VIP Meet & Greet: Private Terminal Escort Guidelines",
+        "title": "Airport VIP Meet & Greet Guidelines",
         "category": "BOOKING",
         "content_markdown": """### Airport VIP Meet & Greet Experience
 

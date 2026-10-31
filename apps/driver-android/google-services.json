@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "77155333800-m3o59lblrfsk48vohkc17lhep0e9djna.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.luxury.chauffeur.customer",
+            "certificate_hash": "0471f4dd34f30e353b6ae0d0abe02fef1ee15c86"
+          }
+        },
+        {
           "client_id": "77155333800-la41jphoa50b9g150mne3dr2g9n6abb0.apps.googleusercontent.com",
           "client_type": 3
         }
@@ -42,6 +50,14 @@
         }
       },
       "oauth_client": [
+        {
+          "client_id": "77155333800-ado8tb5hv1h32f0n7u8salvj5854r8di.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.luxury.chauffeur.driver",
+            "certificate_hash": "0471f4dd34f30e353b6ae0d0abe02fef1ee15c86"
+          }
+        },
         {
           "client_id": "77155333800-la41jphoa50b9g150mne3dr2g9n6abb0.apps.googleusercontent.com",
           "client_type": 3

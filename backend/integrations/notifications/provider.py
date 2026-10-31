@@ -32,11 +32,33 @@ class FirebaseFCMNotificationProvider(NotificationProvider):
 
     def _init_firebase(self):
         try:
+            import os
+            import json
             import firebase_admin
             from firebase_admin import credentials
             if not firebase_admin._apps:
-                if settings.FCM_CREDENTIALS_PATH:
+                cred = None
+                # Priority 1: Direct JSON string in environment (ideal for Render / cloud dashboard)
+                json_env = getattr(settings, "FIREBASE_SERVICE_ACCOUNT_JSON", None) or os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+                if json_env:
+                    try:
+                        cert_dict = json.loads(json_env) if isinstance(json_env, str) else json_env
+                        cred = credentials.Certificate(cert_dict)
+                    except Exception as e:
+                        logger.warning(f"Could not parse FIREBASE_SERVICE_ACCOUNT_JSON: {e}")
+
+                # Priority 2: Configured file path
+                if not cred and settings.FCM_CREDENTIALS_PATH and os.path.exists(settings.FCM_CREDENTIALS_PATH):
                     cred = credentials.Certificate(settings.FCM_CREDENTIALS_PATH)
+
+                # Priority 3: Default relative file paths
+                if not cred:
+                    for candidate in ["backend/firebase-service-account.json", "firebase-service-account.json"]:
+                        if os.path.exists(candidate):
+                            cred = credentials.Certificate(candidate)
+                            break
+
+                if cred:
                     firebase_admin.initialize_app(cred)
                 else:
                     firebase_admin.initialize_app()

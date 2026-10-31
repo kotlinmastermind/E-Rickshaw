@@ -537,7 +537,7 @@ class AnalyticsBiService:
             "campaigns": [
                 {
                     "code": "SOVEREIGN_DEBUT",
-                    "title": "New Member Sanctuary Escort",
+                    "title": "New Member Sanctuary Ride",
                     "redemptions": 642,
                     "discount_spend_inr": 321000.0,
                     "gross_bookings_generated_inr": 2182000.0,

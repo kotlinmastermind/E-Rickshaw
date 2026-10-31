@@ -134,7 +134,7 @@ class TrackingAdvancedService:
                 "label": "Destination Arrival",
                 "completed": ride.status == "COMPLETED",
                 "timestamp": ride.completed_at.isoformat() if ride.completed_at else None,
-                "description": "Chauffeur escort concluded. Digital receipt issued"
+                "description": "Chauffeur ride concluded. Digital receipt issued"
             }
         ]
 

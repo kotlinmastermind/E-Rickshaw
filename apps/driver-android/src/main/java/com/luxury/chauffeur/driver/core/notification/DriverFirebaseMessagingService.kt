@@ -24,19 +24,7 @@ class DriverFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d("DriverFCM", "FCM registration token refreshed")
-        // Register token with backend
-        if (DriverApiClient.getToken().isNullOrBlank()) return
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                DriverApiClient.getService().registerDeviceToken(
-                    DriverDeviceTokenPayload(fcmToken = token, deviceOs = "ANDROID")
-                )
-                Log.d("DriverFCM", "Successfully synchronized FCM token with backend")
-            } catch (e: Exception) {
-                Log.e("DriverFCM", "Failed to sync FCM token with backend", e)
-            }
-        }
+        DriverFcmManager.onNewToken(applicationContext, token)
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {

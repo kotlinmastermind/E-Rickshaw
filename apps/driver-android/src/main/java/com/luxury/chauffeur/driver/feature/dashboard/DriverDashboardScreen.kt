@@ -17,9 +17,13 @@ import androidx.compose.ui.unit.sp
 import com.google.gson.Gson
 import com.luxury.chauffeur.driver.core.designsystem.*
 import com.luxury.chauffeur.driver.core.network.DriverApiClient
+import com.luxury.chauffeur.driver.core.notification.DriverFcmManager
 import com.luxury.chauffeur.driver.core.network.DriverAvailabilityPayload
 import com.luxury.chauffeur.driver.core.network.DriverDeviceTokenPayload
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.OffsetDateTime
@@ -28,21 +32,31 @@ import okhttp3.*
 
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
+import android.location.LocationManager
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.model.LatLng
 import com.luxury.chauffeur.driver.feature.map.DriverMapView
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.annotation.SuppressLint
 import android.provider.Settings
 import com.luxury.chauffeur.driver.core.location.DriverLocationForegroundService
 import com.luxury.chauffeur.driver.feature.dispatch.IncomingRideDispatchDialog
 
+@SuppressLint("MissingPermission")
 @Composable
 fun DriverDashboardScreen(
     onAcceptRide: (rideId: String, pickup: String, dest: String) -> Unit,
@@ -56,11 +70,11 @@ fun DriverDashboardScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val gson = remember { Gson() }
-    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    val fusedLocationClient = remember(context) { runCatching { LocationServices.getFusedLocationProviderClient(context.applicationContext) }.getOrNull() }
 
     var driverLatLng by remember { mutableStateOf(LatLng(25.6858, 85.2146)) }
     var recenterTrigger by remember { mutableIntStateOf(0) }
-    var isOnline by remember { mutableStateOf(true) }
+    var isOnline by remember { mutableStateOf(false) }
     var incomingRideOffer by remember { mutableStateOf<Map<String, String>?>(null) }
     var offerCountdown by remember { mutableIntStateOf(15) }
     var isWsConnected by remember { mutableStateOf(false) }
@@ -78,6 +92,22 @@ fun DriverDashboardScreen(
     var showKycBlockedDialog by remember { mutableStateOf(false) }
     var showBatteryOptDialog by remember { mutableStateOf(false) }
 
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+        if (fineGranted || coarseGranted) {
+            if (!isKycApproved) {
+                showKycBlockedDialog = true
+            } else {
+                isOnline = true
+            }
+        } else {
+            offersError = "Location permission is required to receive trip dispatches."
+        }
+    }
+
     // Live metrics from backend
     var todayEarningsRupees by remember { mutableIntStateOf(0) }
     var driverRatingAverage by remember { mutableDoubleStateOf(5.0) }
@@ -86,59 +116,121 @@ fun DriverDashboardScreen(
 
     // Fetch real driver profile & earnings on mount
     LaunchedEffect(Unit) {
-        if (!DriverApiClient.getToken().isNullOrBlank()) {
-            runCatching {
-                FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                    if (task.isSuccessful && !task.result.isNullOrBlank()) scope.launch {
-                        runCatching { DriverApiClient.getService().registerDeviceToken(DriverDeviceTokenPayload(task.result)) }
+        DriverFcmManager.syncToken(context)
+        withContext(Dispatchers.IO) {
+            try {
+                val profRes = DriverApiClient.getService().getProfile()
+                if (profRes.isSuccessful && profRes.body() != null) {
+                    val p = profRes.body()!!
+                    withContext(Dispatchers.Main) {
+                        driverRatingAverage = p.ratingAverage
+                        if (p.licenseNumber.isNotBlank()) licenseNumber = p.licenseNumber
+                        kycApprovalStatus = p.approvalStatus
+                        isKycApproved = p.approvalStatus.equals("APPROVED", ignoreCase = true) || p.approvalStatus.equals("VERIFIED", ignoreCase = true)
+                        if (!isKycApproved) {
+                            isOnline = false
+                        }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {}
+
+            try {
+                val earnRes = DriverApiClient.getService().getEarnings()
+                if (earnRes.isSuccessful && earnRes.body() != null) {
+                    val e = earnRes.body()!!
+                    val todayCents = (e["today_earnings_cents"] as? Number)?.toInt()
+                        ?: (e["total_earnings_cents"] as? Number)?.toInt() ?: 0
+                    withContext(Dispatchers.Main) {
+                        todayEarningsRupees = todayCents / 100
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {}
+        }
+
+        fun fetchDriverLocation() {
+            val hasLoc = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                         ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!hasLoc) return
+
+            val fallback = {
+                try {
+                    val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                    if (lm != null) {
+                        val provider = when {
+                            lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+                            lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                            else -> LocationManager.PASSIVE_PROVIDER
+                        }
+                        val loc = lm.getLastKnownLocation(provider)
+                        if (loc != null) {
+                            driverLatLng = LatLng(loc.latitude, loc.longitude)
+                            recenterTrigger++
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val gmsStatus = try {
+                GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context.applicationContext)
+            } catch (e: SecurityException) {
+                Log.w("DriverDashboard", "SecurityException checking Play Services: ${e.message}")
+                ConnectionResult.SERVICE_INVALID
+            } catch (_: Throwable) {
+                ConnectionResult.UNKNOWN
+            }
+
+            if (gmsStatus == ConnectionResult.SUCCESS && fusedLocationClient != null) {
+                try {
+                    fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                        ?.addOnSuccessListener { loc ->
+                            if (loc != null) {
+                                driverLatLng = LatLng(loc.latitude, loc.longitude)
+                                recenterTrigger++
+                            } else {
+                                fallback()
+                            }
+                        }
+                        ?.addOnFailureListener { e ->
+                            Log.w("DriverDashboard", "fusedLocationClient failure: ${e.message}")
+                            fallback()
+                        } ?: fallback()
+                } catch (e: Throwable) {
+                    Log.w("DriverDashboard", "fusedLocationClient exception: ${e.message}")
+                    fallback()
+                }
+            } else {
+                fallback()
             }
         }
-        try {
-            val profRes = DriverApiClient.getService().getProfile()
-            if (profRes.isSuccessful && profRes.body() != null) {
-                val p = profRes.body()!!
-                driverRatingAverage = p.ratingAverage
-                if (p.licenseNumber.isNotBlank()) licenseNumber = p.licenseNumber
-                kycApprovalStatus = p.approvalStatus
-                isKycApproved = p.approvalStatus.equals("APPROVED", ignoreCase = true) || p.approvalStatus.equals("VERIFIED", ignoreCase = true)
-                if (!isKycApproved) {
-                    isOnline = false
-                }
-            }
-        } catch (_: Exception) {}
 
-        try {
-            val earnRes = DriverApiClient.getService().getEarnings()
-            if (earnRes.isSuccessful && earnRes.body() != null) {
-                val e = earnRes.body()!!
-                val todayCents = (e["today_earnings_cents"] as? Number)?.toInt()
-                    ?: (e["total_earnings_cents"] as? Number)?.toInt() ?: 0
-                todayEarningsRupees = todayCents / 100
-            }
-        } catch (_: Exception) {}
-
-        try {
-            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                .addOnSuccessListener { loc ->
-                    if (loc != null) {
-                        driverLatLng = LatLng(loc.latitude, loc.longitude)
-                        recenterTrigger++
-                    }
-                }
-        } catch (_: SecurityException) {}
+        fetchDriverLocation()
     }
 
     // Availability toggle with backend sync and foreground GPS service control
     LaunchedEffect(isOnline) {
-        try {
-            DriverApiClient.getService().setAvailability(DriverAvailabilityPayload(isOnline))
-        } catch (_: Exception) {}
+        withContext(Dispatchers.IO) {
+            try {
+                DriverApiClient.getService().setAvailability(DriverAvailabilityPayload(isOnline))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {}
+        }
         if (isOnline) {
-            DriverLocationForegroundService.start(context)
+            val hasLoc = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                         ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (hasLoc) {
+                try {
+                    DriverLocationForegroundService.start(context)
+                } catch (_: Exception) {}
+            }
         } else {
-            DriverLocationForegroundService.stop(context)
+            try {
+                DriverLocationForegroundService.stop(context)
+            } catch (_: Exception) {}
             incomingRideOffer = null
         }
     }
@@ -149,27 +241,39 @@ fun DriverDashboardScreen(
         while (isOnline) {
             offersLoading = incomingRideOffer == null
             try {
-                val response = DriverApiClient.getService().getDispatchOffers()
+                val response = withContext(Dispatchers.IO) {
+                    DriverApiClient.getService().getDispatchOffers()
+                }
                 if (response.isSuccessful) {
                     offersError = null
                     val first = response.body()?.firstOrNull()
-                    incomingRideOffer = first?.let { offer ->
-                        offer.mapValues { (_, value) -> value?.toString() ?: "" }.toMutableMap().apply {
-                            put("ride_id", offer["ride_id"].toString())
-                            put("pickup", offer["pickup_address"].toString())
-                            put("destination", offer["destination_area"].toString())
-                            put("fare", "₹${((offer["estimated_driver_earnings_cents"] as? Number)?.toInt() ?: 0) / 100}")
-                            put("distance", offer["pickup_distance_km"]?.let { "$it km pickup" } ?: "Pickup distance unavailable")
-                            put("expires_at", offer["expires_at"].toString())
-                            put("category", offer["vehicle_category"].toString())
+                    val parsed = withContext(Dispatchers.Default) {
+                        first?.let { offer ->
+                            offer.mapValues { (_, value) -> value?.toString() ?: "" }.toMutableMap().apply {
+                                put("ride_id", offer["ride_id"].toString())
+                                put("pickup", offer["pickup_address"].toString())
+                                put("destination", offer["destination_area"].toString())
+                                put("fare", "₹${((offer["estimated_driver_earnings_cents"] as? Number)?.toInt() ?: 0) / 100}")
+                                put("distance", offer["pickup_distance_km"]?.let { "$it km pickup" } ?: "Pickup distance unavailable")
+                                put("expires_at", offer["expires_at"].toString())
+                                put("category", offer["vehicle_category"].toString())
+                            }
                         }
                     }
+                    incomingRideOffer = parsed
+                } else if (response.code() == 401) {
+                    // Driver token is missing or expired, stop polling and switch offline
+                    isOnline = false
+                    offersError = "Sign-in required to receive VIP dispatches."
+                    break
                 } else if (response.code() == 404) {
                     // Secondary endpoint not deployed on backend yet; real-time dispatch uses WebSocket
                     offersError = null
                 } else {
                     offersError = "Dispatch temporarily unavailable (${response.code()})"
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 offersError = null
             } finally { offersLoading = false }
@@ -209,7 +313,7 @@ fun DriverDashboardScreen(
                                     "pickup" to pickup,
                                     "destination" to dest,
                                     "fare" to "₹$fare",
-                                    "distance" to "Direct Escort"
+                                    "distance" to "Direct Ride"
                                 )
                                 offerCountdown = 15
                             }
@@ -237,12 +341,16 @@ fun DriverDashboardScreen(
     // Real offer countdown timer
     LaunchedEffect(incomingRideOffer) {
         if (incomingRideOffer != null) {
-            val expiresAt = incomingRideOffer?.get("expires_at")
-            offerCountdown = try { maxOf(0, Duration.between(OffsetDateTime.now(), OffsetDateTime.parse(expiresAt)).seconds.toInt()) } catch (_: Exception) { 0 }
+            val parseSecs = { timeStr: String? ->
+                if (timeStr.isNullOrBlank()) 15
+                else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try { maxOf(0, Duration.between(OffsetDateTime.now(), OffsetDateTime.parse(timeStr)).seconds.toInt()) } catch (_: Exception) { 15 }
+                } else 15
+            }
+            offerCountdown = parseSecs(incomingRideOffer?.get("expires_at"))
             while (offerCountdown > 0 && incomingRideOffer != null) {
                 delay(1000)
-                val expiry = incomingRideOffer?.get("expires_at")
-                offerCountdown = try { maxOf(0, Duration.between(OffsetDateTime.now(), OffsetDateTime.parse(expiry)).seconds.toInt()) } catch (_: Exception) { 0 }
+                offerCountdown = parseSecs(incomingRideOffer?.get("expires_at"))
             }
             if (offerCountdown == 0) incomingRideOffer = null
         }
@@ -327,11 +435,20 @@ fun DriverDashboardScreen(
                         AnimatedOnlineToggle(
                             isOnline = isOnline,
                             onToggle = { targetOnline ->
-                                if (targetOnline && !isKycApproved) {
-                                    showKycBlockedDialog = true
-                                } else {
-                                    isOnline = targetOnline
-                                    if (targetOnline) {
+                                if (targetOnline) {
+                                    val hasLoc = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                                                 ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                    if (!hasLoc) {
+                                        locationPermissionLauncher.launch(
+                                            arrayOf(
+                                                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                                android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                            )
+                                        )
+                                    } else if (!isKycApproved) {
+                                        showKycBlockedDialog = true
+                                    } else {
+                                        isOnline = true
                                         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
                                         val isIgnoring = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                                             powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
@@ -340,6 +457,8 @@ fun DriverDashboardScreen(
                                             showBatteryOptDialog = true
                                         }
                                     }
+                                } else {
+                                    isOnline = false
                                 }
                             }
                         )
@@ -354,7 +473,7 @@ fun DriverDashboardScreen(
                     border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(190.dp)
+                        .height(260.dp)
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         DriverMapView(
@@ -365,15 +484,67 @@ fun DriverDashboardScreen(
                         )
                         FloatingActionButton(
                             onClick = {
-                                try {
-                                    fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                                        .addOnSuccessListener { loc ->
+                                val hasLoc = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                                             ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                if (!hasLoc) {
+                                    locationPermissionLauncher.launch(
+                                        arrayOf(
+                                            android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                            android.Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    )
+                                    return@FloatingActionButton
+                                }
+
+                                val fallback = {
+                                    try {
+                                        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                                        if (lm != null) {
+                                            val provider = when {
+                                                lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+                                                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                                                else -> LocationManager.PASSIVE_PROVIDER
+                                            }
+                                            val loc = lm.getLastKnownLocation(provider)
                                             if (loc != null) {
                                                 driverLatLng = LatLng(loc.latitude, loc.longitude)
                                                 recenterTrigger++
                                             }
                                         }
-                                } catch (_: SecurityException) {}
+                                    } catch (_: Exception) {}
+                                }
+
+                                val gmsStatus = try {
+                                    GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context.applicationContext)
+                                } catch (e: SecurityException) {
+                                    Log.w("DriverDashboard", "SecurityException checking Play Services: ${e.message}")
+                                    ConnectionResult.SERVICE_INVALID
+                                } catch (_: Throwable) {
+                                    ConnectionResult.UNKNOWN
+                                }
+
+                                if (gmsStatus == ConnectionResult.SUCCESS && fusedLocationClient != null) {
+                                    try {
+                                        fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                                            ?.addOnSuccessListener { loc ->
+                                                if (loc != null) {
+                                                    driverLatLng = LatLng(loc.latitude, loc.longitude)
+                                                    recenterTrigger++
+                                                } else {
+                                                    fallback()
+                                                }
+                                            }
+                                            ?.addOnFailureListener { e ->
+                                                Log.w("DriverDashboard", "fusedLocationClient failure: ${e.message}")
+                                                fallback()
+                                            } ?: fallback()
+                                    } catch (e: Throwable) {
+                                        Log.w("DriverDashboard", "fusedLocationClient exception: ${e.message}")
+                                        fallback()
+                                    }
+                                } else {
+                                    fallback()
+                                }
                             },
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)

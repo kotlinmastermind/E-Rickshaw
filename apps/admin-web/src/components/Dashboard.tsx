@@ -47,7 +47,7 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <div className="stat-card">
-          <div className="stat-label">Active Escorts</div>
+          <div className="stat-label">Active Rides</div>
           <div className="stat-value">{stats.active_rides}</div>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
             En route & in progress

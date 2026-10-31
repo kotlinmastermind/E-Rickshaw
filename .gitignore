@@ -29,6 +29,8 @@ local.properties
 *.key
 *.jks
 keystore.properties
+*firebase-service-account*.json
+*credentials*.json
 backups/
 *.bak
 
@@ -38,4 +40,10 @@ backups/
 Thumbs.db
 .vscode/
 .pytest_cache/
+scratch/
+release-apks/
+uploads/
+*.png
+*.xml
+*~
 

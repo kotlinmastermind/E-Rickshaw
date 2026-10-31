@@ -12,6 +12,8 @@ class DriverTokenManager(context: Context) {
         private const val KEY_USER_ID = "driver_user_id"
         private const val KEY_PHONE = "driver_phone"
         private const val KEY_ROLE = "driver_role"
+        private const val KEY_FCM_TOKEN = "driver_fcm_device_token"
+        private const val KEY_FCM_TOKEN_SYNCED = "driver_fcm_device_token_synced"
 
         @Volatile
         private var instance: DriverTokenManager? = null
@@ -38,7 +40,30 @@ class DriverTokenManager(context: Context) {
 
     fun isLoggedIn(): Boolean = !getToken().isNullOrBlank()
 
+    fun saveFcmToken(token: String) {
+        val current = getFcmToken()
+        if (current != token) {
+            prefs.edit()
+                .putString(KEY_FCM_TOKEN, token)
+                .putBoolean(KEY_FCM_TOKEN_SYNCED, false)
+                .apply()
+        }
+    }
+
+    fun getFcmToken(): String? = prefs.getString(KEY_FCM_TOKEN, null)
+
+    fun isFcmTokenSynced(): Boolean = prefs.getBoolean(KEY_FCM_TOKEN_SYNCED, false)
+
+    fun setFcmTokenSynced(synced: Boolean) {
+        prefs.edit().putBoolean(KEY_FCM_TOKEN_SYNCED, synced).apply()
+    }
+
     fun clear() {
+        val fcmToken = getFcmToken()
         prefs.edit().clear().apply()
+        if (!fcmToken.isNullOrBlank()) {
+            saveFcmToken(fcmToken)
+            setFcmTokenSynced(false)
+        }
     }
 }

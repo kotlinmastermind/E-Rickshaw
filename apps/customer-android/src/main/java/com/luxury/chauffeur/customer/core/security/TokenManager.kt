@@ -21,6 +21,8 @@ class TokenManager(context: Context) {
         private const val KEY_TEXT_SCALE = "text_scale"
         private const val KEY_LANGUAGE = "preferred_language"
         private const val KEY_CURRENCY = "currency_code"
+        private const val KEY_FCM_TOKEN = "customer_fcm_device_token"
+        private const val KEY_FCM_TOKEN_SYNCED = "customer_fcm_device_token_synced"
 
         @Volatile
         private var instance: TokenManager? = null
@@ -81,7 +83,30 @@ class TokenManager(context: Context) {
     fun getCurrencyCode(): String = prefs.getString(KEY_CURRENCY, "INR") ?: "INR"
     fun setCurrencyCode(curr: String) = prefs.edit().putString(KEY_CURRENCY, curr).apply()
 
+    fun saveFcmToken(token: String) {
+        val current = getFcmToken()
+        if (current != token) {
+            prefs.edit()
+                .putString(KEY_FCM_TOKEN, token)
+                .putBoolean(KEY_FCM_TOKEN_SYNCED, false)
+                .apply()
+        }
+    }
+
+    fun getFcmToken(): String? = prefs.getString(KEY_FCM_TOKEN, null)
+
+    fun isFcmTokenSynced(): Boolean = prefs.getBoolean(KEY_FCM_TOKEN_SYNCED, false)
+
+    fun setFcmTokenSynced(synced: Boolean) {
+        prefs.edit().putBoolean(KEY_FCM_TOKEN_SYNCED, synced).apply()
+    }
+
     fun clear() {
+        val fcmToken = getFcmToken()
         prefs.edit().clear().apply()
+        if (!fcmToken.isNullOrBlank()) {
+            saveFcmToken(fcmToken)
+            setFcmTokenSynced(false)
+        }
     }
 }

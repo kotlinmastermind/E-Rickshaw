@@ -310,7 +310,7 @@ async def compare_vehicle_categories(db: AsyncSession = Depends(get_db)):
             ],
             "ideal_for": "Executive airport transfers & city transit" if c.code == "SEDAN" else (
                 "VIP delegations & family travel with luggage" if c.code == "LUXURY_SUV" else (
-                    "State visits & ceremonial luxury galas" if c.code == "EXECUTIVE_LIMO" else "Eco-conscious high-tech private escort"
+                    "State visits & ceremonial luxury galas" if c.code == "EXECUTIVE_LIMO" else "Eco-conscious high-tech private ride"
                 )
             )
         })

@@ -12,6 +12,10 @@ from backend.infrastructure.security.crypto import decode_jwt_token
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+class IdentityLookupPayload(BaseModel):
+    identifier: str = Field(..., description="Mobile number (e.g. +919876543210) or Email address", json_schema_extra={"example": "+919876543210"})
+    role: str = Field(default="customer", description="customer or driver", json_schema_extra={"example": "customer"})
+
 class OtpRequestPayload(BaseModel):
     phone_number: str = Field(..., json_schema_extra={"example": "+919876543210"})
 
@@ -109,6 +113,11 @@ class ForgotPasswordResetPayload(BaseModel):
     identifier: str = Field(..., min_length=3)
     otp_code: str = Field(..., min_length=4, max_length=6)
     new_password: str = Field(..., min_length=6)
+
+@router.post("/lookup", dependencies=[Depends(auth_rate_limiter)])
+async def lookup_user_identity(payload: IdentityLookupPayload, db: AsyncSession = Depends(get_db)):
+    service = AuthService(db)
+    return await service.lookup_user_identity(payload.identifier, payload.role)
 
 @router.post("/otp/request", dependencies=[Depends(otp_rate_limiter)])
 async def request_otp(payload: OtpRequestPayload, db: AsyncSession = Depends(get_db)):

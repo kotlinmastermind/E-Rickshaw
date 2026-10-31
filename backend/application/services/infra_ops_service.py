@@ -492,12 +492,12 @@ interface GeneratedApiClient {{
         if not providers:
             defaults = [
                 ProviderHealthConfig(
-                    provider_name="TWILIO_PRIMARY_SMS",
+                    provider_name="FIREBASE_PRIMARY_SMS",
                     provider_type="SMS",
                     is_healthy=True,
                     circuit_breaker_state="CLOSED",
                     consecutive_failures=0,
-                    failover_provider_name="MSG91_SECONDARY_SMS",
+                    failover_provider_name="FIREBASE_SECONDARY_SMS",
                     quota_used_percentage=18.4
                 ),
                 ProviderHealthConfig(
@@ -525,7 +525,7 @@ interface GeneratedApiClient {{
         return providers
 
     async def trigger_provider_failover(self, provider_name: str) -> ProviderHealthConfig:
-        stmt = select(ProviderHealthConfig).where(ProviderHealthConfig.provider_name == provider_name)
+        stmt = select(ProviderHealthConfig).where((ProviderHealthConfig.provider_name == provider_name) | (ProviderHealthConfig.provider_type == 'SMS'))
         res = await self.db.execute(stmt)
         provider = res.scalars().first()
         if provider:

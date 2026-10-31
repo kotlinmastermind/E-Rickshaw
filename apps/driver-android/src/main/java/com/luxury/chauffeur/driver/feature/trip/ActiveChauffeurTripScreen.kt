@@ -278,7 +278,7 @@ fun ActiveChauffeurTripScreen(
                     border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(240.dp)
+                        .height(300.dp)
                 ) {
                     Box {
                         if (pickupLat != null && pickupLng != null && destLat != null && destLng != null) {

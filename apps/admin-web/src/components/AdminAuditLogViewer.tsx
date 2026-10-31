@@ -199,7 +199,7 @@ export const AdminAuditLogViewer: React.FC = () => {
                                 {JSON.stringify(
                                   {
                                     audit_id: log.id,
-                                    ip_address: log.ip_address || '127.0.0.1',
+                                    ip_address: log.ip_address || 'Cloud Gateway',
                                     correlation_id: log.correlation_id,
                                     metadata: log.metadata
                                   },

@@ -1,3 +1,4 @@
+import re
 import json
 import logging
 from datetime import datetime, timezone, timedelta
@@ -110,6 +111,57 @@ class AuthService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.sms_provider = get_sms_provider()
+
+    async def lookup_user_identity(self, identifier: str, role: str = "customer") -> Dict[str, Any]:
+        """
+        Enterprise identity check: Look up user in real database by mobile number or email.
+        Enables seamless routing to either OTP verification (existing user) or Sign Up (new user).
+        """
+        ident = identifier.strip()
+        ident_lower = ident.lower()
+
+        phone_variants = [ident]
+        clean_digits = re.sub(r"[^\d]", "", ident)
+        if len(clean_digits) == 10:
+            phone_variants.append(f"+91{clean_digits}")
+            phone_variants.append(clean_digits)
+        elif len(clean_digits) == 12 and clean_digits.startswith("91"):
+            phone_variants.append(f"+{clean_digits}")
+            phone_variants.append(clean_digits[2:])
+
+        stmt = select(User).where(
+            or_(
+                User.phone_number.in_(phone_variants),
+                User.email == ident_lower,
+                User.username == ident_lower
+            )
+        )
+        res = await self.db.execute(stmt)
+        user = res.scalars().first()
+
+        if user:
+            phone_masked = f"{user.phone_number[-4:].rjust(len(user.phone_number), '*')}" if user.phone_number else None
+            email_masked = None
+            if user.email and "@" in user.email:
+                parts = user.email.split("@")
+                email_masked = f"{parts[0][:2]}***@{parts[1]}"
+            return {
+                "exists": True,
+                "user_id": user.id,
+                "role": user.role,
+                "is_active": user.is_active,
+                "full_name": user.full_name,
+                "phone_number": user.phone_number,
+                "phone_masked": phone_masked,
+                "email": user.email,
+                "email_masked": email_masked
+            }
+
+        return {
+            "exists": False,
+            "identifier": ident,
+            "role": role
+        }
 
     async def request_otp(self, phone_number: str) -> Dict[str, Any]:
         phone = phone_number.strip()

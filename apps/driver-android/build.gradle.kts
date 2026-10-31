@@ -19,6 +19,12 @@ android {
     namespace = "com.luxury.chauffeur.driver"
     compileSdk = 34
 
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     defaultConfig {
         applicationId = "com.luxury.chauffeur.driver"
         minSdk = 24
@@ -44,6 +50,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

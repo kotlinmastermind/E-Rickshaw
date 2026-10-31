@@ -633,7 +633,7 @@ fun LiveTrackingScreen(
                 border = BorderStroke(1.dp, LuxuryColors.CardBorder),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(230.dp)
+                    .height(280.dp)
             ) {
                 Box {
                     LuxuryMapView(

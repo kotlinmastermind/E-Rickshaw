@@ -183,7 +183,7 @@ async def test_part19_latency_providers_secrets_vulnerabilities_crashes_flags(db
     assert "MAPS" in prov_types
 
     # Trigger circuit breaker failover
-    tripped = await service.trigger_provider_failover("TWILIO_PRIMARY_SMS")
+    tripped = await service.trigger_provider_failover("FIREBASE_PRIMARY_SMS")
     assert tripped.circuit_breaker_state == "OPEN"
     assert tripped.is_healthy is False
 

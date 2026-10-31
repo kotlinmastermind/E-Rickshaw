@@ -30,6 +30,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
+import android.location.LocationManager
+import android.content.Context
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.model.LatLng
@@ -43,6 +47,8 @@ import com.luxury.chauffeur.customer.feature.map.LuxuryMapView
 import com.luxury.chauffeur.customer.feature.support.*
 import com.luxury.chauffeur.customer.feature.vehicles.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 data class LuxuryPlace(val name: String, val address: String, val lat: Double, val lng: Double,
@@ -83,11 +89,11 @@ fun LocationScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+    val fusedLocationClient = remember(context) { runCatching { LocationServices.getFusedLocationProviderClient(context.applicationContext) }.getOrNull() }
 
     // Real device GPS states
     var pickupLatLng by remember { mutableStateOf(LatLng(18.9220, 72.8347)) }
-    var pickupAddress by remember { mutableStateOf("Locating your distinguished presence...") }
+    var pickupAddress by remember { mutableStateOf("Getting your current location...") }
     var isGpsLive by remember { mutableStateOf(false) }
     var pickupVerified by remember { mutableStateOf(false) }
     var gpsAccuracyMeters by remember { mutableStateOf<Float?>(null) }
@@ -246,14 +252,7 @@ fun LocationScreen(
     var helpContextTag by remember { mutableStateOf<String?>(null) }
     var activeIncidents by remember { mutableStateOf<List<ServiceIncidentDto>>(emptyList()) }
 
-    LaunchedEffect(Unit) {
-        try {
-            val incRes = ApiClient.getService().getActiveIncidentBanners()
-            if (incRes.isSuccessful && incRes.body() != null) {
-                activeIncidents = incRes.body()!!
-            }
-        } catch (_: Exception) {}
-    }
+
 
     val defaultCuratedDestinations = remember {
         listOf(
@@ -376,69 +375,95 @@ fun LocationScreen(
             return
         }
 
-        isDetectingLocation = true
-        try {
-            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                .addOnSuccessListener { location ->
-                    isDetectingLocation = false
-                    if (location != null) {
-                        pickupLatLng = LatLng(location.latitude, location.longitude)
-                        isGpsLive = true
-                        pickupVerified = true
-                        gpsAccuracyMeters = if (location.hasAccuracy()) location.accuracy else null
-                        scope.launch {
-                            try {
-                                val revRes = ApiClient.getService().reverseGeocode(
-                                    mapOf("latitude" to location.latitude, "longitude" to location.longitude)
-                                )
-                                if (revRes.isSuccessful && revRes.body() != null) {
-                                    val formatted = revRes.body()!!["formatted_address"] as? String
-                                    if (!formatted.isNullOrBlank()) {
-                                        pickupAddress = formatted
-                                    }
-                                }
-                            } catch (_: Exception) {
-                                pickupAddress = "Near Lat: %.4f, Lng: %.4f".format(location.latitude, location.longitude)
-                            }
-                        }
-                    } else {
-                        fusedLocationClient.lastLocation.addOnSuccessListener { lastLoc ->
-                            if (lastLoc != null) {
-                                pickupLatLng = LatLng(lastLoc.latitude, lastLoc.longitude)
-                                isGpsLive = true
-                                pickupVerified = true
-                                gpsAccuracyMeters = if (lastLoc.hasAccuracy()) lastLoc.accuracy else null
-                                scope.launch {
-                                    try {
-                                        val revRes = ApiClient.getService().reverseGeocode(
-                                            mapOf("latitude" to lastLoc.latitude, "longitude" to lastLoc.longitude)
-                                        )
-                                        if (revRes.isSuccessful && revRes.body() != null) {
-                                            val formatted = revRes.body()!!["formatted_address"] as? String
-                                            if (!formatted.isNullOrBlank()) {
-                                                pickupAddress = formatted
-                                            }
-                                        }
-                                    } catch (_: Exception) {
-                                        pickupAddress = "Near Lat: %.4f, Lng: %.4f".format(lastLoc.latitude, lastLoc.longitude)
-                                    }
-                                }
-                            } else {
-                                isGpsLive = false
-                                pickupAddress = "Location unavailable • choose a pickup pin"
-                            }
+        fun processLocationResult(location: android.location.Location) {
+            isDetectingLocation = false
+            pickupLatLng = LatLng(location.latitude, location.longitude)
+            isGpsLive = true
+            pickupVerified = true
+            gpsAccuracyMeters = if (location.hasAccuracy()) location.accuracy else null
+            scope.launch {
+                try {
+                    val revRes = ApiClient.getService().reverseGeocode(
+                        mapOf("latitude" to location.latitude, "longitude" to location.longitude)
+                    )
+                    if (revRes.isSuccessful && revRes.body() != null) {
+                        val formatted = revRes.body()!!["formatted_address"] as? String
+                        if (!formatted.isNullOrBlank()) {
+                            pickupAddress = formatted
                         }
                     }
+                } catch (_: Exception) {
+                    pickupAddress = "Near Lat: %.4f, Lng: %.4f".format(location.latitude, location.longitude)
                 }
-                .addOnFailureListener {
-                    isDetectingLocation = false
-                    isGpsLive = false
-                    pickupAddress = "Location unavailable • choose a pickup pin"
+            }
+        }
+
+        @SuppressLint("MissingPermission")
+        fun fallbackToFrameworkLocation() {
+            try {
+                val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                if (lm != null) {
+                    val provider = when {
+                        lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+                        lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                        else -> LocationManager.PASSIVE_PROVIDER
+                    }
+                    val loc = lm.getLastKnownLocation(provider)
+                    if (loc != null) {
+                        processLocationResult(loc)
+                        return
+                    }
                 }
-        } catch (_: Exception) {
+            } catch (_: Exception) {}
             isDetectingLocation = false
             isGpsLive = false
             pickupAddress = "Location unavailable • choose a pickup pin"
+        }
+
+        isDetectingLocation = true
+        val gmsStatus = try {
+            GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context.applicationContext)
+        } catch (e: SecurityException) {
+            android.util.Log.w("LocationScreen", "SecurityException checking Google Play Services: ${e.message}")
+            ConnectionResult.SERVICE_INVALID
+        } catch (_: Throwable) {
+            ConnectionResult.UNKNOWN
+        }
+
+        if (gmsStatus == ConnectionResult.SUCCESS && fusedLocationClient != null) {
+            try {
+                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                    ?.addOnSuccessListener { location ->
+                        if (location != null) {
+                            processLocationResult(location)
+                        } else {
+                            try {
+                                fusedLocationClient.lastLocation
+                                    ?.addOnSuccessListener { lastLoc ->
+                                        if (lastLoc != null) processLocationResult(lastLoc)
+                                        else fallbackToFrameworkLocation()
+                                    }
+                                    ?.addOnFailureListener { e ->
+                                        android.util.Log.w("LocationScreen", "Fused lastLocation failure: ${e.message}")
+                                        fallbackToFrameworkLocation()
+                                    }
+                                    ?: fallbackToFrameworkLocation()
+                            } catch (_: Throwable) {
+                                fallbackToFrameworkLocation()
+                            }
+                        }
+                    }
+                    ?.addOnFailureListener { e ->
+                        android.util.Log.w("LocationScreen", "Fused getCurrentLocation failure: ${e.message}")
+                        fallbackToFrameworkLocation()
+                    }
+                    ?: fallbackToFrameworkLocation()
+            } catch (e: Throwable) {
+                android.util.Log.w("LocationScreen", "FusedLocationProviderClient invocation exception: ${e.message}")
+                fallbackToFrameworkLocation()
+            }
+        } else {
+            fallbackToFrameworkLocation()
         }
     }
 
@@ -457,23 +482,7 @@ fun LocationScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        try {
-            val api = ApiClient.getService()
-            val health = api.getMapProviderHealth()
-            if (health.isSuccessful) {
-                val body = health.body().orEmpty()
-                mapProviderDisclosure = "${body["provider"] ?: "Map"} · ${body["status"] ?: "status unknown"}. ${body["message"] ?: "Map provider disclosure"}"
-            } else mapProviderDisclosure = "Map provider health is unavailable; route and place estimates may be approximate."
-            val pinsResponse = api.getSavedLocationPins()
-            if (pinsResponse.isSuccessful) savedPins = pinsResponse.body().orEmpty().mapNotNull { p ->
-                val id = p["id"] as? String ?: return@mapNotNull null
-                SavedPinLocal(id, p["label"] as? String ?: "Saved pin", p["address"] as? String ?: "",
-                    (p["latitude"] as? Number)?.toDouble() ?: return@mapNotNull null,
-                    (p["longitude"] as? Number)?.toDouble() ?: return@mapNotNull null, p["pin_type"] as? String ?: "PICKUP")
-            }
-        } catch (_: Exception) { mapProviderDisclosure = "Map provider unavailable. Saved pins will load when connectivity returns." }
-    }
+
 
     LaunchedEffect(pickupLatLng, selectedDestination) {
         val destination = selectedDestination ?: return@LaunchedEffect
@@ -521,7 +530,7 @@ fun LocationScreen(
         }
     }
 
-    // Initial load: GPS, Vehicle categories, and Recent destination shortcuts (Feature 47)
+    // Unified Staggered Background Loader: Eliminates ANR and UI thread starvation
     LaunchedEffect(Unit) {
         val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val hasCoarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -533,74 +542,122 @@ fun LocationScreen(
             )
         }
 
-        try {
-            val catRes = ApiClient.getService().getVehicleCategories()
-            if (catRes.isSuccessful && !catRes.body().isNullOrEmpty()) {
-                val cats = catRes.body()!!.map { dto ->
-                    val safeCode = dto.code ?: "E_RICKSHAW_STANDARD"
-                    val fare = when (safeCode.uppercase()) {
-                        "E_RICKSHAW_SHARE", "SHARE", "POOL" -> 10
-                        "E_AUTO", "AUTO" -> 30
-                        "E_CARGO_LOADER", "CARGO", "LOADER" -> 50
-                        else -> 20
+        withContext(Dispatchers.IO) {
+            try {
+                val catRes = ApiClient.getService().getVehicleCategories()
+                if (catRes.isSuccessful && !catRes.body().isNullOrEmpty()) {
+                    val cats = catRes.body()!!.map { dto ->
+                        val safeCode = dto.code ?: "E_RICKSHAW_STANDARD"
+                        val fare = when (safeCode.uppercase()) {
+                            "E_RICKSHAW_SHARE", "SHARE", "POOL" -> 10
+                            "E_AUTO", "AUTO" -> 30
+                            "E_CARGO_LOADER", "CARGO", "LOADER" -> 50
+                            else -> 20
+                        }
+                        LuxuryVehicleCategory(
+                            id = dto.id ?: "cat_1",
+                            name = dto.name ?: "Standard E-Rickshaw",
+                            desc = dto.description ?: "Clean Electric Transit",
+                            capacity = dto.capacity,
+                            fareRupees = fare,
+                            code = safeCode,
+                            legroomInches = dto.legroomInches ?: 42.0,
+                            quietnessDb = dto.quietnessDb ?: 50.0,
+                            isElectric = dto.isElectric ?: false,
+                            wheelchairAccessible = dto.wheelchairAccessible ?: false,
+                            petFriendly = dto.petFriendly ?: false,
+                            luggageCapacity = "${dto.luggageLargeCapacity ?: 2} Large + ${dto.luggageSmallCapacity ?: 2} Small"
+                        )
                     }
-                    LuxuryVehicleCategory(
-                        id = dto.id ?: "cat_1",
-                        name = dto.name ?: "Standard E-Rickshaw",
-                        desc = dto.description ?: "Clean Electric Transit",
-                        capacity = dto.capacity,
-                        fareRupees = fare,
-                        code = safeCode,
-                        legroomInches = dto.legroomInches ?: 42.0,
-                        quietnessDb = dto.quietnessDb ?: 50.0,
-                        isElectric = dto.isElectric ?: false,
-                        wheelchairAccessible = dto.wheelchairAccessible ?: false,
-                        petFriendly = dto.petFriendly ?: false,
-                        luggageCapacity = "${dto.luggageLargeCapacity ?: 2} Large + ${dto.luggageSmallCapacity ?: 2} Small"
-                    )
+                    withContext(Dispatchers.Main) {
+                        dynamicCategories = cats
+                    }
                 }
-                dynamicCategories = cats
-            }
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
 
-        // Load saved customer preferences into booking parameters (Feature 70)
-        try {
-            val prefRes = ApiClient.getService().getCustomerPreferences()
-            if (prefRes.isSuccessful && prefRes.body() != null) {
-                val p = prefRes.body()!!
-                quietRideRequested = p.quietRide
-                cabinTempRequested = p.temperatureCelsius
-                p.preferredMusic?.let { musicRequested = it }
-                noPhoneCall = p.noPhoneCallRide
-                p.preferredDriverLanguage?.let { driverLanguageRequested = it }
-                femaleDriverRequested = p.femaleDriverPreferred
-                p.vehicleColorPreference?.let { vehicleColorRequested = it }
-                p.premiumAmenities?.let { amenitiesRequested = it }
-                evRideRequested = p.electricVehiclePreferred
-                wheelchairRequested = p.wheelchairAccessRequired
-                stepFreePickup = p.stepFreePickupRequired
-                assistanceAnimal = p.assistanceAnimalPresent
-                extraLegroomRequested = p.extraLegroomRequired
-                petFriendlyRequested = p.petFriendlyPreferred
-                p.accessibilityNotes?.let { specialAssistanceNotes = it }
-            }
-        } catch (_: Exception) {}
+        // Stagger non-essential background requests by 1.2s to prevent CPU contention during MapView layout
+        delay(1200)
 
-        // Load recent destination shortcuts (Feature 47)
-        try {
-            val recRes = ApiClient.getService().getRecentDestinations()
-            if (recRes.isSuccessful && !recRes.body().isNullOrEmpty()) {
-                recentDestinations = recRes.body()!!
-            }
-        } catch (_: Exception) {}
+        withContext(Dispatchers.IO) {
+            val api = ApiClient.getService()
 
-        // Load expiring promo reminders (Feature 99)
-        try {
-            val promoRes = ApiClient.getService().getExpiringPromos()
-            if (promoRes.isSuccessful && !promoRes.body().isNullOrEmpty()) {
-                expiringPromos = promoRes.body()!!
-            }
-        } catch (_: Exception) {}
+            // 1. Map Provider Health
+            try {
+                val health = api.getMapProviderHealth()
+                if (health.isSuccessful) {
+                    val body = health.body().orEmpty()
+                    val disclosure = "${body["provider"] ?: "Map"} · ${body["status"] ?: "status unknown"}. ${body["message"] ?: "Map provider disclosure"}"
+                    withContext(Dispatchers.Main) { mapProviderDisclosure = disclosure }
+                }
+            } catch (_: Exception) {}
+
+            // 2. Saved Pins
+            try {
+                val pinsResponse = api.getSavedLocationPins()
+                if (pinsResponse.isSuccessful) {
+                    val parsedPins = pinsResponse.body().orEmpty().mapNotNull { p ->
+                        val id = p["id"] as? String ?: return@mapNotNull null
+                        SavedPinLocal(
+                            id, p["label"] as? String ?: "Saved pin", p["address"] as? String ?: "",
+                            (p["latitude"] as? Number)?.toDouble() ?: return@mapNotNull null,
+                            (p["longitude"] as? Number)?.toDouble() ?: return@mapNotNull null,
+                            p["pin_type"] as? String ?: "PICKUP"
+                        )
+                    }
+                    withContext(Dispatchers.Main) { savedPins = parsedPins }
+                }
+            } catch (_: Exception) {}
+
+            // 3. Customer Preferences
+            try {
+                val prefRes = api.getCustomerPreferences()
+                if (prefRes.isSuccessful && prefRes.body() != null) {
+                    val p = prefRes.body()!!
+                    withContext(Dispatchers.Main) {
+                        quietRideRequested = p.quietRide
+                        cabinTempRequested = p.temperatureCelsius
+                        p.preferredMusic?.let { musicRequested = it }
+                        noPhoneCall = p.noPhoneCallRide
+                        p.preferredDriverLanguage?.let { driverLanguageRequested = it }
+                        femaleDriverRequested = p.femaleDriverPreferred
+                        p.vehicleColorPreference?.let { vehicleColorRequested = it }
+                        p.premiumAmenities?.let { amenitiesRequested = it }
+                        evRideRequested = p.electricVehiclePreferred
+                        wheelchairRequested = p.wheelchairAccessRequired
+                        stepFreePickup = p.stepFreePickupRequired
+                        assistanceAnimal = p.assistanceAnimalPresent
+                        extraLegroomRequested = p.extraLegroomRequired
+                        petFriendlyRequested = p.petFriendlyPreferred
+                        p.accessibilityNotes?.let { specialAssistanceNotes = it }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // 4. Recent Destinations
+            try {
+                val recRes = api.getRecentDestinations()
+                if (recRes.isSuccessful && !recRes.body().isNullOrEmpty()) {
+                    withContext(Dispatchers.Main) { recentDestinations = recRes.body()!! }
+                }
+            } catch (_: Exception) {}
+
+            // 5. Expiring Promos
+            try {
+                val promoRes = api.getExpiringPromos()
+                if (promoRes.isSuccessful && !promoRes.body().isNullOrEmpty()) {
+                    withContext(Dispatchers.Main) { expiringPromos = promoRes.body()!! }
+                }
+            } catch (_: Exception) {}
+
+            // 6. Active Incidents
+            try {
+                val incRes = api.getActiveIncidentBanners()
+                if (incRes.isSuccessful && incRes.body() != null) {
+                    withContext(Dispatchers.Main) { activeIncidents = incRes.body()!! }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     // Autocomplete Search
@@ -638,10 +695,11 @@ fun LocationScreen(
         }
     }
 
-    // Dynamic Fare Calculation
+    // Dynamic Fare Calculation (with 300ms debounce to prevent request flooding)
     LaunchedEffect(selectedDestination, selectedCategoryIndex, isSharedRide, selectedSeats, pickupLatLng, intermediateStops.size, isRoundTrip) {
         val dest = selectedDestination ?: defaultCuratedDestinations.first()
-        val cat = dynamicCategories.getOrNull(selectedCategoryIndex) ?: dynamicCategories.first()
+        val cat = dynamicCategories.getOrNull(selectedCategoryIndex) ?: dynamicCategories.firstOrNull() ?: return@LaunchedEffect
+        delay(300)
         isCalculatingFare = true
         try {
             if (isSharedRide) {
@@ -1190,28 +1248,26 @@ fun LocationScreen(
                 border = BorderStroke(1.dp, LuxuryColors.CardBorder),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(170.dp)
+                    .height(250.dp)
             ) {
                 Box {
                     val destPlace = selectedDestination ?: defaultCuratedDestinations.first()
                     LuxuryMapView(
                         modifier = Modifier.fillMaxSize(),
                         pickupLatLng = pickupLatLng,
-                        pickupTitle = "Pickup: $pickupAddress",
+                        pickupTitle = "PICKUP",
                         destLatLng = LatLng(destPlace.lat, destPlace.lng),
                         destTitle = destPlace.name
                     )
 
-                    // Top GPS status & Map pin actions
+                    // Map pin action pills positioned on TopEnd to avoid overlapping with TopStart GPS HUD
                     Row(
                         modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(6.dp),
+                            .align(Alignment.TopEnd)
+                            .padding(top = 8.dp, end = 52.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        GoldBadge(if (isGpsLive) "GPS LIVE" else "GPS READY")
-
                         Surface(
                             shape = RoundedCornerShape(LuxuryDimensions.RadiusSmall),
                             color = LuxuryColors.ObsidianBlack.copy(alpha = 0.88f),
@@ -1268,7 +1324,7 @@ fun LocationScreen(
                 },
                 placeholder = {
                     Text(
-                        if (isSearchingDestinations) "Searching live landmarks..." else "Where may we escort you?",
+                        if (isSearchingDestinations) "Searching live landmarks..." else "Where are you to go ?",
                         color = LuxuryColors.SubtleGray
                     )
                 },
@@ -1294,7 +1350,7 @@ fun LocationScreen(
 
             if (selectedDestination == null) {
                 Text(
-                    text = if (dynamicDestinations.isNotEmpty()) "LIVE MATCHES (SERVER)" else "DISTINGUISHED DESTINATIONS",
+                    text = if (dynamicDestinations.isNotEmpty()) "LIVE MATCHES (SERVER)" else "POPULAR DESTINATIONS",
                     style = LuxuryTypography.TitleGold.copy(fontSize = 13.sp)
                 )
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1503,7 +1559,7 @@ fun LocationScreen(
 
                         if (intermediateStops.isEmpty()) {
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("Direct non-stop escort. Add waypoints with designated dwell times.", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
+                            Text("Direct non-stop ride. Add stops with wait time.", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
                         } else {
                             Spacer(modifier = Modifier.height(6.dp))
                             intermediateStops.forEachIndexed { idx, stp ->
@@ -1576,7 +1632,7 @@ fun LocationScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Schedule Paired Return Journey", style = LuxuryTypography.BodyRegular.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp))
-                                Text("Automatically reserve return chauffeur escort", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
+                                Text("Automatically book return chauffeur ride", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
                             }
                             Switch(
                                 checked = isReturnTripScheduled,
@@ -1735,7 +1791,7 @@ fun LocationScreen(
                                 value = destinationNotes,
                                 onValueChange = { destinationNotes = it },
                                 label = { Text("Destination Notes for Chauffeur", fontSize = 11.sp) },
-                                placeholder = { Text("e.g. Escort to 4th floor penthouse lobby", color = LuxuryColors.SubtleGray) },
+                                placeholder = { Text("e.g. Drop at 4th floor penthouse lobby", color = LuxuryColors.SubtleGray) },
                                 textStyle = LuxuryTypography.BodyRegular.copy(fontSize = 13.sp),
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -1819,7 +1875,7 @@ fun LocationScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("SELECT LUXURY ESCORT", style = LuxuryTypography.TitleGold.copy(fontSize = 12.sp))
+                    Text("SELECT LUXURY RIDE", style = LuxuryTypography.TitleGold.copy(fontSize = 12.sp))
                     Row {
                         TextButton(
                             onClick = { showFeatureComparisonSheet = true },

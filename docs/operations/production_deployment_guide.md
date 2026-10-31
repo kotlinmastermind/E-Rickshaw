@@ -6,7 +6,7 @@
 - Valid SSL / TLS Certificates (Let's Encrypt or enterprise wildcard)
 - PostgreSQL 16
 - Redis 7.x
-- Configured external provider credentials (SMS: Twilio, Payments: Razorpay, Maps: Google Maps Platform)
+- Configured external provider credentials (SMS: Google Firebase, Payments: Razorpay, Maps: Google Maps Platform)
 
 ---
 
@@ -31,10 +31,7 @@ GOOGLE_MAPS_API_KEY=<prod_maps_key>
 RAZORPAY_KEY_ID=<prod_rzp_key>
 RAZORPAY_KEY_SECRET=<prod_rzp_secret>
 RAZORPAY_WEBHOOK_SECRET=<prod_rzp_webhook_secret>
-SMS_PROVIDER=twilio
-TWILIO_ACCOUNT_SID=<prod_sid>
-TWILIO_AUTH_TOKEN=<prod_token>
-TWILIO_FROM_NUMBER=<prod_e164_number>
+SMS_PROVIDER=firebase
 ```
 
 ---

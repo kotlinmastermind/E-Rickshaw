@@ -69,3 +69,30 @@ async def adjust_route_fare(payload: RouteChangeAdjustmentRequest, db: AsyncSess
         new_duration_minutes=payload.new_duration_minutes,
         reason=payload.reason
     )
+
+@router.get("/rules")
+async def get_active_fare_rules(db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import select
+    from backend.domain.models import FareRule
+    stmt = select(FareRule).where(FareRule.is_active == True)
+    result = await db.execute(stmt)
+    rules = result.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "category_id": r.category_id,
+            "version": r.version,
+            "base_fare_rupees": r.base_fare_cents // 100,
+            "per_km_rupees": r.per_km_cents // 100,
+            "per_minute_rupees": r.per_minute_cents // 100,
+            "minimum_fare_rupees": r.minimum_fare_cents // 100,
+            "cancellation_fee_rupees": r.cancellation_fee_cents // 100,
+            "surge_multiplier": r.surge_multiplier,
+            "grace_waiting_minutes": r.grace_waiting_minutes,
+            "shared_discount_percentage": r.shared_discount_percentage,
+            "tax_percentage": r.tax_percentage,
+            "is_active": r.is_active
+        }
+        for r in rules
+    ]
+

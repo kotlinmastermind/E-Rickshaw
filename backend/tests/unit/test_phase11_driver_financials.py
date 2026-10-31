@@ -51,7 +51,7 @@ async def test_part11_earnings_dashboard_and_ride_breakdown(db_session):
         estimated_fare_cents=200000,
         final_fare_cents=200000, # ₹2,000
         tip_cents=30000,         # ₹300 tip
-        completed_at=now - timedelta(hours=2)
+        completed_at=now - timedelta(seconds=30)
     )
     ride2 = Ride(
         customer_id="cust-part11-2",

@@ -287,7 +287,7 @@ class UserGovernanceService:
         challenge = secrets.token_urlsafe(32)
         return {
             "challenge": challenge,
-            "rp": {"name": "Grand Chauffeur Luxury Escort", "id": "grandchauffeur.luxury"},
+            "rp": {"name": "Grand Chauffeur Luxury Ride", "id": "grandchauffeur.luxury"},
             "user": {"id": user_id or "anonymous", "name": "Distinguished Member"},
             "timeout": 60000
         }
@@ -798,7 +798,7 @@ class UserGovernanceService:
             "export_metadata": {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "compliance_standard": "GDPR_DPDP_RIGHT_TO_PORTABILITY",
-                "platform": "Grand Chauffeur Luxury Escort"
+                "platform": "Grand Chauffeur Luxury Ride"
             },
             "user_identity": {
                 "id": user.id,

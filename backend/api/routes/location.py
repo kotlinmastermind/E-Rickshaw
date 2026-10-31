@@ -65,6 +65,27 @@ class BatteryOptimizationPayload(BaseModel):
     displacement_threshold_m: float = Field(15.0, ge=1.0, le=100.0)
 
 
+class IsochronePayload(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    travel_time_minutes: int = Field(15, ge=3, le=60)
+
+
+class AddressValidationPayload(BaseModel):
+    address_line: str = Field(min_length=3, max_length=500)
+    locality: Optional[str] = Field(None, max_length=120)
+    postal_code: Optional[str] = Field(None, max_length=12)
+
+
+class CoordinateItem(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class SnapPathPayload(BaseModel):
+    points: List[CoordinateItem] = Field(min_length=1, max_length=100)
+
+
 # =============================================================================
 # 426. LIVE MAP PROVIDER HEALTH CHECK
 # =============================================================================
@@ -314,32 +335,98 @@ async def get_route(
     route = await provider.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
     data = route.to_dict()
 
-    points = []
-    poly_str = data.get("polyline", "")
-    if ";" in poly_str:
-        for chunk in poly_str.split(";"):
-            if "," in chunk:
-                parts = chunk.strip().split(",")
-                try:
-                    points.append({"latitude": float(parts[0]), "longitude": float(parts[1])})
-                except ValueError:
-                    pass
-
+    points = data.get("points") or []
     if len(points) < 3:
-        steps = 6
-        points = []
-        for i in range(steps + 1):
-            fraction = i / float(steps)
-            lat_interp = origin_lat + fraction * (dest_lat - origin_lat)
-            lng_interp = origin_lng + fraction * (dest_lng - origin_lng)
-            if 0 < i < steps:
-                bend = math.sin(fraction * math.pi) * 0.0015
-                lat_interp += bend
-            points.append({"latitude": round(lat_interp, 6), "longitude": round(lng_interp, 6)})
+        poly_str = data.get("polyline", "")
+        if ";" in poly_str:
+            for chunk in poly_str.split(";"):
+                if "," in chunk:
+                    parts = chunk.strip().split(",")
+                    try:
+                        points.append({"latitude": float(parts[0]), "longitude": float(parts[1])})
+                    except ValueError:
+                        pass
+
+        if len(points) < 3:
+            steps = 6
+            points = []
+            for i in range(steps + 1):
+                fraction = i / float(steps)
+                lat_interp = origin_lat + fraction * (dest_lat - origin_lat)
+                lng_interp = origin_lng + fraction * (dest_lng - origin_lng)
+                if 0 < i < steps:
+                    bend = math.sin(fraction * math.pi) * 0.0015
+                    lat_interp += bend
+                points.append({"latitude": round(lat_interp, 6), "longitude": round(lng_interp, 6)})
 
     return {
         **data,
         "points": points,
         "restriction_coverage": "Verified against active municipal restrictions."
     }
+
+
+# =============================================================================
+# GOOGLE ISOCHRONES, ADDRESS VALIDATION & ROADS PATH SNAPPING
+# =============================================================================
+@router.post("/isochrone")
+async def compute_isochrone(payload: IsochronePayload):
+    """
+    Computes reachable geographic polygon for E-Rickshaws within the specified travel time (minutes).
+    Uses Google Isochrones API / route contours with urban speed constraints.
+    """
+    provider = get_maps_provider()
+    return await provider.get_isochrone(
+        origin_lat=payload.latitude,
+        origin_lng=payload.longitude,
+        travel_time_minutes=payload.travel_time_minutes
+    )
+
+
+@router.post("/validate-address")
+async def validate_address_accuracy(payload: AddressValidationPayload):
+    """
+    Validates delivery/pickup address using Google Address Validation API.
+    Returns deliverability verdict, standardized postal address, and verified coordinates.
+    """
+    provider = get_maps_provider()
+    return await provider.validate_address(
+        address_line=payload.address_line,
+        locality=payload.locality,
+        postal_code=payload.postal_code
+    )
+
+
+@router.post("/snap-path")
+async def snap_gps_path(payload: SnapPathPayload):
+    """
+    Snaps a sequence of GPS breadcrumb coordinates to the nearest road network using Roads API.
+    """
+    provider = get_maps_provider()
+    raw_pts = [{"latitude": p.latitude, "longitude": p.longitude} for p in payload.points]
+    snapped = await provider.snap_path(raw_pts)
+    return {
+        "snapped_points": snapped,
+        "count": len(snapped),
+        "provider_mode": "GOOGLE_ROADS_SNAPPED"
+    }
+
+
+@router.get("/navigation-guidance")
+async def get_navigation_guidance(
+    origin_lat: float = Query(..., ge=-90, le=90),
+    origin_lng: float = Query(..., ge=-180, le=180),
+    dest_lat: float = Query(..., ge=-90, le=90),
+    dest_lng: float = Query(..., ge=-180, le=180)
+):
+    """
+    Returns step-by-step turn-by-turn navigation maneuvers and route guidance for Drivers.
+    """
+    provider = get_maps_provider()
+    return await provider.get_navigation_guidance(
+        origin_lat=origin_lat,
+        origin_lng=origin_lng,
+        dest_lat=dest_lat,
+        dest_lng=dest_lng
+    )
 

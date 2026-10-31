@@ -22,6 +22,13 @@ import com.luxury.chauffeur.driver.core.designsystem.*
 import com.luxury.chauffeur.driver.core.network.DriverApiClient
 import kotlinx.coroutines.launch
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+
 enum class EarningsTab {
     SHIFTS_EARNINGS,
     GOALS_INCENTIVES,
@@ -89,341 +96,401 @@ fun EarningsAndWalletScreen(
     var showEditGoalDialog by remember { mutableStateOf(false) }
     var failureDiagnosticStatement by remember { mutableStateOf<ReconciliationStatementDto?>(null) }
 
-    // Load Data
+    // Load Data (Parallel IO fetching + Default Dispatcher mapping + Main state updates)
     val reloadAll = {
         coroutineScope.launch {
             isLoading = true
             try {
-                val service = DriverApiClient.getService()
+                withContext(Dispatchers.IO) {
+                    val service = DriverApiClient.getService()
 
-                // 1. Dashboard
-                val dashRes = service.getFinancialDashboard(14)
-                if (dashRes.isSuccessful && dashRes.body() != null) {
-                    val body = dashRes.body()!!
-                    walletBalanceRupees = (body["wallet_balance_rupees"] as? Number)?.toDouble() ?: 0.0
+                    coroutineScope {
+                        val dashDeferred = async { runCatching { service.getFinancialDashboard(14) }.getOrNull() }
+                        val shiftDeferred = async { runCatching { service.getCurrentShift() }.getOrNull() }
+                        val utilDeferred = async { runCatching { service.getUtilizationReport() }.getOrNull() }
+                        val goalDeferred = async { runCatching { service.getWeeklyGoal() }.getOrNull() }
+                        val incDeferred = async { runCatching { service.getIncentives() }.getOrNull() }
+                        val bonDeferred = async { runCatching { service.getBonusHistory() }.getOrNull() }
+                        val accDeferred = async { runCatching { service.getPayoutAccounts() }.getOrNull() }
+                        val schedDeferred = async { runCatching { service.getPayoutSchedule() }.getOrNull() }
+                        val recDeferred = async { runCatching { service.getPayoutReconciliation() }.getOrNull() }
+                        val taxDeferred = async { runCatching { service.getTaxDocuments() }.getOrNull() }
+                        val ledgDeferred = async { runCatching { service.getWalletLedger() }.getOrNull() }
+                        val expDeferred = async { runCatching { service.getOperatingExpenses() }.getOrNull() }
+                        val foreDeferred = async { runCatching { service.getAvailabilityForecastAndZones() }.getOrNull() }
+                        val suppDeferred = async { runCatching { service.getFinancialSupportRequests() }.getOrNull() }
 
-                    val todayMap = body["today"] as? Map<*, *>
-                    todayGrossCents = (todayMap?.get("gross_fare_cents") as? Number)?.toLong() ?: 0L
-                    todayCommissionCents = (todayMap?.get("commission_cents") as? Number)?.toLong() ?: 0L
-                    todayTipsCents = (todayMap?.get("tips_cents") as? Number)?.toLong() ?: 0L
-                    todayNetRupees = (todayMap?.get("net_earnings_rupees") as? Number)?.toDouble() ?: 0.0
-                    todayTripsCount = (todayMap?.get("trips_count") as? Number)?.toInt() ?: 0
+                        val dashRes = dashDeferred.await()
+                        val shiftRes = shiftDeferred.await()
+                        val utilRes = utilDeferred.await()
+                        val goalRes = goalDeferred.await()
+                        val incRes = incDeferred.await()
+                        val bonRes = bonDeferred.await()
+                        val accRes = accDeferred.await()
+                        val schedRes = schedDeferred.await()
+                        val recRes = recDeferred.await()
+                        val taxRes = taxDeferred.await()
+                        val ledgRes = ledgDeferred.await()
+                        val expRes = expDeferred.await()
+                        val foreRes = foreDeferred.await()
+                        val suppRes = suppDeferred.await()
 
-                    val weekMap = body["this_week"] as? Map<*, *>
-                    weekGrossCents = (weekMap?.get("gross_fare_cents") as? Number)?.toLong() ?: 0L
-                    weekCommissionCents = (weekMap?.get("commission_cents") as? Number)?.toLong() ?: 0L
-                    weekTipsCents = (weekMap?.get("tips_cents") as? Number)?.toLong() ?: 0L
-                    weekNetRupees = (weekMap?.get("net_earnings_rupees") as? Number)?.toDouble() ?: 0.0
-                    weekTripsCount = (weekMap?.get("trips_count") as? Number)?.toInt() ?: 0
+                        withContext(Dispatchers.Default) {
+                            // 1. Dashboard
+                            var wBal = 0.0
+                            var tGross = 0L; var tComm = 0L; var tTips = 0L; var tNet = 0.0; var tTrips = 0
+                            var wGross = 0L; var wComm = 0L; var wTips = 0L; var wNet = 0.0; var wTrips = 0
+                            var parsedDaily = emptyList<DailyHistoryItem>()
 
-                    val dailyList = body["daily_history"] as? List<*>
-                    if (dailyList != null) {
-                        dailyHistory = dailyList.mapNotNull {
-                            val m = it as? Map<*, *> ?: return@mapNotNull null
-                            DailyHistoryItem(
-                                date = m["date"] as? String ?: "",
-                                dayName = m["day_name"] as? String ?: "",
-                                tripsCount = (m["trips_count"] as? Number)?.toInt() ?: 0,
-                                grossEarningsCents = (m["gross_earnings_cents"] as? Number)?.toLong() ?: 0L,
-                                netEarningsCents = (m["net_earnings_cents"] as? Number)?.toLong() ?: 0L,
-                                netEarningsRupees = (m["net_earnings_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                commissionCents = (m["commission_cents"] as? Number)?.toLong() ?: 0L,
-                                tipsCents = (m["tips_cents"] as? Number)?.toLong() ?: 0L
-                            )
+                            if (dashRes?.isSuccessful == true && dashRes.body() != null) {
+                                val body = dashRes.body()!!
+                                wBal = (body["wallet_balance_rupees"] as? Number)?.toDouble() ?: 0.0
+
+                                val todayMap = body["today"] as? Map<*, *>
+                                tGross = (todayMap?.get("gross_fare_cents") as? Number)?.toLong() ?: 0L
+                                tComm = (todayMap?.get("commission_cents") as? Number)?.toLong() ?: 0L
+                                tTips = (todayMap?.get("tips_cents") as? Number)?.toLong() ?: 0L
+                                tNet = (todayMap?.get("net_earnings_rupees") as? Number)?.toDouble() ?: 0.0
+                                tTrips = (todayMap?.get("trips_count") as? Number)?.toInt() ?: 0
+
+                                val weekMap = body["this_week"] as? Map<*, *>
+                                wGross = (weekMap?.get("gross_fare_cents") as? Number)?.toLong() ?: 0L
+                                wComm = (weekMap?.get("commission_cents") as? Number)?.toLong() ?: 0L
+                                wTips = (weekMap?.get("tips_cents") as? Number)?.toLong() ?: 0L
+                                wNet = (weekMap?.get("net_earnings_rupees") as? Number)?.toDouble() ?: 0.0
+                                wTrips = (weekMap?.get("trips_count") as? Number)?.toInt() ?: 0
+
+                                val dailyList = body["daily_history"] as? List<*>
+                                parsedDaily = dailyList?.mapNotNull {
+                                    val m = it as? Map<*, *> ?: return@mapNotNull null
+                                    DailyHistoryItem(
+                                        date = m["date"] as? String ?: "",
+                                        dayName = m["day_name"] as? String ?: "",
+                                        tripsCount = (m["trips_count"] as? Number)?.toInt() ?: 0,
+                                        grossEarningsCents = (m["gross_earnings_cents"] as? Number)?.toLong() ?: 0L,
+                                        netEarningsCents = (m["net_earnings_cents"] as? Number)?.toLong() ?: 0L,
+                                        netEarningsRupees = (m["net_earnings_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        commissionCents = (m["commission_cents"] as? Number)?.toLong() ?: 0L,
+                                        tipsCents = (m["tips_cents"] as? Number)?.toLong() ?: 0L
+                                    )
+                                }.orEmpty()
+                            }
+
+                            // 2. Shift Status
+                            var parsedShift = ShiftStatusDto()
+                            if (shiftRes?.isSuccessful == true && shiftRes.body() != null) {
+                                val s = shiftRes.body()!!
+                                val compliance = s["compliance_status"] as? Map<*, *>
+                                val forecast = s["forecast"] as? Map<*, *>
+                                parsedShift = ShiftStatusDto(
+                                    isShiftActive = s["is_shift_active"] as? Boolean ?: false,
+                                    shiftId = s["shift_id"] as? String,
+                                    startedAt = s["started_at"] as? String,
+                                    durationMinutes = (s["duration_minutes"] as? Number)?.toDouble() ?: 0.0,
+                                    totalBreakMinutes = (s["total_break_minutes"] as? Number)?.toInt() ?: 0,
+                                    tripsCount = (s["trips_count"] as? Number)?.toInt() ?: 0,
+                                    shiftGrossCents = (s["shift_gross_cents"] as? Number)?.toLong() ?: 0L,
+                                    shiftNetCents = (s["shift_net_cents"] as? Number)?.toLong() ?: 0L,
+                                    shiftNetRupees = (s["shift_net_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                    continuousDrivingMinutes = (compliance?.get("continuous_driving_minutes") as? Number)?.toDouble() ?: 0.0,
+                                    breakRecommended = compliance?.get("break_recommended") as? Boolean ?: false,
+                                    breakReminderMessage = compliance?.get("message") as? String,
+                                    forecastProjectedNetRupees = (forecast?.get("projected_shift_net_rupees") as? Number)?.toDouble() ?: 0.0,
+                                    forecastPaceStatus = forecast?.get("pace_status") as? String ?: "ON_PACE",
+                                    forecastExplanation = forecast?.get("forecast_explanation") as? String ?: ""
+                                )
+                            }
+
+                            // 3. Utilization
+                            var parsedUtil = UtilizationReportDto()
+                            if (utilRes?.isSuccessful == true && utilRes.body() != null) {
+                                val u = utilRes.body()!!
+                                parsedUtil = UtilizationReportDto(
+                                    date = u["date"] as? String ?: "",
+                                    totalOnlineHours = (u["total_online_hours"] as? Number)?.toDouble() ?: 0.0,
+                                    totalInRideHours = (u["total_in_ride_hours"] as? Number)?.toDouble() ?: 0.0,
+                                    utilizationPercentage = (u["utilization_percentage"] as? Number)?.toDouble() ?: 0.0,
+                                    completedTrips = (u["completed_trips"] as? Number)?.toInt() ?: 0
+                                )
+                            }
+
+                            // 4. Goals & Incentives
+                            var parsedGoal = WeeklyGoalDto()
+                            if (goalRes?.isSuccessful == true && goalRes.body() != null) {
+                                val g = goalRes.body()!!
+                                parsedGoal = WeeklyGoalDto(
+                                    targetNetRupees = (g["target_net_rupees"] as? Number)?.toDouble() ?: 25000.0,
+                                    currentNetRupees = (g["current_net_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                    progressPercentage = (g["progress_percentage"] as? Number)?.toDouble() ?: 0.0,
+                                    daysRemaining = (g["days_remaining"] as? Number)?.toInt() ?: 3,
+                                    paceStatus = g["pace_status"] as? String ?: "ON_TRACK",
+                                    paceMessage = g["pace_message"] as? String ?: ""
+                                )
+                            }
+
+                            var parsedCriteria = emptyList<IncentiveCriterion>()
+                            var parsedMilestones = emptyList<IncentiveMilestoneDto>()
+                            if (incRes?.isSuccessful == true && incRes.body() != null) {
+                                val inc = incRes.body()!!
+                                val eligList = inc["eligibility_criteria"] as? List<*>
+                                parsedCriteria = eligList?.mapNotNull {
+                                    val c = it as? Map<*, *> ?: return@mapNotNull null
+                                    IncentiveCriterion(
+                                        name = c["name"] as? String ?: "",
+                                        required = c["required"] as? String ?: "",
+                                        current = c["current"] as? String ?: "",
+                                        isEligible = c["is_eligible"] as? Boolean ?: false
+                                    )
+                                }.orEmpty()
+
+                                val msList = inc["milestones"] as? List<*>
+                                parsedMilestones = msList?.mapNotNull {
+                                    val m = it as? Map<*, *> ?: return@mapNotNull null
+                                    IncentiveMilestoneDto(
+                                        id = m["id"] as? String ?: "",
+                                        title = m["title"] as? String ?: "",
+                                        tier = m["tier"] as? String ?: "BRONZE",
+                                        targetTrips = (m["target_trips"] as? Number)?.toInt() ?: 0,
+                                        currentTrips = (m["current_trips"] as? Number)?.toInt() ?: 0,
+                                        rewardCents = (m["reward_cents"] as? Number)?.toLong() ?: 0L,
+                                        rewardRupees = (m["reward_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        isCompleted = m["is_completed"] as? Boolean ?: false,
+                                        isClaimed = m["is_claimed"] as? Boolean ?: false,
+                                        expiresAt = m["expires_at"] as? String ?: ""
+                                    )
+                                }.orEmpty()
+                            }
+
+                            var parsedBonuses = emptyList<BonusPayoutDto>()
+                            if (bonRes?.isSuccessful == true && bonRes.body() != null) {
+                                val bList = bonRes.body()!!["bonuses"] as? List<*>
+                                parsedBonuses = bList?.mapNotNull {
+                                    val b = it as? Map<*, *> ?: return@mapNotNull null
+                                    BonusPayoutDto(
+                                        id = b["id"] as? String ?: "",
+                                        title = b["title"] as? String ?: "",
+                                        amountRupees = (b["amount_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        paidAt = b["paid_at"] as? String ?: "",
+                                        status = b["status"] as? String ?: "",
+                                        questTier = b["quest_tier"] as? String ?: ""
+                                    )
+                                }.orEmpty()
+                            }
+
+                            // 5. Wallet & Payout Accounts
+                            var parsedAccounts = emptyList<PayoutAccountDto>()
+                            if (accRes?.isSuccessful == true && accRes.body() != null) {
+                                val aList = accRes.body()!!["accounts"] as? List<*>
+                                parsedAccounts = aList?.mapNotNull {
+                                    val a = it as? Map<*, *> ?: return@mapNotNull null
+                                    PayoutAccountDto(
+                                        id = a["id"] as? String ?: "",
+                                        accountType = a["account_type"] as? String ?: "BANK_ACCOUNT",
+                                        holderName = a["holder_name"] as? String ?: "",
+                                        bankName = a["bank_name"] as? String,
+                                        accountNumberMasked = a["account_number_masked"] as? String,
+                                        ifscCode = a["ifsc_code"] as? String,
+                                        upiId = a["upi_id"] as? String,
+                                        isPrimary = a["is_primary"] as? Boolean ?: false,
+                                        isVerified = a["is_verified"] as? Boolean ?: false,
+                                        verificationStatus = a["verification_status"] as? String ?: "VERIFIED",
+                                        pennyDropRef = a["penny_drop_ref"] as? String
+                                    )
+                                }.orEmpty()
+                            }
+
+                            var parsedSchedule = PayoutScheduleDto()
+                            if (schedRes?.isSuccessful == true && schedRes.body() != null) {
+                                val s = schedRes.body()!!
+                                parsedSchedule = PayoutScheduleDto(
+                                    frequency = s["frequency"] as? String ?: "WEEKLY_MONDAY",
+                                    autoPayoutEnabled = s["auto_payout_enabled"] as? Boolean ?: true,
+                                    minimumPayoutRupees = (s["minimum_payout_rupees"] as? Number)?.toDouble() ?: 500.0,
+                                    nextScheduledDate = s["next_scheduled_date"] as? String ?: "Upcoming Monday, 09:00 AM",
+                                    primaryAccountId = s["primary_account_id"] as? String
+                                )
+                            }
+
+                            var parsedRec = emptyList<ReconciliationStatementDto>()
+                            if (recRes?.isSuccessful == true && recRes.body() != null) {
+                                val rList = recRes.body()!!["statements"] as? List<*>
+                                parsedRec = rList?.mapNotNull {
+                                    val r = it as? Map<*, *> ?: return@mapNotNull null
+                                    ReconciliationStatementDto(
+                                        id = r["id"] as? String ?: "",
+                                        periodMonth = r["period_month"] as? String ?: "",
+                                        grossFareCents = (r["gross_fare_cents"] as? Number)?.toLong() ?: 0L,
+                                        platformCommissionCents = (r["platform_commission_cents"] as? Number)?.toLong() ?: 0L,
+                                        tipsCents = (r["tips_cents"] as? Number)?.toLong() ?: 0L,
+                                        bonusesCents = (r["bonuses_cents"] as? Number)?.toLong() ?: 0L,
+                                        tdsDeductionCents = (r["tds_deduction_cents"] as? Number)?.toLong() ?: 0L,
+                                        netSettlementCents = (r["net_settlement_cents"] as? Number)?.toLong() ?: 0L,
+                                        netSettlementRupees = (r["net_settlement_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        settlementStatus = r["settlement_status"] as? String ?: "SETTLED",
+                                        bankUtrNumber = r["bank_utr_number"] as? String,
+                                        failureReason = r["failure_reason"] as? String,
+                                        failureExplanation = r["failure_explanation"] as? String,
+                                        canRetry = r["can_retry"] as? Boolean ?: false,
+                                        settledAt = r["settled_at"] as? String
+                                    )
+                                }.orEmpty()
+                            }
+
+                            var parsedTaxes = emptyList<TaxDocumentDto>()
+                            if (taxRes?.isSuccessful == true && taxRes.body() != null) {
+                                val tList = taxRes.body()!!["tax_documents"] as? List<*>
+                                parsedTaxes = tList?.mapNotNull {
+                                    val t = it as? Map<*, *> ?: return@mapNotNull null
+                                    TaxDocumentDto(
+                                        id = t["id"] as? String ?: "",
+                                        title = t["title"] as? String ?: "",
+                                        documentType = t["document_type"] as? String ?: "",
+                                        financialYear = t["financial_year"] as? String ?: "",
+                                        grossAmountRupees = (t["gross_amount_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        tdsDeductedRupees = (t["tds_deducted_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        downloadUrl = t["download_url"] as? String ?: "",
+                                        issuedDate = t["issued_date"] as? String ?: ""
+                                    )
+                                }.orEmpty()
+                            }
+
+                            var parsedLedger = emptyList<LedgerEntryDto>()
+                            if (ledgRes?.isSuccessful == true && ledgRes.body() != null) {
+                                val lList = ledgRes.body()!!["entries"] as? List<*>
+                                parsedLedger = lList?.mapNotNull {
+                                    val l = it as? Map<*, *> ?: return@mapNotNull null
+                                    LedgerEntryDto(
+                                        id = l["id"] as? String ?: "",
+                                        entryType = l["entry_type"] as? String ?: "CREDIT",
+                                        category = l["category"] as? String ?: "",
+                                        amountCents = (l["amount_cents"] as? Number)?.toLong() ?: 0L,
+                                        amountRupees = (l["amount_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        balanceAfterCents = (l["balance_after_cents"] as? Number)?.toLong() ?: 0L,
+                                        balanceAfterRupees = (l["balance_after_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        description = l["description"] as? String ?: "",
+                                        referenceId = l["reference_id"] as? String,
+                                        createdAt = l["created_at"] as? String ?: ""
+                                    )
+                                }.orEmpty()
+                            }
+
+                            // 6. Expenses, Zones & Welfare
+                            var parsedExpTotal = 0.0
+                            var parsedExpenses = emptyList<OperatingExpenseDto>()
+                            if (expRes?.isSuccessful == true && expRes.body() != null) {
+                                val eBody = expRes.body()!!
+                                parsedExpTotal = (eBody["total_expenses_rupees"] as? Number)?.toDouble() ?: 0.0
+                                val eList = eBody["expenses"] as? List<*>
+                                parsedExpenses = eList?.mapNotNull {
+                                    val e = it as? Map<*, *> ?: return@mapNotNull null
+                                    OperatingExpenseDto(
+                                        id = e["id"] as? String ?: "",
+                                        expenseCategory = e["expense_category"] as? String ?: "EV_CHARGING",
+                                        amountRupees = (e["amount_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        quantityUnits = (e["quantity_units"] as? Number)?.toDouble(),
+                                        unitType = e["unit_type"] as? String,
+                                        odometerKm = (e["odometer_km"] as? Number)?.toDouble(),
+                                        vendorName = e["vendor_name"] as? String,
+                                        receiptNotes = e["receipt_notes"] as? String,
+                                        loggedAt = e["logged_at"] as? String ?: ""
+                                    )
+                                }.orEmpty()
+                            }
+
+                            var parsedZones = emptyList<ZoneComparisonDto>()
+                            var parsedForecasts = emptyList<AvailabilityForecastDto>()
+                            if (foreRes?.isSuccessful == true && foreRes.body() != null) {
+                                val fBody = foreRes.body()!!
+                                val zList = fBody["zone_performance_comparison"] as? List<*>
+                                parsedZones = zList?.mapNotNull {
+                                    val z = it as? Map<*, *> ?: return@mapNotNull null
+                                    ZoneComparisonDto(
+                                        zoneName = z["zone_name"] as? String ?: "",
+                                        averageHourlyRupees = (z["average_hourly_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        demandLevel = z["demand_level"] as? String ?: "HIGH",
+                                        surgeMultiplier = (z["surge_multiplier"] as? Number)?.toDouble() ?: 1.2,
+                                        recommendedTime = z["recommended_time"] as? String ?: ""
+                                    )
+                                }.orEmpty()
+
+                                val aList = fBody["availability_forecast"] as? List<*>
+                                parsedForecasts = aList?.mapNotNull {
+                                    val a = it as? Map<*, *> ?: return@mapNotNull null
+                                    AvailabilityForecastDto(
+                                        dayLabel = a["day_label"] as? String ?: "",
+                                        date = a["date"] as? String ?: "",
+                                        peakHours = a["peak_hours"] as? String ?: "",
+                                        expectedDemandIndex = (a["expected_demand_index"] as? Number)?.toInt() ?: 80,
+                                        potentialDailyEarningsRupees = (a["potential_daily_earnings_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        weatherAdvisory = a["weather_advisory"] as? String ?: ""
+                                    )
+                                }.orEmpty()
+                            }
+
+                            var parsedSupp = emptyList<FinancialSupportDto>()
+                            if (suppRes?.isSuccessful == true && suppRes.body() != null) {
+                                val sList = suppRes.body()!!["requests"] as? List<*>
+                                parsedSupp = sList?.mapNotNull {
+                                    val s = it as? Map<*, *> ?: return@mapNotNull null
+                                    FinancialSupportDto(
+                                        id = s["id"] as? String ?: "",
+                                        requestType = s["request_type"] as? String ?: "",
+                                        requestedAmountRupees = (s["requested_amount_rupees"] as? Number)?.toDouble() ?: 0.0,
+                                        reasonDescription = s["reason_description"] as? String ?: "",
+                                        repaymentPlan = s["repayment_plan"] as? String ?: "",
+                                        status = s["status"] as? String ?: "SUBMITTED",
+                                        approvedAmountRupees = (s["approved_amount_rupees"] as? Number)?.toDouble(),
+                                        adminNotes = s["admin_notes"] as? String,
+                                        submittedAt = s["submitted_at"] as? String ?: ""
+                                    )
+                                }.orEmpty()
+                            }
+
+                            // Batch update UI states cleanly on Main thread
+                            withContext(Dispatchers.Main) {
+                                walletBalanceRupees = wBal
+                                todayGrossCents = tGross
+                                todayCommissionCents = tComm
+                                todayTipsCents = tTips
+                                todayNetRupees = tNet
+                                todayTripsCount = tTrips
+                                weekGrossCents = wGross
+                                weekCommissionCents = wComm
+                                weekTipsCents = wTips
+                                weekNetRupees = wNet
+                                weekTripsCount = wTrips
+                                dailyHistory = parsedDaily
+
+                                shiftStatus = parsedShift
+                                utilizationReport = parsedUtil
+                                weeklyGoal = parsedGoal
+                                incentiveCriteria = parsedCriteria
+                                incentiveMilestones = parsedMilestones
+                                bonusHistory = parsedBonuses
+
+                                payoutAccounts = parsedAccounts
+                                payoutSchedule = parsedSchedule
+                                reconciliationStatements = parsedRec
+                                taxDocuments = parsedTaxes
+                                ledgerEntries = parsedLedger
+
+                                totalExpensesRupees = parsedExpTotal
+                                expenses = parsedExpenses
+                                zoneComparisons = parsedZones
+                                availabilityForecast = parsedForecasts
+                                supportRequests = parsedSupp
+                            }
                         }
                     }
                 }
-
-                // 2. Shift & Compliance
-                val shiftRes = service.getCurrentShift()
-                if (shiftRes.isSuccessful && shiftRes.body() != null) {
-                    val s = shiftRes.body()!!
-                    val compliance = s["compliance_status"] as? Map<*, *>
-                    val forecast = s["forecast"] as? Map<*, *>
-                    shiftStatus = ShiftStatusDto(
-                        isShiftActive = s["is_shift_active"] as? Boolean ?: false,
-                        shiftId = s["shift_id"] as? String,
-                        startedAt = s["started_at"] as? String,
-                        durationMinutes = (s["duration_minutes"] as? Number)?.toDouble() ?: 0.0,
-                        totalBreakMinutes = (s["total_break_minutes"] as? Number)?.toInt() ?: 0,
-                        tripsCount = (s["trips_count"] as? Number)?.toInt() ?: 0,
-                        shiftGrossCents = (s["shift_gross_cents"] as? Number)?.toLong() ?: 0L,
-                        shiftNetCents = (s["shift_net_cents"] as? Number)?.toLong() ?: 0L,
-                        shiftNetRupees = (s["shift_net_rupees"] as? Number)?.toDouble() ?: 0.0,
-                        continuousDrivingMinutes = (compliance?.get("continuous_driving_minutes") as? Number)?.toDouble() ?: 0.0,
-                        breakRecommended = compliance?.get("break_recommended") as? Boolean ?: false,
-                        breakReminderMessage = compliance?.get("message") as? String,
-                        forecastProjectedNetRupees = (forecast?.get("projected_shift_net_rupees") as? Number)?.toDouble() ?: 0.0,
-                        forecastPaceStatus = forecast?.get("pace_status") as? String ?: "ON_PACE",
-                        forecastExplanation = forecast?.get("forecast_explanation") as? String ?: ""
-                    )
-                }
-
-                // 3. Utilization
-                val utilRes = service.getUtilizationReport()
-                if (utilRes.isSuccessful && utilRes.body() != null) {
-                    val u = utilRes.body()!!
-                    utilizationReport = UtilizationReportDto(
-                        date = u["date"] as? String ?: "",
-                        totalOnlineHours = (u["total_online_hours"] as? Number)?.toDouble() ?: 0.0,
-                        totalInRideHours = (u["total_in_ride_hours"] as? Number)?.toDouble() ?: 0.0,
-                        utilizationPercentage = (u["utilization_percentage"] as? Number)?.toDouble() ?: 0.0,
-                        completedTrips = (u["completed_trips"] as? Number)?.toInt() ?: 0
-                    )
-                }
-
-                // 4. Goals & Incentives
-                val goalRes = service.getWeeklyGoal()
-                if (goalRes.isSuccessful && goalRes.body() != null) {
-                    val g = goalRes.body()!!
-                    weeklyGoal = WeeklyGoalDto(
-                        targetNetRupees = (g["target_net_rupees"] as? Number)?.toDouble() ?: 25000.0,
-                        currentNetRupees = (g["current_net_rupees"] as? Number)?.toDouble() ?: 0.0,
-                        progressPercentage = (g["progress_percentage"] as? Number)?.toDouble() ?: 0.0,
-                        daysRemaining = (g["days_remaining"] as? Number)?.toInt() ?: 3,
-                        paceStatus = g["pace_status"] as? String ?: "ON_TRACK",
-                        paceMessage = g["pace_message"] as? String ?: ""
-                    )
-                }
-
-                val incRes = service.getIncentives()
-                if (incRes.isSuccessful && incRes.body() != null) {
-                    val inc = incRes.body()!!
-                    val eligList = inc["eligibility_criteria"] as? List<*>
-                    if (eligList != null) {
-                        incentiveCriteria = eligList.mapNotNull {
-                            val c = it as? Map<*, *> ?: return@mapNotNull null
-                            IncentiveCriterion(
-                                name = c["name"] as? String ?: "",
-                                required = c["required"] as? String ?: "",
-                                current = c["current"] as? String ?: "",
-                                isEligible = c["is_eligible"] as? Boolean ?: false
-                            )
-                        }
-                    }
-                    val msList = inc["milestones"] as? List<*>
-                    if (msList != null) {
-                        incentiveMilestones = msList.mapNotNull {
-                            val m = it as? Map<*, *> ?: return@mapNotNull null
-                            IncentiveMilestoneDto(
-                                id = m["id"] as? String ?: "",
-                                title = m["title"] as? String ?: "",
-                                tier = m["tier"] as? String ?: "BRONZE",
-                                targetTrips = (m["target_trips"] as? Number)?.toInt() ?: 0,
-                                currentTrips = (m["current_trips"] as? Number)?.toInt() ?: 0,
-                                rewardCents = (m["reward_cents"] as? Number)?.toLong() ?: 0L,
-                                rewardRupees = (m["reward_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                isCompleted = m["is_completed"] as? Boolean ?: false,
-                                isClaimed = m["is_claimed"] as? Boolean ?: false,
-                                expiresAt = m["expires_at"] as? String ?: ""
-                            )
-                        }
-                    }
-                }
-
-                val bonRes = service.getBonusHistory()
-                if (bonRes.isSuccessful && bonRes.body() != null) {
-                    val bList = bonRes.body()!!["bonuses"] as? List<*>
-                    if (bList != null) {
-                        bonusHistory = bList.mapNotNull {
-                            val b = it as? Map<*, *> ?: return@mapNotNull null
-                            BonusPayoutDto(
-                                id = b["id"] as? String ?: "",
-                                title = b["title"] as? String ?: "",
-                                amountRupees = (b["amount_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                paidAt = b["paid_at"] as? String ?: "",
-                                status = b["status"] as? String ?: "",
-                                questTier = b["quest_tier"] as? String ?: ""
-                            )
-                        }
-                    }
-                }
-
-                // 5. Wallet, Payouts & Taxes
-                val accRes = service.getPayoutAccounts()
-                if (accRes.isSuccessful && accRes.body() != null) {
-                    val aList = accRes.body()!!["accounts"] as? List<*>
-                    if (aList != null) {
-                        payoutAccounts = aList.mapNotNull {
-                            val a = it as? Map<*, *> ?: return@mapNotNull null
-                            PayoutAccountDto(
-                                id = a["id"] as? String ?: "",
-                                accountType = a["account_type"] as? String ?: "BANK_ACCOUNT",
-                                holderName = a["holder_name"] as? String ?: "",
-                                bankName = a["bank_name"] as? String,
-                                accountNumberMasked = a["account_number_masked"] as? String,
-                                ifscCode = a["ifsc_code"] as? String,
-                                upiId = a["upi_id"] as? String,
-                                isPrimary = a["is_primary"] as? Boolean ?: false,
-                                isVerified = a["is_verified"] as? Boolean ?: false,
-                                verificationStatus = a["verification_status"] as? String ?: "VERIFIED",
-                                pennyDropRef = a["penny_drop_ref"] as? String
-                            )
-                        }
-                    }
-                }
-
-                val schedRes = service.getPayoutSchedule()
-                if (schedRes.isSuccessful && schedRes.body() != null) {
-                    val s = schedRes.body()!!
-                    payoutSchedule = PayoutScheduleDto(
-                        frequency = s["frequency"] as? String ?: "WEEKLY_MONDAY",
-                        autoPayoutEnabled = s["auto_payout_enabled"] as? Boolean ?: true,
-                        minimumPayoutRupees = (s["minimum_payout_rupees"] as? Number)?.toDouble() ?: 500.0,
-                        nextScheduledDate = s["next_scheduled_date"] as? String ?: "Upcoming Monday, 09:00 AM",
-                        primaryAccountId = s["primary_account_id"] as? String
-                    )
-                }
-
-                val recRes = service.getPayoutReconciliation()
-                if (recRes.isSuccessful && recRes.body() != null) {
-                    val rList = recRes.body()!!["statements"] as? List<*>
-                    if (rList != null) {
-                        reconciliationStatements = rList.mapNotNull {
-                            val r = it as? Map<*, *> ?: return@mapNotNull null
-                            ReconciliationStatementDto(
-                                id = r["id"] as? String ?: "",
-                                periodMonth = r["period_month"] as? String ?: "",
-                                grossFareCents = (r["gross_fare_cents"] as? Number)?.toLong() ?: 0L,
-                                platformCommissionCents = (r["platform_commission_cents"] as? Number)?.toLong() ?: 0L,
-                                tipsCents = (r["tips_cents"] as? Number)?.toLong() ?: 0L,
-                                bonusesCents = (r["bonuses_cents"] as? Number)?.toLong() ?: 0L,
-                                tdsDeductionCents = (r["tds_deduction_cents"] as? Number)?.toLong() ?: 0L,
-                                netSettlementCents = (r["net_settlement_cents"] as? Number)?.toLong() ?: 0L,
-                                netSettlementRupees = (r["net_settlement_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                settlementStatus = r["settlement_status"] as? String ?: "SETTLED",
-                                bankUtrNumber = r["bank_utr_number"] as? String,
-                                failureReason = r["failure_reason"] as? String,
-                                failureExplanation = r["failure_explanation"] as? String,
-                                canRetry = r["can_retry"] as? Boolean ?: false,
-                                settledAt = r["settled_at"] as? String
-                            )
-                        }
-                    }
-                }
-
-                val taxRes = service.getTaxDocuments()
-                if (taxRes.isSuccessful && taxRes.body() != null) {
-                    val tList = taxRes.body()!!["tax_documents"] as? List<*>
-                    if (tList != null) {
-                        taxDocuments = tList.mapNotNull {
-                            val t = it as? Map<*, *> ?: return@mapNotNull null
-                            TaxDocumentDto(
-                                id = t["id"] as? String ?: "",
-                                title = t["title"] as? String ?: "",
-                                documentType = t["document_type"] as? String ?: "",
-                                financialYear = t["financial_year"] as? String ?: "",
-                                grossAmountRupees = (t["gross_amount_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                tdsDeductedRupees = (t["tds_deducted_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                downloadUrl = t["download_url"] as? String ?: "",
-                                issuedDate = t["issued_date"] as? String ?: ""
-                            )
-                        }
-                    }
-                }
-
-                val ledgRes = service.getWalletLedger()
-                if (ledgRes.isSuccessful && ledgRes.body() != null) {
-                    val lList = ledgRes.body()!!["entries"] as? List<*>
-                    if (lList != null) {
-                        ledgerEntries = lList.mapNotNull {
-                            val l = it as? Map<*, *> ?: return@mapNotNull null
-                            LedgerEntryDto(
-                                id = l["id"] as? String ?: "",
-                                entryType = l["entry_type"] as? String ?: "CREDIT",
-                                category = l["category"] as? String ?: "",
-                                amountCents = (l["amount_cents"] as? Number)?.toLong() ?: 0L,
-                                amountRupees = (l["amount_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                balanceAfterCents = (l["balance_after_cents"] as? Number)?.toLong() ?: 0L,
-                                balanceAfterRupees = (l["balance_after_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                description = l["description"] as? String ?: "",
-                                referenceId = l["reference_id"] as? String,
-                                createdAt = l["created_at"] as? String ?: ""
-                            )
-                        }
-                    }
-                }
-
-                // 6. Expenses, Zones & Welfare
-                val expRes = service.getOperatingExpenses()
-                if (expRes.isSuccessful && expRes.body() != null) {
-                    val eBody = expRes.body()!!
-                    totalExpensesRupees = (eBody["total_expenses_rupees"] as? Number)?.toDouble() ?: 0.0
-                    val eList = eBody["expenses"] as? List<*>
-                    if (eList != null) {
-                        expenses = eList.mapNotNull {
-                            val e = it as? Map<*, *> ?: return@mapNotNull null
-                            OperatingExpenseDto(
-                                id = e["id"] as? String ?: "",
-                                expenseCategory = e["expense_category"] as? String ?: "EV_CHARGING",
-                                amountRupees = (e["amount_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                quantityUnits = (e["quantity_units"] as? Number)?.toDouble(),
-                                unitType = e["unit_type"] as? String,
-                                odometerKm = (e["odometer_km"] as? Number)?.toDouble(),
-                                vendorName = e["vendor_name"] as? String,
-                                receiptNotes = e["receipt_notes"] as? String,
-                                loggedAt = e["logged_at"] as? String ?: ""
-                            )
-                        }
-                    }
-                }
-
-                val foreRes = service.getAvailabilityForecastAndZones()
-                if (foreRes.isSuccessful && foreRes.body() != null) {
-                    val fBody = foreRes.body()!!
-                    val zList = fBody["zone_performance_comparison"] as? List<*>
-                    if (zList != null) {
-                        zoneComparisons = zList.mapNotNull {
-                            val z = it as? Map<*, *> ?: return@mapNotNull null
-                            ZoneComparisonDto(
-                                zoneName = z["zone_name"] as? String ?: "",
-                                averageHourlyRupees = (z["average_hourly_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                demandLevel = z["demand_level"] as? String ?: "HIGH",
-                                surgeMultiplier = (z["surge_multiplier"] as? Number)?.toDouble() ?: 1.2,
-                                recommendedTime = z["recommended_time"] as? String ?: ""
-                            )
-                        }
-                    }
-                    val aList = fBody["availability_forecast"] as? List<*>
-                    if (aList != null) {
-                        availabilityForecast = aList.mapNotNull {
-                            val a = it as? Map<*, *> ?: return@mapNotNull null
-                            AvailabilityForecastDto(
-                                dayLabel = a["day_label"] as? String ?: "",
-                                date = a["date"] as? String ?: "",
-                                peakHours = a["peak_hours"] as? String ?: "",
-                                expectedDemandIndex = (a["expected_demand_index"] as? Number)?.toInt() ?: 80,
-                                potentialDailyEarningsRupees = (a["potential_daily_earnings_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                weatherAdvisory = a["weather_advisory"] as? String ?: ""
-                            )
-                        }
-                    }
-                }
-
-                val suppRes = service.getFinancialSupportRequests()
-                if (suppRes.isSuccessful && suppRes.body() != null) {
-                    val sList = suppRes.body()!!["requests"] as? List<*>
-                    if (sList != null) {
-                        supportRequests = sList.mapNotNull {
-                            val s = it as? Map<*, *> ?: return@mapNotNull null
-                            FinancialSupportDto(
-                                id = s["id"] as? String ?: "",
-                                requestType = s["request_type"] as? String ?: "",
-                                requestedAmountRupees = (s["requested_amount_rupees"] as? Number)?.toDouble() ?: 0.0,
-                                reasonDescription = s["reason_description"] as? String ?: "",
-                                repaymentPlan = s["repayment_plan"] as? String ?: "",
-                                status = s["status"] as? String ?: "SUBMITTED",
-                                approvedAmountRupees = (s["approved_amount_rupees"] as? Number)?.toDouble(),
-                                adminNotes = s["admin_notes"] as? String,
-                                submittedAt = s["submitted_at"] as? String ?: ""
-                            )
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                // Safe luxury fallback
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Safe fallback
             } finally {
-                isLoading = false
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                }
             }
         }
     }

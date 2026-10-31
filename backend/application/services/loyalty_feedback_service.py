@@ -399,7 +399,7 @@ class LoyaltyFeedbackService:
                 "perks": [
                     "2.0x Royal Points Multiplier",
                     "Guaranteed Presidential Maybach allocation",
-                    "Private Tarmac & Airport Concierge Escort",
+                    "Private Tarmac & Airport Concierge Assist",
                     "Dedicated 24/7 Security Operations Line",
                     "0% Surge Pricing Shield",
                     "Complimentary Laurent-Perrier Champagne Amenity"
@@ -445,7 +445,7 @@ class LoyaltyFeedbackService:
                     "1.0x Royal Points Multiplier",
                     "Standard Luxury Fleet Access",
                     "Chauffeur Luggage Assistance",
-                    "Live Trip GPS Escort Sharing"
+                    "Live Trip GPS Sharing"
                 ]
             }
 
@@ -624,7 +624,7 @@ class LoyaltyFeedbackService:
                 "code": "NIGHT_OWL",
                 "name": "Midnight Executive",
                 "icon": "🌙",
-                "description": "Experienced midnight executive escorts between 11 PM and 5 AM.",
+                "description": "Experienced midnight executive rides between 11 PM and 5 AM.",
                 "is_unlocked": "NIGHT_OWL" in unlocked_codes
             },
             {
@@ -742,7 +742,7 @@ class LoyaltyFeedbackService:
                 PersonalizedOffer(
                     customer_id=customer.id,
                     offer_type="BIRTHDAY" if customer.birthday_date else "ANNIVERSARY",
-                    title="Celebration Jubilee Escort",
+                    title="Celebration Jubilee Ride",
                     tagline="25% off your celebratory royal journey up to ₹1,000",
                     promo_code="CELEBRATE25",
                     discount_percent=25,
@@ -754,12 +754,12 @@ class LoyaltyFeedbackService:
                 PersonalizedOffer(
                     customer_id=None,
                     offer_type="AIRPORT_ESCORT",
-                    title="Executive Airport Tarmac Escort",
+                    title="Executive Airport Tarmac Transfer",
                     tagline="Flat ₹300 off your next chauffeur pickup at Mumbai T2 or Delhi T3",
                     promo_code="AIRPORT300",
                     discount_percent=15,
                     max_discount_cents=30000,
-                    badge_label="FLIGHT ESCORT",
+                    badge_label="AIRPORT RIDE",
                     starts_at=now - timedelta(days=1),
                     expires_at=now + timedelta(days=14)
                 ),

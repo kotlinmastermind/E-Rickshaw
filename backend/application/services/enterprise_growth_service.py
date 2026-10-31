@@ -617,7 +617,7 @@ class EnterpriseGrowthService:
         if not pkgs:
             defaults = [
                 AirportTransferPackage(airport_code="BOM", package_title="Chhatrapati Shivaji Maharaj Airport VIP Fast-Track", category_code="EXECUTIVE_LIMO", flat_fare_cents=850000, meets_and_greets_included=True),
-                AirportTransferPackage(airport_code="DEL", package_title="Indira Gandhi Intl T3 Escort Package", category_code="LUXURY_SUV", flat_fare_cents=750000, meets_and_greets_included=True),
+                AirportTransferPackage(airport_code="DEL", package_title="Indira Gandhi Intl T3 Airport Package", category_code="LUXURY_SUV", flat_fare_cents=750000, meets_and_greets_included=True),
                 AirportTransferPackage(airport_code="BLR", package_title="Kempegowda T2 Executive Corridor", category_code="EXECUTIVE_LIMO", flat_fare_cents=650000, meets_and_greets_included=True)
             ]
             self.db.add_all(defaults)
@@ -663,7 +663,7 @@ class EnterpriseGrowthService:
         if not products:
             defaults = [
                 IntercityProduct(route_name="Mumbai - Pune Expressway Corridor", origin_city="Mumbai", destination_city="Pune", distance_km=148.0, fixed_fare_cents=1250000, toll_included=True),
-                IntercityProduct(route_name="Delhi - Agra Yamuna Expressway Escort", origin_city="Delhi", destination_city="Agra", distance_km=210.0, fixed_fare_cents=1650000, toll_included=True),
+                IntercityProduct(route_name="Delhi - Agra Yamuna Expressway Tour", origin_city="Delhi", destination_city="Agra", distance_km=210.0, fixed_fare_cents=1650000, toll_included=True),
                 IntercityProduct(route_name="Bangalore - Mysore Electric Highway", origin_city="Bangalore", destination_city="Mysore", distance_km=145.0, fixed_fare_cents=1150000, toll_included=True)
             ]
             self.db.add_all(defaults)
@@ -714,7 +714,7 @@ class EnterpriseGrowthService:
         addons = list(res.scalars().all())
         if not addons:
             defaults = [
-                ChauffeurServiceAddon(addon_code="ADDON_ARMORED_ESCORT", title="Armed Security Detail Escort", price_cents=500000, description="Dedicated armed security detail accompanying Maybach vehicle."),
+                ChauffeurServiceAddon(addon_code="ADDON_ARMORED_ESCORT", title="Armed Security Detail Ride", price_cents=500000, description="Dedicated armed security detail accompanying Maybach vehicle."),
                 ChauffeurServiceAddon(addon_code="ADDON_CHAMPAGNE_CRU", title="Chilled Dom Pérignon Champagne Bottle", price_cents=350000, description="Pre-chilled luxury champagne bottle in rear cooler bar."),
                 ChauffeurServiceAddon(addon_code="ADDON_STARLINK_WIFI", title="High-Speed Starlink Satellite In-Cabin Wi-Fi", price_cents=100000, description="Unrestricted satellite internet for executive calls and data."),
                 ChauffeurServiceAddon(addon_code="ADDON_CHILD_SANCTUARY", title="Premium Ergonomic Child Safety Seat", price_cents=50000, description="ISOFIX luxury leather child restraint seat.")

@@ -296,7 +296,7 @@ fun EnterpriseProductsDialog(
 
                             val airportList = if (airportPackages.isNotEmpty()) airportPackages else listOf(
                                 mapOf("airport_code" to "BOM", "package_title" to "Mumbai Int'l T2 VIP Fast-Track Limo", "flat_fare_rupees" to 8500.0),
-                                mapOf("airport_code" to "DEL", "package_title" to "Delhi IGI T3 Escort Package", "flat_fare_rupees" to 7500.0),
+                                mapOf("airport_code" to "DEL", "package_title" to "Delhi IGI T3 Airport Package", "flat_fare_rupees" to 7500.0),
                                 mapOf("airport_code" to "BLR", "package_title" to "Kempegowda T2 Executive Corridor", "flat_fare_rupees" to 6500.0)
                             )
 
@@ -314,7 +314,7 @@ fun EnterpriseProductsDialog(
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(text = "[$code] $title", style = LuxuryTypography.BodyRegular.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold))
-                                        Text(text = "₹${fare.toInt()} Flat • Meet & Greet Escort", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.ChampagneGold))
+                                        Text(text = "₹${fare.toInt()} Flat • Meet & Greet Assist", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.ChampagneGold))
                                     }
                                     Button(
                                         onClick = {
@@ -349,7 +349,7 @@ fun EnterpriseProductsDialog(
 
                             val intercityList = if (intercityProducts.isNotEmpty()) intercityProducts else listOf(
                                 mapOf("route_name" to "Mumbai - Pune Expressway Corridor", "fixed_fare_rupees" to 12500.0, "distance_km" to 148.0),
-                                mapOf("route_name" to "Delhi - Agra Yamuna Expressway Escort", "fixed_fare_rupees" to 16500.0, "distance_km" to 210.0),
+                                mapOf("route_name" to "Delhi - Agra Yamuna Expressway Tour", "fixed_fare_rupees" to 16500.0, "distance_km" to 210.0),
                                 mapOf("route_name" to "Bangalore - Mysore Electric Highway", "fixed_fare_rupees" to 11500.0, "distance_km" to 145.0)
                             )
 
@@ -451,7 +451,7 @@ fun EnterpriseProductsDialog(
                             Spacer(modifier = Modifier.height(6.dp))
 
                             val addList = if (addons.isNotEmpty()) addons else listOf(
-                                mapOf("title" to "Armed Security Detail Escort", "price_rupees" to 5000.0),
+                                mapOf("title" to "Armed Security Detail Ride", "price_rupees" to 5000.0),
                                 mapOf("title" to "Chilled Dom Pérignon Champagne Bottle", "price_rupees" to 3500.0),
                                 mapOf("title" to "Starlink Satellite High-Speed Wi-Fi", "price_rupees" to 1000.0),
                                 mapOf("title" to "ISOFIX Ergonomic Child Safety Seat", "price_rupees" to 500.0)

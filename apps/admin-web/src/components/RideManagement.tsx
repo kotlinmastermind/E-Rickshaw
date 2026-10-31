@@ -302,7 +302,7 @@ export const RideManagement: React.FC = () => {
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, marginTop: 4 }}>
                   {selectedRide.booking_mode === 'HOTEL_CONCIERGE'
                     ? `Hotel Concierge (Suite ${selectedRide.hotel_room_number || 'N/A'})`
-                    : (selectedRide.booking_mode === 'BUSINESS' ? `Corporate (${selectedRide.business_cost_center || 'CC-STD'})` : 'Standard Escort')}
+                    : (selectedRide.booking_mode === 'BUSINESS' ? `Corporate (${selectedRide.business_cost_center || 'CC-STD'})` : 'Standard Luxury Ride')}
                 </div>
                 {selectedRide.hotel_guest_name && (
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>

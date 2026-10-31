@@ -855,7 +855,27 @@ data class RouteDetailsDto(
     @SerializedName("route_label") val routeLabel: String? = null
 )
 
+data class IdentityLookupRequest(
+    @SerializedName("identifier") val identifier: String,
+    @SerializedName("role") val role: String = "customer"
+)
+
+data class IdentityLookupResponse(
+    @SerializedName("exists") val exists: Boolean,
+    @SerializedName("user_id") val userId: String? = null,
+    @SerializedName("role") val role: String? = null,
+    @SerializedName("full_name") val fullName: String? = null,
+    @SerializedName("phone_number") val phoneNumber: String? = null,
+    @SerializedName("phone_masked") val phoneMasked: String? = null,
+    @SerializedName("email") val email: String? = null,
+    @SerializedName("email_masked") val emailMasked: String? = null,
+    @SerializedName("is_active") val isActive: Boolean = true
+)
+
 interface CustomerApiService {
+    @POST("api/v1/auth/lookup")
+    suspend fun lookupIdentity(@Body payload: IdentityLookupRequest): Response<IdentityLookupResponse>
+
     @POST("api/v1/auth/otp/request")
     suspend fun requestOtp(@Body payload: OtpRequestPayload): Response<Map<String, Any>>
 
@@ -935,6 +955,20 @@ interface CustomerApiService {
 
     @POST("api/v1/location/snap-to-road")
     suspend fun snapToRoad(@Body payload: Map<String, Double>): Response<Map<String, Any>>
+
+    @POST("api/v1/location/isochrone")
+    suspend fun getIsochrone(@Body payload: IsochroneRequest): Response<IsochroneResponse>
+
+    @POST("api/v1/location/validate-address")
+    suspend fun validateAddress(@Body payload: AddressValidationRequest): Response<AddressValidationResponse>
+
+    @GET("api/v1/location/navigation-guidance")
+    suspend fun getNavigationGuidance(
+        @Query("origin_lat") originLat: Double,
+        @Query("origin_lng") originLng: Double,
+        @Query("dest_lat") destLat: Double,
+        @Query("dest_lng") destLng: Double
+    ): Response<NavigationGuidanceResponse>
 
     @POST("api/v1/location/eligibility")
     suspend fun checkLocationEligibility(@Body payload: Map<String, Double>): Response<Map<String, Any>>
@@ -3060,6 +3094,54 @@ data class TourismWeeklyResponse(
     @SerializedName("rotation_theme") val rotationTheme: String,
     @SerializedName("featured_places") val featuredPlaces: List<TourismPlaceDto>,
     @SerializedName("all_places") val allPlaces: List<TourismPlaceDto>
+)
+
+data class IsochroneRequest(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double,
+    @SerializedName("travel_time_minutes") val travelTimeMinutes: Int = 15
+)
+
+data class LatLngPointDto(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double
+)
+
+data class IsochroneResponse(
+    @SerializedName("origin") val origin: LatLngPointDto,
+    @SerializedName("travel_time_minutes") val travelTimeMinutes: Int,
+    @SerializedName("reachability_radius_km") val reachabilityRadiusKm: Double,
+    @SerializedName("polygon") val polygon: List<LatLngPointDto>,
+    @SerializedName("provider_mode") val providerMode: String
+)
+
+data class AddressValidationRequest(
+    @SerializedName("address_line") val addressLine: String,
+    @SerializedName("locality") val locality: String? = null,
+    @SerializedName("postal_code") val postalCode: String? = null
+)
+
+data class AddressValidationResponse(
+    @SerializedName("valid") val valid: Boolean,
+    @SerializedName("verdict") val verdict: String,
+    @SerializedName("formatted_address") val formattedAddress: String,
+    @SerializedName("confidence") val confidence: String? = null,
+    @SerializedName("provider_mode") val providerMode: String? = null
+)
+
+data class NavigationStepDto(
+    @SerializedName("instruction") val instruction: String,
+    @SerializedName("maneuver") val maneuver: String,
+    @SerializedName("distance") val distance: String,
+    @SerializedName("duration") val duration: String? = null
+)
+
+data class NavigationGuidanceResponse(
+    @SerializedName("distance_km") val distanceKm: Double,
+    @SerializedName("duration_minutes") val durationMinutes: Double,
+    @SerializedName("steps") val steps: List<NavigationStepDto>,
+    @SerializedName("polyline") val polyline: String? = null,
+    @SerializedName("provider_mode") val providerMode: String? = null
 )
 
 

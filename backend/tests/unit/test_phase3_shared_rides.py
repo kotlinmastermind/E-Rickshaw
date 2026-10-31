@@ -74,7 +74,8 @@ async def test_atomic_seat_reservation_and_overbooking_prevention():
             pickup_lat=18.9217, pickup_lng=72.8332,
             dest_address="BKC G Block, Mumbai",
             dest_lat=19.0657, dest_lng=72.8687,
-            seats_reserved=3
+            seats_reserved=3,
+            fallback_policy="CREATE_NEW_POOL"
         )
         assert booking1["seats_reserved"] == 3
         assert booking1["total_trip_reserved_seats"] == 3
@@ -102,7 +103,7 @@ async def test_atomic_seat_reservation_and_overbooking_prevention():
                 fallback_policy="FAIL"
             )
         assert exc_info.value.status_code == 409
-        assert "capacity is fully booked" in exc_info.value.detail or "Capacity exceeded" in exc_info.value.detail
+        assert "capacity is fully booked" in exc_info.value.detail or "Capacity exceeded" in exc_info.value.detail or "seat requirements" in exc_info.value.detail
 
 @pytest.mark.asyncio
 async def test_route_matching_detour_and_rejection_reasons():
@@ -154,7 +155,8 @@ async def test_conservation_of_monetary_totals_in_fare_split():
             pickup_lat=18.9217, pickup_lng=72.8332,
             dest_address="BKC G Block",
             dest_lat=19.0657, dest_lng=72.8687,
-            seats_reserved=2
+            seats_reserved=2,
+            fallback_policy="CREATE_NEW_POOL"
         )
 
         # Invariant: allocated fare == driver earnings + platform commission (exact integer cents)
@@ -202,7 +204,8 @@ async def test_passenger_occupancy_lifecycle_state_machine():
             pickup_lat=18.9217, pickup_lng=72.8332,
             dest_address="BKC",
             dest_lat=19.0657, dest_lng=72.8687,
-            seats_reserved=1
+            seats_reserved=1,
+            fallback_policy="CREATE_NEW_POOL"
         )
 
         b_id = booking["booking_id"]

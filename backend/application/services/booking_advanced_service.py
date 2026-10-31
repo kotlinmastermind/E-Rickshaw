@@ -604,7 +604,7 @@ UID:gc-{ride.id}@grandchauffeur.luxury
 DTSTAMP:{dtstamp}
 DTSTART:{dtstart}
 DTEND:{dtend}
-SUMMARY:Grand Chauffeur Escort: {ride.pickup_address} to {ride.destination_address}
+SUMMARY:Grand Chauffeur Ride: {ride.pickup_address} to {ride.destination_address}
 DESCRIPTION:Grand Chauffeur Private Executive Mobility.\\n\\n{passenger_line}\\nSecurity OTP Passcode: {ride.start_otp}\\nChauffeur: {driver_summary}\\n{flight_line}\\n{notes_line}\\nDedicated Concierge Support: concierge@grandchauffeur.luxury
 LOCATION:{ride.pickup_address}
 STATUS:CONFIRMED

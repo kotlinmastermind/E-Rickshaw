@@ -85,7 +85,7 @@ fun TripShareDialog(
                 ) {
                     Column {
                         Text(
-                            "SHARE TRIP ESCORT",
+                            "SHARE LIVE TRIP",
                             style = LuxuryTypography.HeadlineMedium.copy(
                                 color = LuxuryColors.ChampagneGold,
                                 fontSize = 18.sp
@@ -259,7 +259,7 @@ fun TripShareDialog(
                                                 "Track my Grand Chauffeur executive journey live: ${share.shareUrl} (Secured with Privacy Shield)"
                                             )
                                         }
-                                        context.startActivity(Intent.createChooser(intent, "Share Trip Escort"))
+                                        context.startActivity(Intent.createChooser(intent, "Share Live Trip"))
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = LuxuryColors.ChampagneGold),
                                     modifier = Modifier.weight(1f).height(38.dp)
