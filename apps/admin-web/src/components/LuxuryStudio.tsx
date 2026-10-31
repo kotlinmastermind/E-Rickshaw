@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import {
-  Smartphone, Car, Layers, BookOpen, Search,
-  Play, Database, LogOut
+  Play, Database, LogOut, Search
 } from 'lucide-react';
-import { ScreenItem, parseScreens } from '../data/screensData';
+import { ScreenItem, parseScreens, ADMIN_CRUD_MAPPING } from '../data/screensData';
 import { AdminCrudModal } from './AdminCrudModal';
 import { DeviceSimulatorModal } from './DeviceSimulatorModal';
 import { InteractivePopupPlayground } from './InteractivePopupPlayground';
@@ -16,7 +15,8 @@ interface LuxuryStudioProps {
 }
 
 export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut, onOpenSignIn, onSwitchMode }) => {
-  const [activeTab, setActiveTab] = useState<'cust' | 'drv' | 'adm' | 'pop' | 'nav'>('adm');
+  // Default to Customer (50) per uploaded HTML spec: show('cust')
+  const [activeTab, setActiveTab] = useState<'cust' | 'drv' | 'adm' | 'pop' | 'nav'>('cust');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Active Modals
@@ -48,13 +48,14 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
     return matchTitle || matchElem || matchTable;
   });
 
-  // Render Wireframe Card HTML matching the uploaded spec
+  // Render Wireframe Card HTML matching the uploaded HTML spec
   const renderWireframeContent = (s: ScreenItem) => {
     const isMap = s.type === 'm';
     const isList = s.type === 'l';
     const isForm = s.type === 'f';
     const isPrice = s.type === 'd';
-    const isSplash = s.type === 's' || (!isMap && !isList && !isForm && !isPrice);
+    const isPopup = s.type === 'p';
+    const isSplash = s.type === 's' || (!isMap && !isList && !isForm && !isPrice && !isPopup);
 
     const rows = s.elements.map((el, i) => (
       <div key={i} className="r">{el}</div>
@@ -65,6 +66,15 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
         <>
           <div className="map" />
           <div className="sheet">{rows}</div>
+        </>
+      );
+    }
+
+    if (isList) {
+      return (
+        <>
+          {rows}
+          {rows}
         </>
       );
     }
@@ -90,6 +100,16 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
       );
     }
 
+    if (isPopup) {
+      return (
+        <>
+          <div className="big">{s.elements[0]}</div>
+          {rows}
+          <div className="b">{s.elements[s.elements.length - 1] || 'Proceed'}</div>
+        </>
+      );
+    }
+
     if (isSplash) {
       return (
         <>
@@ -101,76 +121,44 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
       );
     }
 
-    // Default list
     return rows;
   };
 
-  const navItems = activeTab === 'cust'
-    ? ['Home', 'Rides', 'Wallet', 'Account']
-    : activeTab === 'drv'
-    ? ['Home', 'Earnings', 'Goals', 'Profile']
-    : null;
+  // Bottom Navigation tabs per spec:
+  // const NAV={cust:['Home','Rides','Wallet','Account'],drv:['Home','Earnings','Goals','Profile'],adm:null};
+  const getCardNav = (s: ScreenItem) => {
+    if (activeTab === 'cust') {
+      const showNav = s.type === 'm' || s.title.startsWith('Wallet') || s.title.startsWith('Ride history');
+      if (showNav) return ['Home', 'Rides', 'Wallet', 'Account'];
+    } else if (activeTab === 'drv') {
+      const showNav = s.type === 'm' || s.title.startsWith('Driver home') || s.title.startsWith('Trip history');
+      if (showNav) return ['Home', 'Earnings', 'Goals', 'Profile'];
+    }
+    return null;
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--t)', display: 'flex', flexDirection: 'column' }}>
-      {/* Top Sovereign Luxury Header */}
-      <header style={{
-        background: '#121216',
-        borderBottom: '1px solid #222226',
-        padding: '12px 20px',
+      {/* Top Header matching uploaded HTML */}
+      <div style={{
         display: 'flex',
-        flexWrap: 'wrap',
         justifyContent: 'space-between',
         alignItems: 'center',
-        gap: 12
+        flexWrap: 'wrap',
+        paddingRight: 16
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            background: 'linear-gradient(135deg, #b8962e, #d4af37)',
-            color: '#0b0b0d',
-            fontWeight: 800,
-            fontSize: 16,
-            width: 36,
-            height: 36,
-            borderRadius: 10,
-            display: 'grid',
-            placeItems: 'center',
-            letterSpacing: '0.05em'
-          }}>
-            ER
-          </div>
-          <div>
-            <div style={{ color: '#d4af37', fontWeight: 700, fontSize: 16, letterSpacing: '0.03em' }}>
-              E-RICKSHAW PLATFORM • LUXURY OS
-            </div>
-            <div style={{ color: '#8d8672', fontSize: 11 }}>
-              130 Luxury Screens • 68 Active Tables • Full Responsive CRUD
-            </div>
-          </div>
+        <div>
+          <h1>E-Rickshaw Platform – Luxury UI</h1>
+          <p className="s">Customer 50 · Driver 50 · Admin 30 · 70 popups · gold-on-black wireframes, Rapido-style flow</p>
         </div>
 
-        {/* Status Indicators & Search */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            background: 'rgba(16,185,129,0.1)',
-            border: '1px solid rgba(16,185,129,0.3)',
-            borderRadius: 20,
-            padding: '4px 12px',
-            fontSize: 11,
-            color: '#10b981'
-          }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} />
-            <span>Supabase 68 Tables • Online</span>
-          </div>
-
+        {/* Search, Mode Switch, Admin Auth Pill */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative' }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: '#8d8672' }} />
+            <Search size={14} style={{ position: 'absolute', left: 10, top: 9, color: '#8d8672' }} />
             <input
               type="text"
-              placeholder="Search 130 screens or tables..."
+              placeholder="Search screens, tables..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               style={{
@@ -180,10 +168,35 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
                 padding: '6px 12px 6px 30px',
                 color: '#f2ead3',
                 fontSize: 12,
-                width: 220
+                width: 190
               }}
             />
           </div>
+
+          {(activeTab === 'cust' || activeTab === 'drv') && (
+            <button
+              onClick={() => setSimulatorState({
+                open: true,
+                category: activeTab,
+                initialId: activeTab === 'cust' ? 8 : 10
+              })}
+              style={{
+                background: 'linear-gradient(90deg, #b8962e, #d4af37)',
+                color: '#0b0b0d',
+                border: 'none',
+                padding: '6px 14px',
+                borderRadius: 20,
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5
+              }}
+            >
+              <Play size={11} fill="#0b0b0d" /> Test Phone Flow
+            </button>
+          )}
 
           {adminUser ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -214,14 +227,14 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
                   border: '1px solid #333',
                   color: '#8d8672',
                   borderRadius: '50%',
-                  width: 32,
-                  height: 32,
+                  width: 30,
+                  height: 30,
                   display: 'grid',
                   placeItems: 'center',
                   cursor: 'pointer'
                 }}
               >
-                <LogOut size={14} />
+                <LogOut size={13} />
               </button>
             </div>
           ) : (
@@ -246,263 +259,225 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
             </div>
           )}
         </div>
-      </header>
+      </div>
 
-      {/* Main Tab Bar matching spec */}
-      <nav className="luxury-tabs">
-        <button
-          className={activeTab === 'adm' ? 'on' : ''}
-          onClick={() => setActiveTab('adm')}
-        >
-          <Database size={14} /> Admin Operations & Live CRUD (30)
-        </button>
+      {/* Main Tab Navigation matching uploaded HTML spec */}
+      <nav id="tabs" className="luxury-tabs">
         <button
           className={activeTab === 'cust' ? 'on' : ''}
           onClick={() => setActiveTab('cust')}
         >
-          <Smartphone size={14} /> Customer (50)
+          Customer (50)
         </button>
         <button
           className={activeTab === 'drv' ? 'on' : ''}
           onClick={() => setActiveTab('drv')}
         >
-          <Car size={14} /> Driver Cockpit (50)
+          Driver (50)
+        </button>
+        <button
+          className={activeTab === 'adm' ? 'on' : ''}
+          onClick={() => setActiveTab('adm')}
+        >
+          Admin (30)
         </button>
         <button
           className={activeTab === 'pop' ? 'on' : ''}
           onClick={() => setActiveTab('pop')}
         >
-          <Layers size={14} /> Popups Matrix (68)
+          Popups (68)
         </button>
         <button
           className={activeTab === 'nav' ? 'on' : ''}
           onClick={() => setActiveTab('nav')}
         >
-          <BookOpen size={14} /> Navigation Rules & Priority
+          Navigation rules
         </button>
       </nav>
 
-      {/* Tab Context Subtitle */}
-      <div style={{ padding: '8px 20px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <p className="s" style={{ padding: 0 }}>
-          {activeTab === 'adm' && '30 Production Admin Screens mapped to live PostgreSQL tables with full CRUD actions.'}
-          {activeTab === 'cust' && '50 Customer Screens with Rapido-style linear booking lifecycle and floating SOS.'}
-          {activeTab === 'drv' && '50 Driver Screens featuring authoritative 20s dispatch overlay and safety locks.'}
-          {activeTab === 'pop' && '68 Popups Matrix categorized by Dialogs, Bottom Sheets, Fullscreen, and Toasts.'}
-          {activeTab === 'nav' && 'Complete architectural navigation rules, priority queues, and state machine flows.'}
-        </p>
-
-        {(activeTab === 'cust' || activeTab === 'drv') && (
-          <button
-            onClick={() => setSimulatorState({
-              open: true,
-              category: activeTab,
-              initialId: activeTab === 'cust' ? 8 : 10
-            })}
-            style={{
-              background: 'linear-gradient(90deg, #b8962e, #d4af37)',
-              color: '#0b0b0d',
-              border: 'none',
-              padding: '6px 14px',
-              borderRadius: 20,
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6
-            }}
-          >
-            <Play size={12} fill="#0b0b0d" /> Launch Interactive Phone Simulator
-          </button>
-        )}
-      </div>
-
       {/* Main View Area */}
-      <main style={{ flex: 1, paddingBottom: 40 }}>
-        {/* VIEW 1: ADMIN OPERATIONS & LIVE CRUD (30 Screens) */}
-        {activeTab === 'adm' && (
-          <div className="grid ad-grid">
-            {filteredScreens.map(s => (
-              <div
-                key={s.id}
-                className="ph ad"
-                onClick={() => setSelectedAdminScreen(s)}
-                style={{ cursor: 'pointer' }}
-              >
-                <div className="top">
-                  <span>{s.title}</span>
-                  <i>Screen {String(s.id).padStart(2, '0')}</i>
-                </div>
-
-                <div className="body">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                    <span style={{ fontSize: 10, color: '#d4af37', background: 'rgba(212,175,55,0.1)', padding: '2px 6px', borderRadius: 6, fontWeight: 700 }}>
-                      TABLE: {s.tableTarget || 'SYSTEM'}
-                    </span>
-                    <span style={{ fontSize: 9.5, color: '#8d8672' }}>
-                      {s.crudActions?.map(a => a.toUpperCase()).join(' • ')}
-                    </span>
-                  </div>
-                  {renderWireframeContent(s)}
-                </div>
-
-                {/* Card Overlay Actions on Hover */}
-                <div className="card-overlay-actions">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedAdminScreen(s);
-                    }}
-                    style={{
-                      background: 'linear-gradient(90deg, #b8962e, #d4af37)',
-                      color: '#0b0b0d',
-                      border: 'none',
-                      borderRadius: 8,
-                      padding: '8px 16px',
-                      fontWeight: 700,
-                      fontSize: 12,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6
-                    }}
-                  >
-                    <Database size={13} /> Open Live CRUD Console
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* VIEW 2 & 3: CUSTOMER (50) & DRIVER (50) SCREENS */}
+      <main id="v" style={{ flex: 1, paddingBottom: 40 }}>
+        {/* VIEW 1: CUSTOMER (50) & DRIVER (50) SCREENS */}
         {(activeTab === 'cust' || activeTab === 'drv') && (
           <div className="grid">
-            {filteredScreens.map(s => (
-              <div
-                key={s.id}
-                className="ph"
-                onClick={() => setSimulatorState({
-                  open: true,
-                  category: activeTab,
-                  initialId: s.id
-                })}
-                style={{ cursor: 'pointer' }}
-              >
-                <div className="top">
-                  <span>{s.title}</span>
-                  <i>{s.id}</i>
-                </div>
-
-                <div className="body">
-                  {renderWireframeContent(s)}
-                </div>
-
-                {/* Bottom Nav Simulation */}
-                {navItems && (s.type === 'm' || s.title.toLowerCase().includes('wallet') || s.title.toLowerCase().includes('history') || s.title.toLowerCase().includes('home')) && (
-                  <div className="bn">
-                    {navItems.map((n, j) => (
-                      <span key={j} style={{ color: j === 0 ? '#d4af37' : '#8d8672', fontWeight: j === 0 ? 700 : 400 }}>
-                        {n}
-                      </span>
-                    ))}
+            {filteredScreens.map(s => {
+              const cardNav = getCardNav(s);
+              return (
+                <div
+                  key={s.id}
+                  className="ph"
+                  onClick={() => setSimulatorState({
+                    open: true,
+                    category: activeTab,
+                    initialId: s.id
+                  })}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="top">
+                    <span>{s.title}</span>
+                    <i>{s.id}</i>
                   </div>
-                )}
 
-                {/* Hover Play Button */}
-                <div className="card-overlay-actions">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSimulatorState({
-                        open: true,
-                        category: activeTab,
-                        initialId: s.id
-                      });
-                    }}
-                    style={{
-                      background: 'linear-gradient(90deg, #b8962e, #d4af37)',
-                      color: '#0b0b0d',
-                      border: 'none',
-                      borderRadius: 8,
-                      padding: '8px 14px',
-                      fontWeight: 700,
-                      fontSize: 11,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6
-                    }}
-                  >
-                    <Play size={12} fill="#0b0b0d" /> Test in Phone Shell
-                  </button>
+                  <div className="body">
+                    {renderWireframeContent(s)}
+                  </div>
+
+                  {cardNav && (
+                    <div className="bn">
+                      {cardNav.map((n, j) => (
+                        j === 0 ? <b key={j}>{n}</b> : <span key={j}>{n}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Hover Overlay Button to test in Simulator */}
+                  <div className="card-overlay-actions">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSimulatorState({
+                          open: true,
+                          category: activeTab,
+                          initialId: s.id
+                        });
+                      }}
+                      style={{
+                        background: 'linear-gradient(90deg, #b8962e, #d4af37)',
+                        color: '#0b0b0d',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '8px 14px',
+                        fontWeight: 700,
+                        fontSize: 11,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5
+                      }}
+                    >
+                      <Play size={12} fill="#0b0b0d" /> Open Phone Simulator
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
-        {/* VIEW 4: POPUPS MATRIX (68 Popups) */}
+        {/* VIEW 2: ADMIN OPERATIONS & LIVE CRUD (30 Screens) */}
+        {activeTab === 'adm' && (
+          <div className="grid ad-grid">
+            {filteredScreens.map(s => {
+              const mapping = ADMIN_CRUD_MAPPING[s.id];
+              return (
+                <div
+                  key={s.id}
+                  className="ph ad"
+                  onClick={() => setSelectedAdminScreen(s)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="top">
+                    <span>{s.title}</span>
+                    <i>{s.id}</i>
+                  </div>
+
+                  <div className="body">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                      <span style={{ fontSize: 9.5, color: '#d4af37', background: 'rgba(212,175,55,0.1)', padding: '2px 6px', borderRadius: 6, fontWeight: 700 }}>
+                        TABLE: {mapping?.table?.toUpperCase() || s.tableTarget || 'SYSTEM'}
+                      </span>
+                      <span style={{ fontSize: 9.5, color: '#8d8672' }}>
+                        {mapping?.actions?.map(a => a.toUpperCase()).join(' • ') || 'READ'}
+                      </span>
+                    </div>
+                    {renderWireframeContent(s)}
+                  </div>
+
+                  {/* Card Overlay Actions on Hover */}
+                  <div className="card-overlay-actions">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAdminScreen(s);
+                      }}
+                      style={{
+                        background: 'linear-gradient(90deg, #b8962e, #d4af37)',
+                        color: '#0b0b0d',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '8px 16px',
+                        fontWeight: 700,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}
+                    >
+                      <Database size={13} /> Open Live CRUD Console
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* VIEW 3: POPUPS MATRIX (68 Popups) */}
         {activeTab === 'pop' && (
-          <div style={{ padding: '16px' }}>
+          <div style={{ padding: '8px 0' }}>
             <InteractivePopupPlayground />
           </div>
         )}
 
-        {/* VIEW 5: NAVIGATION RULES & PRIORITY */}
+        {/* VIEW 4: NAVIGATION RULES (Exact HTML R text) */}
         {activeTab === 'nav' && (
           <div className="sec">
-            <h2>Navigation Rules & Operational Architecture</h2>
-
-            <div style={{
-              background: '#16161a',
-              border: '1px solid #d4af37',
-              borderRadius: 12,
-              padding: 16,
-              marginBottom: 20
-            }}>
-              <h3 style={{ margin: '0 0 10px', color: '#d4af37' }}>Priority Queue Hierarchy</h3>
-              <div style={{
-                background: '#0b0b0d',
-                padding: 12,
-                borderRadius: 8,
-                fontSize: 12,
-                color: '#f2ead3',
-                fontFamily: 'monospace',
-                border: '1px solid #2a2a2e'
-              }}>
-                Session Timeout &gt; Emergency SOS &gt; Driver 20s Dispatch &gt; Fatigue / Fake-GPS &gt; Payment Errors &gt; Info Dialogs &gt; Toasts
-              </div>
-              <p style={{ margin: '8px 0 0', fontSize: 12, color: '#8d8672' }}>
-                Only one blocking popup is shown at any moment. Higher-priority system alerts immediately preempt lower-priority dialogs, while non-blocking toasts auto-dismiss after 3 seconds.
-              </p>
-            </div>
-
-            <h3>Customer App Lifecycle (50 Screens)</h3>
+            <h2>Navigation rules</h2>
+            <h3>Customer app</h3>
             <ul>
-              <li><strong>4 Persistent Bottom Tabs:</strong> <code>Home</code> | <code>Rides</code> | <code>Wallet</code> | <code>Account</code>.</li>
-              <li><strong>Linear Booking Flow:</strong> Home (08) → Search (09) → Choose Ride (12) → Confirm (16) → Searching (18) → Driver Found (19) → Live Ride (23) → Trip Summary (28) → Payment (29) → Rating (30).</li>
-              <li><strong>Active Ride Isolation:</strong> During active rides (Screens 18-25), the bottom navigation is strictly hidden. A persistent bottom card displays driver ETA, vehicle plate, and live location.</li>
-              <li><strong>Floating SOS Panic Button:</strong> Omnipresent on every live-ride screen with 1-tap police (112) and emergency contacts broadcast.</li>
-              <li><strong>Back Button Protection:</strong> Tapping Back during an active ride displays an exit confirmation dialog and <strong>never cancels the ongoing trip</strong>.</li>
-              <li><strong>Out-of-Zone / Restricted Roads:</strong> Verified prior to booking confirmation (Screens 17 & 21).</li>
+              <li>Bottom nav (4 tabs): Home | Rides | Wallet | Account.</li>
+              <li>Booking flow is linear: Home → Search → Choose ride → Confirm → Searching → Driver found → Live ride → Summary → Payment → Rating.</li>
+              <li>During an active ride the bottom nav is hidden; a persistent ride card shows ETA and driver.</li>
+              <li>SOS floating button on every live-ride screen.</li>
+              <li>Back during a ride shows a confirm dialog and never cancels the ride.</li>
+              <li>Driver not found in 3 retries → Offer fare bump or Try again.</li>
+              <li>Out-of-zone / restricted road → alert before Confirm.</li>
             </ul>
-
-            <h3>Driver Cockpit Lifecycle (50 Screens)</h3>
+            <h3>Driver app</h3>
             <ul>
-              <li><strong>4 Persistent Bottom Tabs:</strong> <code>Home</code> | <code>Earnings</code> | <code>Goals</code> | <code>Profile</code>.</li>
-              <li><strong>Onboarding Gatekeeper:</strong> Unapproved drivers only see Approval Tracker (07) and Document Upload (04); Home cockpit remains locked until KYC verification.</li>
-              <li><strong>20-Second Incoming Ride Offer:</strong> Full-screen overlay with circular countdown ring; timeout automatically registers <code>is_accepted=false</code> in <code>ride_assignments</code>.</li>
-              <li><strong>Authoritative Ride State Machine:</strong> Accept → Navigate → Arrived → 4-Digit OTP Verified → Start → Drop → Payment Collection → Rate Customer. Skips are strictly prohibited.</li>
-              <li><strong>Safety Limits:</strong> Continuous online time &gt; 8 hours enforces a mandatory 20-minute fatigue rest countdown lock. Fake-GPS spoofing locks online mode immediately.</li>
+              <li>Bottom nav (4 tabs): Home | Earnings | Goals | Profile.</li>
+              <li>Unapproved driver sees only the Approval tracker, Home is locked.</li>
+              <li>Ride request is a full-screen overlay with a 20s timer; timeout = auto-reject and ride_assignments.status updated.</li>
+              <li>Trip state machine without skips: Accept → Navigate → Arrived → OTP → Start → Drop → Payment → Rate customer.</li>
+              <li>Offline: Home map dims, requests stop. Fatigue limit forces the rest screen.</li>
+              <li>Fake-GPS detection blocks going online until fixed.</li>
             </ul>
-
-            <h3>Admin Operations Website (30 Screens)</h3>
+            <h3>Admin website</h3>
             <ul>
-              <li><strong>Direct Table Mapping:</strong> All 30 admin screens map directly to active Supabase PostgreSQL tables.</li>
-              <li><strong>Destructive Action Safeguards:</strong> Every deletion, refund, or suspension requires a mandatory justification note and writes permanently to <code>audit_logs</code>.</li>
-              <li><strong>SOS Command Desk:</strong> Active emergency SOS alerts display a flashing red banner across all screens with 1-click access to the dispatch console.</li>
+              <li>Left sidebar + top global search + role-based menu; items hidden without admin_permissions.</li>
+              <li>Every destructive action (refund, ban, wallet adjust) needs a confirm modal and writes to audit_logs.</li>
+              <li>Ride detail links to Driver, Customer, Payment and Chat; the SOS console takes priority with a red banner everywhere.</li>
+            </ul>
+            <h3>Popup rules (screens + popups combined)</h3>
+            <ul>
+              <li><b>4 popup types:</b> Dialog (centred, blocking, max 2 buttons), Bottom sheet (choices/forms, swipe-down or back to dismiss), Toast (3s auto-dismiss, never blocks), Full-screen overlay (critical, back and outside tap ignored).</li>
+              <li><b>Priority:</b> Session expired / Force logout &gt; SOS &gt; Driver ride request &gt; Fatigue / Fake-GPS &gt; Payment and network errors &gt; Info dialogs &gt; Toasts. Only one blocking popup at a time; lower-priority ones queue, toasts never queue.</li>
+              <li><b>Back press:</b> Dialog = same as secondary button; Sheet = dismiss; Full-screen = ignored. During an active ride, back never cancels the ride.</li>
+              <li><b>Outside tap:</b> dismisses Sheets only. Destructive dialogs (Cancel ride, Logout, Ban, Delete) never close on outside tap.</li>
+              <li><b>Route stack:</b> popups do not add to the back stack. Primary button either returns to the calling screen with a result or pushes the next screen (e.g. Driver arrived → Share OTP, Payment failed → Payment method).</li>
+              <li><b>Flow triggers (Customer):</b> Pickup confirm sheet → Surge / Fare changed → Searching; No driver found dialog after 3 retries; Driver arrived overlay → Ride in progress; Ride ended → Payment → Tip sheet → Rate prompt.</li>
+              <li><b>Flow triggers (Driver):</b> Go online dialog checks docs, GPS and fatigue; Ride request overlay (20s) → Navigate; Wrong OTP dialog blocks Start; Cash collect sheet → Rate customer; Fatigue overlay forces offline until the rest timer ends.</li>
+              <li><b>Admin:</b> every destructive dialog asks for a reason and writes audit_logs; refunds above the set limit need MFA re-auth; Session timeout overlay clears the sidebar state.</li>
+              <li><b>SOS:</b> Send-SOS dialog appears on Customer and Driver, a hold-to-confirm button prevents accidental triggers, and Admin receives a red banner plus the SOS console.</li>
+              <li><b>Offline:</b> No-internet dialog only blocks network actions; the live ride and map keep working with the last known state.</li>
+              <li><b>Every popup:</b> has a loading state on its primary button, an error toast on failure, and sends no analytics event until a button is tapped.</li>
+            </ul>
+            <h3>Common</h3>
+            <ul>
+              <li>Every screen has loading, empty and error states.</li>
+              <li>Money is stored in cents and shown in ₹.</li>
+              <li>Auth only via Firebase; Supabase is for data only.</li>
             </ul>
           </div>
         )}

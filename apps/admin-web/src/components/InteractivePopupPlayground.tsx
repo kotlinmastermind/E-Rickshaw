@@ -1,24 +1,21 @@
 import React, { useState } from 'react';
-import { CheckCircle, Play } from 'lucide-react';
+import { CheckCircle } from 'lucide-react';
 import { PopupItem, parsePopups } from '../data/screensData';
 
 export const InteractivePopupPlayground: React.FC = () => {
-  const [activeCategory, setActiveCategory] = useState<'cust' | 'drv' | 'adm'>('cust');
   const [searchTerm, setSearchTerm] = useState('');
 
   // Active Live Popup Queue State
   const [activeQueue, setActiveQueue] = useState<PopupItem[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const popups = parsePopups(activeCategory);
+  const sections: { key: 'cust' | 'drv' | 'adm'; title: string }[] = [
+    { key: 'cust', title: 'Customer popups (24)' },
+    { key: 'drv', title: 'Driver popups (24)' },
+    { key: 'adm', title: 'Admin popups (20)' }
+  ];
 
-  const filteredPopups = popups.filter(p => {
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
-    return p.title.toLowerCase().includes(term) || p.bodyText.toLowerCase().includes(term);
-  });
-
-  // Priority ranking
+  // Priority ranking per specification
   const getPriorityScore = (item: PopupItem): number => {
     const t = item.title.toLowerCase();
     if (t.includes('session') || t.includes('timeout')) return 100;
@@ -55,63 +52,12 @@ export const InteractivePopupPlayground: React.FC = () => {
   const currentActive = activeQueue[0];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Category selector & search */}
-      <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 12,
-        padding: '0 4px'
-      }}>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => setActiveCategory('cust')}
-            style={{
-              background: activeCategory === 'cust' ? '#d4af37' : '#16161a',
-              color: activeCategory === 'cust' ? '#0b0b0d' : '#f2ead3',
-              border: '1px solid #333',
-              borderRadius: 20,
-              padding: '6px 16px',
-              fontSize: 12,
-              fontWeight: activeCategory === 'cust' ? 700 : 500,
-              cursor: 'pointer'
-            }}
-          >
-            Customer Popups (24)
-          </button>
-          <button
-            onClick={() => setActiveCategory('drv')}
-            style={{
-              background: activeCategory === 'drv' ? '#d4af37' : '#16161a',
-              color: activeCategory === 'drv' ? '#0b0b0d' : '#f2ead3',
-              border: '1px solid #333',
-              borderRadius: 20,
-              padding: '6px 16px',
-              fontSize: 12,
-              fontWeight: activeCategory === 'drv' ? 700 : 500,
-              cursor: 'pointer'
-            }}
-          >
-            Driver Popups (24)
-          </button>
-          <button
-            onClick={() => setActiveCategory('adm')}
-            style={{
-              background: activeCategory === 'adm' ? '#d4af37' : '#16161a',
-              color: activeCategory === 'adm' ? '#0b0b0d' : '#f2ead3',
-              border: '1px solid #333',
-              borderRadius: 20,
-              padding: '6px 16px',
-              fontSize: 12,
-              fontWeight: activeCategory === 'adm' ? 700 : 500,
-              cursor: 'pointer'
-            }}
-          >
-            Admin Popups (20)
-          </button>
-        </div>
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* Legend Notice matching uploaded HTML */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '0 16px' }}>
+        <p className="lg" style={{ padding: 0, margin: 0 }}>
+          Dialog = centred, blocking · Sheet = bottom, swipe-down · Toast = 3s, non-blocking · Full = critical, no dismiss
+        </p>
 
         <input
           type="text"
@@ -119,122 +65,109 @@ export const InteractivePopupPlayground: React.FC = () => {
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
           style={{
-            padding: '7px 14px',
+            padding: '6px 14px',
             background: '#16161a',
             border: '1px solid #2a2a2e',
-            borderRadius: 8,
+            borderRadius: 20,
             color: '#f2ead3',
             fontSize: 12,
-            minWidth: 220
+            minWidth: 200
           }}
         />
       </div>
 
-      {/* Legend Banner */}
-      <div style={{
-        background: '#141418',
-        border: '1px solid #2a2a2e',
-        borderRadius: 10,
-        padding: '10px 16px',
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
-        fontSize: 12,
-        color: '#8d8672'
-      }}>
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-          <span><b style={{ color: '#d4af37' }}>Dialog (d):</b> Centred, blocking modal</span>
-          <span><b style={{ color: '#d4af37' }}>Sheet (b):</b> Bottom drawer (swipe down)</span>
-          <span><b style={{ color: '#10b981' }}>Toast (t):</b> 3s non-blocking pill</span>
-          <span><b style={{ color: '#ef4444' }}>Full (x):</b> Critical overlay, no outside dismiss</span>
-        </div>
-        <div style={{ color: '#d4af37', fontWeight: 600 }}>
-          Strict Priority Queue Active
-        </div>
-      </div>
+      {/* Render all 3 categories stacked matching uploaded HTML */}
+      {sections.map(sec => {
+        const list = parsePopups(sec.key).filter(p => {
+          if (!searchTerm) return true;
+          const term = searchTerm.toLowerCase();
+          return p.title.toLowerCase().includes(term) || p.bodyText.toLowerCase().includes(term);
+        });
 
-      {/* Popups Grid matching uploaded HTML card specs */}
-      <div className={`grid ${activeCategory === 'adm' ? 'ad-grid' : ''}`}>
-        {filteredPopups.map((p, idx) => {
-          const isToast = p.type === 't';
-          const isSheet = p.type === 'b';
-          const isFull = p.type === 'x';
+        if (list.length === 0) return null;
 
-          return (
-            <div
-              key={p.id}
-              className={`ph ${activeCategory === 'adm' ? 'ad' : ''}`}
-              style={{ cursor: 'pointer' }}
-              onClick={() => triggerPopup(p)}
-              title="Click to trigger this popup live in the simulator"
-            >
-              <div className="top">
-                <span>{p.title}</span>
-                <i>{idx + 1}</i>
-              </div>
+        return (
+          <div key={sec.key} style={{ marginTop: 12 }}>
+            <h2 className="ph2">{sec.title}</h2>
+            <div className="grid">
+              {list.map((p, idx) => {
+                const isToast = p.type === 't';
+                const isSheet = p.type === 'b';
+                const isFull = p.type === 'x';
 
-              {/* Dimmed background wireframe */}
-              <div className="body" style={{ opacity: 0.25 }}>
-                <div className="r">&nbsp;</div>
-                <div className="r">&nbsp;</div>
-                <div className="r">&nbsp;</div>
-              </div>
+                return (
+                  <div
+                    key={p.id}
+                    className={`ph ${sec.key === 'adm' ? 'ad' : ''}`}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => triggerPopup(p)}
+                    title="Click to trigger this popup live in the simulator"
+                  >
+                    <div className="top">
+                      <span>{p.title}</span>
+                      <i>{idx + 1}</i>
+                    </div>
 
-              {/* Wireframe Popup Render matching uploaded HTML */}
-              {isToast ? (
-                <div className="tt">
-                  {p.title}: {p.bodyText}
-                </div>
-              ) : (
-                <div className={`ov ${isSheet ? 'bt' : isFull ? 'full' : ''}`}>
-                  <div className={`dl ${isSheet ? 'sh' : ''}`}>
-                    <b>{p.title}</b>
-                    <span>{p.bodyText}</span>
-                    {p.actions.map((act, aIdx) => (
-                      <div
-                        key={aIdx}
-                        className={aIdx === 0 ? 'b' : 'f'}
-                        style={{ textAlign: 'center', marginTop: aIdx === 0 ? 2 : 0 }}
-                      >
-                        {act}
+                    {/* Dimmed background wireframe */}
+                    <div className="body" style={{ opacity: 0.3 }}>
+                      <div className="r">&nbsp;</div>
+                      <div className="r">&nbsp;</div>
+                      <div className="r">&nbsp;</div>
+                    </div>
+
+                    {/* Wireframe Popup Render matching uploaded HTML */}
+                    {isToast ? (
+                      <div className="tt">
+                        {p.title}: {p.bodyText}
                       </div>
-                    ))}
+                    ) : (
+                      <div className={`ov ${isSheet ? 'bt' : isFull ? 'full' : ''}`}>
+                        <div className={`dl ${isSheet ? 'sh' : ''}`}>
+                          <b>{p.title}</b>
+                          <span>{p.bodyText}</span>
+                          {p.actions.map((act, aIdx) => (
+                            <div
+                              key={aIdx}
+                              className={aIdx === 0 ? 'b' : 'f'}
+                              style={{ textAlign: 'center', marginTop: aIdx === 0 ? 2 : 0 }}
+                            >
+                              {act}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Quick Trigger Pill on Hover */}
+                    <div className="card-overlay-actions">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          triggerPopup(p);
+                        }}
+                        style={{
+                          background: 'linear-gradient(90deg, #b8962e, #d4af37)',
+                          border: 'none',
+                          color: '#000',
+                          fontWeight: 700,
+                          padding: '8px 14px',
+                          borderRadius: 8,
+                          fontSize: 11,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Trigger Live Popup
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
-
-              {/* Hover Trigger Action */}
-              <div className="card-overlay-actions">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    triggerPopup(p);
-                  }}
-                  style={{
-                    background: 'linear-gradient(90deg, #b8962e, #d4af37)',
-                    border: 'none',
-                    color: '#000',
-                    fontWeight: 700,
-                    padding: '8px 14px',
-                    borderRadius: 8,
-                    fontSize: 11,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}
-                >
-                  <Play size={12} /> Trigger Live Popup
-                </button>
-              </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        );
+      })}
 
-      {/* LIVE INTERACTIVE POPUP SIMULATION MODAL (Triggered when user clicks a popup) */}
+      {/* LIVE INTERACTIVE POPUP SIMULATION MODAL */}
       {currentActive && (
         <div
           onClick={() => {

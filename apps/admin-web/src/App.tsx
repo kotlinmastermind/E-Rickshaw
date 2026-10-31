@@ -87,7 +87,6 @@ const TAB_BREADCRUMBS: Record<NavTab, BreadcrumbInfo> = {
 
 export const App: React.FC = () => {
   const [authenticated, setAuthenticated] = useState(false);
-  const [checking, setChecking] = useState(() => Boolean(localStorage.getItem('admin_token')));
   const [adminUser, setAdminUser] = useState<any>(null);
   const [viewMode, setViewMode] = useState<'luxury_studio' | 'classic'>('luxury_studio');
   const [showSignInModal, setShowSignInModal] = useState(false);
@@ -105,7 +104,7 @@ export const App: React.FC = () => {
     }).catch(() => {
       localStorage.removeItem('admin_token');
       localStorage.removeItem('admin_refresh_token');
-    }).finally(() => setChecking(false));
+    });
   }, []);
 
   const handleSignOut = () => {
@@ -116,14 +115,6 @@ export const App: React.FC = () => {
       setAdminUser(null);
     });
   };
-
-  if (checking) {
-    return (
-      <main role="status" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#0D0D0F', color: '#C9A24B', fontFamily: 'Georgia, serif' }}>
-        Verifying sovereign administrator session…
-      </main>
-    );
-  }
 
   return (
     <>
