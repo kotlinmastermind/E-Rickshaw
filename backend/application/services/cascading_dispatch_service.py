@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import math
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
@@ -22,8 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.domain.models import (
     Ride, RideAssignment, DriverProfile, DriverAvailability,
-    DriverLocation, DriverDispatchPreferences, VehicleCategory,
-    RideStatusEvent
+    DriverLocation, VehicleCategory, RideStatusEvent
 )
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.api.routes.ws import ws_manager
@@ -35,6 +35,15 @@ MAX_SEARCH_RADIUS_KM: float = 25.0
 OFFER_TIMEOUT_SECONDS: int = 20
 SAFETY_FALLBACK_SECONDS: int = 22
 COOLDOWN_TTL_SECONDS: int = 60
+
+
+@dataclass
+class DriverDispatchPreferences:
+    driver_id: str = ""
+    minimum_fare_cents: int = 0
+    maximum_pickup_distance_km: float = 25.0
+    auto_accept_enabled: bool = False
+    vehicle_categories_json: Optional[str] = None
 
 
 def utc_now() -> datetime:
@@ -60,15 +69,7 @@ class CascadingDispatchService:
         return res.scalar_one_or_none()
 
     async def _driver_preferences(self, driver_id: str) -> DriverDispatchPreferences:
-        res = await self.db.execute(
-            select(DriverDispatchPreferences).where(DriverDispatchPreferences.driver_id == driver_id)
-        )
-        pref = res.scalar_one_or_none()
-        if pref is None:
-            pref = DriverDispatchPreferences(driver_id=driver_id)
-            self.db.add(pref)
-            await self.db.flush()
-        return pref
+        return DriverDispatchPreferences(driver_id=driver_id)
 
     async def _latest_location(self, driver_id: str) -> Optional[DriverLocation]:
         res = await self.db.execute(

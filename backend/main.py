@@ -14,30 +14,24 @@ from backend.api.routes import (
     auth, customer, driver, vehicles, location,
     fares, rides, payments, admin, ws, health,
     wallets, promos, support, chat, favorites, pools, user_governance,
-    safety, loyalty_feedback, driver_onboarding, driver_safety, driver_financials, admin_governance,
-    admin_finance_support, notifications, analytics_bi, infra_ops, enterprise_growth, localization,
-    tourism
+    safety, loyalty_feedback, driver_onboarding, driver_safety, driver_financials,
+    notifications, analytics_bi
 )
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
 async def _dispatch_scheduled_broadcasts():
-    """Process persisted in-app campaigns while this API worker is running."""
-    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    """Process due notifications while this API worker is running."""
     while True:
         try:
             async with async_session_maker() as session:
-                operations = AdminFinanceSupportService(session)
-                await operations.dispatch_due_broadcasts()
-                await operations.activate_due_commission_rules()
-                await operations.process_support_escalations()
                 from backend.application.services.notification_service import NotificationService
                 await NotificationService(session).process_due()
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Scheduled broadcast dispatch cycle failed")
+            logger.exception("Scheduled notification dispatch cycle failed")
         await asyncio.sleep(30)
 
 @asynccontextmanager
@@ -239,8 +233,6 @@ app.include_router(fares.router, prefix=settings.API_V1_STR)
 app.include_router(rides.router, prefix=settings.API_V1_STR)
 app.include_router(payments.router, prefix=settings.API_V1_STR)
 app.include_router(admin.router, prefix=settings.API_V1_STR)
-app.include_router(admin_governance.router, prefix=settings.API_V1_STR)
-app.include_router(admin_finance_support.router, prefix=settings.API_V1_STR)
 app.include_router(notifications.router, prefix=settings.API_V1_STR)
 app.include_router(notifications.admin_router, prefix=settings.API_V1_STR)
 app.include_router(ws.router, prefix=settings.API_V1_STR)
@@ -257,10 +249,6 @@ app.include_router(driver_onboarding.router, prefix=settings.API_V1_STR)
 app.include_router(driver_safety.router, prefix=settings.API_V1_STR)
 app.include_router(driver_financials.router, prefix=settings.API_V1_STR)
 app.include_router(analytics_bi.router, prefix=settings.API_V1_STR)
-app.include_router(infra_ops.router, prefix=settings.API_V1_STR)
-app.include_router(enterprise_growth.router, prefix=settings.API_V1_STR)
-app.include_router(localization.router, prefix=settings.API_V1_STR)
-app.include_router(tourism.router, prefix=settings.API_V1_STR)
 
 @app.get("/", tags=["Root"])
 async def root():

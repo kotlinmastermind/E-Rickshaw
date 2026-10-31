@@ -1094,10 +1094,8 @@ class SafetyAdvancedService:
         alert_res = await self.db.execute(alert_stmt)
         alerts = alert_res.scalars().all()
 
-        # Driver Blocks
-        block_stmt = select(DriverBlock).order_by(desc(DriverBlock.created_at)).limit(20)
-        block_res = await self.db.execute(block_stmt)
-        blocks = block_res.scalars().all()
+        # Driver Blocks (Purged bloat table: driver_blocks)
+        blocks = []
 
         return {
             "incident_cases": [

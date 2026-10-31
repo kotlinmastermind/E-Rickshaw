@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 from backend.application.services.cascading_dispatch_service import CascadingDispatchService
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    DriverLocation, DriverDispatchPreferences, VehicleCategory,
+    DriverLocation, VehicleCategory,
     Ride, RideAssignment, RideStatusEvent
 )
 from backend.infrastructure.cache.redis_client import redis_client
@@ -89,20 +89,6 @@ async def test_driver_timeout_cascades_to_driver_b(db_session):
     loc_a = DriverLocation(driver_id=driver_a.id, latitude=19.0761, longitude=72.8777)
     loc_b = DriverLocation(driver_id=driver_b.id, latitude=19.0765, longitude=72.8777)
     db_session.add_all([loc_a, loc_b])
-
-    pref_a = DriverDispatchPreferences(
-        driver_id=driver_a.id,
-        minimum_fare_cents=0,
-        maximum_pickup_distance_km=25.0,
-        vehicle_categories_json=json.dumps([cat.code])
-    )
-    pref_b = DriverDispatchPreferences(
-        driver_id=driver_b.id,
-        minimum_fare_cents=0,
-        maximum_pickup_distance_km=25.0,
-        vehicle_categories_json=json.dumps([cat.code])
-    )
-    db_session.add_all([pref_a, pref_b])
 
     # 3. Create requested Ride
     ride = Ride(
@@ -199,13 +185,7 @@ async def test_redis_cooldown_prevents_driver_reselection_in_cycle(db_session):
 
     avail = DriverAvailability(driver_id=driver.id, is_online=True, is_busy=False)
     loc = DriverLocation(driver_id=driver.id, latitude=19.0765, longitude=72.8775)
-    pref = DriverDispatchPreferences(
-        driver_id=driver.id,
-        minimum_fare_cents=0,
-        maximum_pickup_distance_km=25.0,
-        vehicle_categories_json=json.dumps([cat.code])
-    )
-    db_session.add_all([avail, loc, pref])
+    db_session.add_all([avail, loc])
 
     ride = Ride(
         customer_id=customer_profile.id,
@@ -275,13 +255,7 @@ async def test_all_drivers_rejecting_leads_to_expired_lifecycle(db_session):
 
     avail = DriverAvailability(driver_id=driver.id, is_online=True, is_busy=False)
     loc = DriverLocation(driver_id=driver.id, latitude=19.0760, longitude=72.8777)
-    pref = DriverDispatchPreferences(
-        driver_id=driver.id,
-        minimum_fare_cents=0,
-        maximum_pickup_distance_km=25.0,
-        vehicle_categories_json=json.dumps([cat.code])
-    )
-    db_session.add_all([avail, loc, pref])
+    db_session.add_all([avail, loc])
 
     ride = Ride(
         customer_id=customer_profile.id,
@@ -374,13 +348,7 @@ async def test_server_authoritative_safety_fallback_execution(db_session):
 
     avail = DriverAvailability(driver_id=driver.id, is_online=True, is_busy=False)
     loc = DriverLocation(driver_id=driver.id, latitude=19.0760, longitude=72.8777)
-    pref = DriverDispatchPreferences(
-        driver_id=driver.id,
-        minimum_fare_cents=0,
-        maximum_pickup_distance_km=25.0,
-        vehicle_categories_json=json.dumps([cat.code])
-    )
-    db_session.add_all([avail, loc, pref])
+    db_session.add_all([avail, loc])
 
     ride = Ride(
         customer_id=customer_profile.id,

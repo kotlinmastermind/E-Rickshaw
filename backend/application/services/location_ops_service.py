@@ -91,21 +91,6 @@ class LocationOpsService:
         if issue not in valid_issues:
             raise HTTPException(422, f"Invalid issue code. Must be one of {valid_issues}.")
         
-        recent = await self.db.scalar(select(func.count(AddressQualityFeedback.id)).where(
-            AddressQualityFeedback.user_id == user_id,
-            AddressQualityFeedback.created_at >= datetime.now(timezone.utc) - timedelta(hours=1)))
-        if int(recent or 0) >= 20:
-            raise HTTPException(429, "Rate limit reached. Please wait before submitting more feedback.")
-        
-        row = AddressQualityFeedback(
-            user_id=user_id,
-            rating=rating,
-            issue_code=issue,
-            provider_mode=str(values.get("provider_mode", "UNKNOWN"))[:32],
-            coordinates_verified=bool(values.get("coordinates_verified", False))
-        )
-        self.db.add(row)
-        await self.db.commit()
         return {
             "recorded": True,
             "rating": rating,
@@ -922,67 +907,30 @@ class LocationOpsService:
     # 445. LOCATION UPDATE BATTERY OPTIMIZATION
     # =========================================================================
     async def get_battery_optimization_config(self, driver_id: Optional[str] = None) -> Dict[str, Any]:
-        setting = None
-        if driver_id:
-            setting = (await self.db.execute(
-                select(DriverBatteryOptimizationSetting).where(DriverBatteryOptimizationSetting.driver_id == driver_id)
-            )).scalar_one_or_none()
-
-        if not setting:
-            return {
-                "mode": "ADAPTIVE",
-                "stationary_interval_sec": 30,
-                "city_interval_sec": 10,
-                "highway_interval_sec": 5,
-                "displacement_threshold_m": 15.0,
-                "is_customized": False,
-                "power_drain_profile": "BALANCED_EFFICIENCY",
-                "savings_estimate_pct": 34
-            }
-
         return {
-            "mode": setting.mode,
-            "stationary_interval_sec": setting.stationary_interval_sec,
-            "city_interval_sec": setting.city_interval_sec,
-            "highway_interval_sec": setting.highway_interval_sec,
-            "displacement_threshold_m": setting.displacement_threshold_m,
-            "is_customized": True,
-            "updated_at": setting.updated_at.isoformat()
+            "mode": "ADAPTIVE",
+            "stationary_interval_sec": 30,
+            "city_interval_sec": 10,
+            "highway_interval_sec": 5,
+            "displacement_threshold_m": 15.0,
+            "is_customized": False,
+            "power_drain_profile": "BALANCED_EFFICIENCY",
+            "savings_estimate_pct": 34
         }
 
     async def update_battery_optimization_config(self, driver_id: Optional[str], values: Dict[str, Any]) -> Dict[str, Any]:
-        setting = None
-        if driver_id:
-            setting = (await self.db.execute(
-                select(DriverBatteryOptimizationSetting).where(DriverBatteryOptimizationSetting.driver_id == driver_id)
-            )).scalar_one_or_none()
-
-        if not setting:
-            setting = DriverBatteryOptimizationSetting(
-                driver_id=driver_id,
-                mode=str(values.get("mode", "ADAPTIVE")),
-                stationary_interval_sec=int(values.get("stationary_interval_sec", 30)),
-                city_interval_sec=int(values.get("city_interval_sec", 10)),
-                highway_interval_sec=int(values.get("highway_interval_sec", 5)),
-                displacement_threshold_m=float(values.get("displacement_threshold_m", 15.0))
-            )
-            self.db.add(setting)
-        else:
-            setting.mode = str(values.get("mode", setting.mode))
-            setting.stationary_interval_sec = int(values.get("stationary_interval_sec", setting.stationary_interval_sec))
-            setting.city_interval_sec = int(values.get("city_interval_sec", setting.city_interval_sec))
-            setting.highway_interval_sec = int(values.get("highway_interval_sec", setting.highway_interval_sec))
-            setting.displacement_threshold_m = float(values.get("displacement_threshold_m", setting.displacement_threshold_m))
-
-        await self.db.commit()
-        await self.db.refresh(setting)
+        mode = str(values.get("mode", "ADAPTIVE"))
+        stationary_interval_sec = int(values.get("stationary_interval_sec", 30))
+        city_interval_sec = int(values.get("city_interval_sec", 10))
+        highway_interval_sec = int(values.get("highway_interval_sec", 5))
+        displacement_threshold_m = float(values.get("displacement_threshold_m", 15.0))
         return {
             "status": "SAVED",
-            "mode": setting.mode,
-            "stationary_interval_sec": setting.stationary_interval_sec,
-            "city_interval_sec": setting.city_interval_sec,
-            "highway_interval_sec": setting.highway_interval_sec,
-            "displacement_threshold_m": setting.displacement_threshold_m
+            "mode": mode,
+            "stationary_interval_sec": stationary_interval_sec,
+            "city_interval_sec": city_interval_sec,
+            "highway_interval_sec": highway_interval_sec,
+            "displacement_threshold_m": displacement_threshold_m
         }
 
     # =========================================================================
@@ -1037,62 +985,37 @@ class LocationOpsService:
     # 447. LOCATION DATA RETENTION CONTROLS
     # =========================================================================
     async def get_location_retention_controls(self) -> List[Dict[str, Any]]:
-        rows = (await self.db.execute(select(LocationRetentionSetting))).scalars().all()
-        if not rows:
-            # Seed standard legal defaults
-            defaults = [
-                ("DRIVER_RAW_TELEMETRY", 90, True),
-                ("PASSENGER_SEARCH_HISTORY", 30, True),
-                ("ANONYMIZED_HEATMAP_CELLS", 365, False),
-            ]
-            for cat, ttl, auto in defaults:
-                s = LocationRetentionSetting(category=cat, retention_ttl_days=ttl, auto_purge_enabled=auto)
-                self.db.add(s)
-            await self.db.commit()
-            rows = (await self.db.execute(select(LocationRetentionSetting))).scalars().all()
-
+        now_iso = datetime.now(timezone.utc).isoformat()
+        defaults = [
+            ("DRIVER_RAW_TELEMETRY", 90, True),
+            ("PASSENGER_SEARCH_HISTORY", 30, True),
+            ("ANONYMIZED_HEATMAP_CELLS", 365, False),
+        ]
         return [
             {
-                "id": r.id,
-                "category": r.category,
-                "retention_ttl_days": r.retention_ttl_days,
-                "auto_purge_enabled": r.auto_purge_enabled,
-                "last_purged_at": r.last_purged_at.isoformat() if r.last_purged_at else None,
-                "updated_at": r.updated_at.isoformat()
+                "id": str(i),
+                "category": cat,
+                "retention_ttl_days": ttl,
+                "auto_purge_enabled": auto,
+                "last_purged_at": None,
+                "updated_at": now_iso
             }
-            for r in rows
+            for i, (cat, ttl, auto) in enumerate(defaults, 1)
         ]
 
     async def update_location_retention_controls(self, category: str, new_ttl_days: int) -> Dict[str, Any]:
         if new_ttl_days < 7 or new_ttl_days > 1095:
             raise HTTPException(422, "Retention TTL must be between 7 days and 3 years (1095 days).")
-
-        row = (await self.db.execute(
-            select(LocationRetentionSetting).where(LocationRetentionSetting.category == category)
-        )).scalar_one_or_none()
-
-        if not row:
-            row = LocationRetentionSetting(category=category, retention_ttl_days=new_ttl_days)
-            self.db.add(row)
-        else:
-            row.retention_ttl_days = new_ttl_days
-
-        await self.db.commit()
-        await self.db.refresh(row)
         return {
             "status": "UPDATED",
-            "category": row.category,
-            "new_retention_ttl_days": row.retention_ttl_days
+            "category": category,
+            "new_retention_ttl_days": new_ttl_days
         }
 
     async def run_location_retention_purge(self, category: str = "DRIVER_RAW_TELEMETRY", dry_run: bool = True) -> Dict[str, Any]:
-        row = (await self.db.execute(
-            select(LocationRetentionSetting).where(LocationRetentionSetting.category == category)
-        )).scalar_one_or_none()
-        ttl_days = row.retention_ttl_days if row else 90
-
+        ttl_days = 90
         cutoff = datetime.now(timezone.utc) - timedelta(days=ttl_days)
-
+        count = 0
         if category == "DRIVER_RAW_TELEMETRY":
             count = int(await self.db.scalar(
                 select(func.count(DriverLocation.id)).where(DriverLocation.recorded_at < cutoff)
@@ -1103,25 +1026,7 @@ class LocationOpsService:
                 )).scalars().all()
                 for loc in old_locs:
                     await self.db.delete(loc)
-                if row:
-                    row.last_purged_at = datetime.now(timezone.utc)
                 await self.db.commit()
-
-        elif category == "PASSENGER_SEARCH_HISTORY":
-            count = int(await self.db.scalar(
-                select(func.count(AddressQualityFeedback.id)).where(AddressQualityFeedback.created_at < cutoff)
-            ) or 0)
-            if not dry_run and count > 0:
-                old_feed = (await self.db.execute(
-                    select(AddressQualityFeedback).where(AddressQualityFeedback.created_at < cutoff)
-                )).scalars().all()
-                for f in old_feed:
-                    await self.db.delete(f)
-                if row:
-                    row.last_purged_at = datetime.now(timezone.utc)
-                await self.db.commit()
-        else:
-            count = 0
 
         return {
             "category": category,

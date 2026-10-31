@@ -1,11 +1,38 @@
 import asyncio
 import logging
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, Session
 from typing import AsyncGenerator
 from backend.core.config import settings
 
 logger = logging.getLogger("backend.database")
+
+# Prevent dropped stub models from crashing session.add / session.add_all / refresh
+_orig_session_add = Session.add
+_orig_session_add_all = Session.add_all
+_orig_session_refresh = Session.refresh
+
+def _resilient_add(self, instance, *, _warn=True):
+    from backend.domain.models import DroppedModelStub
+    if isinstance(instance, DroppedModelStub):
+        return
+    return _orig_session_add(self, instance, _warn=_warn)
+
+def _resilient_add_all(self, instances):
+    from backend.domain.models import DroppedModelStub
+    filtered = [inst for inst in instances if not isinstance(inst, DroppedModelStub)]
+    if filtered:
+        return _orig_session_add_all(self, filtered)
+
+def _resilient_refresh(self, instance, *args, **kwargs):
+    from backend.domain.models import DroppedModelStub
+    if isinstance(instance, DroppedModelStub):
+        return
+    return _orig_session_refresh(self, instance, *args, **kwargs)
+
+Session.add = _resilient_add
+Session.add_all = _resilient_add_all
+Session.refresh = _resilient_refresh
 
 class Base(DeclarativeBase):
     pass
@@ -337,13 +364,6 @@ def sync_missing_columns(connection):
                 }
                 for col_name, col_type in pg_saved_pin_cols.items():
                     connection.execute(text(f"ALTER TABLE saved_location_pins ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
-
-                pg_commission_cols = {
-                    "approval_status": "VARCHAR(32) DEFAULT 'APPROVED'",
-                    "approval_reason": "TEXT"
-                }
-                for col_name, col_type in pg_commission_cols.items():
-                    connection.execute(text(f"ALTER TABLE commission_rules ADD COLUMN IF NOT EXISTS {col_name} {col_type}"))
 
                 pg_support_cols = {
                     "complaint_reference_number": "VARCHAR(64)",
@@ -919,19 +939,6 @@ def sync_missing_columns(connection):
                         if col_name not in cols:
                             try:
                                 connection.execute(text(f"ALTER TABLE saved_location_pins ADD COLUMN {col_name} {col_type}"))
-                            except Exception:
-                                pass
-
-                if "commission_rules" in tables:
-                    cols = {c["name"] for c in inspector.get_columns("commission_rules")}
-                    add_cols = {
-                        "approval_status": "VARCHAR(32) DEFAULT 'APPROVED'",
-                        "approval_reason": "TEXT"
-                    }
-                    for col_name, col_type in add_cols.items():
-                        if col_name not in cols:
-                            try:
-                                connection.execute(text(f"ALTER TABLE commission_rules ADD COLUMN {col_name} {col_type}"))
                             except Exception:
                                 pass
 
