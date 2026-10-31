@@ -89,6 +89,7 @@ tasks.matching { it.name.startsWith("check") && it.name.endsWith("Classpath") }.
 }
 
 dependencies {
+    implementation(project(":packages:common-android"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)

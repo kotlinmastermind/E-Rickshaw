@@ -9,110 +9,31 @@ from backend.api.deps import get_current_user
 from backend.domain.models import User
 from backend.infrastructure.security.rate_limiter import otp_rate_limiter, auth_rate_limiter
 from backend.infrastructure.security.crypto import decode_jwt_token
+from backend.api.schemas.auth import (
+    IdentityLookupPayload,
+    OtpRequestPayload,
+    OtpVerifyPayload,
+    TokenRefreshPayload,
+    PasswordRegisterPayload,
+    PasswordLoginPayload,
+    AdminMfaEnablePayload,
+    OAuthPayload,
+    PasskeyLoginPayload,
+    MfaChallengeVerifyPayload,
+    RecoveryRequestPayload,
+    PasswordResetPayload,
+    EmailVerifyPayload,
+    CustomerSignupPayload,
+    DriverSignupPayload,
+    UnifiedLoginPayload,
+    ForgotPasswordOtpPayload,
+    ForgotPasswordResetPayload,
+    FirebaseVerifyPayload,
+    UserDto,
+    AuthResponse
+)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-
-class IdentityLookupPayload(BaseModel):
-    identifier: str = Field(..., description="Mobile number (e.g. +919876543210) or Email address", json_schema_extra={"example": "+919876543210"})
-    role: str = Field(default="customer", description="customer or driver", json_schema_extra={"example": "customer"})
-
-class OtpRequestPayload(BaseModel):
-    phone_number: str = Field(..., json_schema_extra={"example": "+919876543210"})
-
-class OtpVerifyPayload(BaseModel):
-    phone_number: str = Field(..., json_schema_extra={"example": "+919876543210"})
-    otp_code: str = Field(..., min_length=4, max_length=6, json_schema_extra={"example": "123456"})
-    role: str = Field(default="customer", json_schema_extra={"example": "customer"})  # customer, driver, admin
-
-class TokenRefreshPayload(BaseModel):
-    refresh_token: str
-
-class PasswordRegisterPayload(BaseModel):
-    email: str = Field(..., json_schema_extra={"example": "guest@luxury.com"})
-    password: str = Field(..., min_length=8)
-    full_name: str = Field(..., min_length=2)
-    phone_number: str = Field(..., min_length=10)
-    role: str = "customer"
-
-class PasswordLoginPayload(BaseModel):
-    email: str = Field(..., json_schema_extra={"example": "guest@luxury.com"})
-    password: str
-
-class AdminMfaEnablePayload(BaseModel):
-    setup_token: str = Field(..., min_length=20)
-    code: str = Field(..., min_length=6, max_length=6, pattern="^[0-9]{6}$")
-
-class OAuthPayload(BaseModel):
-    provider: Optional[str] = "google"
-    identity_token: Optional[str] = None
-    id_token: Optional[str] = None
-    apple_user_id: Optional[str] = None
-    email: Optional[str] = "guest@grandchauffeur.com"
-    full_name: Optional[str] = None
-    phone_number: Optional[str] = None
-    role: str = "customer"
-
-    @property
-    def token(self) -> str:
-        return self.identity_token or self.id_token or "simulated_token"
-
-class PasskeyLoginPayload(BaseModel):
-    credential_id: Optional[str] = None
-    credentialId: Optional[str] = None
-    signature: Optional[str] = None
-    email: Optional[str] = None
-
-class MfaChallengeVerifyPayload(BaseModel):
-    mfa_token: Optional[str] = None
-    challenge_token: Optional[str] = None
-    code: Optional[str] = None
-    totp_code: Optional[str] = None
-
-class RecoveryRequestPayload(BaseModel):
-    identifier: Optional[str] = None
-    email: Optional[str] = None
-
-class PasswordResetPayload(BaseModel):
-    user_id: Optional[str] = None
-    recovery_code: Optional[str] = None
-    recovery_token: Optional[str] = None
-    new_password: str = Field(..., min_length=6)
-
-class EmailVerifyPayload(BaseModel):
-    code: str = Field(..., min_length=6, max_length=6)
-
-class CustomerSignupPayload(BaseModel):
-    phone_number: str = Field(..., min_length=10)
-    email: str = Field(..., json_schema_extra={"example": "customer@luxury.com"})
-    full_name: str = Field(..., min_length=2)
-    password: str = Field(..., min_length=6)
-    username: str = Field(..., min_length=3)
-    otp_code: str = Field(..., min_length=4, max_length=6)
-
-class DriverSignupPayload(BaseModel):
-    phone_number: str = Field(..., min_length=10)
-    email: str = Field(..., json_schema_extra={"example": "driver@luxury.com"})
-    full_name: str = Field(..., min_length=2)
-    password: str = Field(..., min_length=6)
-    username: str = Field(..., min_length=3)
-    otp_code: str = Field(..., min_length=4, max_length=6)
-    vehicle_type: str = Field(default="SEDAN")
-    vehicle_name: str = Field(..., min_length=2, json_schema_extra={"example": "Mercedes-Benz E-Class"})
-    vehicle_no: str = Field(..., min_length=5, json_schema_extra={"example": "MH01-LX-0001"})
-
-class UnifiedLoginPayload(BaseModel):
-    login_type: str = Field(default="PASSWORD")
-    identifier: str = Field(..., min_length=3)
-    password: Optional[str] = None
-    otp_code: Optional[str] = None
-
-class ForgotPasswordOtpPayload(BaseModel):
-    identifier: str = Field(..., min_length=3)
-
-class ForgotPasswordResetPayload(BaseModel):
-    identifier: str = Field(..., min_length=3)
-    otp_code: str = Field(..., min_length=4, max_length=6)
-    new_password: str = Field(..., min_length=6)
 
 @router.post("/lookup", dependencies=[Depends(auth_rate_limiter)])
 async def lookup_user_identity(payload: IdentityLookupPayload, db: AsyncSession = Depends(get_db)):
@@ -136,12 +57,6 @@ async def verify_otp(payload: OtpVerifyPayload, request: Request, db: AsyncSessi
         ip_address=ip,
         user_agent=ua
     )
-
-class FirebaseVerifyPayload(BaseModel):
-    phone_number: str = Field(..., json_schema_extra={"example": "+919876543210"})
-    role: str = Field(default="customer")
-    firebase_uid: Optional[str] = None
-    id_token: Optional[str] = None
 
 @router.post("/firebase/verify", dependencies=[Depends(auth_rate_limiter)])
 async def verify_firebase(payload: FirebaseVerifyPayload, request: Request, db: AsyncSession = Depends(get_db)):
