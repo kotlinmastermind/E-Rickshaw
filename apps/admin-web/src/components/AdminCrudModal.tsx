@@ -8,11 +8,12 @@ import { requestApi } from '../services/api';
 
 interface AdminCrudModalProps {
   screen: ScreenItem;
-  onClose: () => void;
+  onClose?: () => void;
   onAuditAction?: (action: string, entity: string, reason: string) => void;
+  isInline?: boolean;
 }
 
-export const AdminCrudModal: React.FC<AdminCrudModalProps> = ({ screen, onClose, onAuditAction }) => {
+export const AdminCrudModal: React.FC<AdminCrudModalProps> = ({ screen, onClose, onAuditAction, isInline = false }) => {
   const mapping = ADMIN_CRUD_MAPPING[screen.id] || {
     table: 'admin_operations',
     endpoint: '/admin/stats/overview',
@@ -138,30 +139,19 @@ export const AdminCrudModal: React.FC<AdminCrudModalProps> = ({ screen, onClose,
     return str.includes(searchTerm.toLowerCase());
   });
 
-  return (
+  const innerContent = (
     <div style={{
-      position: 'fixed',
-      inset: 0,
-      background: 'rgba(0,0,0,0.85)',
-      backdropFilter: 'blur(8px)',
-      zIndex: 100,
+      background: '#121216',
+      border: '1px solid #d4af37',
+      borderRadius: 16,
+      width: '100%',
+      maxWidth: isInline ? '100%' : 960,
+      maxHeight: isInline ? 'none' : '90vh',
       display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '16px'
+      flexDirection: 'column',
+      boxShadow: isInline ? 'none' : '0 20px 60px rgba(0,0,0,0.9), 0 0 25px rgba(212,175,55,0.2)',
+      overflow: 'hidden'
     }}>
-      <div style={{
-        background: '#121216',
-        border: '1px solid #d4af37',
-        borderRadius: 16,
-        width: '100%',
-        maxWidth: 960,
-        maxHeight: '90vh',
-        display: 'flex',
-        flexDirection: 'column',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.9), 0 0 25px rgba(212,175,55,0.2)',
-        overflow: 'hidden'
-      }}>
         {/* Header */}
         <div style={{
           padding: '16px 20px',
@@ -668,22 +658,43 @@ export const AdminCrudModal: React.FC<AdminCrudModalProps> = ({ screen, onClose,
           color: '#8d8672'
         }}>
           <div>Connected to Supabase Live Database • 68 Core Active Tables</div>
-          <button
-            onClick={onClose}
-            style={{
-              background: '#222226',
-              border: '1px solid #444',
-              color: '#f2ead3',
-              padding: '6px 16px',
-              borderRadius: 6,
-              fontSize: 12,
-              cursor: 'pointer'
-            }}
-          >
-            Close
-          </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              style={{
+                background: '#222226',
+                border: '1px solid #444',
+                color: '#f2ead3',
+                padding: '6px 16px',
+                borderRadius: 6,
+                fontSize: 12,
+                cursor: 'pointer'
+              }}
+            >
+              Close
+            </button>
+          )}
         </div>
       </div>
+  );
+
+  if (isInline) {
+    return innerContent;
+  }
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.85)',
+      backdropFilter: 'blur(8px)',
+      zIndex: 100,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '16px'
+    }}>
+      {innerContent}
     </div>
   );
 };

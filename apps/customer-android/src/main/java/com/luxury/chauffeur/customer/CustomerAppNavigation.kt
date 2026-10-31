@@ -72,9 +72,9 @@ enum class CustomerScreenRoute {
 
 enum class CustomerTab(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Default.Home),
-    TRIPS("Trips", Icons.Default.List),
+    RIDES("Rides", Icons.Default.List),
     WALLET("Wallet", Icons.Default.AccountBox),
-    ME("Me", Icons.Default.Person)
+    ACCOUNT("Account", Icons.Default.Person)
 }
 
 @Composable
@@ -259,7 +259,7 @@ fun CustomerAppNavigation() {
                                 }
                             )
                         }
-                        CustomerTab.TRIPS -> {
+                        CustomerTab.RIDES -> {
                             CustomerTripsTabContent(
                                 onRepeatTrip = { _, _ ->
                                     currentTab = CustomerTab.HOME
@@ -273,7 +273,7 @@ fun CustomerAppNavigation() {
                                 onOpenReferrals = { showReferralSanctuaryDialog = true }
                             )
                         }
-                        CustomerTab.ME -> {
+                        CustomerTab.ACCOUNT -> {
                             CustomerMeTabContent(
                                 onNavigateProfile = { currentScreen = CustomerScreenRoute.PROFILE_EDIT },
                                 onNavigateGovernance = { currentScreen = CustomerScreenRoute.GOVERNANCE_SETTINGS },

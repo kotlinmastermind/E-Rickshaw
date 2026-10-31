@@ -9,14 +9,16 @@ interface DeviceSimulatorModalProps {
   screens: ScreenItem[];
   initialScreenId: number;
   category: 'cust' | 'drv';
-  onClose: () => void;
+  onClose?: () => void;
+  isInline?: boolean;
 }
 
 export const DeviceSimulatorModal: React.FC<DeviceSimulatorModalProps> = ({
   screens,
   initialScreenId,
   category,
-  onClose
+  onClose,
+  isInline = false
 }) => {
   const [currentId, setCurrentId] = useState<number>(initialScreenId);
   const [activeTab, setActiveTab] = useState<string>('Home');
@@ -111,28 +113,19 @@ export const DeviceSimulatorModal: React.FC<DeviceSimulatorModalProps> = ({
     }
   };
 
-  return (
+  const innerContent = (
     <div style={{
-      position: 'fixed',
-      inset: 0,
-      background: 'rgba(0,0,0,0.92)',
-      backdropFilter: 'blur(10px)',
-      zIndex: 110,
       display: 'flex',
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 24,
       alignItems: 'center',
+      maxWidth: isInline ? '100%' : 960,
+      width: '100%',
+      maxHeight: isInline ? 'none' : '94vh',
       justifyContent: 'center',
-      padding: '12px'
+      padding: isInline ? '16px 0' : 0
     }}>
-      <div style={{
-        display: 'flex',
-        flexDirection: 'row',
-        gap: 24,
-        alignItems: 'center',
-        maxWidth: 960,
-        width: '100%',
-        maxHeight: '94vh',
-        justifyContent: 'center'
-      }}>
         {/* Smartphone Shell */}
         <div style={{
           width: 320,
@@ -867,6 +860,25 @@ export const DeviceSimulatorModal: React.FC<DeviceSimulatorModalProps> = ({
           </div>
         </div>
       </div>
+  );
+
+  if (isInline) {
+    return innerContent;
+  }
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.92)',
+      backdropFilter: 'blur(10px)',
+      zIndex: 110,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '12px'
+    }}>
+      {innerContent}
     </div>
   );
 };

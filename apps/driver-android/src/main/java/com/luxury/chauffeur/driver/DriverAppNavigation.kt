@@ -54,8 +54,8 @@ enum class DriverScreenRoute {
 enum class DriverTab(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Default.Home),
     EARNINGS("Earnings", Icons.Default.Star),
-    TRIPS("Trips", Icons.Default.List),
-    ME("Me", Icons.Default.Person)
+    GOALS("Goals", Icons.Default.List),
+    PROFILE("Profile", Icons.Default.Person)
 }
 
 @Composable
@@ -214,7 +214,7 @@ fun DriverAppNavigation(
                                 onNavigateDocuments = { currentScreen = DriverScreenRoute.DOCUMENTS },
                                 onNavigateOnboarding = { currentScreen = DriverScreenRoute.ONBOARDING },
                                 onNavigateEarnings = { currentTab = DriverTab.EARNINGS },
-                                onNavigateProfile = { currentTab = DriverTab.ME },
+                                onNavigateProfile = { currentTab = DriverTab.PROFILE },
                                 onNavigateSafety = { currentScreen = DriverScreenRoute.SAFETY_SUPPORT },
                                 onNavigateNotifications = { currentScreen = DriverScreenRoute.NOTIFICATIONS }
                             )
@@ -224,7 +224,7 @@ fun DriverAppNavigation(
                                 onNavigateBack = { currentTab = DriverTab.HOME }
                             )
                         }
-                        DriverTab.TRIPS -> {
+                        DriverTab.GOALS -> {
                             RideHistoryScreen(
                                 onNavigateBack = { currentTab = DriverTab.HOME },
                                 onSelectRide = { rideId ->
@@ -233,10 +233,10 @@ fun DriverAppNavigation(
                                 }
                             )
                         }
-                        DriverTab.ME -> {
+                        DriverTab.PROFILE -> {
                             DriverProfileScreen(
                                 onNavigateBack = { currentTab = DriverTab.HOME },
-                                onNavigateRideHistory = { currentTab = DriverTab.TRIPS }
+                                onNavigateRideHistory = { currentTab = DriverTab.GOALS }
                             )
                         }
                     }

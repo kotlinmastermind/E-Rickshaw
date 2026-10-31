@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
-  Play, Database, LogOut, Search
+  Play, Database, LogOut, Search, Smartphone, Table,
+  Layers
 } from 'lucide-react';
 import { ScreenItem, parseScreens, ADMIN_CRUD_MAPPING } from '../data/screensData';
 import { AdminCrudModal } from './AdminCrudModal';
@@ -19,9 +20,19 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
   const [activeTab, setActiveTab] = useState<'cust' | 'drv' | 'adm' | 'pop' | 'nav'>('cust');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Active Modals
-  const [selectedAdminScreen, setSelectedAdminScreen] = useState<ScreenItem | null>(null);
-  const [simulatorState, setSimulatorState] = useState<{ open: boolean; category: 'cust' | 'drv'; initialId: number }>({
+  // Primary Interactive View Modes (Phone / CRUD / Grid)
+  const [custViewMode, setCustViewMode] = useState<'phone' | 'grid'>('phone');
+  const [drvViewMode, setDrvViewMode] = useState<'phone' | 'grid'>('phone');
+  const [admViewMode, setAdmViewMode] = useState<'crud' | 'grid'>('crud');
+
+  // Selected Screen IDs for inline interactive view
+  const [inlineCustScreenId, setInlineCustScreenId] = useState<number>(8); // Home map
+  const [inlineDrvScreenId, setInlineDrvScreenId] = useState<number>(10); // Driver home
+  const [inlineAdmScreenId, setInlineAdmScreenId] = useState<number>(16); // Vehicle categories
+
+  // Standalone modal states if user clicks "Open in Modal"
+  const [selectedAdminModalScreen, setSelectedAdminModalScreen] = useState<ScreenItem | null>(null);
+  const [simulatorModalState, setSimulatorModalState] = useState<{ open: boolean; category: 'cust' | 'drv'; initialId: number }>({
     open: false,
     category: 'cust',
     initialId: 8
@@ -137,6 +148,8 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
     return null;
   };
 
+  const selectedAdmScreen = admScreens.find(s => s.id === inlineAdmScreenId) || admScreens[15];
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--t)', display: 'flex', flexDirection: 'column' }}>
       {/* Top Header matching uploaded HTML */}
@@ -145,15 +158,31 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
         justifyContent: 'space-between',
         alignItems: 'center',
         flexWrap: 'wrap',
-        paddingRight: 16
+        paddingRight: 16,
+        borderBottom: '1px solid #1a1a20'
       }}>
         <div>
           <h1>E-Rickshaw Platform – Luxury UI</h1>
           <p className="s">Customer 50 · Driver 50 · Admin 30 · 70 popups · gold-on-black wireframes, Rapido-style flow</p>
         </div>
 
-        {/* Search, Mode Switch, Admin Auth Pill */}
+        {/* Search, Live DB Badge, Admin Auth Pill */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', flexWrap: 'wrap' }}>
+          <div style={{
+            fontSize: 11,
+            color: '#10b981',
+            background: 'rgba(16,185,129,0.1)',
+            border: '1px solid rgba(16,185,129,0.3)',
+            padding: '4px 10px',
+            borderRadius: 14,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} />
+            68 Supabase Tables Live
+          </div>
+
           <div style={{ position: 'relative' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: 9, color: '#8d8672' }} />
             <input
@@ -168,35 +197,10 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
                 padding: '6px 12px 6px 30px',
                 color: '#f2ead3',
                 fontSize: 12,
-                width: 190
+                width: 180
               }}
             />
           </div>
-
-          {(activeTab === 'cust' || activeTab === 'drv') && (
-            <button
-              onClick={() => setSimulatorState({
-                open: true,
-                category: activeTab,
-                initialId: activeTab === 'cust' ? 8 : 10
-              })}
-              style={{
-                background: 'linear-gradient(90deg, #b8962e, #d4af37)',
-                color: '#0b0b0d',
-                border: 'none',
-                padding: '6px 14px',
-                borderRadius: 20,
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5
-              }}
-            >
-              <Play size={11} fill="#0b0b0d" /> Test Phone Flow
-            </button>
-          )}
 
           {adminUser ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -296,141 +300,469 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
       </nav>
 
       {/* Main View Area */}
-      <main id="v" style={{ flex: 1, paddingBottom: 40 }}>
-        {/* VIEW 1: CUSTOMER (50) & DRIVER (50) SCREENS */}
-        {(activeTab === 'cust' || activeTab === 'drv') && (
-          <div className="grid">
-            {filteredScreens.map(s => {
-              const cardNav = getCardNav(s);
-              return (
-                <div
-                  key={s.id}
-                  className="ph"
-                  onClick={() => setSimulatorState({
-                    open: true,
-                    category: activeTab,
-                    initialId: s.id
-                  })}
-                  style={{ cursor: 'pointer' }}
+      <main id="v" style={{ flex: 1, padding: '16px 20px', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+
+        {/* VIEW 1: CUSTOMER (50 SCREENS) */}
+        {activeTab === 'cust' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* View Controls Toolbar */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              background: '#16161a',
+              border: '1px solid #2a2a2e',
+              padding: '10px 16px',
+              borderRadius: 12
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, color: '#d4af37', fontWeight: 600 }}>Mode:</span>
+                <button
+                  onClick={() => setCustViewMode('phone')}
+                  style={{
+                    background: custViewMode === 'phone' ? '#d4af37' : '#0f0f12',
+                    color: custViewMode === 'phone' ? '#000' : '#f2ead3',
+                    border: '1px solid #333',
+                    borderRadius: 16,
+                    padding: '4px 12px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5
+                  }}
                 >
-                  <div className="top">
-                    <span>{s.title}</span>
-                    <i>{s.id}</i>
-                  </div>
+                  <Smartphone size={13} /> Live Interactive Phone
+                </button>
+                <button
+                  onClick={() => setCustViewMode('grid')}
+                  style={{
+                    background: custViewMode === 'grid' ? '#d4af37' : '#0f0f12',
+                    color: custViewMode === 'grid' ? '#000' : '#f2ead3',
+                    border: '1px solid #333',
+                    borderRadius: 16,
+                    padding: '4px 12px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5
+                  }}
+                >
+                  <Layers size={13} /> 50 Wireframe Cards Grid
+                </button>
+              </div>
 
-                  <div className="body">
-                    {renderWireframeContent(s)}
-                  </div>
+              {/* Jump directly to screen */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 11, color: '#8d8672' }}>Jump to Screen:</span>
+                <select
+                  value={inlineCustScreenId}
+                  onChange={e => setInlineCustScreenId(Number(e.target.value))}
+                  style={{
+                    background: '#0f0f12',
+                    border: '1px solid #333',
+                    color: '#f2ead3',
+                    padding: '4px 10px',
+                    borderRadius: 8,
+                    fontSize: 11
+                  }}
+                >
+                  {custScreens.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.id.toString().padStart(2, '0')} - {s.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
-                  {cardNav && (
-                    <div className="bn">
-                      {cardNav.map((n, j) => (
-                        j === 0 ? <b key={j}>{n}</b> : <span key={j}>{n}</span>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Hover Overlay Button to test in Simulator */}
-                  <div className="card-overlay-actions">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSimulatorState({
-                          open: true,
-                          category: activeTab,
-                          initialId: s.id
-                        });
+            {/* Content: Either Phone Simulator or Cards Grid */}
+            {custViewMode === 'phone' ? (
+              <DeviceSimulatorModal
+                isInline={true}
+                category="cust"
+                screens={custScreens}
+                initialScreenId={inlineCustScreenId}
+              />
+            ) : (
+              <div className="grid">
+                {filteredScreens.map(s => {
+                  const cardNav = getCardNav(s);
+                  return (
+                    <div
+                      key={s.id}
+                      className="ph"
+                      onClick={() => {
+                        setInlineCustScreenId(s.id);
+                        setCustViewMode('phone');
                       }}
-                      style={{
-                        background: 'linear-gradient(90deg, #b8962e, #d4af37)',
-                        color: '#0b0b0d',
-                        border: 'none',
-                        borderRadius: 8,
-                        padding: '8px 14px',
-                        fontWeight: 700,
-                        fontSize: 11,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 5
-                      }}
+                      style={{ cursor: 'pointer' }}
                     >
-                      <Play size={12} fill="#0b0b0d" /> Open Phone Simulator
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                      <div className="top">
+                        <span>{s.title}</span>
+                        <i>{s.id}</i>
+                      </div>
+
+                      <div className="body">
+                        {renderWireframeContent(s)}
+                      </div>
+
+                      {cardNav && (
+                        <div className="bn">
+                          {cardNav.map((n, j) => (
+                            j === 0 ? <b key={j}>{n}</b> : <span key={j}>{n}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="card-overlay-actions">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setInlineCustScreenId(s.id);
+                            setCustViewMode('phone');
+                          }}
+                          style={{
+                            background: 'linear-gradient(90deg, #b8962e, #d4af37)',
+                            color: '#0b0b0d',
+                            border: 'none',
+                            borderRadius: 8,
+                            padding: '8px 14px',
+                            fontWeight: 700,
+                            fontSize: 11,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 5
+                          }}
+                        >
+                          <Play size={12} fill="#0b0b0d" /> Open in Phone
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
-        {/* VIEW 2: ADMIN OPERATIONS & LIVE CRUD (30 Screens) */}
+        {/* VIEW 2: DRIVER (50 SCREENS) */}
+        {activeTab === 'drv' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* View Controls Toolbar */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              background: '#16161a',
+              border: '1px solid #2a2a2e',
+              padding: '10px 16px',
+              borderRadius: 12
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, color: '#d4af37', fontWeight: 600 }}>Mode:</span>
+                <button
+                  onClick={() => setDrvViewMode('phone')}
+                  style={{
+                    background: drvViewMode === 'phone' ? '#d4af37' : '#0f0f12',
+                    color: drvViewMode === 'phone' ? '#000' : '#f2ead3',
+                    border: '1px solid #333',
+                    borderRadius: 16,
+                    padding: '4px 12px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5
+                  }}
+                >
+                  <Smartphone size={13} /> Live Driver Cockpit
+                </button>
+                <button
+                  onClick={() => setDrvViewMode('grid')}
+                  style={{
+                    background: drvViewMode === 'grid' ? '#d4af37' : '#0f0f12',
+                    color: drvViewMode === 'grid' ? '#000' : '#f2ead3',
+                    border: '1px solid #333',
+                    borderRadius: 16,
+                    padding: '4px 12px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5
+                  }}
+                >
+                  <Layers size={13} /> 50 Wireframe Cards Grid
+                </button>
+              </div>
+
+              {/* Jump directly to driver screen */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 11, color: '#8d8672' }}>Jump to Screen:</span>
+                <select
+                  value={inlineDrvScreenId}
+                  onChange={e => setInlineDrvScreenId(Number(e.target.value))}
+                  style={{
+                    background: '#0f0f12',
+                    border: '1px solid #333',
+                    color: '#f2ead3',
+                    padding: '4px 10px',
+                    borderRadius: 8,
+                    fontSize: 11
+                  }}
+                >
+                  {drvScreens.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.id.toString().padStart(2, '0')} - {s.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Content: Either Phone Cockpit or Cards Grid */}
+            {drvViewMode === 'phone' ? (
+              <DeviceSimulatorModal
+                isInline={true}
+                category="drv"
+                screens={drvScreens}
+                initialScreenId={inlineDrvScreenId}
+              />
+            ) : (
+              <div className="grid">
+                {filteredScreens.map(s => {
+                  const cardNav = getCardNav(s);
+                  return (
+                    <div
+                      key={s.id}
+                      className="ph"
+                      onClick={() => {
+                        setInlineDrvScreenId(s.id);
+                        setDrvViewMode('phone');
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <div className="top">
+                        <span>{s.title}</span>
+                        <i>{s.id}</i>
+                      </div>
+
+                      <div className="body">
+                        {renderWireframeContent(s)}
+                      </div>
+
+                      {cardNav && (
+                        <div className="bn">
+                          {cardNav.map((n, j) => (
+                            j === 0 ? <b key={j}>{n}</b> : <span key={j}>{n}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="card-overlay-actions">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setInlineDrvScreenId(s.id);
+                            setDrvViewMode('phone');
+                          }}
+                          style={{
+                            background: 'linear-gradient(90deg, #b8962e, #d4af37)',
+                            color: '#0b0b0d',
+                            border: 'none',
+                            borderRadius: 8,
+                            padding: '8px 14px',
+                            fontWeight: 700,
+                            fontSize: 11,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 5
+                          }}
+                        >
+                          <Play size={12} fill="#0b0b0d" /> Open Cockpit
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* VIEW 3: ADMIN OPERATIONS & LIVE CRUD (30 Screens) */}
         {activeTab === 'adm' && (
-          <div className="grid ad-grid">
-            {filteredScreens.map(s => {
-              const mapping = ADMIN_CRUD_MAPPING[s.id];
-              return (
-                <div
-                  key={s.id}
-                  className="ph ad"
-                  onClick={() => setSelectedAdminScreen(s)}
-                  style={{ cursor: 'pointer' }}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* View Controls & Table Selector Toolbar */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              background: '#16161a',
+              border: '1px solid #2a2a2e',
+              padding: '12px 18px',
+              borderRadius: 12
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 12, color: '#d4af37', fontWeight: 600 }}>Console View:</span>
+                <button
+                  onClick={() => setAdmViewMode('crud')}
+                  style={{
+                    background: admViewMode === 'crud' ? '#d4af37' : '#0f0f12',
+                    color: admViewMode === 'crud' ? '#000' : '#f2ead3',
+                    border: '1px solid #333',
+                    borderRadius: 16,
+                    padding: '5px 14px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
                 >
-                  <div className="top">
-                    <span>{s.title}</span>
-                    <i>{s.id}</i>
-                  </div>
+                  <Table size={13} /> Full Live CRUD Console
+                </button>
+                <button
+                  onClick={() => setAdmViewMode('grid')}
+                  style={{
+                    background: admViewMode === 'grid' ? '#d4af37' : '#0f0f12',
+                    color: admViewMode === 'grid' ? '#000' : '#f2ead3',
+                    border: '1px solid #333',
+                    borderRadius: 16,
+                    padding: '5px 14px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <Layers size={13} /> 30 Wireframe Cards Grid
+                </button>
+              </div>
 
-                  <div className="body">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                      <span style={{ fontSize: 9.5, color: '#d4af37', background: 'rgba(212,175,55,0.1)', padding: '2px 6px', borderRadius: 6, fontWeight: 700 }}>
-                        TABLE: {mapping?.table?.toUpperCase() || s.tableTarget || 'SYSTEM'}
-                      </span>
-                      <span style={{ fontSize: 9.5, color: '#8d8672' }}>
-                        {mapping?.actions?.map(a => a.toUpperCase()).join(' • ') || 'READ'}
-                      </span>
-                    </div>
-                    {renderWireframeContent(s)}
-                  </div>
+              {/* Table Selection Dropdown */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 11, color: '#8d8672' }}>Select Domain Table:</span>
+                <select
+                  value={inlineAdmScreenId}
+                  onChange={e => setInlineAdmScreenId(Number(e.target.value))}
+                  style={{
+                    background: '#0f0f12',
+                    border: '1px solid #333',
+                    color: '#d4af37',
+                    fontWeight: 600,
+                    padding: '6px 12px',
+                    borderRadius: 8,
+                    fontSize: 11,
+                    cursor: 'pointer'
+                  }}
+                >
+                  {admScreens.map(s => {
+                    const map = ADMIN_CRUD_MAPPING[s.id];
+                    return (
+                      <option key={s.id} value={s.id}>
+                        {s.id.toString().padStart(2, '0')} - {s.title} ({map?.table || 'SYSTEM'})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
 
-                  {/* Card Overlay Actions on Hover */}
-                  <div className="card-overlay-actions">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedAdminScreen(s);
+            {/* Content: Either Full-Width Live CRUD Workbench or 30 Cards Grid */}
+            {admViewMode === 'crud' ? (
+              <AdminCrudModal
+                isInline={true}
+                screen={selectedAdmScreen}
+              />
+            ) : (
+              <div className="grid ad-grid">
+                {filteredScreens.map(s => {
+                  const mapping = ADMIN_CRUD_MAPPING[s.id];
+                  return (
+                    <div
+                      key={s.id}
+                      className="ph ad"
+                      onClick={() => {
+                        setInlineAdmScreenId(s.id);
+                        setAdmViewMode('crud');
                       }}
-                      style={{
-                        background: 'linear-gradient(90deg, #b8962e, #d4af37)',
-                        color: '#0b0b0d',
-                        border: 'none',
-                        borderRadius: 8,
-                        padding: '8px 16px',
-                        fontWeight: 700,
-                        fontSize: 12,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6
-                      }}
+                      style={{ cursor: 'pointer' }}
                     >
-                      <Database size={13} /> Open Live CRUD Console
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                      <div className="top">
+                        <span>{s.title}</span>
+                        <i>{s.id}</i>
+                      </div>
+
+                      <div className="body">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                          <span style={{ fontSize: 9.5, color: '#d4af37', background: 'rgba(212,175,55,0.1)', padding: '2px 6px', borderRadius: 6, fontWeight: 700 }}>
+                            TABLE: {mapping?.table?.toUpperCase() || s.tableTarget || 'SYSTEM'}
+                          </span>
+                          <span style={{ fontSize: 9.5, color: '#8d8672' }}>
+                            {mapping?.actions?.map(a => a.toUpperCase()).join(' • ') || 'READ'}
+                          </span>
+                        </div>
+                        {renderWireframeContent(s)}
+                      </div>
+
+                      <div className="card-overlay-actions">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setInlineAdmScreenId(s.id);
+                            setAdmViewMode('crud');
+                          }}
+                          style={{
+                            background: 'linear-gradient(90deg, #b8962e, #d4af37)',
+                            color: '#0b0b0d',
+                            border: 'none',
+                            borderRadius: 8,
+                            padding: '8px 16px',
+                            fontWeight: 700,
+                            fontSize: 12,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6
+                          }}
+                        >
+                          <Database size={13} /> Open Live CRUD Console
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
-        {/* VIEW 3: POPUPS MATRIX (68 Popups) */}
+        {/* VIEW 4: POPUPS MATRIX (68 Popups) */}
         {activeTab === 'pop' && (
           <div style={{ padding: '8px 0' }}>
             <InteractivePopupPlayground />
           </div>
         )}
 
-        {/* VIEW 4: NAVIGATION RULES (Exact HTML R text) */}
+        {/* VIEW 5: NAVIGATION RULES (Exact HTML R text) */}
         {activeTab === 'nav' && (
           <div className="sec">
             <h2>Navigation rules</h2>
@@ -444,6 +776,7 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
               <li>Driver not found in 3 retries → Offer fare bump or Try again.</li>
               <li>Out-of-zone / restricted road → alert before Confirm.</li>
             </ul>
+
             <h3>Driver app</h3>
             <ul>
               <li>Bottom nav (4 tabs): Home | Earnings | Goals | Profile.</li>
@@ -453,12 +786,14 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
               <li>Offline: Home map dims, requests stop. Fatigue limit forces the rest screen.</li>
               <li>Fake-GPS detection blocks going online until fixed.</li>
             </ul>
+
             <h3>Admin website</h3>
             <ul>
               <li>Left sidebar + top global search + role-based menu; items hidden without admin_permissions.</li>
               <li>Every destructive action (refund, ban, wallet adjust) needs a confirm modal and writes to audit_logs.</li>
               <li>Ride detail links to Driver, Customer, Payment and Chat; the SOS console takes priority with a red banner everywhere.</li>
             </ul>
+
             <h3>Popup rules (screens + popups combined)</h3>
             <ul>
               <li><b>4 popup types:</b> Dialog (centred, blocking, max 2 buttons), Bottom sheet (choices/forms, swipe-down or back to dismiss), Toast (3s auto-dismiss, never blocks), Full-screen overlay (critical, back and outside tap ignored).</li>
@@ -473,6 +808,7 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
               <li><b>Offline:</b> No-internet dialog only blocks network actions; the live ride and map keep working with the last known state.</li>
               <li><b>Every popup:</b> has a loading state on its primary button, an error toast on failure, and sends no analytics event until a button is tapped.</li>
             </ul>
+
             <h3>Common</h3>
             <ul>
               <li>Every screen has loading, empty and error states.</li>
@@ -483,24 +819,20 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
         )}
       </main>
 
-      {/* LIVE ADMIN CRUD MODAL */}
-      {selectedAdminScreen && (
+      {/* Standalone Modals if triggered */}
+      {selectedAdminModalScreen && (
         <AdminCrudModal
-          screen={selectedAdminScreen}
-          onClose={() => setSelectedAdminScreen(null)}
-          onAuditAction={(action, entity, reason) => {
-            console.log(`Audit: ${action} on ${entity} - Reason: ${reason}`);
-          }}
+          screen={selectedAdminModalScreen}
+          onClose={() => setSelectedAdminModalScreen(null)}
         />
       )}
 
-      {/* INTERACTIVE DEVICE SIMULATOR MODAL */}
-      {simulatorState.open && (
+      {simulatorModalState.open && (
         <DeviceSimulatorModal
-          screens={simulatorState.category === 'cust' ? custScreens : drvScreens}
-          initialScreenId={simulatorState.initialId}
-          category={simulatorState.category}
-          onClose={() => setSimulatorState({ ...simulatorState, open: false })}
+          category={simulatorModalState.category}
+          screens={simulatorModalState.category === 'cust' ? custScreens : drvScreens}
+          initialScreenId={simulatorModalState.initialId}
+          onClose={() => setSimulatorModalState({ open: false, category: 'cust', initialId: 1 })}
         />
       )}
     </div>
