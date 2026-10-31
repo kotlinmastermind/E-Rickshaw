@@ -1,6 +1,7 @@
 import json
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Query, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
@@ -246,6 +247,51 @@ async def list_vehicle_categories(
         })
 
     return filtered
+
+
+class CategoryCreatePayload(BaseModel):
+    code: str = Field(..., min_length=2, max_length=32)
+    name: str = Field(..., min_length=2, max_length=64)
+    description: str = Field("", max_length=512)
+    capacity: int = Field(4, ge=1, le=10)
+    sort_order: int = Field(1, ge=1)
+    is_electric: bool = True
+    icon_url: Optional[str] = "https://images.unsplash.com/photo-1558981806-ec527fa84c39"
+
+
+@router.post("/categories")
+async def create_vehicle_category(
+    payload: CategoryCreatePayload,
+    db: AsyncSession = Depends(get_db)
+):
+    cat = VehicleCategory(
+        code=payload.code.strip().upper(),
+        name=payload.name.strip(),
+        description=payload.description.strip(),
+        capacity=payload.capacity,
+        sort_order=payload.sort_order,
+        is_electric=payload.is_electric,
+        icon_url=payload.icon_url,
+        is_active=True
+    )
+    db.add(cat)
+    await db.commit()
+    await db.refresh(cat)
+    return {"status": "CREATED", "id": cat.id, "name": cat.name, "code": cat.code}
+
+
+@router.delete("/categories/{category_id}")
+async def delete_vehicle_category(
+    category_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(VehicleCategory).where(VehicleCategory.id == category_id)
+    cat = (await db.execute(stmt)).scalar_one_or_none()
+    if not cat:
+        raise HTTPException(404, "Vehicle category not found")
+    await db.delete(cat)
+    await db.commit()
+    return {"status": "DELETED", "id": category_id}
 
 
 @router.get("/categories/{code}/gallery")

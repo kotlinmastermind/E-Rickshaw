@@ -84,6 +84,44 @@ async def create_promo_code(
     await db.refresh(promo)
     return {"status": "CREATED", "promo_id": promo.id, "code": promo.code}
 
+@router.get("/admin/promos")
+async def list_admin_promos(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(PromoCode).order_by(PromoCode.created_at.desc())
+    res = await db.execute(stmt)
+    promos = res.scalars().all()
+    return [
+        {
+            "id": p.id,
+            "code": p.code,
+            "discount_type": p.discount_type,
+            "discount_value": p.discount_value,
+            "max_discount_rupees": (p.max_discount_cents or 0) // 100,
+            "min_fare_rupees": (p.min_fare_cents or 0) // 100,
+            "total_usage_limit": p.total_usage_limit,
+            "times_used": p.times_used,
+            "is_active": p.is_active,
+            "expires_at": p.expires_at.isoformat() if p.expires_at else None
+        }
+        for p in promos
+    ]
+
+@router.delete("/admin/promos/{promo_id}")
+async def delete_admin_promo(
+    promo_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(PromoCode).where(PromoCode.id == promo_id)
+    promo = (await db.execute(stmt)).scalar_one_or_none()
+    if not promo:
+        raise HTTPException(status_code=404, detail="Promo code not found")
+    await db.delete(promo)
+    await db.commit()
+    return {"status": "DELETED", "promo_id": promo_id}
+
 # ---------------- PASSES ----------------
 @router.get("/passes/catalog")
 async def get_pass_catalog(db: AsyncSession = Depends(get_db)):

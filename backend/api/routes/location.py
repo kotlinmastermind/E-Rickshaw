@@ -244,6 +244,57 @@ async def list_road_restrictions(
     return await LocationOpsService(db).list_road_restrictions(latitude, longitude, radius_km)
 
 
+class RoadRestrictionCreatePayload(BaseModel):
+    title: str = Field(..., min_length=2, max_length=128)
+    description: str = Field(..., max_length=512)
+    restriction_type: str = Field("ROAD_CLOSURE")
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    radius_meters: float = Field(500.0, ge=10, le=50000)
+
+
+@router.post("/road-restrictions")
+async def create_road_restriction(
+    payload: RoadRestrictionCreatePayload,
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import RoadRestriction
+    restriction = RoadRestriction(
+        title=payload.title,
+        description=payload.description,
+        restriction_type=payload.restriction_type,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        radius_meters=payload.radius_meters,
+        is_active=True
+    )
+    db.add(restriction)
+    await db.commit()
+    await db.refresh(restriction)
+    return {
+        "status": "CREATED",
+        "id": restriction.id,
+        "title": restriction.title,
+        "restriction_type": restriction.restriction_type
+    }
+
+
+@router.delete("/road-restrictions/{restriction_id}")
+async def delete_road_restriction(
+    restriction_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    from sqlalchemy import select
+    from backend.domain.models import RoadRestriction
+    stmt = select(RoadRestriction).where(RoadRestriction.id == restriction_id)
+    rec = (await db.execute(stmt)).scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "Road restriction not found")
+    await db.delete(rec)
+    await db.commit()
+    return {"status": "DELETED", "id": restriction_id}
+
+
 # =============================================================================
 # 437. SERVICE AREA BOUNDARY CHECK & 438. OUT-OF-ZONE EXPLANATION
 # =============================================================================

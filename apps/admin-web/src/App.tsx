@@ -28,6 +28,7 @@ import { DriverFinancialsAndPayoutConsole } from './components/DriverFinancialsA
 import { NotificationOperationsConsole } from './components/NotificationOperationsConsole';
 import { AnalyticsAndGovernanceConsole } from './components/AnalyticsAndGovernanceConsole';
 import { AdminSignIn } from './components/AdminSignIn';
+import { LuxuryStudio } from './components/LuxuryStudio';
 import { requestApi } from './services/api';
 
 type NavTab =
@@ -88,6 +89,8 @@ export const App: React.FC = () => {
   const [authenticated, setAuthenticated] = useState(false);
   const [checking, setChecking] = useState(() => Boolean(localStorage.getItem('admin_token')));
   const [adminUser, setAdminUser] = useState<any>(null);
+  const [viewMode, setViewMode] = useState<'luxury_studio' | 'classic'>('luxury_studio');
+  const [showSignInModal, setShowSignInModal] = useState(false);
 
   useEffect(() => {
     if (!localStorage.getItem('admin_token')) return;
@@ -105,6 +108,15 @@ export const App: React.FC = () => {
     }).finally(() => setChecking(false));
   }, []);
 
+  const handleSignOut = () => {
+    void requestApi('/auth/logout', { method: 'POST' }).catch(() => undefined).finally(() => {
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('admin_refresh_token');
+      setAuthenticated(false);
+      setAdminUser(null);
+    });
+  };
+
   if (checking) {
     return (
       <main role="status" style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#0D0D0F', color: '#C9A24B', fontFamily: 'Georgia, serif' }}>
@@ -113,26 +125,68 @@ export const App: React.FC = () => {
     );
   }
 
-  if (!authenticated) {
-    return <AdminSignIn onAuthenticated={user => { setAdminUser(user); setAuthenticated(true); }} />;
-  }
-
   return (
-    <AdminConsole
-      adminUser={adminUser}
-      onSignOut={() => {
-        void requestApi('/auth/logout', { method: 'POST' }).catch(() => undefined).finally(() => {
-          localStorage.removeItem('admin_token');
-          localStorage.removeItem('admin_refresh_token');
-          setAuthenticated(false);
-          setAdminUser(null);
-        });
-      }}
-    />
+    <>
+      {viewMode === 'luxury_studio' ? (
+        <LuxuryStudio
+          adminUser={authenticated ? adminUser : null}
+          onSignOut={handleSignOut}
+          onOpenSignIn={() => setShowSignInModal(true)}
+          onSwitchMode={authenticated ? () => setViewMode('classic') : undefined}
+        />
+      ) : (
+        <AdminConsole
+          adminUser={adminUser}
+          onSignOut={handleSignOut}
+          onSwitchToStudio={() => setViewMode('luxury_studio')}
+        />
+      )}
+
+      {showSignInModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.85)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 1000,
+          display: 'grid',
+          placeItems: 'center',
+          padding: 16
+        }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: 440 }}>
+            <button
+              onClick={() => setShowSignInModal(false)}
+              style={{
+                position: 'absolute',
+                top: 14,
+                right: 14,
+                background: '#222',
+                border: '1px solid #444',
+                color: '#fff',
+                borderRadius: '50%',
+                width: 30,
+                height: 30,
+                cursor: 'pointer',
+                zIndex: 10
+              }}
+            >
+              ✕
+            </button>
+            <AdminSignIn
+              onAuthenticated={user => {
+                setAdminUser(user);
+                setAuthenticated(true);
+                setShowSignInModal(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 
-const AdminConsole: React.FC<{ adminUser: any; onSignOut: () => void }> = ({ adminUser, onSignOut }) => {
+const AdminConsole: React.FC<{ adminUser: any; onSignOut: () => void; onSwitchToStudio?: () => void }> = ({ adminUser, onSignOut, onSwitchToStudio }) => {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [universalSearch, setUniversalSearch] = useState('');
   const [searchFilter, setSearchFilter] = useState<'all' | 'users' | 'drivers' | 'rides' | 'tickets'>('all');
@@ -203,6 +257,25 @@ const AdminConsole: React.FC<{ adminUser: any; onSignOut: () => void }> = ({ adm
           <div style={{ fontSize: '10px', color: '#9A968C', letterSpacing: '0.08em', marginTop: 2 }}>
             EXECUTIVE CONTROL V3.0
           </div>
+          {onSwitchToStudio && (
+            <button
+              onClick={onSwitchToStudio}
+              style={{
+                marginTop: 10,
+                width: '100%',
+                background: 'linear-gradient(90deg, #b8962e, #d4af37)',
+                color: '#0b0b0d',
+                border: 'none',
+                padding: '6px 10px',
+                borderRadius: 14,
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              ✨ 130 Luxury Screens & CRUD
+            </button>
+          )}
         </div>
 
         <nav style={{ padding: '12px 8px', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
