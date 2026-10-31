@@ -39,6 +39,7 @@ import com.luxury.chauffeur.driver.feature.profile.DriverProfileScreen
 import com.luxury.chauffeur.driver.feature.safety.DriverSafetySupportScreen
 import com.luxury.chauffeur.driver.feature.trip.ActiveChauffeurTripScreen
 import com.luxury.chauffeur.driver.feature.trip.RideHistoryScreen
+import com.luxury.chauffeur.driver.feature.luxury.DriverLuxuryFlowScreens
 
 enum class DriverScreenRoute {
     PERMISSION_ONBOARDING,
@@ -112,8 +113,8 @@ fun DriverAppNavigation(
     Scaffold(
         containerColor = Color(0xFF090A0F),
         bottomBar = {
-            // NAV.d: Bottom nav 4 tab: Home, Earnings, Trips, Me; trip ke dauran hide.
-            val isTopLevel = currentScreen == DriverScreenRoute.DASHBOARD
+            // NAV.d: Bottom nav is handled by DriverLuxuryFlowScreens with active ride auto-hide
+            val isTopLevel = false
             if (isTopLevel) {
                 Surface(
                     color = Color(0xFF13151F),
@@ -162,8 +163,8 @@ fun DriverAppNavigation(
             }
         },
         floatingActionButton = {
-            // NAV.d Screen 67: Offline 112 floating button sab screens par
-            if (currentScreen != DriverScreenRoute.AUTH) {
+            // NAV.d Screen 67: Offline 112 floating button on standalone auth/legacy screens
+            if (currentScreen != DriverScreenRoute.AUTH && currentScreen != DriverScreenRoute.DASHBOARD) {
                 FloatingActionButton(
                     onClick = { showEmergency112Dialog = true },
                     containerColor = Color(0xFFEF4444),
@@ -202,44 +203,26 @@ fun DriverAppNavigation(
                     )
                 }
                 DriverScreenRoute.DASHBOARD -> {
-                    when (currentTab) {
-                        DriverTab.HOME -> {
-                            DriverDashboardScreen(
-                                onAcceptRide = { rideId, pickup, dest ->
-                                    activeTripId = rideId
-                                    activePickup = pickup
-                                    activeDest = dest
-                                    currentScreen = DriverScreenRoute.ACTIVE_TRIP
-                                },
-                                onNavigateDocuments = { currentScreen = DriverScreenRoute.DOCUMENTS },
-                                onNavigateOnboarding = { currentScreen = DriverScreenRoute.ONBOARDING },
-                                onNavigateEarnings = { currentTab = DriverTab.EARNINGS },
-                                onNavigateProfile = { currentTab = DriverTab.PROFILE },
-                                onNavigateSafety = { currentScreen = DriverScreenRoute.SAFETY_SUPPORT },
-                                onNavigateNotifications = { currentScreen = DriverScreenRoute.NOTIFICATIONS }
-                            )
+                    DriverLuxuryFlowScreens(
+                        activeTab = when (currentTab) {
+                            DriverTab.HOME -> "Home"
+                            DriverTab.EARNINGS -> "Earnings"
+                            DriverTab.GOALS -> "Goals"
+                            DriverTab.PROFILE -> "Profile"
+                        },
+                        onTabSelected = { tab ->
+                            currentTab = when (tab) {
+                                "Home" -> DriverTab.HOME
+                                "Earnings" -> DriverTab.EARNINGS
+                                "Goals" -> DriverTab.GOALS
+                                else -> DriverTab.PROFILE
+                            }
+                        },
+                        onSignOut = {
+                            tokenManager.clear()
+                            currentScreen = DriverScreenRoute.AUTH
                         }
-                        DriverTab.EARNINGS -> {
-                            EarningsAndWalletScreen(
-                                onNavigateBack = { currentTab = DriverTab.HOME }
-                            )
-                        }
-                        DriverTab.GOALS -> {
-                            RideHistoryScreen(
-                                onNavigateBack = { currentTab = DriverTab.HOME },
-                                onSelectRide = { rideId ->
-                                    activeTripId = rideId
-                                    currentScreen = DriverScreenRoute.ACTIVE_TRIP
-                                }
-                            )
-                        }
-                        DriverTab.PROFILE -> {
-                            DriverProfileScreen(
-                                onNavigateBack = { currentTab = DriverTab.HOME },
-                                onNavigateRideHistory = { currentTab = DriverTab.GOALS }
-                            )
-                        }
-                    }
+                    )
                 }
                 DriverScreenRoute.DOCUMENTS -> {
                     DocumentUploadScreen(
