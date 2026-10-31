@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   LayoutDashboard, Navigation, Bell,
-  FileText, ShieldAlert, Activity, Database,
-  LifeBuoy, Radio, Zap, Map, Award, Sliders, Wallet, BarChart3, Cpu,
+  FileText, ShieldAlert, Activity,
+  LifeBuoy, Radio, Zap, Map, Award, Sliders, Wallet, BarChart3,
   Search, Users, Car, DollarSign, Clock, ChevronRight, X
 } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
@@ -18,7 +18,6 @@ import { LocationOperationsConsole } from './components/LocationOperationsConsol
 import { AdminReportsConsole } from './components/AdminReportsConsole';
 import { AdminAuditLogViewer } from './components/AdminAuditLogViewer';
 import { AdminSystemHealth } from './components/AdminSystemHealth';
-import { AdminDatabaseBackup } from './components/AdminDatabaseBackup';
 import { SafetyAuditConsole } from './components/SafetyAuditConsole';
 import { ReferralAndRecoveryConsole } from './components/ReferralAndRecoveryConsole';
 import { FleetAccessibilityConsole } from './components/FleetAccessibilityConsole';
@@ -28,8 +27,6 @@ import { AdminGovernanceConsole } from './components/AdminGovernanceConsole';
 import { DriverFinancialsAndPayoutConsole } from './components/DriverFinancialsAndPayoutConsole';
 import { NotificationOperationsConsole } from './components/NotificationOperationsConsole';
 import { AnalyticsAndGovernanceConsole } from './components/AnalyticsAndGovernanceConsole';
-import { AdminInfraOpsConsole } from './components/AdminInfraOpsConsole';
-import { AdminEnterpriseGrowthConsole } from './components/AdminEnterpriseGrowthConsole';
 import { AdminSignIn } from './components/AdminSignIn';
 import { requestApi } from './services/api';
 
@@ -55,9 +52,6 @@ type NavTab =
   | 'safety'
   | 'audit'
   | 'health'
-  | 'backups'
-  | 'infra-ops'
-  | 'enterprise-growth'
   | 'loyalty-recovery';
 
 interface BreadcrumbInfo {
@@ -87,10 +81,7 @@ const TAB_BREADCRUMBS: Record<NavTab, BreadcrumbInfo> = {
   'safety': { group: 'Governance & Compliance', screen: '53 Safety Trends & SOC Command Desk' },
   'audit': { group: 'Governance & Compliance', screen: '55 Security Audit Trail & Access Logs' },
   'health': { group: 'Governance & Compliance', screen: '57 System Health, DB Latency & Maps Quota' },
-  'backups': { group: 'Governance & Compliance', screen: '56 DPDP Data Vault & Backups' },
-  'infra-ops': { group: 'Governance & Compliance', screen: '58 Feature Flags, A/B Testing & Resilience' },
-  'enterprise-growth': { group: 'Enterprise & Partners', screen: '59 Corporate Accounts & 60 Multi-City Matrix' },
-  'loyalty-recovery': { group: 'Enterprise & Partners', screen: '50 Promo ROI & Churn Recovery' }
+  'loyalty-recovery': { group: 'Growth & Promos', screen: '50 Promo Codes, Redemptions & Referrals' }
 };
 
 export const App: React.FC = () => {
@@ -278,7 +269,7 @@ const AdminConsole: React.FC<{ adminUser: any; onSignOut: () => void }> = ({ adm
             </ul>
           </div>
 
-          {/* Group 6: Governance & Compliance (Screens 01-04, 55-58) */}
+          {/* Group 6: Governance & Compliance */}
           <div>
             <div style={{ padding: '0 10px', fontSize: '10px', letterSpacing: '0.08em', color: '#C9A24B', textTransform: 'uppercase', marginBottom: 4, fontWeight: 700 }}>
               6. Governance & Compliance
@@ -287,19 +278,16 @@ const AdminConsole: React.FC<{ adminUser: any; onSignOut: () => void }> = ({ adm
               <SidebarItem icon={<ShieldAlert size={15} />} label="Safety & SOC Command" active={activeTab === 'safety'} onClick={() => setActiveTab('safety')} />
               <SidebarItem icon={<ShieldAlert size={15} />} label="Security Audit Trail" active={activeTab === 'audit'} onClick={() => setActiveTab('audit')} />
               <SidebarItem icon={<Activity size={15} />} label="System Health" active={activeTab === 'health'} onClick={() => setActiveTab('health')} />
-              <SidebarItem icon={<Database size={15} />} label="DB Backups & Purge" active={activeTab === 'backups'} onClick={() => setActiveTab('backups')} />
-              <SidebarItem icon={<Cpu size={15} />} label="Infra & Feature Flags" active={activeTab === 'infra-ops'} onClick={() => setActiveTab('infra-ops')} />
             </ul>
           </div>
 
-          {/* Group 7: Enterprise & Partners (Screens 59-60) */}
+          {/* Group 7: Growth & Promos */}
           <div>
             <div style={{ padding: '0 10px', fontSize: '10px', letterSpacing: '0.08em', color: '#C9A24B', textTransform: 'uppercase', marginBottom: 4, fontWeight: 700 }}>
-              7. Enterprise & Partners
+              7. Growth & Promos
             </div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <SidebarItem icon={<Zap size={15} />} label="Corporate & Cities" active={activeTab === 'enterprise-growth'} onClick={() => setActiveTab('enterprise-growth')} />
-              <SidebarItem icon={<Award size={15} />} label="Loyalty & Retention" active={activeTab === 'loyalty-recovery'} onClick={() => setActiveTab('loyalty-recovery')} />
+              <SidebarItem icon={<Award size={15} />} label="Promos & Referrals" active={activeTab === 'loyalty-recovery'} onClick={() => setActiveTab('loyalty-recovery')} />
             </ul>
           </div>
         </nav>
@@ -499,9 +487,6 @@ const AdminConsole: React.FC<{ adminUser: any; onSignOut: () => void }> = ({ adm
           {activeTab === 'safety' && <SafetyAuditConsole />}
           {activeTab === 'audit' && <AdminAuditLogViewer />}
           {activeTab === 'health' && <AdminSystemHealth />}
-          {activeTab === 'backups' && <AdminDatabaseBackup />}
-          {activeTab === 'infra-ops' && <AdminInfraOpsConsole />}
-          {activeTab === 'enterprise-growth' && <AdminEnterpriseGrowthConsole />}
           {activeTab === 'loyalty-recovery' && <ReferralAndRecoveryConsole />}
         </main>
       </div>

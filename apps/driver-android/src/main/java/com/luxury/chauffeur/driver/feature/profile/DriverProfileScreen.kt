@@ -189,46 +189,6 @@ fun DriverProfileScreen(
                         )
                     }
                 }
-
-                // Feature Flags Dialog Card
-                var showInfraDialog by remember { mutableStateOf(false) }
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = DriverColors.CockpitDark,
-                    border = BorderStroke(1.dp, DriverColors.ChauffeurGold),
-                    modifier = Modifier.fillMaxWidth().clickable { showInfraDialog = true }
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(driverLocalizedString("resilience_feature_flags", "RESILIENCE & FEATURE FLAGS"), style = DriverTypography.Subtitle.copy(fontSize = 14.sp))
-                        Text("Inspect Driver App Feature Flags & ANR Reporter", style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 12.sp))
-                    }
-                }
-
-                if (showInfraDialog) {
-                    com.luxury.chauffeur.driver.feature.infra.DriverInfraAndFeatureFlagsDialog(
-                        onDismiss = { showInfraDialog = false }
-                    )
-                }
-
-                // Addons Card
-                var showEnterpriseDialog by remember { mutableStateOf(false) }
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = DriverColors.CockpitDark,
-                    border = BorderStroke(1.dp, DriverColors.ChauffeurGold),
-                    modifier = Modifier.fillMaxWidth().clickable { showEnterpriseDialog = true }
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(driverLocalizedString("intercity_specialty_addons", "ENTERPRISE & SPECIALTY ADD-ONS"), style = DriverTypography.Subtitle.copy(fontSize = 14.sp))
-                        Text("Verify Intercity, Hourly & Special Service Add-ons", style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 12.sp))
-                    }
-                }
-
-                if (showEnterpriseDialog) {
-                    com.luxury.chauffeur.driver.feature.enterprise.DriverEnterpriseAddonsDialog(
-                        onDismiss = { showEnterpriseDialog = false }
-                    )
-                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))

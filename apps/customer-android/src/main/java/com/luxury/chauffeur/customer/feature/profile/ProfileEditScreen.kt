@@ -17,8 +17,6 @@ import com.luxury.chauffeur.customer.core.designsystem.*
 import com.luxury.chauffeur.customer.core.network.*
 import com.luxury.chauffeur.customer.feature.payments.VipWalletConsoleDialog
 import com.luxury.chauffeur.customer.feature.loyalty.*
-import com.luxury.chauffeur.customer.feature.infra.InfraAndFeatureFlagsDialog
-import com.luxury.chauffeur.customer.feature.enterprise.EnterpriseProductsDialog
 import com.luxury.chauffeur.customer.feature.auth.CustomerAuthenticationDialog
 import com.luxury.chauffeur.customer.feature.vehicles.BespokeSanctuaryCustomizationSheet
 import com.luxury.chauffeur.customer.core.localization.localizedString
@@ -36,8 +34,6 @@ fun ProfileEditScreen(
     var showOffersFeed by remember { mutableStateOf(false) }
     var showPastJournals by remember { mutableStateOf(false) }
     var showBespokeSheet by remember { mutableStateOf(false) }
-    var showInfraDialog by remember { mutableStateOf(false) }
-    var showEnterpriseDialog by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
     var customerPreferences by remember { mutableStateOf<CustomerPreferencesDto?>(null) }
 
@@ -394,46 +390,6 @@ fun ProfileEditScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Part 19 Infrastructure, Flags & Mobile Diagnostics (Features 451, 452, 454, 474, 475)
-                    LuxuryCard(
-                        onClick = { showInfraDialog = true },
-                        border = BorderStroke(1.dp, LuxuryColors.ChampagneGold)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(localizedString("system_resilience", "SYSTEM RESILIENCE & FEATURE FLAGS"), style = LuxuryTypography.TitleGold.copy(fontSize = 14.sp))
-                                Text("OpenAPI Specs, Active Flags, Error Catalog & Crash Diagnostics", style = LuxuryTypography.BodySubtle)
-                            }
-                            Text("INSPECT ›", style = LuxuryTypography.TitleGold.copy(fontSize = 12.sp))
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Part 20 Enterprise & B2B Products (Features 476, 488, 491, 492, 493, 499)
-                    LuxuryCard(
-                        onClick = { showEnterpriseDialog = true },
-                        border = BorderStroke(1.dp, LuxuryColors.ChampagneGold)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(localizedString("enterprise_products", "ENTERPRISE & B2B PRODUCTS"), style = LuxuryTypography.TitleGold.copy(fontSize = 14.sp))
-                                Text("Corporate Portal, Airport Packages, Intercity & Feature Votes", style = LuxuryTypography.BodySubtle)
-                            }
-                            Text("ENTERPRISE ›", style = LuxuryTypography.TitleGold.copy(fontSize = 12.sp))
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
                     // Sign In / Sign Up / Forgot Password Portal Card
                     LuxuryCard(
                         onClick = { showAuthDialog = true },
@@ -626,18 +582,6 @@ fun ProfileEditScreen(
                 showPastJournals = false
                 onNavigateBack()
             }
-        )
-    }
-
-    if (showInfraDialog) {
-        InfraAndFeatureFlagsDialog(
-            onDismiss = { showInfraDialog = false }
-        )
-    }
-
-    if (showEnterpriseDialog) {
-        EnterpriseProductsDialog(
-            onDismiss = { showEnterpriseDialog = false }
         )
     }
 
