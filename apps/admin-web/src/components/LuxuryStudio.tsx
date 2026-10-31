@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import {
   Play, Database, LogOut, Search, Smartphone, Table,
-  Layers
+  Layers, MapPin
 } from 'lucide-react';
 import { ScreenItem, parseScreens, ADMIN_CRUD_MAPPING } from '../data/screensData';
 import { AdminCrudModal } from './AdminCrudModal';
 import { DeviceSimulatorModal } from './DeviceSimulatorModal';
 import { InteractivePopupPlayground } from './InteractivePopupPlayground';
+import { AdminLuxuryFlowConsole } from './AdminLuxuryFlowConsole';
 
 interface LuxuryStudioProps {
   adminUser?: any;
@@ -23,7 +24,7 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
   // Primary Interactive View Modes (Phone / CRUD / Grid)
   const [custViewMode, setCustViewMode] = useState<'phone' | 'grid'>('phone');
   const [drvViewMode, setDrvViewMode] = useState<'phone' | 'grid'>('phone');
-  const [admViewMode, setAdmViewMode] = useState<'crud' | 'grid'>('crud');
+  const [admViewMode, setAdmViewMode] = useState<'blueprint' | 'crud' | 'grid'>('blueprint');
 
   // Selected Screen IDs for inline interactive view
   const [inlineCustScreenId, setInlineCustScreenId] = useState<number>(8); // Home map
@@ -620,6 +621,24 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 12, color: '#d4af37', fontWeight: 600 }}>Console View:</span>
                 <button
+                  onClick={() => setAdmViewMode('blueprint')}
+                  style={{
+                    background: admViewMode === 'blueprint' ? '#d4af37' : '#0f0f12',
+                    color: admViewMode === 'blueprint' ? '#000' : '#f2ead3',
+                    border: '1px solid #333',
+                    borderRadius: 16,
+                    padding: '5px 14px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}
+                >
+                  <MapPin size={13} /> 30-Screen Blueprint & Real Map Console
+                </button>
+                <button
                   onClick={() => setAdmViewMode('crud')}
                   style={{
                     background: admViewMode === 'crud' ? '#d4af37' : '#0f0f12',
@@ -686,8 +705,13 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
               </div>
             </div>
 
-            {/* Content: Either Full-Width Live CRUD Workbench or 30 Cards Grid */}
-            {admViewMode === 'crud' ? (
+            {/* Content: Either 30-Screen Blueprint & Real Map Console, Live CRUD Workbench or 30 Cards Grid */}
+            {admViewMode === 'blueprint' ? (
+              <AdminLuxuryFlowConsole
+                adminUser={adminUser}
+                onSignOut={onSignOut}
+              />
+            ) : admViewMode === 'crud' ? (
               <AdminCrudModal
                 isInline={true}
                 screen={selectedAdmScreen}

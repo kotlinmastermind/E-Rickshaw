@@ -57,10 +57,17 @@ class MainActivity : ComponentActivity() {
                 MapsInitializer.initialize(applicationContext, MapsInitializer.Renderer.LATEST) { renderer ->
                     Log.d("MapsInit", "Maps initialized with renderer: $renderer")
                 }
-            } catch (_: Throwable) {
+            } catch (t: Throwable) {
+                Log.w("MapsInit", "LATEST maps renderer unavailable (${t.message}), falling back to LEGACY pre-Chimera renderer")
                 try {
-                    MapsInitializer.initialize(applicationContext)
-                } catch (_: Throwable) {}
+                    MapsInitializer.initialize(applicationContext, MapsInitializer.Renderer.LEGACY) { renderer ->
+                        Log.d("MapsInit", "Maps initialized with LEGACY renderer: $renderer")
+                    }
+                } catch (_: Throwable) {
+                    try {
+                        MapsInitializer.initialize(applicationContext)
+                    } catch (_: Throwable) {}
+                }
             }
         }
         setContent {

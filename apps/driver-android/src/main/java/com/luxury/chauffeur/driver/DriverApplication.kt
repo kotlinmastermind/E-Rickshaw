@@ -93,6 +93,13 @@ class DriverApplication : Application() {
         val nonFatalKeywords = listOf(
             "FlagStore",
             "policy_maps_core_dynamite",
+            "maps_dynamite",
+            "DynamiteModule",
+            "No acceptable module",
+            "pre-Chimera",
+            "com.google.android.gms.dynamite",
+            "zzcc",
+            "LoadingException",
             "m140.cpq",
             "m140.cps",
             "cpq.u",
@@ -126,11 +133,18 @@ class DriverApplication : Application() {
             MapsInitializer.initialize(applicationContext, MapsInitializer.Renderer.LATEST) { renderer ->
                 Log.d("DriverApplication", "Google Maps initialized with renderer: $renderer")
             }
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            Log.w("DriverApplication", "LATEST maps renderer unavailable (${t.message}), falling back to LEGACY (pre-Chimera)")
             try {
-                MapsInitializer.initialize(applicationContext)
-            } catch (t: Throwable) {
-                Log.e("DriverApplication", "Failed to initialize Google Maps SDK", t)
+                MapsInitializer.initialize(applicationContext, MapsInitializer.Renderer.LEGACY) { renderer ->
+                    Log.d("DriverApplication", "Google Maps initialized with LEGACY renderer: $renderer")
+                }
+            } catch (_: Throwable) {
+                try {
+                    MapsInitializer.initialize(applicationContext)
+                } catch (t3: Throwable) {
+                    Log.e("DriverApplication", "Failed to initialize Google Maps SDK", t3)
+                }
             }
         }
     }
