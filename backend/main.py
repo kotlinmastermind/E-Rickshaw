@@ -262,6 +262,19 @@ app.include_router(enterprise_growth.router, prefix=settings.API_V1_STR)
 app.include_router(localization.router, prefix=settings.API_V1_STR)
 app.include_router(tourism.router, prefix=settings.API_V1_STR)
 
+@app.get("/", tags=["Root"])
+async def root():
+    """Welcome and API discovery root endpoint."""
+    return {
+        "service": settings.PROJECT_NAME,
+        "version": "1.0.0",
+        "status": "OPERATIONAL",
+        "docs_url": "/docs",
+        "health_url": "/health/ready",
+        "privacy_policy": "/privacy-policy",
+        "api_v1_prefix": settings.API_V1_STR
+    }
+
 @app.get("/privacy-policy", response_class=HTMLResponse)
 async def privacy_policy():
     """Google Play Store compliant public Privacy Policy."""
