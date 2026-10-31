@@ -54,7 +54,7 @@ fun SplashScreen(
                 .scale(scaleAnim.value)
         ) {
             Text(
-                text = "GRAND CHAUFFEUR",
+                text = "E-RICKSHAW LUXURY",
                 style = LuxuryTypography.HeadlineLarge.copy(
                     letterSpacing = 4.sp,
                     fontWeight = FontWeight.ExtraBold,
@@ -63,11 +63,11 @@ fun SplashScreen(
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "UNCOMPROMISING LUXURY TRAVEL",
+                text = "CLEAN, QUIET & PREMIUM ELECTRIC COMMUTE",
                 style = LuxuryTypography.BodySubtle.copy(
-                    letterSpacing = 3.sp,
+                    letterSpacing = 2.sp,
                     fontSize = 11.sp,
-                    color = LuxuryColors.PlatinumWhite.copy(alpha = 0.7f)
+                    color = LuxuryColors.PlatinumWhite.copy(alpha = 0.8f)
                 )
             )
         }

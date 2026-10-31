@@ -53,6 +53,7 @@ import com.luxury.chauffeur.customer.feature.security.AppLockOverlay
 import com.luxury.chauffeur.customer.feature.sharedride.SharedTripConsoleScreen
 import com.luxury.chauffeur.customer.feature.splash.SplashScreen
 import com.luxury.chauffeur.customer.feature.support.*
+import com.luxury.chauffeur.customer.feature.luxury.CustomerLuxuryFlowScreens
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -142,8 +143,8 @@ fun CustomerAppNavigation() {
     Scaffold(
         containerColor = Color(0xFF0D0D0F),
         bottomBar = {
-            // NAV.r: Bottom nav 4 tab: Home, Trips, Wallet, Me — sirf top-level par; booking/trip me hide.
-            val isTopLevel = currentScreen == CustomerScreenRoute.HOME_LOCATION
+            // Bottom nav is handled by CustomerLuxuryFlowScreens with active ride auto-hide
+            val isTopLevel = false
             if (isTopLevel) {
                 Surface(
                     color = Color(0xFF17171A),
@@ -239,50 +240,26 @@ fun CustomerAppNavigation() {
                     )
                 }
                 CustomerScreenRoute.HOME_LOCATION -> {
-                    when (currentTab) {
-                        CustomerTab.HOME -> {
-                            LocationScreen(
-                                onRideRequested = { rideId, otp ->
-                                    activeRideId = rideId
-                                    activeOtp = otp
-                                    currentScreen = CustomerScreenRoute.LIVE_TRACKING
-                                },
-                                onNavigateProfile = { currentScreen = CustomerScreenRoute.PROFILE_EDIT },
-                                onNavigateNotifications = { currentScreen = CustomerScreenRoute.NOTIFICATIONS },
-                                onNavigateGovernance = { currentScreen = CustomerScreenRoute.GOVERNANCE_SETTINGS },
-                                onSharedRideBooked = { rideId, otp, poolId, bookingId ->
-                                    activeRideId = rideId
-                                    activeOtp = otp
-                                    activePooledTripId = poolId
-                                    activeSharedBookingId = bookingId
-                                    currentScreen = CustomerScreenRoute.SHARED_TRIP
-                                }
-                            )
+                    CustomerLuxuryFlowScreens(
+                        activeTab = when (currentTab) {
+                            CustomerTab.HOME -> "Home"
+                            CustomerTab.RIDES -> "Rides"
+                            CustomerTab.WALLET -> "Wallet"
+                            CustomerTab.ACCOUNT -> "Account"
+                        },
+                        onTabSelected = { tab ->
+                            currentTab = when (tab) {
+                                "Home" -> CustomerTab.HOME
+                                "Rides" -> CustomerTab.RIDES
+                                "Wallet" -> CustomerTab.WALLET
+                                else -> CustomerTab.ACCOUNT
+                            }
+                        },
+                        onSignOut = {
+                            tokenManager.clear()
+                            currentScreen = CustomerScreenRoute.AUTH_OTP
                         }
-                        CustomerTab.RIDES -> {
-                            CustomerTripsTabContent(
-                                onRepeatTrip = { _, _ ->
-                                    currentTab = CustomerTab.HOME
-                                }
-                            )
-                        }
-                        CustomerTab.WALLET -> {
-                            CustomerWalletTabContent(
-                                onOpenWalletConsole = { showWalletConsoleDialog = true },
-                                onOpenLoyalty = { showLoyaltySanctuaryDialog = true },
-                                onOpenReferrals = { showReferralSanctuaryDialog = true }
-                            )
-                        }
-                        CustomerTab.ACCOUNT -> {
-                            CustomerMeTabContent(
-                                onNavigateProfile = { currentScreen = CustomerScreenRoute.PROFILE_EDIT },
-                                onNavigateGovernance = { currentScreen = CustomerScreenRoute.GOVERNANCE_SETTINGS },
-                                onNavigateNotifications = { currentScreen = CustomerScreenRoute.NOTIFICATIONS },
-                                onOpenSupport = { showSupportDeskDialog = true },
-                                onSignOutRequested = { showSignOutConfirmDialog = true }
-                            )
-                        }
-                    }
+                    )
                 }
                 CustomerScreenRoute.PROFILE_EDIT -> {
                     ProfileEditScreen(

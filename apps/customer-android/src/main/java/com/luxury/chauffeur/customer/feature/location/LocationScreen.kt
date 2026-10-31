@@ -256,10 +256,10 @@ fun LocationScreen(
 
     val defaultCuratedDestinations = remember {
         listOf(
-            LuxuryPlace("CSM T2 VIP Private Terminal", "Sahar, Andheri East, Mumbai", 19.0974, 72.8744),
-            LuxuryPlace("The Oberoi Grand Pavilion", "Nariman Point, Marine Drive, Mumbai", 18.9272, 72.8205),
-            LuxuryPlace("Bandra Kurla Financial Enclave", "G Block BKC, Bandra East, Mumbai", 19.0657, 72.8687),
-            LuxuryPlace("The St. Regis Penthouse Suites", "462 Senapati Bapat Marg, Lower Parel, Mumbai", 18.9934, 72.8242)
+            LuxuryPlace("Rajiv Chowk Metro Gate 2", "Connaught Place, New Delhi", 28.6328, 77.2197),
+            LuxuryPlace("Model Town Metro Hub", "Ring Road, Model Town, Delhi", 28.7032, 77.1937),
+            LuxuryPlace("Chandni Chowk Market", "Old Delhi Transit Corridor", 28.6506, 77.2303),
+            LuxuryPlace("Vishwa Vidyalaya Metro Gate 1", "North Campus, Mall Road, Delhi", 28.6948, 77.2144)
         )
     }
 
@@ -975,7 +975,7 @@ fun LocationScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "GRAND CHAUFFEUR",
+                    text = "E-RICKSHAW LUXURY",
                     style = LuxuryTypography.HeadlineMedium.copy(color = LuxuryColors.ChampagneGold, letterSpacing = 2.sp, fontSize = 18.sp)
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1012,7 +1012,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.ChampagneGold)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("✈ AIRPORT VIP ZONES", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("✈ METRO FEEDER", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1759,7 +1759,7 @@ fun LocationScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // CHAUFFEUR GUIDANCE & ACCESS INSTRUCTIONS (Features 33, 34, 35)
+                // PILOT GUIDANCE & ACCESS INSTRUCTIONS (Features 33, 34, 35)
                 LuxuryCard {
                     Column {
                         Row(
@@ -1767,7 +1767,7 @@ fun LocationScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("CHAUFFEUR GUIDANCE & ACCESS", style = LuxuryTypography.TitleGold.copy(fontSize = 12.sp))
+                            Text("PILOT GUIDANCE & ACCESS", style = LuxuryTypography.TitleGold.copy(fontSize = 12.sp))
                             TextButton(
                                 onClick = { showGuidanceSection = !showGuidanceSection },
                                 contentPadding = PaddingValues(0.dp)

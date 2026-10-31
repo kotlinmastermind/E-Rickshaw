@@ -367,7 +367,7 @@ fun DriverDashboardScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("CHAUFFEUR COCKPIT", style = DriverTypography.Title.copy(fontSize = 18.sp, color = DriverColors.ChauffeurGold))
+                    Text("E-RICKSHAW PILOT COCKPIT", style = DriverTypography.Title.copy(fontSize = 18.sp, color = DriverColors.ChauffeurGold))
                     Text("$chauffeurVehicleName • $licenseNumber", style = DriverTypography.Body.copy(fontSize = 12.sp, color = DriverColors.TextMuted))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
