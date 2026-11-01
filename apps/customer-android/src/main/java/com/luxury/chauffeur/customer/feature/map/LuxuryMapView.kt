@@ -471,6 +471,8 @@ fun LuxuryMapView(
     val mapView = rememberMapViewWithLifecycle()
     var googleMapInstance by remember { mutableStateOf<GoogleMap?>(null) }
     var selectedVehiclePopup by remember { mutableStateOf<NearbyVehicleDto?>(null) }
+    var useGoogleMapsEngine by remember { mutableStateOf(false) }
+    var currentMapLayer by remember { mutableStateOf("STREETS") } // "STREETS", "SATELLITE", "DARK"
 
     // Map Controls State
     val scope = rememberCoroutineScope()
@@ -843,50 +845,30 @@ fun LuxuryMapView(
             return Offset(px, py)
         }
 
-        // 1. Real Google Map Native View
-        AndroidView(
-            factory = { mapView },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // 2. Resilient Vector Fallback (ONLY shown if Google Map instance is null / initializing)
-        if (googleMapInstance == null) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                // Base Landmass
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(Color(0xFFF8FAFC), Color(0xFFF1F5F9))
-                    )
-                )
-
-                // Rivers Ribbon
-                val riverPath = Path().apply {
-                    val startP = project(centerLat - 0.009, centerLng - 0.030)
-                    val c1 = project(centerLat - 0.007, centerLng - 0.010)
-                    val c2 = project(centerLat - 0.005, centerLng + 0.010)
-                    val endP = project(centerLat - 0.008, centerLng + 0.035)
-                    moveTo(startP.x, startP.y)
-                    cubicTo(c1.x, c1.y, c2.x, c2.y, endP.x, endP.y)
-                }
-                drawPath(path = riverPath, color = Color(0xFFBAE6FD).copy(alpha = 0.85f), style = Stroke(width = 46f * zoomScale, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                drawPath(path = riverPath, color = Color(0xFF38BDF8).copy(alpha = 0.55f), style = Stroke(width = 32f * zoomScale, cap = StrokeCap.Round, join = StrokeJoin.Round))
-
-                // Streets Grid
-                val gridOffsets = listOf(-0.006, -0.004, -0.002, 0.002, 0.004, 0.006)
-                for (off in gridOffsets) {
-                    val p1 = project(centerLat + off, centerLng - 0.025)
-                    val p2 = project(centerLat + off, centerLng + 0.025)
-                    drawLine(Color(0xFFCBD5E1), p1, p2, strokeWidth = 14f * zoomScale, cap = StrokeCap.Round)
-                    drawLine(Color(0xFFE2E8F0), p1, p2, strokeWidth = 10f * zoomScale, cap = StrokeCap.Round)
-                }
-
-                // Customer pulsing puck
-                val customerPos = project(pickupLatLng.latitude, pickupLatLng.longitude)
-                drawCircle(Color(0xFF10B981).copy(alpha = pulseAlpha), radius = pulseRadius * density * zoomScale, center = customerPos)
-                drawCircle(Color.White, radius = 16f * density * zoomScale, center = customerPos)
-                drawCircle(Color(0xFF059669), radius = 11f * density * zoomScale, center = customerPos)
-                drawCircle(Color.White, radius = 4f * density * zoomScale, center = customerPos)
-            }
+        if (useGoogleMapsEngine) {
+            // 1. Google Maps Platform Native View
+            AndroidView(
+                factory = { mapView },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // 2. Real World Live Interactive Map (OpenStreetMap / Carto / ESRI Satellite)
+            RealWorldLeafletMapView(
+                modifier = Modifier.fillMaxSize(),
+                pickupLatLng = pickupLatLng,
+                pickupTitle = pickupTitle,
+                destLatLng = destLatLng,
+                destTitle = destTitle,
+                driverLatLng = driverLatLng,
+                nearbyVehicles = displayVehicles,
+                routePoints = routePoints,
+                mapLayer = currentMapLayer,
+                recenterTrigger = recenterTrigger,
+                zoomLevel = zoomLevel,
+                onMapClick = onMapClick,
+                onCameraMoved = onCameraIdle,
+                onVehicleClick = onVehicleClick
+            )
         }
 
         // 3. Top Status HUD Bar
@@ -904,13 +886,27 @@ fun LuxuryMapView(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color(0xFF10B981)))
+                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF10B981)))
                 Text(
-                    text = if (destLatLng != null) "✓ GOOGLE ROUTE & ADDRESS VERIFIED" else "⚡ GOOGLE MAPS ACTIVE",
+                    text = if (useGoogleMapsEngine) "⚡ GOOGLE MAPS ACTIVE" else "🗺️ REAL LIVE MAP (${currentMapLayer})",
                     color = Color.White,
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF1E293B),
+                    border = BorderStroke(0.5.dp, Color(0xFFEAB308)),
+                    modifier = Modifier.clickable { useGoogleMapsEngine = !useGoogleMapsEngine }
+                ) {
+                    Text(
+                        text = if (useGoogleMapsEngine) "Switch to Real Map" else "Switch to Google Map",
+                        color = Color(0xFFEAB308),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
+                }
                 if (showIsochroneRadius) {
                     Text(
                         text = if (isochroneLoading) "• ⏳ ISOCHRONE..." else "• ⭕ 15M ISOCHRONE",
@@ -1002,16 +998,24 @@ fun LuxuryMapView(
                 Text("🚦", fontSize = 16.sp)
             }
 
-            // Map Style Switcher (Normal / Satellite / Terrain)
+            // Map Style Switcher (Normal / Satellite / Dark)
             FloatingActionButton(
-                onClick = { mapTypeIndex = (mapTypeIndex + 1) % 3 },
+                onClick = {
+                    currentMapLayer = when (currentMapLayer) {
+                        "STREETS" -> "SATELLITE"
+                        "SATELLITE" -> "DARK"
+                        else -> "STREETS"
+                    }
+                    mapTypeIndex = (mapTypeIndex + 1) % 3
+                    Toast.makeText(context, "Layer: $currentMapLayer", Toast.LENGTH_SHORT).show()
+                },
                 modifier = Modifier.size(38.dp),
                 shape = CircleShape,
                 containerColor = Color.White,
                 contentColor = Color(0xFF0F172A),
                 elevation = FloatingActionButtonDefaults.elevation(4.dp)
             ) {
-                Text("🗺️", fontSize = 16.sp)
+                Text(if (currentMapLayer == "SATELLITE") "🛰️" else if (currentMapLayer == "DARK") "🌙" else "🗺️", fontSize = 16.sp)
             }
 
             // Isochrone 15-Minute Reachability Zone Toggle (Google Isochrones API)
