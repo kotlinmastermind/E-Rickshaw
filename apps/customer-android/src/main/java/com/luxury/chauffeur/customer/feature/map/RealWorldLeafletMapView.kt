@@ -166,17 +166,19 @@ fun RealWorldLeafletMapView(
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         val updateJson = buildUpdateJson()
-                        evaluateJavascript("if(window.updateMap) { window.updateMap($updateJson); }", null)
+                        val initJs = "if(!window.map) { initMap(${pickupLatLng.latitude}, ${pickupLatLng.longitude}, $zoomLevel, '$mapLayer'); } window.updateMap($updateJson);"
+                        evaluateJavascript(initJs, null)
                     }
                 }
                 addJavascriptInterface(AndroidMapBridge(bridgeListener), "AndroidBridge")
-                loadDataWithBaseURL("https://app.luxurychauffeur.local/", getRealMapHtml(pickupLatLng.latitude, pickupLatLng.longitude, zoomLevel, mapLayer), "text/html", "UTF-8", null)
+                loadUrl("file:///android_asset/leaflet/map.html")
             }
         },
         update = { webView ->
             webViewRef = webView
             val updateJson = buildUpdateJson()
-            webView.evaluateJavascript("if(window.updateMap) { window.updateMap($updateJson); }", null)
+            val js = "if(window.map && window.updateMap) { window.updateMap($updateJson); } else if(!window.map && window.initMap) { initMap(${pickupLatLng.latitude}, ${pickupLatLng.longitude}, $zoomLevel, '$mapLayer'); window.updateMap($updateJson); }"
+            webView.evaluateJavascript(js, null)
         },
         modifier = modifier.fillMaxSize()
     )
@@ -446,3 +448,4 @@ fun getRealMapHtml(initLat: Double, initLng: Double, zoom: Float, layer: String)
 </html>
 """.trimIndent()
 }
+

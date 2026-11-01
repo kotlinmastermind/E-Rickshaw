@@ -147,13 +147,13 @@ class WorldwideLiveMapsProvider(MapsProvider):
     polyline generation, and turn-by-turn navigation guidance anywhere on Earth with zero billing constraints.
     """
     CURATED_POIS = [
-        {"place_id": "poi_patna_jn", "name": "Patna Junction Railway Station", "address": "Station Rd, Fraser Road Area, Patna, Bihar", "lat": 25.6032, "lng": 85.1376},
-        {"place_id": "poi_gandhi_maidan", "name": "Gandhi Maidan", "address": "Bakarganj, Patna, Bihar", "lat": 25.6180, "lng": 85.1440},
-        {"place_id": "poi_boring_road", "name": "Boring Road Crossing", "address": "Boring Rd, Sri Krishna Puri, Patna, Bihar", "lat": 25.6110, "lng": 85.1208},
-        {"place_id": "poi_airport_patna", "name": "Jay Prakash Narayan Airport (PAT)", "address": "Shaheed Pir Ali Khan Marg, Patna, Bihar", "lat": 25.5913, "lng": 85.0880},
-        {"place_id": "poi_aiims_patna", "name": "AIIMS Patna", "address": "Phulwari Sharif, Patna, Bihar", "lat": 25.5615, "lng": 85.0441},
-        {"place_id": "poi_cp_delhi", "name": "Connaught Place (Rajiv Chowk)", "address": "Connaught Place, New Delhi", "lat": 28.6328, "lng": 77.2197},
-        {"place_id": "poi_taj_palace", "name": "The Taj Mahal Palace", "address": "Apollo Bunder, Colaba, Mumbai", "lat": 18.9217, "lng": 72.8332}
+        {"place_id": "poi_patna_jn", "name": "Patna Junction Railway Station", "address": "Station Rd, Fraser Road Area, Patna, Bihar", "lat": 25.6032, "lng": 85.1376, "latitude": 25.6032, "longitude": 85.1376},
+        {"place_id": "poi_gandhi_maidan", "name": "Gandhi Maidan", "address": "Bakarganj, Patna, Bihar", "lat": 25.6180, "lng": 85.1440, "latitude": 25.6180, "longitude": 85.1440},
+        {"place_id": "poi_boring_road", "name": "Boring Road Crossing", "address": "Boring Rd, Sri Krishna Puri, Patna, Bihar", "lat": 25.6110, "lng": 85.1208, "latitude": 25.6110, "longitude": 85.1208},
+        {"place_id": "poi_airport_patna", "name": "Jay Prakash Narayan Airport (PAT)", "address": "Shaheed Pir Ali Khan Marg, Patna, Bihar", "lat": 25.5913, "lng": 85.0880, "latitude": 25.5913, "longitude": 85.0880},
+        {"place_id": "poi_aiims_patna", "name": "AIIMS Patna", "address": "Phulwari Sharif, Patna, Bihar", "lat": 25.5615, "lng": 85.0441, "latitude": 25.5615, "longitude": 85.0441},
+        {"place_id": "poi_cp_delhi", "name": "Connaught Place (Rajiv Chowk)", "address": "Connaught Place, New Delhi", "lat": 28.6328, "lng": 77.2197, "latitude": 28.6328, "longitude": 77.2197},
+        {"place_id": "poi_taj_palace", "name": "The Taj Mahal Palace", "address": "Apollo Bunder, Colaba, Mumbai", "lat": 18.9217, "lng": 72.8332, "latitude": 18.9217, "longitude": 72.8332}
     ]
 
     def provider_health(self) -> Dict[str, Any]:
@@ -201,6 +201,8 @@ class WorldwideLiveMapsProvider(MapsProvider):
                                     "address": addr,
                                     "lat": round(lat, 6),
                                     "lng": round(lng, 6),
+                                    "latitude": round(lat, 6),
+                                    "longitude": round(lng, 6),
                                     "coordinates_verified": True,
                                     "provider_mode": "WORLDWIDE_LIVE_OSM"
                                 })
@@ -229,6 +231,8 @@ class WorldwideLiveMapsProvider(MapsProvider):
                                 "address": disp,
                                 "lat": round(lat, 6),
                                 "lng": round(lng, 6),
+                                "latitude": round(lat, 6),
+                                "longitude": round(lng, 6),
                                 "coordinates_verified": True,
                                 "provider_mode": "NOMINATIM_OSM"
                             })

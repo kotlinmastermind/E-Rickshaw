@@ -381,7 +381,22 @@ fun PaymentScreen(
                                                 paymentSettled = true
                                             }
                                         }
-                                        "UPI", "SAVED_CARD" -> {
+                                        "UPI" -> {
+                                            val launched = RazorpayCheckoutHelper.launchDirectUpiIntent(
+                                                context = context,
+                                                amountRupees = amountRupees.toDouble(),
+                                                rideId = rideId
+                                            )
+                                            if (launched) {
+                                                Toast.makeText(context, "Opening UPI app to pay ₹$amountRupees...", Toast.LENGTH_SHORT).show()
+                                                paymentSettled = true
+                                                isProcessing = false
+                                            } else {
+                                                showUpiDeepLinkDialog = true
+                                                isProcessing = false
+                                            }
+                                        }
+                                        "SAVED_CARD" -> {
                                             val act = context as? Activity
                                             if (act != null) {
                                                 try {

@@ -408,11 +408,29 @@ async def get_route(
                 if 0 < i < steps:
                     bend = math.sin(fraction * math.pi) * 0.0015
                     lat_interp += bend
-                points.append({"latitude": round(lat_interp, 6), "longitude": round(lng_interp, 6)})
+                points.append({
+                    "latitude": round(lat_interp, 6),
+                    "longitude": round(lng_interp, 6),
+                    "lat": round(lat_interp, 6),
+                    "lng": round(lng_interp, 6)
+                })
+
+    # Ensure all points have both latitude/longitude and lat/lng
+    normalized_points = []
+    for p in points:
+        lat_val = p.get("latitude") if p.get("latitude") is not None else p.get("lat")
+        lng_val = p.get("longitude") if p.get("longitude") is not None else p.get("lng")
+        if lat_val is not None and lng_val is not None:
+            normalized_points.append({
+                "latitude": float(lat_val),
+                "longitude": float(lng_val),
+                "lat": float(lat_val),
+                "lng": float(lng_val)
+            })
 
     return {
         **data,
-        "points": points,
+        "points": normalized_points,
         "restriction_coverage": "Verified against active municipal restrictions."
     }
 

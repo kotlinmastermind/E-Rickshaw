@@ -815,15 +815,7 @@ fun LuxuryMapView(
     )
 
     BoxWithConstraints(
-        modifier = modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    panOffsetX += dragAmount.x
-                    panOffsetY += dragAmount.y
-                }
-            }
+        modifier = modifier.fillMaxSize()
     ) {
         val widthPx = constraints.maxWidth.toFloat()
         val heightPx = constraints.maxHeight.toFloat()

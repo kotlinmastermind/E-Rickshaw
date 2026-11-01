@@ -414,21 +414,43 @@ fun LocationScreen(
             try {
                 val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
                 if (lm != null) {
-                    val provider = when {
+                    val providers = listOf(
+                        LocationManager.GPS_PROVIDER,
+                        LocationManager.NETWORK_PROVIDER,
+                        LocationManager.PASSIVE_PROVIDER
+                    )
+                    for (prov in providers) {
+                        try {
+                            if (lm.isProviderEnabled(prov)) {
+                                val loc = lm.getLastKnownLocation(prov)
+                                if (loc != null) {
+                                    processLocationResult(loc)
+                                    return
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    val bestProv = when {
                         lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
                         lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
                         else -> LocationManager.PASSIVE_PROVIDER
                     }
-                    val loc = lm.getLastKnownLocation(provider)
-                    if (loc != null) {
-                        processLocationResult(loc)
+                    try {
+                        lm.requestSingleUpdate(bestProv, object : android.location.LocationListener {
+                            override fun onLocationChanged(loc: android.location.Location) {
+                                processLocationResult(loc)
+                            }
+                            override fun onStatusChanged(p: String?, s: Int, e: android.os.Bundle?) {}
+                            override fun onProviderEnabled(p: String) {}
+                            override fun onProviderDisabled(p: String) {}
+                        }, android.os.Looper.getMainLooper())
                         return
-                    }
+                    } catch (_: Exception) {}
                 }
             } catch (_: Exception) {}
             isDetectingLocation = false
             isGpsLive = false
-            pickupAddress = "Location unavailable • choose a pickup pin"
+            pickupAddress = "Tap map to set pickup pin"
         }
 
         isDetectingLocation = true
@@ -686,8 +708,8 @@ fun LocationScreen(
                             val map = item as? Map<*, *> ?: return@mapNotNull null
                             val name = map["name"] as? String ?: return@mapNotNull null
                             val address = map["address"] as? String ?: name
-                            val lat = (map["lat"] as? Number)?.toDouble() ?: 19.0760
-                            val lng = (map["lng"] as? Number)?.toDouble() ?: 72.8777
+                            val lat = (map["lat"] as? Number)?.toDouble() ?: (map["latitude"] as? Number)?.toDouble() ?: 28.6139
+                            val lng = (map["lng"] as? Number)?.toDouble() ?: (map["longitude"] as? Number)?.toDouble() ?: 77.2090
                             LuxuryPlace(name = name, address = address, lat = lat, lng = lng)
                         }
                         dynamicDestinations = parsed
@@ -1317,7 +1339,27 @@ fun LocationScreen(
                         routePoints = liveRoutePoints,
                         routeDistanceKm = liveRouteDistanceKm,
                         routeDurationMinutes = liveRouteDurationMinutes,
-                        recenterTrigger = recenterTrigger
+                        recenterTrigger = recenterTrigger,
+                        onMapClick = { clickedLatLng ->
+                            scope.launch {
+                                try {
+                                    val rev = ApiClient.getService().reverseGeocode(
+                                        mapOf("latitude" to clickedLatLng.latitude, "longitude" to clickedLatLng.longitude)
+                                    )
+                                    val addr = (rev.body()?.get("formatted_address") as? String)
+                                        ?: "Pinned (${String.format(java.util.Locale.US, "%.4f, %.4f", clickedLatLng.latitude, clickedLatLng.longitude)})"
+                                    selectedDestination = LuxuryPlace(addr, addr, clickedLatLng.latitude, clickedLatLng.longitude)
+                                    destinationSearchQuery = addr
+                                    recenterTrigger += 1
+                                    Toast.makeText(context, "Destination selected: $addr", Toast.LENGTH_SHORT).show()
+                                } catch (_: Exception) {
+                                    val name = "Pinned (${String.format(java.util.Locale.US, "%.4f, %.4f", clickedLatLng.latitude, clickedLatLng.longitude)})"
+                                    selectedDestination = LuxuryPlace(name, name, clickedLatLng.latitude, clickedLatLng.longitude)
+                                    destinationSearchQuery = name
+                                    recenterTrigger += 1
+                                }
+                            }
+                        }
                     )
 
                     // Floating GPS Recenter button (Target / Crosshair)
@@ -1477,7 +1519,7 @@ fun LocationScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (selectedDestination == null) {
+            if (selectedDestination == null || destinationSearchQuery.isNotEmpty()) {
                 Text(
                     text = if (dynamicDestinations.isNotEmpty()) "LIVE MATCHES (SERVER)" else "POPULAR DESTINATIONS",
                     style = LuxuryTypography.TitleGold.copy(fontSize = 13.sp)
@@ -1500,6 +1542,7 @@ fun LocationScreen(
                             onClick = {
                                 selectedDestination = place
                                 destinationSearchQuery = place.name
+                                recenterTrigger += 1
                             }
                         ) {
                             Text(place.name, style = LuxuryTypography.BodyRegular.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp))

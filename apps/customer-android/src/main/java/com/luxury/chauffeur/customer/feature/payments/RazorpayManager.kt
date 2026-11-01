@@ -195,13 +195,38 @@ object RazorpayCheckoutHelper {
             val formattedAmount = String.format(java.util.Locale.US, "%.2f", amountRupees)
             val uri = Uri.parse("upi://pay?pa=$payeeVpa&pn=${Uri.encode(payeeName)}&mc=5511&tr=$rideId&tn=RidePayment-${rideId.take(8)}&am=$formattedAmount&cu=INR")
             val intent = Intent(Intent.ACTION_VIEW, uri)
-            val chooser = Intent.createChooser(intent, "Pay via UPI App (Google Pay / PhonePe / Paytm)")
+            val chooser = Intent.createChooser(intent, "Pay ₹$formattedAmount via UPI (GPay / PhonePe / Paytm / BHIM)")
             chooser.flags = Intent.FLAG_ACTIVITY_NEW_TASK
             context.startActivity(chooser)
             true
         } catch (e: Exception) {
             Log.w(TAG, "Direct UPI Intent launch failed: ${e.message}")
             false
+        }
+    }
+
+    /**
+     * Launch a specific UPI App directly by package name (e.g. GPay, PhonePe, Paytm)
+     */
+    fun launchSpecificUpiApp(
+        context: Context,
+        packageName: String,
+        amountRupees: Double,
+        rideId: String,
+        payeeVpa: String = RazorpayConfig.DEFAULT_UPI_VPA,
+        payeeName: String = RazorpayConfig.COMPANY_NAME
+    ): Boolean {
+        return try {
+            val formattedAmount = String.format(java.util.Locale.US, "%.2f", amountRupees)
+            val uri = Uri.parse("upi://pay?pa=$payeeVpa&pn=${Uri.encode(payeeName)}&mc=5511&tr=$rideId&tn=RidePayment-${rideId.take(8)}&am=$formattedAmount&cu=INR")
+            val intent = Intent(Intent.ACTION_VIEW, uri)
+            intent.setPackage(packageName)
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Targeted launch for $packageName failed, falling back to chooser: ${e.message}")
+            launchDirectUpiIntent(context, amountRupees, rideId, payeeVpa, payeeName)
         }
     }
 }

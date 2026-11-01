@@ -326,6 +326,7 @@ fun DriverMapView(
     currentSpeedKmh: Int = 24,
     speedLimitKmh: Int = 30,
     bearing: Float = 45f,
+    routePoints: List<LatLng> = emptyList(),
     isNavigationCockpitEnabled: Boolean = true,
     onLaunchExternalNav: (() -> Unit)? = null,
     onMapClick: ((LatLng) -> Unit)? = null
@@ -548,7 +549,7 @@ fun DriverMapView(
                 pickupTitle = pickupTitle,
                 destLatLng = destLatLng,
                 destTitle = destTitle,
-                routePoints = emptyList(),
+                routePoints = routePoints,
                 mapLayer = currentMapLayer,
                 is3DMode = is3DCameraMode,
                 recenterTrigger = recenterTrigger,
