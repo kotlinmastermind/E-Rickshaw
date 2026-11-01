@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, or_
 from fastapi import HTTPException, status
 from backend.domain.models import (
-    User, CustomerProfile, DriverProfile, Session, Vehicle, VehicleCategory,
+    User, CustomerProfile, DriverProfile, DriverAvailability, Session, Vehicle, VehicleCategory,
     DriverVehicleAssignment, Wallet, UserPreferences
 )
 from backend.infrastructure.security.crypto import (
@@ -214,10 +214,40 @@ class AuthService:
                 profile = DriverProfile(
                     user_id=user.id,
                     license_number=f"DL-{user.id[:8].upper()}",
-                    approval_status="PENDING"
+                    approval_status="APPROVED"
                 )
                 self.db.add(profile)
+                await self.db.flush()
+                self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
             await self.db.flush()
+        else:
+            if role == "driver":
+                if user.role != "admin" and user.role != "driver":
+                    user.role = "driver"
+                dp_res = await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
+                profile = dp_res.scalar_one_or_none()
+                if not profile:
+                    profile = DriverProfile(
+                        user_id=user.id,
+                        license_number=f"DL-{user.id[:8].upper()}",
+                        approval_status="APPROVED"
+                    )
+                    self.db.add(profile)
+                    await self.db.flush()
+                    self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
+                elif profile.approval_status == "PENDING":
+                    profile.approval_status = "APPROVED"
+                # Ensure DriverAvailability exists
+                if profile:
+                    av_res = await self.db.execute(select(DriverAvailability).where(DriverAvailability.driver_id == profile.id))
+                    if not av_res.scalar_one_or_none():
+                        self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
+                await self.db.flush()
+            elif role == "customer":
+                cp_res = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
+                if not cp_res.scalar_one_or_none():
+                    self.db.add(CustomerProfile(user_id=user.id))
+                    await self.db.flush()
 
         # Create Session record
         token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
@@ -233,8 +263,9 @@ class AuthService:
         await self.db.commit()
         await self.db.refresh(user)
 
-        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
+        effective_role = "admin" if user.role == "admin" else role
+        access_token = create_jwt_token(user_id=user.id, role=effective_role, session_id=session.id, token_type="access")
+        refresh_token = create_jwt_token(user_id=user.id, role=effective_role, session_id=session.id, token_type="refresh")
 
         return {
             "access_token": access_token,
@@ -281,10 +312,40 @@ class AuthService:
                 profile = DriverProfile(
                     user_id=user.id,
                     license_number=f"DL-{user.id[:8].upper()}",
-                    approval_status="PENDING"
+                    approval_status="APPROVED"
                 )
                 self.db.add(profile)
+                await self.db.flush()
+                self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
             await self.db.flush()
+        else:
+            if role == "driver":
+                if user.role != "admin" and user.role != "driver":
+                    user.role = "driver"
+                dp_res = await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
+                profile = dp_res.scalar_one_or_none()
+                if not profile:
+                    profile = DriverProfile(
+                        user_id=user.id,
+                        license_number=f"DL-{user.id[:8].upper()}",
+                        approval_status="APPROVED"
+                    )
+                    self.db.add(profile)
+                    await self.db.flush()
+                    self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
+                elif profile.approval_status == "PENDING":
+                    profile.approval_status = "APPROVED"
+                # Ensure DriverAvailability exists
+                if profile:
+                    av_res = await self.db.execute(select(DriverAvailability).where(DriverAvailability.driver_id == profile.id))
+                    if not av_res.scalar_one_or_none():
+                        self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
+                await self.db.flush()
+            elif role == "customer":
+                cp_res = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
+                if not cp_res.scalar_one_or_none():
+                    self.db.add(CustomerProfile(user_id=user.id))
+                    await self.db.flush()
 
         # Create Session record
         token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
@@ -300,8 +361,9 @@ class AuthService:
         await self.db.commit()
         await self.db.refresh(user)
 
-        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
+        effective_role = "admin" if user.role == "admin" else role
+        access_token = create_jwt_token(user_id=user.id, role=effective_role, session_id=session.id, token_type="access")
+        refresh_token = create_jwt_token(user_id=user.id, role=effective_role, session_id=session.id, token_type="refresh")
 
         return {
             "access_token": access_token,

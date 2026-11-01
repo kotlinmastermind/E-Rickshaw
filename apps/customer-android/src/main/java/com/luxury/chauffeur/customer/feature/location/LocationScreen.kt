@@ -19,6 +19,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
+import kotlin.math.roundToInt
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -114,6 +117,13 @@ fun LocationScreen(
     var selectedDestination by remember { mutableStateOf<LuxuryPlace?>(null) }
     var dynamicDestinations by remember { mutableStateOf<List<LuxuryPlace>>(emptyList()) }
     var isSearchingDestinations by remember { mutableStateOf(false) }
+    var recenterTrigger by remember { mutableIntStateOf(0) }
+    var liveRoutePoints by remember { mutableStateOf<List<LatLng>>(emptyList()) }
+    var liveRouteDistanceKm by remember { mutableStateOf<Double?>(null) }
+    var liveRouteDurationMinutes by remember { mutableStateOf<Double?>(null) }
+    var liveNavigationSteps by remember { mutableStateOf<List<NavigationStepDto>>(emptyList()) }
+    var isFetchingRoute by remember { mutableStateOf(false) }
+    var showNavigationStepsDialog by remember { mutableStateOf(false) }
 
     // Recent destinations shortcuts (Feature 47)
     var recentDestinations by remember { mutableStateOf<List<RecentDestinationDto>>(emptyList()) }
@@ -380,6 +390,7 @@ fun LocationScreen(
             pickupLatLng = LatLng(location.latitude, location.longitude)
             isGpsLive = true
             pickupVerified = true
+            recenterTrigger += 1
             gpsAccuracyMeters = if (location.hasAccuracy()) location.accuracy else null
             scope.launch {
                 try {
@@ -692,6 +703,51 @@ fun LocationScreen(
         } else {
             dynamicDestinations = emptyList()
             isSearchingDestinations = false
+        }
+    }
+
+    // Real Road Route & Navigation Guidance Engine
+    LaunchedEffect(pickupLatLng, selectedDestination) {
+        val dest = selectedDestination
+        if (dest != null) {
+            isFetchingRoute = true
+            try {
+                val routeRes = ApiClient.getService().getRouteDetails(
+                    originLat = pickupLatLng.latitude,
+                    originLng = pickupLatLng.longitude,
+                    destLat = dest.lat,
+                    destLng = dest.lng
+                )
+                if (routeRes.isSuccessful && routeRes.body() != null) {
+                    val r = routeRes.body()!!
+                    liveRouteDistanceKm = r.distanceKm
+                    liveRouteDurationMinutes = r.durationMinutes
+                    val pts = r.points?.map { LatLng(it.latitude, it.longitude) } ?: emptyList()
+                    liveRoutePoints = if (pts.isNotEmpty()) pts else listOf(pickupLatLng, LatLng(dest.lat, dest.lng))
+                }
+
+                try {
+                    val navRes = ApiClient.getService().getNavigationGuidance(
+                        originLat = pickupLatLng.latitude,
+                        originLng = pickupLatLng.longitude,
+                        destLat = dest.lat,
+                        destLng = dest.lng
+                    )
+                    if (navRes.isSuccessful && navRes.body() != null) {
+                        liveNavigationSteps = navRes.body()!!.steps
+                    }
+                } catch (_: Exception) {}
+            } catch (e: Exception) {
+                android.util.Log.w("LocationScreen", "Route fetch error: ${e.message}")
+                liveRoutePoints = listOf(pickupLatLng, LatLng(dest.lat, dest.lng))
+            } finally {
+                isFetchingRoute = false
+            }
+        } else {
+            liveRoutePoints = emptyList()
+            liveRouteDistanceKm = null
+            liveRouteDurationMinutes = null
+            liveNavigationSteps = emptyList()
         }
     }
 
@@ -1255,10 +1311,35 @@ fun LocationScreen(
                     LuxuryMapView(
                         modifier = Modifier.fillMaxSize(),
                         pickupLatLng = pickupLatLng,
-                        pickupTitle = "PICKUP",
-                        destLatLng = LatLng(destPlace.lat, destPlace.lng),
-                        destTitle = destPlace.name
+                        pickupTitle = if (isGpsLive) "MY GPS LOCATION" else "PICKUP PIN",
+                        destLatLng = selectedDestination?.let { LatLng(it.lat, it.lng) } ?: LatLng(destPlace.lat, destPlace.lng),
+                        destTitle = selectedDestination?.name ?: destPlace.name,
+                        routePoints = liveRoutePoints,
+                        routeDistanceKm = liveRouteDistanceKm,
+                        routeDurationMinutes = liveRouteDurationMinutes,
+                        recenterTrigger = recenterTrigger
                     )
+
+                    // Floating GPS Recenter button (Target / Crosshair)
+                    Surface(
+                        shape = CircleShape,
+                        color = LuxuryColors.ObsidianBlack.copy(alpha = 0.92f),
+                        border = BorderStroke(1.5.dp, LuxuryColors.ChampagneGold),
+                        shadowElevation = 6.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(bottom = 36.dp, end = 10.dp)
+                            .size(38.dp)
+                            .clickable {
+                                recenterTrigger += 1
+                                fetchLiveDeviceLocation()
+                                Toast.makeText(context, "Locating via GPS...", Toast.LENGTH_SHORT).show()
+                            }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("⌖", color = LuxuryColors.ChampagneGold, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
 
                     // Map pin action pills positioned on TopEnd to avoid overlapping with TopStart GPS HUD
                     Row(
@@ -1312,6 +1393,54 @@ fun LocationScreen(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+
+            // Live Shortest Route & Navigation Connection Banner
+            if (selectedDestination != null && liveRouteDistanceKm != null) {
+                Surface(
+                    shape = RoundedCornerShape(LuxuryDimensions.RadiusMedium),
+                    color = LuxuryColors.CardSurface,
+                    border = BorderStroke(1.dp, LuxuryColors.ChampagneGold.copy(alpha = 0.85f)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("🛣️", fontSize = 16.sp)
+                                Column {
+                                    Text(
+                                        text = "SHORTEST ROUTE CONNECTED",
+                                        style = LuxuryTypography.TitleGold.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        text = "${liveRouteDistanceKm} km • ~${liveRouteDurationMinutes?.roundToInt() ?: 5} mins (Fastest Path)",
+                                        style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp, color = Color(0xFF10B981), fontWeight = FontWeight.SemiBold)
+                                    )
+                                }
+                            }
+                            if (liveNavigationSteps.isNotEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = LuxuryColors.ChampagneGold.copy(alpha = 0.15f),
+                                    border = BorderStroke(1.dp, LuxuryColors.ChampagneGold),
+                                    modifier = Modifier.clickable { showNavigationStepsDialog = true }
+                                ) {
+                                    Text(
+                                        text = "DIRECTIONS ›",
+                                        color = LuxuryColors.ChampagneGold,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Destination Search Input
             OutlinedTextField(
@@ -2521,6 +2650,62 @@ fun LocationScreen(
                 Toast.makeText(context, "Selected: $routeLabel ($dur min, $dist km)", Toast.LENGTH_SHORT).show()
             }
         )
+    }
+
+    if (showNavigationStepsDialog) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showNavigationStepsDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(LuxuryDimensions.RadiusLarge),
+                color = LuxuryColors.CardSurface,
+                border = BorderStroke(1.dp, LuxuryColors.ChampagneGold),
+                modifier = Modifier.fillMaxWidth().wrapContentHeight()
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "TURN-BY-TURN NAVIGATION",
+                            style = LuxuryTypography.TitleGold.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = "✕",
+                            color = LuxuryColors.SubtleGray,
+                            modifier = Modifier.clickable { showNavigationStepsDialog = false }.padding(4.dp)
+                        )
+                    }
+                    Text(
+                        text = "Shortest driving route: ${liveRouteDistanceKm ?: 0.0} km • ~${liveRouteDurationMinutes?.roundToInt() ?: 0} mins",
+                        style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp, color = Color(0xFF10B981))
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LazyColumn(modifier = Modifier.heightIn(max = 320.dp)) {
+                        items(liveNavigationSteps) { step ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("➤", color = LuxuryColors.ChampagneGold, fontSize = 12.sp, modifier = Modifier.padding(end = 8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(step.instruction, style = LuxuryTypography.BodyRegular.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold))
+                                    Text(step.distance, style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.SubtleGray))
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    LuxuryGoldButton(
+                        text = "DISMISS DIRECTIONS",
+                        onClick = { showNavigationStepsDialog = false },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
     }
 
     if (showGpsRecoveryDialog) {

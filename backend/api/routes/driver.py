@@ -11,6 +11,17 @@ from backend.application.services.cascading_dispatch_service import CascadingDis
 
 router = APIRouter(prefix="/drivers", tags=["Driver Operations"])
 
+class DispatchPreferencesPayload(BaseModel):
+    minimum_fare_cents: int = Field(0, ge=0, le=100000000)
+    maximum_pickup_distance_km: float = Field(20, gt=0, le=200)
+    vehicle_categories: List[str] = Field(default_factory=list, max_length=20)
+    preferred_drop_zones: List[str] = Field(default_factory=list, max_length=50)
+    voice_guidance_enabled: bool = True
+    reroute_on_closure_enabled: bool = True
+
+class RejectOfferPayload(BaseModel):
+    reason: str = Field(..., pattern="^(TOO_FAR|FARE_TOO_LOW|WRONG_CATEGORY|UNAVAILABLE|OTHER|DISPATCH_TIMEOUT|PILOT_DECLINED|PASSENGER_MISMATCH|LOW_BATTERY)$")
+
 @router.get("/dispatch/offers")
 async def get_dispatch_offers(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
     return await DriverTripOperationsService(db).get_offers(user.id)
@@ -42,17 +53,6 @@ class LocationPingPayload(BaseModel):
 class DriverProfileUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
-
-class DispatchPreferencesPayload(BaseModel):
-    minimum_fare_cents: int = Field(0, ge=0, le=100000000)
-    maximum_pickup_distance_km: float = Field(20, gt=0, le=200)
-    vehicle_categories: List[str] = Field(default_factory=list, max_length=20)
-    navigation_provider: str = Field("GOOGLE_MAPS", pattern="^(GOOGLE_MAPS|WAZE|SYSTEM)$")
-    voice_guidance_enabled: bool = True
-    reroute_on_closure_enabled: bool = True
-
-class RejectOfferPayload(BaseModel):
-    reason: str = Field(..., pattern="^(TOO_FAR|FARE_TOO_LOW|WRONG_CATEGORY|UNAVAILABLE|OTHER|DISPATCH_TIMEOUT|PILOT_DECLINED|PASSENGER_MISMATCH|LOW_BATTERY)$")
 
 @router.get("/profile")
 async def get_driver_profile(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):

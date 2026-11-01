@@ -114,17 +114,31 @@ object RazorpayCheckoutHelper {
             retryObj.put("max_count", 2)
             options.put("retry", retryObj)
 
+            // Explicitly enable payment methods
+            val methodObj = JSONObject()
+            methodObj.put("upi", true)
+            methodObj.put("card", true)
+            methodObj.put("netbanking", true)
+            methodObj.put("wallet", true)
+            methodObj.put("emi", true)
+            options.put("method", methodObj)
+
             // Custom Display sequence that forces UPI to show at the top of Razorpay Checkout
             val config = JSONObject()
             val display = JSONObject()
             val blocks = JSONObject()
 
-            // 1. UPI Block (Primary)
+            // 1. UPI Block (Primary - Intent, QR, and Collect/VPA)
             val upiBlock = JSONObject()
-            upiBlock.put("name", "Pay using UPI (GPay, PhonePe, Paytm, QR)")
+            upiBlock.put("name", "UPI / QR / Google Pay / PhonePe / Paytm")
             val upiInstruments = JSONArray()
             val upiInst = JSONObject()
             upiInst.put("method", "upi")
+            val upiFlows = JSONArray()
+            upiFlows.put("intent")
+            upiFlows.put("collect")
+            upiFlows.put("qr")
+            upiInst.put("flows", upiFlows)
             upiInstruments.put(upiInst)
             upiBlock.put("instruments", upiInstruments)
             blocks.put("upi_block", upiBlock)
