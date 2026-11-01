@@ -30,6 +30,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.util.Log
+import com.luxury.chauffeur.driver.core.network.DriverApiClient
+import com.luxury.chauffeur.driver.core.network.DriverAvailabilityPayload
+import com.luxury.chauffeur.driver.core.network.StartTripPayload
+import com.luxury.chauffeur.driver.core.network.FinishTripPayload
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 

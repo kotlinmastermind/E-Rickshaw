@@ -30,6 +30,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.util.Log
+import com.luxury.chauffeur.customer.core.network.ApiClient
+import com.luxury.chauffeur.customer.core.network.FareEstimateRequest
+import com.luxury.chauffeur.customer.core.network.RideRequestPayload
+import com.luxury.chauffeur.customer.core.network.RateDriverRequest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -138,6 +143,8 @@ fun CustomerLuxuryFlowScreens(
     val scope = rememberCoroutineScope()
 
     // Active Ride Flow State
+    var activeRideId by remember { mutableStateOf<String?>(null) }
+    var currentEstimateId by remember { mutableStateOf<String?>(null) }
     var flowStep by remember { mutableStateOf(CustFlowStep.HOME_MAP) }
     var selectedCategory by remember { mutableStateOf("Standard E-Rickshaw") }
     var estimatedFare by remember { mutableIntStateOf(128) }
@@ -148,6 +155,35 @@ fun CustomerLuxuryFlowScreens(
     var driverPlate by remember { mutableStateOf("DL-1ER-4821") }
     var driverRating by remember { mutableStateOf("4.9 ★") }
     var driverEta by remember { mutableIntStateOf(2) }
+
+    // Dynamic Backend Fare Estimation Hook
+    LaunchedEffect(destinationQuery, selectedCategory) {
+        try {
+            val api = ApiClient.getService()
+            val catCode = if (selectedCategory.contains("Share", ignoreCase = true)) "E_RICKSHAW_SHARE"
+                          else if (selectedCategory.contains("Auto", ignoreCase = true)) "E_AUTO"
+                          else "E_RICKSHAW_STANDARD"
+            val estResp = api.calculateFareEstimate(
+                FareEstimateRequest(
+                    categoryId = catCode,
+                    pickupLatitude = 28.7041,
+                    pickupLongitude = 77.1025,
+                    destinationLatitude = 28.6304,
+                    destinationLongitude = 77.2177
+                )
+            )
+            if (estResp.isSuccessful && estResp.body() != null) {
+                val est = estResp.body()!!
+                currentEstimateId = est.estimateId
+                val rupees = est.estimatedFareRupees?.toInt() ?: (est.estimatedFareCents / 100)
+                if (rupees > 0) {
+                    estimatedFare = rupees
+                }
+            }
+        } catch (t: Throwable) {
+            Log.w("CustomerFlow", "Fare estimate API fallback: ${t.message}")
+        }
+    }
 
     // User Profile State (CRUD)
     var userName by remember { mutableStateOf("Sunil Sharma") }
@@ -284,14 +320,59 @@ fun CustomerLuxuryFlowScreens(
         CustFlowStep.SOS_PANIC
     )
 
-    // Searching Radar Pulse with 3-retry driver search rule
+    // Searching Radar Pulse with live backend ride request & driver status polling
     LaunchedEffect(flowStep) {
         if (flowStep == CustFlowStep.SEARCHING_RADAR) {
             radarSeconds = 20
+
+            // Send live ride request to backend if estimateId exists
+            try {
+                val api = ApiClient.getService()
+                val estId = currentEstimateId
+                if (estId != null) {
+                    val resp = api.requestRide(
+                        RideRequestPayload(
+                            estimateId = estId,
+                            pickupAddress = pickupAddress,
+                            destinationAddress = destinationQuery,
+                            paymentMethod = "UPI"
+                        )
+                    )
+                    if (resp.isSuccessful && resp.body() != null) {
+                        val body = resp.body()!!
+                        val rideId = body["id"] as? String ?: body["ride_id"] as? String
+                        if (!rideId.isNullOrBlank()) {
+                            activeRideId = rideId
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.w("CustomerFlow", "Live ride request network call fallback: ${t.message}")
+            }
+
             while (radarSeconds > 0 && flowStep == CustFlowStep.SEARCHING_RADAR) {
                 delay(1000L)
                 radarSeconds--
+
+                // Poll active ride status if activeRideId exists
+                activeRideId?.let { rId ->
+                    try {
+                        val statusResp = ApiClient.getService().getRideDetails(rId)
+                        if (statusResp.isSuccessful && statusResp.body() != null) {
+                            val ride = statusResp.body()!!
+                            ride.driver?.let { d ->
+                                if (d.name.isNotBlank()) driverName = d.name
+                                driverRating = "${d.rating} ★"
+                            }
+                            if (!ride.startOtp.isNullOrBlank()) startOtp = ride.startOtp
+                            if (ride.status == "ACCEPTED" || ride.status == "ARRIVING" || ride.status == "ASSIGNED") {
+                                flowStep = CustFlowStep.DRIVER_FOUND
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                }
             }
+
             if (flowStep == CustFlowStep.SEARCHING_RADAR) {
                 if (searchRetries < 2) {
                     searchRetries++

@@ -37,13 +37,23 @@ Session.refresh = _resilient_refresh
 class Base(DeclarativeBase):
     pass
 
-connect_args = {"check_same_thread": False, "timeout": 30} if settings.DATABASE_URL.startswith("sqlite") else {"timeout": 6, "command_timeout": 6}
+connect_args = {"check_same_thread": False, "timeout": 30} if settings.DATABASE_URL.startswith("sqlite") else {"timeout": 15, "command_timeout": 15}
+
+engine_kwargs = {
+    "echo": False,
+    "future": True,
+    "connect_args": connect_args
+}
+if not settings.DATABASE_URL.startswith("sqlite"):
+    engine_kwargs.update({
+        "pool_pre_ping": True,
+        "pool_size": 20,
+        "max_overflow": 10
+    })
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=False,
-    connect_args=connect_args,
-    future=True
+    **engine_kwargs
 )
 
 async_session_maker = async_sessionmaker(

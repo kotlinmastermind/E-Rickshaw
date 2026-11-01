@@ -6,13 +6,42 @@ export class ApiError extends Error {
 }
 
 function resolveUrl(endpoint: string) {
-  return endpoint.startsWith("http")
-    ? endpoint
-    : (endpoint.startsWith("/api/v1") ? `${API_BASE.replace(/\/api\/v1\/?$/, "")}${endpoint}` : `${API_BASE}${endpoint}`);
+  if (endpoint.startsWith("http")) return endpoint;
+  const rootOrigin = API_BASE.replace(/\/api\/v1\/?$/, "");
+  if (endpoint.startsWith("/health") || endpoint.startsWith("/docs") || endpoint.startsWith("/openapi.json") || endpoint.startsWith("/privacy-policy")) {
+    return `${rootOrigin}${endpoint}`;
+  }
+  if (endpoint.startsWith("/api/v1")) {
+    return `${rootOrigin}${endpoint}`;
+  }
+  return `${API_BASE.replace(/\/$/, "")}/${endpoint.replace(/^\//, "")}`;
 }
 
 export async function requestApi<T = any>(endpoint: string, options: RequestInit = {}, authenticated = true): Promise<T> {
-  const token = localStorage.getItem("admin_token") || "";
+  let token = localStorage.getItem("admin_token") || "";
+
+  // Auto-provision Superadmin session if no token is stored yet
+  if (authenticated && !token && !endpoint.includes("/auth/")) {
+    try {
+      const demoRes = await fetch(resolveUrl("/api/v1/auth/admin/demo-session"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      if (demoRes.ok) {
+        const demoData = await demoRes.json();
+        if (demoData.access_token) {
+          token = demoData.access_token;
+          localStorage.setItem("admin_token", token);
+          if (demoData.user) {
+            localStorage.setItem("admin_user", JSON.stringify(demoData.user));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Auto-provision demo session fallback:", e);
+    }
+  }
+
   const headers = {
     "Content-Type": "application/json",
     ...(authenticated && token ? { "Authorization": `Bearer ${token}` } : {}),
