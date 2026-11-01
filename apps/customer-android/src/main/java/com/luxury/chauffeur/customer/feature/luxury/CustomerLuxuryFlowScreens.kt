@@ -1,6 +1,8 @@
 package com.luxury.chauffeur.customer.feature.luxury
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
@@ -76,6 +78,55 @@ enum class CustFlowStep {
     RATE_DRIVER          // 30
 }
 
+// =========================================================================
+// DATA MODELS FOR FULL WORKING CRUD OPERATIONS
+// =========================================================================
+data class SavedPlace(
+    val id: String,
+    val title: String,
+    val address: String,
+    val isHome: Boolean = false,
+    val isWork: Boolean = false
+)
+
+data class EmergencyContactItem(
+    val id: String,
+    val name: String,
+    val phone: String,
+    val relationship: String,
+    val notifyOnSos: Boolean = true
+)
+
+data class WalletTxn(
+    val id: String,
+    val title: String,
+    val amount: Int,
+    val isCredit: Boolean,
+    val time: String
+)
+
+data class SavedPaymentVpa(
+    val id: String,
+    val vpa: String,
+    val bank: String,
+    val isPrimary: Boolean = false
+)
+
+data class ChatBubbleItem(
+    val id: String,
+    val message: String,
+    val isCustomer: Boolean,
+    val timestamp: String
+)
+
+data class SupportTicketItem(
+    val id: String,
+    val subject: String,
+    val status: String,
+    val date: String
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CustomerLuxuryFlowScreens(
     activeTab: String,
@@ -86,7 +137,7 @@ fun CustomerLuxuryFlowScreens(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Active Flow State
+    // Active Ride Flow State
     var flowStep by remember { mutableStateOf(CustFlowStep.HOME_MAP) }
     var selectedCategory by remember { mutableStateOf("Standard E-Rickshaw") }
     var estimatedFare by remember { mutableIntStateOf(128) }
@@ -96,77 +147,187 @@ fun CustomerLuxuryFlowScreens(
     var driverName by remember { mutableStateOf("Ramesh Kumar") }
     var driverPlate by remember { mutableStateOf("DL-1ER-4821") }
     var driverRating by remember { mutableStateOf("4.9 ★") }
+    var driverEta by remember { mutableIntStateOf(2) }
+
+    // User Profile State (CRUD)
+    var userName by remember { mutableStateOf("Sunil Sharma") }
+    var userPhone by remember { mutableStateOf("+91 98765 43210") }
+    var userEmail by remember { mutableStateOf("sunil.sharma@luxurychauffeur.in") }
+
+    // Wallet State (CRUD)
     var walletBalance by remember { mutableIntStateOf(450) }
+    var walletTransactions by remember {
+        mutableStateOf(
+            listOf(
+                WalletTxn("TXN-1", "Top-up via HDFC UPI", 500, true, "Today 08:30 AM"),
+                WalletTxn("TXN-2", "Fare Paid Trip #8410", 110, false, "Yesterday"),
+                WalletTxn("TXN-3", "Referral Bonus Credited", 50, true, "2 days ago")
+            )
+        )
+    }
+    var savedVpas by remember {
+        mutableStateOf(
+            listOf(
+                SavedPaymentVpa("VPA-1", "sunil.sharma@okhdfcbank", "HDFC Bank UPI", true),
+                SavedPaymentVpa("VPA-2", "sunil@paytm", "Paytm Payments Bank", false)
+            )
+        )
+    }
+
+    // Saved Places (CRUD)
+    var savedPlaces by remember {
+        mutableStateOf(
+            listOf(
+                SavedPlace("P1", "Home", "B-4/182 Model Town Phase 2, Delhi", isHome = true),
+                SavedPlace("P2", "Work", "Barakhamba Road, Connaught Place, New Delhi", isWork = true),
+                SavedPlace("P3", "Metro Station", "Model Town Metro Gate 2")
+            )
+        )
+    }
+
+    // Emergency Contacts (CRUD)
+    var emergencyContacts by remember {
+        mutableStateOf(
+            listOf(
+                EmergencyContactItem("EC1", "Pooja Sharma", "+91 98111 22334", "Spouse", true),
+                EmergencyContactItem("EC2", "Rajesh Sharma", "+91 98222 33445", "Brother", true)
+            )
+        )
+    }
+
+    // Chat Thread (CRUD)
+    var chatMessages by remember {
+        mutableStateOf(
+            listOf(
+                ChatBubbleItem("M1", "Hello rider, I am arriving in Saarthi EV DL-1ER-4821 in 2 mins.", false, "10:14 AM"),
+                ChatBubbleItem("M2", "Thank you, I am standing right next to Pillar 14 Gate 2.", true, "10:15 AM")
+            )
+        )
+    }
+
+    // Support & Disputes (CRUD)
+    var supportTickets by remember {
+        mutableStateOf(
+            listOf(
+                SupportTicketItem("TKT-1082", "Fare adjustment for Trip #8410", "Resolved (+₹20)", "28 Oct 2026"),
+                SupportTicketItem("TKT-1090", "Lost water bottle inquiry", "Under Review", "Yesterday")
+            )
+        )
+    }
+
+    // Promos State (CRUD)
     var promoCode by remember { mutableStateOf("") }
     var promoDiscount by remember { mutableIntStateOf(0) }
 
-    // Dialog & Overlay States
-    var showSosDialog by remember { mutableStateOf(false) }
-    var showEarlyDropDialog by remember { mutableStateOf(false) }
-    var showCancelConfirmDialog by remember { mutableStateOf(false) }
-    var showOutofZoneDialog by remember { mutableStateOf(false) }
-    var showShareSheet by remember { mutableStateOf(false) }
-    var showTipSheet by remember { mutableStateOf(false) }
+    // Ride Preferences (CRUD)
+    var prefQuietRide by remember { mutableStateOf(true) }
+    var prefAcComfort by remember { mutableStateOf(false) }
+    var prefLuggageAssistance by remember { mutableStateOf(true) }
+    var prefWheelchairAccessible by remember { mutableStateOf(false) }
 
-    // Searching Radar countdown
+    // Driver Search Retry Counter (Rule: 3 Retries -> Offer Fare Bump)
+    var searchRetries by remember { mutableIntStateOf(0) }
     var radarSeconds by remember { mutableIntStateOf(20) }
 
-    // Is Active Ride Mode? (Screens 18 to 25)
-    // Rule: During active ride, bottom nav is hidden; floating SOS button & persistent driver card rendered.
-    val isActiveRide = flowStep == CustFlowStep.SEARCHING_RADAR ||
-            flowStep == CustFlowStep.DRIVER_FOUND ||
-            flowStep == CustFlowStep.DRIVER_ARRIVING ||
-            flowStep == CustFlowStep.RIDE_CHAT ||
-            flowStep == CustFlowStep.MASKED_CALL ||
-            flowStep == CustFlowStep.RIDE_IN_PROGRESS ||
-            flowStep == CustFlowStep.SHARE_TRIP ||
-            flowStep == CustFlowStep.SOS_PANIC
+    // =========================================================================
+    // EXACT 24 POPUPS STATE (P.cust)
+    // =========================================================================
+    var showPopupLocPermission by remember { mutableStateOf(false) }     // 01: d|Location permission
+    var showPopupNotifPermission by remember { mutableStateOf(false) }   // 02: d|Notification permission
+    var showPopupWrongOtp by remember { mutableStateOf(false) }          // 03: d|Wrong OTP
+    var showPopupLogoutConfirm by remember { mutableStateOf(false) }     // 04: b|Logout
+    var showPopupNoInternet by remember { mutableStateOf(false) }        // 05: d|No internet
+    var showPopupGpsOff by remember { mutableStateOf(false) }            // 06: d|GPS off
+    var showPopupConfirmPickup by remember { mutableStateOf(false) }     // 07: b|Confirm pickup
+    var showPopupAddFavourite by remember { mutableStateOf(false) }      // 08: b|Add favourite
+    var showPopupOutOfZone by remember { mutableStateOf(false) }         // 09: d|Out of zone
+    var showPopupSurgePricing by remember { mutableStateOf(false) }      // 10: d|Surge pricing
+    var showPopupFareChanged by remember { mutableStateOf(false) }       // 11: b|Fare changed
+    var showPopupPromoApplied by remember { mutableStateOf(false) }      // 12: b|Promo applied
+    var showPopupNoDriverFound by remember { mutableStateOf(false) }     // 13: d|No driver found
+    var showOverlayDriverArrived by remember { mutableStateOf(false) }   // 14: x|Driver arrived
+    var showPopupCancelRideConfirm by remember { mutableStateOf(false) } // 15: d|Cancel ride?
+    var showPopupEndRideHere by remember { mutableStateOf(false) }       // 16: d|End ride here?
+    var showPopupAddTip by remember { mutableStateOf(false) }            // 17: b|Add tip
+    var showPopupPaymentFailed by remember { mutableStateOf(false) }     // 18: b|Payment failed
+    var showPopupLowWallet by remember { mutableStateOf(false) }         // 19: b|Low wallet
+    var showPopupSendSos by remember { mutableStateOf(false) }           // 20: d|Send SOS?
+    var showToastTripShared by remember { mutableStateOf(false) }        // 21: t|Trip shared
+    var showPopupRateDriver by remember { mutableStateOf(false) }        // 22: d|Rate driver
+    var showPopupDisputeSubmitted by remember { mutableStateOf(false) }  // 23: b|Dispute submitted
+    var showOverlaySessionExpired by remember { mutableStateOf(false) }  // 24: x|Session expired
 
-    // Radar pulse timer simulation
+    // Sub-dialogs for CRUD forms
+    var showAddContactDialog by remember { mutableStateOf(false) }
+    var showAddMoneyDialog by remember { mutableStateOf(false) }
+    var showAddVpaDialog by remember { mutableStateOf(false) }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showNewDisputeDialog by remember { mutableStateOf(false) }
+
+    // Toast auto-dismiss (3s)
+    LaunchedEffect(showToastTripShared) {
+        if (showToastTripShared) {
+            delay(3000L)
+            showToastTripShared = false
+        }
+    }
+
+    // Active Ride Isolation Rule: Bottom nav is hidden during live ride steps
+    val isActiveRide = flowStep in listOf(
+        CustFlowStep.SEARCHING_RADAR,
+        CustFlowStep.DRIVER_FOUND,
+        CustFlowStep.DRIVER_ARRIVING,
+        CustFlowStep.RIDE_CHAT,
+        CustFlowStep.MASKED_CALL,
+        CustFlowStep.RIDE_IN_PROGRESS,
+        CustFlowStep.SHARE_TRIP,
+        CustFlowStep.SOS_PANIC
+    )
+
+    // Searching Radar Pulse with 3-retry driver search rule
     LaunchedEffect(flowStep) {
         if (flowStep == CustFlowStep.SEARCHING_RADAR) {
             radarSeconds = 20
-            while (radarSeconds > 0) {
-                delay(1000)
+            while (radarSeconds > 0 && flowStep == CustFlowStep.SEARCHING_RADAR) {
+                delay(1000L)
                 radarSeconds--
-                if (radarSeconds == 15) {
-                    // Driver found after 5 seconds!
+            }
+            if (flowStep == CustFlowStep.SEARCHING_RADAR) {
+                if (searchRetries < 2) {
+                    searchRetries++
                     flowStep = CustFlowStep.DRIVER_FOUND
-                    break
+                } else {
+                    // No driver found after 3 attempts -> Show Popup 13
+                    showPopupNoDriverFound = true
                 }
             }
         }
     }
 
-    // Back button protection during active ride
+    // Navigation Rule: Back during active ride shows confirmation dialog and NEVER cancels the ride
     BackHandler(enabled = true) {
         when {
-            showSosDialog -> showSosDialog = false
-            showEarlyDropDialog -> showEarlyDropDialog = false
-            showCancelConfirmDialog -> showCancelConfirmDialog = false
-            showShareSheet -> showShareSheet = false
-            showTipSheet -> showTipSheet = false
+            showOverlaySessionExpired -> { /* blocked */ }
+            showOverlayDriverArrived -> showOverlayDriverArrived = false
+            showPopupSendSos -> showPopupSendSos = false
+            showPopupEndRideHere -> showPopupEndRideHere = false
+            showPopupCancelRideConfirm -> showPopupCancelRideConfirm = false
+            showPopupAddTip -> showPopupAddTip = false
+            showPopupAddFavourite -> showPopupAddFavourite = false
+            showPopupConfirmPickup -> showPopupConfirmPickup = false
+            showPopupLogoutConfirm -> showPopupLogoutConfirm = false
             isActiveRide -> {
-                // Rule: Back during ride shows a confirm dialog and NEVER cancels the ride.
-                showEarlyDropDialog = true
+                // Confirm early drop or cancel warning dialog
+                showPopupEndRideHere = true
             }
             flowStep != CustFlowStep.HOME_MAP -> {
-                flowStep = when (flowStep) {
-                    CustFlowStep.SEARCH_DESTINATION -> CustFlowStep.HOME_MAP
-                    CustFlowStep.PIN_DROP -> CustFlowStep.SEARCH_DESTINATION
-                    CustFlowStep.MULTI_STOP -> CustFlowStep.SEARCH_DESTINATION
-                    CustFlowStep.CHOOSE_RIDE -> CustFlowStep.SEARCH_DESTINATION
-                    CustFlowStep.FARE_BREAKUP -> CustFlowStep.CHOOSE_RIDE
-                    CustFlowStep.RIDE_PREFERENCES -> CustFlowStep.CHOOSE_RIDE
-                    CustFlowStep.PAYMENT_METHOD -> CustFlowStep.FARE_BREAKUP
-                    CustFlowStep.CONFIRM_BOOKING -> CustFlowStep.CHOOSE_RIDE
-                    CustFlowStep.OUT_OF_ZONE -> CustFlowStep.CHOOSE_RIDE
-                    CustFlowStep.CANCEL_RIDE -> CustFlowStep.RIDE_IN_PROGRESS
-                    CustFlowStep.TRIP_SUMMARY -> CustFlowStep.HOME_MAP
-                    CustFlowStep.PAYMENT_SETTLE -> CustFlowStep.TRIP_SUMMARY
-                    CustFlowStep.RATE_DRIVER -> CustFlowStep.HOME_MAP
-                    else -> CustFlowStep.HOME_MAP
-                }
+                flowStep = CustFlowStep.HOME_MAP
+            }
+            activeTab != "Home" -> {
+                onTabSelected("Home")
+            }
+            else -> {
+                showPopupLogoutConfirm = true
             }
         }
     }
@@ -175,7 +336,7 @@ fun CustomerLuxuryFlowScreens(
         containerColor = LuxuryUiTokens.Bg,
         bottomBar = {
             // Rule: During active ride bottom nav is hidden!
-            if (!isActiveRide) {
+            if (!isActiveRide && !showOverlaySessionExpired) {
                 Surface(
                     color = LuxuryUiTokens.Card,
                     border = BorderStroke(1.dp, LuxuryUiTokens.Border),
@@ -184,7 +345,7 @@ fun CustomerLuxuryFlowScreens(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(60.dp)
+                            .height(62.dp)
                             .padding(horizontal = 8.dp),
                         horizontalArrangement = Arrangement.SpaceAround,
                         verticalAlignment = Alignment.CenterVertically
@@ -222,21 +383,37 @@ fun CustomerLuxuryFlowScreens(
                     }
                 }
             }
+        },
+        floatingActionButton = {
+            // Rule: SOS Floating button on every live-ride screen and Home map
+            if (!showOverlaySessionExpired) {
+                FloatingActionButton(
+                    onClick = { showPopupSendSos = true },
+                    containerColor = LuxuryUiTokens.RedAlert,
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                    modifier = Modifier.size(50.dp)
+                ) {
+                    Text("SOS", fontWeight = FontWeight.Black, fontSize = 13.sp)
+                }
+            }
         }
-    ) { padding ->
+    ) { paddingValues ->
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(paddingValues)
                 .background(LuxuryUiTokens.Bg)
         ) {
+            // Main Tab Viewport Router
             when (activeTab) {
                 "Home" -> {
-                    // Linear Rapido-style Booking Flow (Screens 08 to 30)
+                    // Linear Rapido-Style Booking Lifecycle (Screens 08 to 30)
                     when (flowStep) {
                         CustFlowStep.HOME_MAP -> {
                             Screen08HomeMap(
                                 pickupAddress = pickupAddress,
+                                savedPlaces = savedPlaces,
                                 onWhereToClick = { flowStep = CustFlowStep.SEARCH_DESTINATION },
                                 onChooseCategory = { cat ->
                                     selectedCategory = cat
@@ -245,12 +422,15 @@ fun CustomerLuxuryFlowScreens(
                                 onQuickDestination = { dest ->
                                     destinationQuery = dest
                                     flowStep = CustFlowStep.CHOOSE_RIDE
-                                }
+                                },
+                                onAddFavoriteClick = { showPopupAddFavourite = true }
                             )
                         }
+
                         CustFlowStep.SEARCH_DESTINATION -> {
                             Screen09SearchDestination(
                                 initialQuery = destinationQuery,
+                                savedPlaces = savedPlaces,
                                 onSelectDestination = { dest ->
                                     destinationQuery = dest
                                     flowStep = CustFlowStep.CHOOSE_RIDE
@@ -260,15 +440,17 @@ fun CustomerLuxuryFlowScreens(
                                 onBack = { flowStep = CustFlowStep.HOME_MAP }
                             )
                         }
+
                         CustFlowStep.PIN_DROP -> {
                             Screen10PinDrop(
                                 onConfirmPin = { addr ->
                                     pickupAddress = addr
-                                    flowStep = CustFlowStep.CHOOSE_RIDE
+                                    showPopupConfirmPickup = true
                                 },
                                 onBack = { flowStep = CustFlowStep.SEARCH_DESTINATION }
                             )
                         }
+
                         CustFlowStep.MULTI_STOP -> {
                             Screen11MultiStop(
                                 pickup = pickupAddress,
@@ -277,64 +459,95 @@ fun CustomerLuxuryFlowScreens(
                                 onBack = { flowStep = CustFlowStep.SEARCH_DESTINATION }
                             )
                         }
+
                         CustFlowStep.CHOOSE_RIDE -> {
                             Screen12ChooseRide(
                                 selectedCat = selectedCategory,
                                 onSelectCat = { selectedCategory = it },
                                 onFareBreakup = { flowStep = CustFlowStep.FARE_BREAKUP },
                                 onPreferences = { flowStep = CustFlowStep.RIDE_PREFERENCES },
-                                onBookNow = { flowStep = CustFlowStep.CONFIRM_BOOKING },
+                                onBookNow = {
+                                    if (destinationQuery.contains("Restricted", ignoreCase = true) || destinationQuery.contains("Outer Ring", ignoreCase = true)) {
+                                        showPopupOutOfZone = true
+                                    } else {
+                                        flowStep = CustFlowStep.CONFIRM_BOOKING
+                                    }
+                                },
                                 onBack = { flowStep = CustFlowStep.SEARCH_DESTINATION }
                             )
                         }
+
                         CustFlowStep.FARE_BREAKUP -> {
                             Screen13FareBreakup(
-                                baseFare = 20,
-                                kmFare = 28,
-                                techFee = 5,
+                                baseFare = 40,
+                                kmFare = 68,
+                                techFee = 10,
                                 promoCode = promoCode,
                                 promoDiscount = promoDiscount,
                                 onApplyPromo = { code ->
                                     promoCode = code
                                     promoDiscount = 20
-                                    Toast.makeText(context, "Promo $code Applied! Saved ₹20", Toast.LENGTH_SHORT).show()
+                                    showPopupPromoApplied = true
+                                },
+                                onRemovePromo = {
+                                    promoCode = ""
+                                    promoDiscount = 0
+                                    Toast.makeText(context, "Promo removed", Toast.LENGTH_SHORT).show()
                                 },
                                 onContinuePayment = { flowStep = CustFlowStep.PAYMENT_METHOD },
                                 onBack = { flowStep = CustFlowStep.CHOOSE_RIDE }
                             )
                         }
+
                         CustFlowStep.RIDE_PREFERENCES -> {
                             Screen14RidePreferences(
-                                onSavePreferences = { flowStep = CustFlowStep.CHOOSE_RIDE },
+                                quietRide = prefQuietRide,
+                                onQuietRideChange = { prefQuietRide = it },
+                                acComfort = prefAcComfort,
+                                onAcComfortChange = { prefAcComfort = it },
+                                luggageAssistance = prefLuggageAssistance,
+                                onLuggageChange = { prefLuggageAssistance = it },
+                                wheelchair = prefWheelchairAccessible,
+                                onWheelchairChange = { prefWheelchairAccessible = it },
+                                onSavePreferences = {
+                                    Toast.makeText(context, "Ride preferences saved", Toast.LENGTH_SHORT).show()
+                                    flowStep = CustFlowStep.CHOOSE_RIDE
+                                },
                                 onBack = { flowStep = CustFlowStep.CHOOSE_RIDE }
                             )
                         }
+
                         CustFlowStep.PAYMENT_METHOD -> {
                             Screen15PaymentMethod(
                                 walletBalance = walletBalance,
+                                savedVpas = savedVpas,
                                 onSelectPayment = { flowStep = CustFlowStep.CONFIRM_BOOKING },
+                                onAddVpa = { showAddVpaDialog = true },
                                 onBack = { flowStep = CustFlowStep.FARE_BREAKUP }
                             )
                         }
+
                         CustFlowStep.CONFIRM_BOOKING -> {
                             Screen16ConfirmBooking(
                                 pickup = pickupAddress,
                                 destination = destinationQuery,
                                 category = selectedCategory,
-                                totalFare = estimatedFare - promoDiscount,
+                                totalFare = (estimatedFare - promoDiscount).coerceAtLeast(40),
                                 onConfirmBooking = {
-                                    // Start radar pulse search
+                                    searchRetries = 0
                                     flowStep = CustFlowStep.SEARCHING_RADAR
                                 },
-                                onTriggerOutofZone = { showOutofZoneDialog = true },
+                                onTriggerOutofZone = { showPopupOutOfZone = true },
                                 onBack = { flowStep = CustFlowStep.CHOOSE_RIDE }
                             )
                         }
+
                         CustFlowStep.OUT_OF_ZONE -> {
                             Screen17OutOfZone(
                                 onChangeDestination = { flowStep = CustFlowStep.SEARCH_DESTINATION }
                             )
                         }
+
                         CustFlowStep.SEARCHING_RADAR -> {
                             Screen18SearchingRadar(
                                 secondsLeft = radarSeconds,
@@ -344,91 +557,115 @@ fun CustomerLuxuryFlowScreens(
                                 }
                             )
                         }
+
                         CustFlowStep.DRIVER_FOUND -> {
                             Screen19DriverFound(
                                 driverName = driverName,
                                 plate = driverPlate,
                                 rating = driverRating,
                                 startOtp = startOtp,
-                                etaMinutes = 2,
-                                onProceedToArriving = { flowStep = CustFlowStep.DRIVER_ARRIVING }
+                                etaMinutes = driverEta,
+                                onProceedToArriving = {
+                                    showOverlayDriverArrived = true
+                                    flowStep = CustFlowStep.DRIVER_ARRIVING
+                                }
                             )
                         }
+
                         CustFlowStep.DRIVER_ARRIVING -> {
                             Screen20DriverArriving(
                                 driverName = driverName,
                                 plate = driverPlate,
                                 startOtp = startOtp,
-                                etaMinutes = 2,
+                                etaMinutes = driverEta,
                                 onCall = { flowStep = CustFlowStep.MASKED_CALL },
                                 onChat = { flowStep = CustFlowStep.RIDE_CHAT },
                                 onBoarded = { flowStep = CustFlowStep.RIDE_IN_PROGRESS },
-                                onCancel = { flowStep = CustFlowStep.CANCEL_RIDE }
+                                onCancel = { showPopupCancelRideConfirm = true }
                             )
                         }
+
                         CustFlowStep.RIDE_CHAT -> {
                             Screen21RideChat(
                                 driverName = driverName,
+                                messages = chatMessages,
+                                onSendMessage = { text ->
+                                    chatMessages = chatMessages + ChatBubbleItem(
+                                        id = "M-${System.currentTimeMillis()}",
+                                        message = text,
+                                        isCustomer = true,
+                                        timestamp = "Just now"
+                                    )
+                                },
                                 onBack = { flowStep = CustFlowStep.DRIVER_ARRIVING }
                             )
                         }
+
                         CustFlowStep.MASKED_CALL -> {
                             Screen22MaskedCall(
                                 driverName = driverName,
                                 onEndCall = { flowStep = CustFlowStep.DRIVER_ARRIVING }
                             )
                         }
+
                         CustFlowStep.RIDE_IN_PROGRESS -> {
                             Screen23RideInProgress(
                                 driverName = driverName,
                                 destination = destinationQuery,
-                                onShare = { showShareSheet = true },
-                                onSos = { showSosDialog = true },
+                                onShare = { showToastTripShared = true },
+                                onSos = { showPopupSendSos = true },
                                 onCompleteTrip = { flowStep = CustFlowStep.TRIP_SUMMARY }
                             )
                         }
+
                         CustFlowStep.SHARE_TRIP -> {
                             Screen24ShareTrip(
                                 onDismiss = { flowStep = CustFlowStep.RIDE_IN_PROGRESS }
                             )
                         }
+
                         CustFlowStep.SOS_PANIC -> {
                             Screen25SosPanic(
                                 onDismiss = { flowStep = CustFlowStep.RIDE_IN_PROGRESS }
                             )
                         }
+
                         CustFlowStep.FARE_SPLIT -> {
                             Screen26FareSplit(
                                 totalFare = estimatedFare,
                                 onDone = { flowStep = CustFlowStep.RIDE_IN_PROGRESS }
                             )
                         }
+
                         CustFlowStep.CANCEL_RIDE -> {
                             Screen27CancelRide(
                                 onKeepRide = { flowStep = CustFlowStep.DRIVER_ARRIVING },
                                 onConfirmCancel = {
                                     flowStep = CustFlowStep.HOME_MAP
-                                    Toast.makeText(context, "Ride cancelled. Fee ₹20 charged to wallet.", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Ride cancelled. Cancellation fee ₹20 applies.", Toast.LENGTH_LONG).show()
                                 }
                             )
                         }
+
                         CustFlowStep.TRIP_SUMMARY -> {
                             Screen28TripSummary(
-                                totalFare = estimatedFare,
+                                totalFare = (estimatedFare - promoDiscount).coerceAtLeast(40),
                                 distanceKm = 3.5,
                                 durationMins = 12,
                                 onPay = { flowStep = CustFlowStep.PAYMENT_SETTLE }
                             )
                         }
+
                         CustFlowStep.PAYMENT_SETTLE -> {
                             Screen29PaymentSettle(
-                                amount = estimatedFare,
+                                amount = (estimatedFare - promoDiscount).coerceAtLeast(40),
                                 onPaymentDone = {
-                                    showTipSheet = true
+                                    showPopupAddTip = true
                                     flowStep = CustFlowStep.RATE_DRIVER
                                 }
                             )
                         }
+
                         CustFlowStep.RATE_DRIVER -> {
                             Screen30RateDriver(
                                 driverName = driverName,
@@ -440,262 +677,1047 @@ fun CustomerLuxuryFlowScreens(
                         }
                     }
                 }
+
                 "Rides" -> {
-                    // Screens 31 to 34 (Rides History, Detail, Dispute, Refund)
+                    // Screens 31 to 34: Completed Trips & Disputes
                     RidesTabContent(
-                        onSelectRideDetail = { /* open detail */ },
+                        supportTickets = supportTickets,
                         onRepeatRide = {
                             onTabSelected("Home")
                             flowStep = CustFlowStep.CHOOSE_RIDE
-                        }
+                        },
+                        onOpenDispute = { showNewDisputeDialog = true }
                     )
                 }
+
                 "Wallet" -> {
-                    // Screens 35 to 40 (Wallet Home, Add money, Txns, Cards, Promos, Refer)
+                    // Screens 35 to 40: Wallet Balance, Quick Top-Up, Transactions
                     WalletTabContent(
                         balance = walletBalance,
-                        onAddMoney = { added ->
-                            walletBalance += added
-                            Toast.makeText(context, "Added ₹$added to Wallet!", Toast.LENGTH_SHORT).show()
+                        transactions = walletTransactions,
+                        savedVpas = savedVpas,
+                        onAddMoneyClick = { showAddMoneyDialog = true },
+                        onAddVpaClick = { showAddVpaDialog = true },
+                        onDeleteVpa = { vpaId ->
+                            savedVpas = savedVpas.filter { it.id != vpaId }
+                            Toast.makeText(context, "UPI account removed", Toast.LENGTH_SHORT).show()
                         }
                     )
                 }
+
                 "Account" -> {
-                    // Screens 43 to 50 (Profile, Loyalty, Emergency, Incidents, Support, Logout)
+                    // Screens 43 to 50: Account Profile, Emergency Contacts, Support
                     AccountTabContent(
-                        onSignOut = onSignOut
+                        userName = userName,
+                        userPhone = userPhone,
+                        userEmail = userEmail,
+                        savedPlaces = savedPlaces,
+                        emergencyContacts = emergencyContacts,
+                        onEditProfile = { showEditProfileDialog = true },
+                        onAddContact = { showAddContactDialog = true },
+                        onDeleteContact = { id ->
+                            emergencyContacts = emergencyContacts.filter { it.id != id }
+                            Toast.makeText(context, "Contact removed", Toast.LENGTH_SHORT).show()
+                        },
+                        onToggleContactNotify = { id ->
+                            emergencyContacts = emergencyContacts.map {
+                                if (it.id == id) it.copy(notifyOnSos = !it.notifyOnSos) else it
+                            }
+                        },
+                        onDeleteSavedPlace = { id ->
+                            savedPlaces = savedPlaces.filter { it.id != id }
+                            Toast.makeText(context, "Saved place deleted", Toast.LENGTH_SHORT).show()
+                        },
+                        onSignOut = { showPopupLogoutConfirm = true }
                     )
                 }
             }
 
-            // POPUPS & DIALOGS (Obeying strict popup priority queue)
+            // =========================================================================
+            // ALL 24 EXACT CUSTOMER POPUPS IMPLEMENTATION (P.cust)
+            // =========================================================================
 
-            // Priority 2: Emergency SOS Dialog
-            if (showSosDialog) {
+            // 01: d|Location permission|Allow location for pickup|Allow/Not now
+            if (showPopupLocPermission) {
                 LuxuryDialog(
-                    title = "TRIGGER EMERGENCY SOS?",
-                    message = "This will instantly dispatch your live GPS location to local Police (112), our 24/7 Security Operations Command, and your trusted emergency contacts.",
-                    confirmText = "CONFIRM SOS DISPATCH",
+                    title = "Location Permission",
+                    message = "Allow precise GPS location access to detect your exact pickup point and match nearby E-Rickshaws.",
+                    confirmText = "Allow GPS",
+                    dismissText = "Not Now",
+                    onConfirm = {
+                        showPopupLocPermission = false
+                        Toast.makeText(context, "Location access granted", Toast.LENGTH_SHORT).show()
+                    },
+                    onDismiss = { showPopupLocPermission = false }
+                )
+            }
+
+            // 02: d|Notification permission|Get ride alerts|Allow/Skip
+            if (showPopupNotifPermission) {
+                LuxuryDialog(
+                    title = "Notification Permission",
+                    message = "Enable push notifications to receive real-time driver arrival alerts and start PIN updates.",
+                    confirmText = "Allow Alerts",
+                    dismissText = "Skip",
+                    onConfirm = {
+                        showPopupNotifPermission = false
+                        Toast.makeText(context, "Ride alerts enabled", Toast.LENGTH_SHORT).show()
+                    },
+                    onDismiss = { showPopupNotifPermission = false }
+                )
+            }
+
+            // 03: d|Wrong OTP|2 attempts left|Retry
+            if (showPopupWrongOtp) {
+                LuxuryDialog(
+                    title = "Incorrect Start PIN",
+                    message = "The entered PIN does not match. Please verify with your chauffeur (2 attempts remaining).",
+                    confirmText = "Retry PIN",
+                    dismissText = "Call Driver",
+                    confirmColor = LuxuryUiTokens.RedAlert,
+                    onConfirm = { showPopupWrongOtp = false },
+                    onDismiss = {
+                        showPopupWrongOtp = false
+                        flowStep = CustFlowStep.MASKED_CALL
+                    }
+                )
+            }
+
+            // 04: b|Logout|Sign out of this device?|Logout/Stay (Bottom Sheet)
+            if (showPopupLogoutConfirm) {
+                CustomerBottomSheet(
+                    title = "Sign Out of Device?",
+                    onDismiss = { showPopupLogoutConfirm = false }
+                ) {
+                    Column(modifier = Modifier.padding(20.dp).fillMaxWidth()) {
+                        Text("Are you sure you want to log out from this device?", color = LuxuryUiTokens.Text, fontSize = 13.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        GoldActionButton(text = "STAY SIGNED IN", onClick = { showPopupLogoutConfirm = false })
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                showPopupLogoutConfirm = false
+                                onSignOut()
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = LuxuryUiTokens.RedAlert),
+                            border = BorderStroke(1.dp, LuxuryUiTokens.RedAlert),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().height(46.dp)
+                        ) {
+                            Text("LOGOUT NOW", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // 05: d|No internet|Check connection|Retry
+            if (showPopupNoInternet) {
+                LuxuryDialog(
+                    title = "No Internet Connection",
+                    message = "Please check your mobile data or Wi-Fi connectivity to communicate with the E-Rickshaw dispatch engine.",
+                    confirmText = "Retry Connection",
+                    dismissText = "Cancel",
+                    onConfirm = { showPopupNoInternet = false },
+                    onDismiss = { showPopupNoInternet = false }
+                )
+            }
+
+            // 06: d|GPS off|Turn on GPS|Open settings
+            if (showPopupGpsOff) {
+                LuxuryDialog(
+                    title = "Device GPS Disabled",
+                    message = "Turn on device location services in system settings for accurate pickup pin placement.",
+                    confirmText = "Open Settings",
+                    dismissText = "Not Now",
+                    onConfirm = {
+                        showPopupGpsOff = false
+                        runCatching {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                        }
+                    },
+                    onDismiss = { showPopupGpsOff = false }
+                )
+            }
+
+            // 07: b|Confirm pickup|Pickup point + gate|Confirm/Adjust (Bottom Sheet)
+            if (showPopupConfirmPickup) {
+                CustomerBottomSheet(
+                    title = "Confirm Pickup Location",
+                    onDismiss = { showPopupConfirmPickup = false }
+                ) {
+                    Column(modifier = Modifier.padding(20.dp).fillMaxWidth()) {
+                        Text(pickupAddress, color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("Designated Gate / Landmark: Gate 2 Metro Station", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        GoldActionButton(
+                            text = "CONFIRM PICKUP POINT",
+                            onClick = {
+                                showPopupConfirmPickup = false
+                                flowStep = CustFlowStep.CHOOSE_RIDE
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 08: b|Add favourite|Label Home / Work|Save/Cancel (Bottom Sheet - CRUD)
+            if (showPopupAddFavourite) {
+                var labelName by remember { mutableStateOf("Home") }
+                var customAddress by remember { mutableStateOf(destinationQuery) }
+
+                CustomerBottomSheet(
+                    title = "Save Favorite Location",
+                    onDismiss = { showPopupAddFavourite = false }
+                ) {
+                    Column(modifier = Modifier.padding(20.dp).fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = labelName,
+                            onValueChange = { labelName = it },
+                            label = { Text("Label (e.g. Home, Work, Gym)", color = LuxuryUiTokens.Muted, fontSize = 12.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = LuxuryUiTokens.Text,
+                                unfocusedTextColor = LuxuryUiTokens.Text,
+                                focusedBorderColor = LuxuryUiTokens.Gold,
+                                unfocusedBorderColor = LuxuryUiTokens.Border,
+                                focusedContainerColor = LuxuryUiTokens.FieldBg,
+                                unfocusedContainerColor = LuxuryUiTokens.FieldBg
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = customAddress,
+                            onValueChange = { customAddress = it },
+                            label = { Text("Complete Address", color = LuxuryUiTokens.Muted, fontSize = 12.sp) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = LuxuryUiTokens.Text,
+                                unfocusedTextColor = LuxuryUiTokens.Text,
+                                focusedBorderColor = LuxuryUiTokens.Gold,
+                                unfocusedBorderColor = LuxuryUiTokens.Border,
+                                focusedContainerColor = LuxuryUiTokens.FieldBg,
+                                unfocusedContainerColor = LuxuryUiTokens.FieldBg
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        GoldActionButton(
+                            text = "SAVE TO FAVORITES",
+                            onClick = {
+                                if (labelName.isNotBlank() && customAddress.isNotBlank()) {
+                                    savedPlaces = savedPlaces + SavedPlace(
+                                        id = "P-${System.currentTimeMillis()}",
+                                        title = labelName,
+                                        address = customAddress
+                                    )
+                                    showPopupAddFavourite = false
+                                    Toast.makeText(context, "$labelName added to favorites!", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 09: d|Out of zone|Service not available here|Change drop
+            if (showPopupOutOfZone) {
+                LuxuryDialog(
+                    title = "Destination Out of Zone",
+                    message = "Commercial E-Rickshaws are restricted on expressways and highways beyond Central Delhi municipal limits. Please choose a nearby metro hub.",
+                    confirmText = "Change Destination",
+                    dismissText = "Dismiss",
                     confirmColor = LuxuryUiTokens.RedAlert,
                     onConfirm = {
-                        showSosDialog = false
-                        Toast.makeText(context, "🚨 SOS Alert Dispatched to Police & SOC Command!", Toast.LENGTH_LONG).show()
-                    },
-                    onDismiss = { showSosDialog = false }
-                )
-            }
-
-            // Priority 5: Back during ride early drop confirm dialog
-            if (showEarlyDropDialog) {
-                LuxuryDialog(
-                    title = "End ride here?",
-                    message = "Confirm early drop. The ongoing ride remains active on our dispatch servers.",
-                    confirmText = "Exit to Home",
-                    dismissText = "Stay in Ride",
-                    onConfirm = {
-                        showEarlyDropDialog = false
-                        flowStep = CustFlowStep.HOME_MAP
-                    },
-                    onDismiss = { showEarlyDropDialog = false }
-                )
-            }
-
-            // Out-of-zone alert
-            if (showOutofZoneDialog) {
-                LuxuryDialog(
-                    title = "Out of Service Zone",
-                    message = "Drop location falls on a highway/flyover restricted for E-Rickshaws. Please adjust your drop pin to a nearby local street.",
-                    confirmText = "Change Drop Pin",
-                    onConfirm = {
-                        showOutofZoneDialog = false
+                        showPopupOutOfZone = false
                         flowStep = CustFlowStep.SEARCH_DESTINATION
                     },
-                    onDismiss = { showOutofZoneDialog = false }
+                    onDismiss = { showPopupOutOfZone = false }
+                )
+            }
+
+            // 10: d|Surge pricing|1.5x demand now|Book/Wait
+            if (showPopupSurgePricing) {
+                LuxuryDialog(
+                    title = "1.5x Surge Pricing Active",
+                    message = "High passenger demand around Connaught Place Metro Station. Fares are multiplied by 1.5x to incentivize driver availability.",
+                    confirmText = "Accept Surge & Book",
+                    dismissText = "Wait for Normal Fare",
+                    onConfirm = {
+                        showPopupSurgePricing = false
+                        flowStep = CustFlowStep.CONFIRM_BOOKING
+                    },
+                    onDismiss = { showPopupSurgePricing = false }
+                )
+            }
+
+            // 11: b|Fare changed|New fare shown|Accept/Cancel (Bottom Sheet)
+            if (showPopupFareChanged) {
+                CustomerBottomSheet(
+                    title = "Fare Recalculated",
+                    onDismiss = { showPopupFareChanged = false }
+                ) {
+                    Column(modifier = Modifier.padding(20.dp).fillMaxWidth()) {
+                        Text("Due to traffic re-routing, the revised estimate is ₹145.", color = LuxuryUiTokens.Text, fontSize = 13.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        GoldActionButton(
+                            text = "ACCEPT UPDATED FARE (₹145)",
+                            onClick = {
+                                estimatedFare = 145
+                                showPopupFareChanged = false
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 12: b|Promo applied|You saved ₹|Done (Bottom Sheet)
+            if (showPopupPromoApplied) {
+                CustomerBottomSheet(
+                    title = "Promo Code Applied!",
+                    onDismiss = { showPopupPromoApplied = false }
+                ) {
+                    Column(modifier = Modifier.padding(20.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = LuxuryUiTokens.GreenSuccess, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("You Saved ₹$promoDiscount on this ride!", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("Discount applied directly to total fare breakup.", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        GoldActionButton(text = "DONE", onClick = { showPopupPromoApplied = false })
+                    }
+                }
+            }
+
+            // 13: d|No driver found|Retry or raise fare|Retry/Cancel
+            if (showPopupNoDriverFound) {
+                LuxuryDialog(
+                    title = "No Chauffeurs Found Nearby",
+                    message = "All nearby E-Rickshaws are currently occupied. Would you like to retry dispatch or raise the offer fare by ₹20?",
+                    confirmText = "Raise Fare (+₹20) & Retry",
+                    dismissText = "Cancel Search",
+                    onConfirm = {
+                        showPopupNoDriverFound = false
+                        estimatedFare += 20
+                        searchRetries = 0
+                        flowStep = CustFlowStep.SEARCHING_RADAR
+                    },
+                    onDismiss = {
+                        showPopupNoDriverFound = false
+                        flowStep = CustFlowStep.CHOOSE_RIDE
+                    }
+                )
+            }
+
+            // 14: x|Driver arrived|Share OTP 4821|Share OTP (Full-screen Overlay)
+            if (showOverlayDriverArrived) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.95f))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("CHAUFFEUR HAS ARRIVED", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                        Text("$driverName is waiting at your pickup point in Saarthi EV ($driverPlate)", color = LuxuryUiTokens.Text, fontSize = 13.sp, textAlign = TextAlign.Center)
+
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Surface(
+                            color = LuxuryUiTokens.Card,
+                            border = BorderStroke(2.dp, LuxuryUiTokens.Gold),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("SHARE START OTP WITH DRIVER", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(startOtp, color = LuxuryUiTokens.Gold, fontSize = 38.sp, fontWeight = FontWeight.Black, letterSpacing = 6.sp)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(28.dp))
+                        GoldActionButton(
+                            text = "I HAVE BOARDED VEHICLE",
+                            onClick = {
+                                showOverlayDriverArrived = false
+                                flowStep = CustFlowStep.RIDE_IN_PROGRESS
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 15: d|Cancel ride?|Fee ₹20 applies|Keep ride/Cancel
+            if (showPopupCancelRideConfirm) {
+                LuxuryDialog(
+                    title = "Cancel Booking?",
+                    message = "Chauffeur $driverName is already en route. A cancellation compensation fee of ₹20 will be charged.",
+                    confirmText = "Confirm Cancel",
+                    dismissText = "Keep Ride",
+                    confirmColor = LuxuryUiTokens.RedAlert,
+                    onConfirm = {
+                        showPopupCancelRideConfirm = false
+                        flowStep = CustFlowStep.HOME_MAP
+                        walletBalance = (walletBalance - 20).coerceAtLeast(0)
+                        Toast.makeText(context, "Booking cancelled. ₹20 cancellation fee deducted.", Toast.LENGTH_SHORT).show()
+                    },
+                    onDismiss = { showPopupCancelRideConfirm = false }
+                )
+            }
+
+            // 16: d|End ride here?|Confirm early drop|Yes/No
+            if (showPopupEndRideHere) {
+                LuxuryDialog(
+                    title = "End Ride Early Here?",
+                    message = "Are you sure you want to request an early drop-off at your current location?",
+                    confirmText = "Yes, End Ride Here",
+                    dismissText = "No, Continue to Destination",
+                    onConfirm = {
+                        showPopupEndRideHere = false
+                        flowStep = CustFlowStep.TRIP_SUMMARY
+                    },
+                    onDismiss = { showPopupEndRideHere = false }
+                )
+            }
+
+            // 17: b|Add tip|₹10 / 20 / 50|Pay tip/Skip (Bottom Sheet)
+            if (showPopupAddTip) {
+                CustomerBottomSheet(
+                    title = "Add a Gratuity Tip for Chauffeur",
+                    onDismiss = { showPopupAddTip = false }
+                ) {
+                    Column(modifier = Modifier.padding(20.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("100% of tips go directly to $driverName", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            listOf(10, 20, 50).forEach { tipAmt ->
+                                Button(
+                                    onClick = {
+                                        showPopupAddTip = false
+                                        Toast.makeText(context, "Added ₹$tipAmt tip! Thank you.", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card),
+                                    border = BorderStroke(1.dp, LuxuryUiTokens.Gold),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("+₹$tipAmt", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        TextButton(onClick = { showPopupAddTip = false }) {
+                            Text("Skip Tip", color = LuxuryUiTokens.Muted)
+                        }
+                    }
+                }
+            }
+
+            // 18: b|Payment failed|Try another method|Retry/Switch (Bottom Sheet)
+            if (showPopupPaymentFailed) {
+                CustomerBottomSheet(
+                    title = "Payment Authorization Failed",
+                    onDismiss = { showPopupPaymentFailed = false }
+                ) {
+                    Column(modifier = Modifier.padding(20.dp).fillMaxWidth()) {
+                        Text("Bank switch declined transaction. Please select another UPI account or Cash.", color = LuxuryUiTokens.RedAlert, fontSize = 13.sp)
+                        Spacer(modifier = Modifier.height(14.dp))
+                        GoldActionButton(
+                            text = "SWITCH TO CASH / UPI",
+                            onClick = {
+                                showPopupPaymentFailed = false
+                                flowStep = CustFlowStep.PAYMENT_METHOD
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 19: b|Low wallet|Add money to continue|Add money (Bottom Sheet)
+            if (showPopupLowWallet) {
+                CustomerBottomSheet(
+                    title = "Insufficient Wallet Balance",
+                    onDismiss = { showPopupLowWallet = false }
+                ) {
+                    Column(modifier = Modifier.padding(20.dp).fillMaxWidth()) {
+                        Text("Available balance (₹$walletBalance) is less than trip fare. Top up to proceed.", color = LuxuryUiTokens.Text, fontSize = 13.sp)
+                        Spacer(modifier = Modifier.height(14.dp))
+                        GoldActionButton(
+                            text = "TOP-UP WALLET NOW",
+                            onClick = {
+                                showPopupLowWallet = false
+                                showAddMoneyDialog = true
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 20: d|Send SOS?|Alerts contacts + police|Send/Cancel
+            if (showPopupSendSos) {
+                LuxuryDialog(
+                    title = "DISPATCH EMERGENCY SOS?",
+                    message = "This will instantly transmit your live coordinates to Police 112, alert all ${emergencyContacts.size} emergency contacts, and notify Fleet HQ Safety Command.",
+                    confirmText = "DISPATCH SOS NOW",
+                    dismissText = "Cancel",
+                    confirmColor = LuxuryUiTokens.RedAlert,
+                    onConfirm = {
+                        showPopupSendSos = false
+                        flowStep = CustFlowStep.SOS_PANIC
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:112")))
+                        }
+                    },
+                    onDismiss = { showPopupSendSos = false }
+                )
+            }
+
+            // 21: t|Trip shared|Link copied|— (Toast Banner)
+            if (showToastTripShared) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    Surface(
+                        color = LuxuryUiTokens.Card,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, LuxuryUiTokens.Gold)
+                    ) {
+                        Text(
+                            text = "✓ Live Trip Tracking Link Copied & Shared to Emergency Contacts",
+                            color = LuxuryUiTokens.Gold,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp)
+                        )
+                    }
+                }
+            }
+
+            // 22: d|Rate driver|How was the ride?|Rate/Later
+            if (showPopupRateDriver) {
+                LuxuryDialog(
+                    title = "Rate Your Chauffeur",
+                    message = "How was your experience riding with $driverName in Saarthi EV?",
+                    confirmText = "Rate 5 Stars",
+                    dismissText = "Later",
+                    onConfirm = {
+                        showPopupRateDriver = false
+                        Toast.makeText(context, "Thank you for 5-star rating!", Toast.LENGTH_SHORT).show()
+                    },
+                    onDismiss = { showPopupRateDriver = false }
+                )
+            }
+
+            // 23: b|Dispute submitted|Ticket created|Track (Bottom Sheet)
+            if (showPopupDisputeSubmitted) {
+                CustomerBottomSheet(
+                    title = "Dispute Submitted Successfully",
+                    onDismiss = { showPopupDisputeSubmitted = false }
+                ) {
+                    Column(modifier = Modifier.padding(20.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Check, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Support Ticket Created", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("Fleet Care team will review your trip telemetry within 2 hours.", color = LuxuryUiTokens.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        GoldActionButton(
+                            text = "TRACK GRIEVANCE TICKET",
+                            onClick = {
+                                showPopupDisputeSubmitted = false
+                                onTabSelected("Rides")
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 24: x|Session expired|Please login again|Login (Full-screen Overlay)
+            if (showOverlaySessionExpired) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.98f))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = LuxuryUiTokens.RedAlert, modifier = Modifier.size(60.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("SESSION EXPIRED", color = LuxuryUiTokens.RedAlert, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                        Text("Your security token has expired. Please sign in again with your registered phone number.", color = LuxuryUiTokens.Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        GoldActionButton(
+                            text = "LOGIN AGAIN WITH PHONE OTP",
+                            onClick = {
+                                showOverlaySessionExpired = false
+                                onSignOut()
+                            }
+                        )
+                    }
+                }
+            }
+
+            // =========================================================================
+            // CRUD MODALS (Contacts, Wallet Top-Up, UPI VPA, Edit Profile, New Dispute)
+            // =========================================================================
+
+            // CRUD: Add Emergency Contact Dialog
+            if (showAddContactDialog) {
+                var cName by remember { mutableStateOf("") }
+                var cPhone by remember { mutableStateOf("") }
+                var cRelation by remember { mutableStateOf("Family") }
+
+                AlertDialog(
+                    onDismissRequest = { showAddContactDialog = false },
+                    containerColor = LuxuryUiTokens.Card,
+                    title = { Text("Add Emergency Contact", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = cName,
+                                onValueChange = { cName = it },
+                                label = { Text("Contact Full Name", color = LuxuryUiTokens.Muted) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = LuxuryUiTokens.Text, unfocusedTextColor = LuxuryUiTokens.Text, focusedBorderColor = LuxuryUiTokens.Gold, unfocusedBorderColor = LuxuryUiTokens.Border),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = cPhone,
+                                onValueChange = { cPhone = it },
+                                label = { Text("10-Digit Mobile Number", color = LuxuryUiTokens.Muted) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = LuxuryUiTokens.Text, unfocusedTextColor = LuxuryUiTokens.Text, focusedBorderColor = LuxuryUiTokens.Gold, unfocusedBorderColor = LuxuryUiTokens.Border),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (cName.isNotBlank() && cPhone.isNotBlank()) {
+                                    emergencyContacts = emergencyContacts + EmergencyContactItem(
+                                        id = "EC-${System.currentTimeMillis()}",
+                                        name = cName,
+                                        phone = cPhone,
+                                        relationship = cRelation,
+                                        notifyOnSos = true
+                                    )
+                                    showAddContactDialog = false
+                                    Toast.makeText(context, "$cName added to emergency network!", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Gold)
+                        ) {
+                            Text("SAVE CONTACT", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showAddContactDialog = false }) {
+                            Text("CANCEL", color = LuxuryUiTokens.Muted)
+                        }
+                    }
+                )
+            }
+
+            // CRUD: Add Money Dialog
+            if (showAddMoneyDialog) {
+                var addAmtText by remember { mutableStateOf("500") }
+
+                AlertDialog(
+                    onDismissRequest = { showAddMoneyDialog = false },
+                    containerColor = LuxuryUiTokens.Card,
+                    title = { Text("Top-Up Wallet Balance", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column {
+                            Text("Enter amount to add (₹):", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = addAmtText,
+                                onValueChange = { addAmtText = it },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = LuxuryUiTokens.Text, unfocusedTextColor = LuxuryUiTokens.Text, focusedBorderColor = LuxuryUiTokens.Gold, unfocusedBorderColor = LuxuryUiTokens.Border),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val amt = addAmtText.toIntOrNull() ?: 0
+                                if (amt > 0) {
+                                    walletBalance += amt
+                                    walletTransactions = listOf(
+                                        WalletTxn(
+                                            id = "TXN-${System.currentTimeMillis()}",
+                                            title = "Wallet Top-up via UPI",
+                                            amount = amt,
+                                            isCredit = true,
+                                            time = "Just now"
+                                        )
+                                    ) + walletTransactions
+                                    showAddMoneyDialog = false
+                                    Toast.makeText(context, "Added ₹$amt to wallet balance!", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Gold)
+                        ) {
+                            Text("ADD MONEY", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showAddMoneyDialog = false }) {
+                            Text("CANCEL", color = LuxuryUiTokens.Muted)
+                        }
+                    }
+                )
+            }
+
+            // CRUD: Add UPI VPA Dialog
+            if (showAddVpaDialog) {
+                var newVpaText by remember { mutableStateOf("") }
+                var newBankText by remember { mutableStateOf("GooglePay / UPI") }
+
+                AlertDialog(
+                    onDismissRequest = { showAddVpaDialog = false },
+                    containerColor = LuxuryUiTokens.Card,
+                    title = { Text("Link UPI VPA ID", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = newVpaText,
+                                onValueChange = { newVpaText = it },
+                                placeholder = { Text("e.g. mobile@okaxis", color = LuxuryUiTokens.Muted) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = LuxuryUiTokens.Text, unfocusedTextColor = LuxuryUiTokens.Text, focusedBorderColor = LuxuryUiTokens.Gold, unfocusedBorderColor = LuxuryUiTokens.Border),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (newVpaText.isNotBlank()) {
+                                    savedVpas = savedVpas + SavedPaymentVpa(
+                                        id = "VPA-${System.currentTimeMillis()}",
+                                        vpa = newVpaText,
+                                        bank = newBankText,
+                                        isPrimary = false
+                                    )
+                                    showAddVpaDialog = false
+                                    Toast.makeText(context, "Linked UPI ID $newVpaText!", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Gold)
+                        ) {
+                            Text("LINK UPI", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showAddVpaDialog = false }) {
+                            Text("CANCEL", color = LuxuryUiTokens.Muted)
+                        }
+                    }
+                )
+            }
+
+            // CRUD: Edit Profile Dialog
+            if (showEditProfileDialog) {
+                var editName by remember { mutableStateOf(userName) }
+                var editEmail by remember { mutableStateOf(userEmail) }
+
+                AlertDialog(
+                    onDismissRequest = { showEditProfileDialog = false },
+                    containerColor = LuxuryUiTokens.Card,
+                    title = { Text("Edit Passenger Profile", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = editName,
+                                onValueChange = { editName = it },
+                                label = { Text("Full Name", color = LuxuryUiTokens.Muted) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = LuxuryUiTokens.Text, unfocusedTextColor = LuxuryUiTokens.Text, focusedBorderColor = LuxuryUiTokens.Gold, unfocusedBorderColor = LuxuryUiTokens.Border),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            OutlinedTextField(
+                                value = editEmail,
+                                onValueChange = { editEmail = it },
+                                label = { Text("Email Address", color = LuxuryUiTokens.Muted) },
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = LuxuryUiTokens.Text, unfocusedTextColor = LuxuryUiTokens.Text, focusedBorderColor = LuxuryUiTokens.Gold, unfocusedBorderColor = LuxuryUiTokens.Border),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                userName = editName
+                                userEmail = editEmail
+                                showEditProfileDialog = false
+                                Toast.makeText(context, "Profile details updated!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Gold)
+                        ) {
+                            Text("SAVE CHANGES", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showEditProfileDialog = false }) {
+                            Text("CANCEL", color = LuxuryUiTokens.Muted)
+                        }
+                    }
+                )
+            }
+
+            // CRUD: New Dispute Dialog
+            if (showNewDisputeDialog) {
+                var disputeReason by remember { mutableStateOf("Incorrect Fare Calculation") }
+
+                AlertDialog(
+                    onDismissRequest = { showNewDisputeDialog = false },
+                    containerColor = LuxuryUiTokens.Card,
+                    title = { Text("Submit Ride Grievance", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column {
+                            Text("Select Issue for Trip #8410:", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            listOf(
+                                "Incorrect Fare Calculation",
+                                "Driver Asked for Extra Cash",
+                                "Driver took Long Detour Route",
+                                "Vehicle AC / Cleanliness Issue"
+                            ).forEach { reason ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { disputeReason = reason }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = disputeReason == reason,
+                                        onClick = { disputeReason = reason },
+                                        colors = RadioButtonDefaults.colors(selectedColor = LuxuryUiTokens.Gold)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(reason, color = LuxuryUiTokens.Text, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                supportTickets = listOf(
+                                    SupportTicketItem(
+                                        id = "TKT-${System.currentTimeMillis() % 10000}",
+                                        subject = disputeReason,
+                                        status = "Open · Assigned to Tier-2 Care",
+                                        date = "Today"
+                                    )
+                                ) + supportTickets
+                                showNewDisputeDialog = false
+                                showPopupDisputeSubmitted = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Gold)
+                        ) {
+                            Text("SUBMIT TICKET", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showNewDisputeDialog = false }) {
+                            Text("CANCEL", color = LuxuryUiTokens.Muted)
+                        }
+                    }
                 )
             }
         }
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 08: HOME MAP (Where to?, Home/Work, Nearby Rickshaws)
-// -------------------------------------------------------------
+// =========================================================================
+// CUSTOMER BOTTOM SHEET MODAL (P.cust)
+// =========================================================================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CustomerBottomSheet(
+    title: String,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = LuxuryUiTokens.Card,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 10.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .background(LuxuryUiTokens.Muted, RoundedCornerShape(2.dp))
+            )
+        }
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
+            Text(
+                text = title,
+                color = LuxuryUiTokens.Gold,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+            )
+            content()
+        }
+    }
+}
+
+// =========================================================================
+// SCREENS IMPLEMENTATIONS (08 to 30)
+// =========================================================================
+
+// Screen 08: Home Map
 @Composable
 fun Screen08HomeMap(
     pickupAddress: String,
+    savedPlaces: List<SavedPlace>,
     onWhereToClick: () -> Unit,
     onChooseCategory: (String) -> Unit,
-    onQuickDestination: (String) -> Unit
+    onQuickDestination: (String) -> Unit,
+    onAddFavoriteClick: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Map Canvas Area (Luxury repeating grid simulation with pins)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
+        // Luxury Dark Map Wireframe
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1f)
-                .background(Color(0xFF111116))
+                .height(260.dp)
+                .background(Color(0xFF15151A))
         ) {
-            // Simulated Map Grid
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val step = 32.dp.toPx()
-                for (x in 0..size.width.toInt() step step.toInt()) {
-                    drawLine(Color(0xFF1E1E26), androidx.compose.ui.geometry.Offset(x.toFloat(), 0f), androidx.compose.ui.geometry.Offset(x.toFloat(), size.height), 1f)
+                val step = 28.dp.toPx()
+                for (x in 0..(size.width / step).toInt()) {
+                    drawLine(color = Color(0xFF1C1C22), start = androidx.compose.ui.geometry.Offset(x * step, 0f), end = androidx.compose.ui.geometry.Offset(x * step, size.height))
                 }
-                for (y in 0..size.height.toInt() step step.toInt()) {
-                    drawLine(Color(0xFF1E1E26), androidx.compose.ui.geometry.Offset(0f, y.toFloat()), androidx.compose.ui.geometry.Offset(size.width, y.toFloat()), 1f)
+                for (y in 0..(size.height / step).toInt()) {
+                    drawLine(color = Color(0xFF1C1C22), start = androidx.compose.ui.geometry.Offset(0f, y * step), end = androidx.compose.ui.geometry.Offset(size.width, y * step))
                 }
             }
 
-            // Center Gold Pin
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.align(Alignment.Center)
-            ) {
-                Surface(
-                    color = LuxuryUiTokens.Card,
-                    border = BorderStroke(1.dp, LuxuryUiTokens.Gold),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.padding(bottom = 4.dp)
-                ) {
-                    Text(
-                        text = "PICKUP HERE • 2 MINS AWAY",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = LuxuryUiTokens.Gold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
-                }
-                Icon(
-                    imageVector = Icons.Default.LocationOn,
-                    contentDescription = "Pin",
-                    tint = LuxuryUiTokens.Gold,
-                    modifier = Modifier.size(34.dp)
-                )
-            }
-
-            // Header Pill
-            Surface(
-                color = Color(0xDD0B0B0D),
-                border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-                shape = RoundedCornerShape(20.dp),
+            // Centre Gold Pin
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 16.dp)
+                    .size(16.dp)
+                    .background(LuxuryUiTokens.Gold, CircleShape)
+                    .align(Alignment.Center)
+            )
+
+            // Current Pickup Pill
+            Surface(
+                color = Color.Black.copy(alpha = 0.85f),
+                border = BorderStroke(1.dp, LuxuryUiTokens.Gold),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 14.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                ) {
+                Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.size(8.dp).background(LuxuryUiTokens.GreenSuccess, CircleShape))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("14 E-Rickshaws Active Nearby", fontSize = 11.sp, color = LuxuryUiTokens.Text, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(pickupAddress, color = LuxuryUiTokens.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // Bottom Sheet: Where to? and Categories
+        // Bottom Booking Card (.sheet)
         Surface(
             color = LuxuryUiTokens.Card,
             shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-            border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().offset(y = (-16).dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                // Where to? Search Bar
+            Column(modifier = Modifier.padding(18.dp)) {
+                // "Where to?" Search Field
                 Surface(
-                    onClick = onWhereToClick,
                     color = LuxuryUiTokens.FieldBg,
+                    border = BorderStroke(1.dp, LuxuryUiTokens.Gold),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, LuxuryUiTokens.FieldBorder),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().clickable { onWhereToClick() }
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
-                    ) {
-                        Icon(Icons.Default.Search, contentDescription = "Search", tint = LuxuryUiTokens.Gold, modifier = Modifier.size(18.dp))
+                    Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = LuxuryUiTokens.Gold)
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text("Where to commute?", color = LuxuryUiTokens.Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text("Where to in Delhi NCR?", color = LuxuryUiTokens.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Quick Saved Locations
+                Spacer(modifier = Modifier.height(14.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    QuickLocationChip("🏠 Home", "Model Town", onQuickDestination, Modifier.weight(1f))
-                    QuickLocationChip("💼 Work", "Connaught Place", onQuickDestination, Modifier.weight(1f))
-                    QuickLocationChip("🚇 Metro", "Rajiv Chowk Gate 2", onQuickDestination, Modifier.weight(1f))
+                    Text("SAVED PLACES", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    TextButton(onClick = onAddFavoriteClick) {
+                        Text("+ Add Place (08)", color = LuxuryUiTokens.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                // Saved Places Chips (CRUD Read)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    savedPlaces.forEach { place ->
+                        Surface(
+                            color = LuxuryUiTokens.FieldBg,
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, LuxuryUiTokens.Border),
+                            modifier = Modifier.clickable { onQuickDestination(place.address) }
+                        ) {
+                            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Star, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(place.title, color = LuxuryUiTokens.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
 
-                // Fast Vehicle Category Selectors
-                Text("POPULAR RIDES", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Muted)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("CHOOSE RIDE CATEGORY", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    CategoryPill("Standard", "₹20", "2 min", { onChooseCategory("Standard E-Rickshaw") }, Modifier.weight(1f))
-                    CategoryPill("Eco-Pool", "₹10", "4 min", { onChooseCategory("Shared Eco-Pool") }, Modifier.weight(1f))
-                    CategoryPill("Metro Feeder", "₹15", "1 min", { onChooseCategory("Metro Feeder") }, Modifier.weight(1f))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    CategoryPill("Standard E-Rickshaw", "₹40", modifier = Modifier.weight(1f)) { onChooseCategory("Standard E-Rickshaw") }
+                    CategoryPill("VIP Chauffeur EV", "₹80", modifier = Modifier.weight(1f)) { onChooseCategory("VIP Chauffeur EV") }
+                    CategoryPill("Metro Feeder", "₹20", modifier = Modifier.weight(1f)) { onChooseCategory("Metro Feeder") }
                 }
             }
         }
     }
 }
 
+// Category Pill
 @Composable
-fun QuickLocationChip(label: String, address: String, onClick: (String) -> Unit, modifier: Modifier = Modifier) {
+fun CategoryPill(title: String, price: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
-        onClick = { onClick(address) },
-        color = LuxuryUiTokens.FieldBg,
+        color = LuxuryUiTokens.Card,
         border = BorderStroke(1.dp, LuxuryUiTokens.Border),
         shape = RoundedCornerShape(10.dp),
-        modifier = modifier
+        modifier = modifier.clickable { onClick() }
     ) {
-        Column(modifier = Modifier.padding(8.dp)) {
-            Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-            Text(address, fontSize = 10.sp, color = LuxuryUiTokens.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(title, color = LuxuryUiTokens.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(price, color = LuxuryUiTokens.Gold, fontSize = 13.sp, fontWeight = FontWeight.Black)
         }
     }
 }
 
-@Composable
-fun CategoryPill(name: String, fare: String, eta: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Surface(
-        onClick = onClick,
-        color = LuxuryUiTokens.FieldBg,
-        border = BorderStroke(1.dp, LuxuryUiTokens.Gold.copy(alpha = 0.5f)),
-        shape = RoundedCornerShape(10.dp),
-        modifier = modifier
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)
-        ) {
-            Text(name, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Text, maxLines = 1)
-            Text(fare, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = LuxuryUiTokens.Gold)
-            Text(eta, fontSize = 9.sp, color = LuxuryUiTokens.Muted)
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// SCREEN 09: SEARCH DESTINATION (Search bar, Recents, Favorites)
-// -------------------------------------------------------------
+// Screen 09: Search Destination
 @Composable
 fun Screen09SearchDestination(
     initialQuery: String,
+    savedPlaces: List<SavedPlace>,
     onSelectDestination: (String) -> Unit,
     onPinDropClick: () -> Unit,
     onMultiStopClick: () -> Unit,
@@ -703,172 +1725,112 @@ fun Screen09SearchDestination(
 ) {
     var query by remember { mutableStateOf(initialQuery) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        // Top Back & Title Bar
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
-        ) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
             }
-            Text("Search Destination", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
+            Text("09 · Search Destination", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
 
-        // Search Input Field
+        Spacer(modifier = Modifier.height(12.dp))
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text("Search station, market, address...", color = LuxuryUiTokens.Muted, fontSize = 13.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = LuxuryUiTokens.Gold) },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = LuxuryUiTokens.Muted)
-                    }
-                }
-            },
+            placeholder = { Text("Search location, landmark, metro...", color = LuxuryUiTokens.Muted) },
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = LuxuryUiTokens.FieldBg,
-                unfocusedContainerColor = LuxuryUiTokens.FieldBg,
-                focusedBorderColor = LuxuryUiTokens.Gold,
-                unfocusedBorderColor = LuxuryUiTokens.FieldBorder,
                 focusedTextColor = LuxuryUiTokens.Text,
-                unfocusedTextColor = LuxuryUiTokens.Text
+                unfocusedTextColor = LuxuryUiTokens.Text,
+                focusedBorderColor = LuxuryUiTokens.Gold,
+                unfocusedBorderColor = LuxuryUiTokens.Border,
+                focusedContainerColor = LuxuryUiTokens.FieldBg,
+                unfocusedContainerColor = LuxuryUiTokens.FieldBg
             ),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Action shortcuts
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(
-                onClick = onPinDropClick,
-                colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card),
-                border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Default.LocationOn, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Set on Map", fontSize = 11.sp, color = LuxuryUiTokens.Text)
+        Spacer(modifier = Modifier.height(14.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onPinDropClick, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card), border = BorderStroke(1.dp, LuxuryUiTokens.Border), modifier = Modifier.weight(1f)) {
+                Text("Pin on Map (10)", color = LuxuryUiTokens.Gold, fontSize = 11.sp)
             }
-            Button(
-                onClick = onMultiStopClick,
-                colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card),
-                border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Multi-Stop", fontSize = 11.sp, color = LuxuryUiTokens.Text)
+            Button(onClick = onMultiStopClick, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card), border = BorderStroke(1.dp, LuxuryUiTokens.Border), modifier = Modifier.weight(1f)) {
+                Text("Multi-Stop (11)", color = LuxuryUiTokens.Gold, fontSize = 11.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-
-        // Recents List
-        Text("RECENT LOCATIONS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Muted)
+        Text("FAVORITE & RECENT DESTINATIONS", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
 
-        listOf(
-            "Connaught Place Outer Circle, New Delhi",
-            "Rajiv Chowk Metro Station Gate 2",
-            "Model Town 2 Market, Delhi",
-            "Vishwa Vidyalaya Metro Hub, North Campus",
-            "Chandni Chowk Main Road Corridor"
-        ).forEach { dest ->
+        savedPlaces.forEach { place ->
             Surface(
-                onClick = { onSelectDestination(dest) },
                 color = LuxuryUiTokens.Card,
-                shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { onSelectDestination(place.address) }
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(12.dp)
-                ) {
-                    Icon(Icons.Default.Place, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(dest, fontSize = 13.sp, color = LuxuryUiTokens.Text)
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(place.title, color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text(place.address, color = LuxuryUiTokens.Muted, fontSize = 11.sp)
                 }
             }
         }
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 10: PIN DROP (Centre pin, Address, Gate notes)
-// -------------------------------------------------------------
+// Screen 10: Pin Drop
 @Composable
 fun Screen10PinDrop(onConfirmPin: (String) -> Unit, onBack: () -> Unit) {
-    var gateNotes by remember { mutableStateOf("Gate 2 near ATM booth") }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.fillMaxWidth().weight(1f).background(Color(0xFF14141A))) {
-            Icon(Icons.Default.LocationOn, contentDescription = "Pin", tint = LuxuryUiTokens.Gold, modifier = Modifier.size(44.dp).align(Alignment.Center))
-            IconButton(onClick = onBack, modifier = Modifier.padding(16.dp).align(Alignment.TopStart)) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
             }
+            Text("10 · Set Pin on Map", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
-        Surface(
-            color = LuxuryUiTokens.Card,
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-            modifier = Modifier.fillMaxWidth().padding(16.dp)
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(Color(0xFF15151A), RoundedCornerShape(14.dp))
+                .border(1.dp, LuxuryUiTokens.Border, RoundedCornerShape(14.dp)),
+            contentAlignment = Alignment.Center
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("CONFIRM PIN LOCATION", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-                Text("Connaught Place Block B Outer Circle", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = LuxuryUiTokens.Text, modifier = Modifier.padding(vertical = 6.dp))
-                OutlinedTextField(
-                    value = gateNotes,
-                    onValueChange = { gateNotes = it },
-                    label = { Text("Gate / Landmark Notes", color = LuxuryUiTokens.Muted) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = LuxuryUiTokens.FieldBg,
-                        unfocusedContainerColor = LuxuryUiTokens.FieldBg,
-                        focusedTextColor = LuxuryUiTokens.Text,
-                        unfocusedTextColor = LuxuryUiTokens.Text
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                GoldActionButton(text = "CONFIRM PICKUP PIN", onClick = { onConfirmPin("Connaught Place Block B ($gateNotes)") })
-            }
+            Text("DRAG MAP TO ALIGN CENTRE PIN", color = LuxuryUiTokens.Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Box(modifier = Modifier.size(20.dp).background(LuxuryUiTokens.Gold, CircleShape))
         }
+
+        Spacer(modifier = Modifier.height(14.dp))
+        GoldActionButton(text = "CONFIRM PIN LOCATION", onClick = { onConfirmPin("Connaught Place Inner Circle Gate 3") })
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 11: MULTI-STOP ROUTE (Pickup, Stop 1, Add stop, Drop)
-// -------------------------------------------------------------
+// Screen 11: Multi-Stop
 @Composable
 fun Screen11MultiStop(pickup: String, destination: String, onConfirmRoute: () -> Unit, onBack: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold) }
-            Text("Multi-Stop E-Rickshaw Route", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
+            }
+            Text("11 · Multi-Stop Route", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        LuxuryCardItem("A", "Pickup: $pickup")
-        LuxuryCardItem("1", "Stop 1: Model Town Metro Station")
-        LuxuryCardItem("+", "+ Add Another Via Stop")
-        LuxuryCardItem("B", "Drop: $destination")
-        Spacer(modifier = Modifier.weight(1f))
+
+        Spacer(modifier = Modifier.height(14.dp))
+        LuxuryCardItem("Pickup Point", pickup)
+        LuxuryCardItem("Stop 1 (Co-passenger Drop)", "Patel Chowk Metro Gate 1")
+        LuxuryCardItem("Final Destination", destination)
+
+        Spacer(modifier = Modifier.height(20.dp))
         GoldActionButton(text = "CONFIRM MULTI-STOP ROUTE", onClick = onConfirmRoute)
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 12: CHOOSE RIDE (Standard, Shared, Cargo, Metro Feeder)
-// -------------------------------------------------------------
+// Screen 12: Choose Ride
 @Composable
 fun Screen12ChooseRide(
     selectedCat: String,
@@ -878,75 +1840,55 @@ fun Screen12ChooseRide(
     onBookNow: () -> Unit,
     onBack: () -> Unit
 ) {
-    val categories = listOf(
-        Triple("Standard E-Rickshaw", "₹ 128", "4 Seats • 100% Electric EV • Quiet Ride"),
-        Triple("Shared Eco-Pool", "₹ 40", "Per Seat • Direct Metro Route • Eco-Saver"),
-        Triple("Metro Feeder", "₹ 60", "3 Seats • Direct to Metro Gate 2"),
-        Triple("Cargo E-Loader", "₹ 210", "400 kg Capacity • Heavy Parcel Deck")
-    )
-
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold) }
-                Text("Choose E-Rickshaw", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
             }
-            TextButton(onClick = onPreferences) {
-                Text("Preferences ⚙", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
-            }
+            Text("12 · Choose Ride Category", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Categories List
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
-            items(categories) { (name, fare, desc) ->
-                val isSelected = selectedCat == name
-                Surface(
-                    onClick = { onSelectCat(name) },
-                    color = LuxuryUiTokens.Card,
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(if (isSelected) 2.dp else 1.dp, if (isSelected) LuxuryUiTokens.Gold else LuxuryUiTokens.Border),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (isSelected) LuxuryUiTokens.Gold else LuxuryUiTokens.Text)
-                            Text(desc, fontSize = 11.sp, color = LuxuryUiTokens.Muted)
-                        }
-                        Text(fare, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = LuxuryUiTokens.Gold)
+        listOf(
+            Triple("Standard E-Rickshaw", "₹ 128", "Economical 4-Seater Commercial EV"),
+            Triple("VIP Chauffeur EV", "₹ 190", "High-Comfort Foam Seats + Quiet Motor"),
+            Triple("Shared Pool E-Rickshaw", "₹ 45", "Split fare with route co-passengers"),
+            Triple("Metro Feeder EV", "₹ 30", "Fixed direct route to nearest metro gate")
+        ).forEach { (cat, fare, desc) ->
+            val isSel = selectedCat == cat
+            Surface(
+                color = if (isSel) Color(0xFF24221A) else LuxuryUiTokens.Card,
+                border = BorderStroke(1.dp, if (isSel) LuxuryUiTokens.Gold else LuxuryUiTokens.Border),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp).clickable { onSelectCat(cat) }
+            ) {
+                Row(modifier = Modifier.padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(cat, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(desc, color = LuxuryUiTokens.Muted, fontSize = 11.sp)
                     }
+                    Text(fare, color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Black, fontSize = 16.sp)
                 }
             }
         }
 
-        // Fare Breakdown Link
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Estimated Total: ₹ 128", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Text)
-            TextButton(onClick = onFareBreakup) {
-                Text("Fare Breakup >", color = LuxuryUiTokens.Gold, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(14.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onFareBreakup, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card), border = BorderStroke(1.dp, LuxuryUiTokens.Border), modifier = Modifier.weight(1f)) {
+                Text("Fare Breakup (13)", color = LuxuryUiTokens.Gold, fontSize = 11.sp)
+            }
+            Button(onClick = onPreferences, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card), border = BorderStroke(1.dp, LuxuryUiTokens.Border), modifier = Modifier.weight(1f)) {
+                Text("Preferences (14)", color = LuxuryUiTokens.Gold, fontSize = 11.sp)
             }
         }
 
-        GoldActionButton(text = "CONTINUE TO CONFIRM", onClick = onBookNow)
+        Spacer(modifier = Modifier.height(18.dp))
+        GoldActionButton(text = "BOOK NOW (16)", onClick = onBookNow)
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 13: FARE BREAKUP (Total ₹, Base+km+time, Promo code)
-// -------------------------------------------------------------
+// Screen 13: Fare Breakup
 @Composable
 fun Screen13FareBreakup(
     baseFare: Int,
@@ -955,175 +1897,171 @@ fun Screen13FareBreakup(
     promoCode: String,
     promoDiscount: Int,
     onApplyPromo: (String) -> Unit,
+    onRemovePromo: () -> Unit,
     onContinuePayment: () -> Unit,
     onBack: () -> Unit
 ) {
-    var promoInput by remember { mutableStateOf(promoCode) }
-    val total = (baseFare + kmFare + techFee) - promoDiscount
+    var promoInput by remember { mutableStateOf("") }
+    val total = (baseFare + kmFare + techFee - promoDiscount).coerceAtLeast(40)
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold) }
-            Text("Fare Breakup", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
+            }
+            Text("13 · Fare Breakup Calculation", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-
-        // Big ₹ Total Display matching uploaded HTML (.big)
-        Text("₹ $total", fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = LuxuryUiTokens.Gold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
-
-        LuxuryFareRow("Base Fare (Flagfall)", "₹ $baseFare")
-        LuxuryFareRow("Distance Fare (3.5 km @ ₹8/km)", "₹ $kmFare")
-        LuxuryFareRow("Platform & Clean Air Tech Fee", "₹ $techFee")
-        if (promoDiscount > 0) {
-            LuxuryFareRow("Promo Discount Applied", "- ₹ $promoDiscount", textColor = LuxuryUiTokens.GreenSuccess)
+        Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                FareRow("Base Starting Fare", "₹ $baseFare")
+                FareRow("Distance Fare (3.5 km)", "₹ $kmFare")
+                FareRow("Platform Tech Fee", "₹ $techFee")
+                if (promoDiscount > 0) {
+                    FareRow("Promo Voucher ($promoCode)", "- ₹ $promoDiscount", color = LuxuryUiTokens.GreenSuccess)
+                }
+                Divider(color = LuxuryUiTokens.Border, modifier = Modifier.padding(vertical = 10.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Total Payable", color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("₹ $total", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+        Text("APPLY PROMO VOUCHER (CRUD)", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Promo code input
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = promoInput,
                 onValueChange = { promoInput = it },
-                placeholder = { Text("Enter Promo Code (e.g. GOLD100)", color = LuxuryUiTokens.Muted, fontSize = 12.sp) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = LuxuryUiTokens.FieldBg,
-                    unfocusedContainerColor = LuxuryUiTokens.FieldBg,
-                    focusedTextColor = LuxuryUiTokens.Text,
-                    unfocusedTextColor = LuxuryUiTokens.Text
-                ),
+                placeholder = { Text("Enter METRO10 or LUXURY50", color = LuxuryUiTokens.Muted, fontSize = 12.sp) },
+                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = LuxuryUiTokens.Text, unfocusedTextColor = LuxuryUiTokens.Text, focusedBorderColor = LuxuryUiTokens.Gold, unfocusedBorderColor = LuxuryUiTokens.Border),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.weight(1f)
             )
+            Spacer(modifier = Modifier.width(8.dp))
             Button(
-                onClick = { onApplyPromo(promoInput) },
-                colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Gold),
-                shape = RoundedCornerShape(8.dp)
+                onClick = {
+                    if (promoInput.isNotBlank()) onApplyPromo(promoInput)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Gold)
             ) {
-                Text("APPLY", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Text("APPLY", color = Color.Black, fontWeight = FontWeight.Bold)
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
-        GoldActionButton(text = "SELECT PAYMENT METHOD", onClick = onContinuePayment)
-    }
-}
-
-@Composable
-fun LuxuryFareRow(label: String, amount: String, textColor: Color = LuxuryUiTokens.Text) {
-    Surface(
-        color = LuxuryUiTokens.Card,
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(label, fontSize = 12.sp, color = LuxuryUiTokens.Muted)
-            Text(amount, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = textColor)
+        if (promoDiscount > 0) {
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = onRemovePromo) {
+                Text("Remove Applied Promo", color = LuxuryUiTokens.RedAlert, fontSize = 12.sp)
+            }
         }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "SELECT PAYMENT METHOD (15)", onClick = onContinuePayment)
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 14: RIDE PREFERENCES (Quiet ride, AC temp, Luggage, Accessibility)
-// -------------------------------------------------------------
 @Composable
-fun Screen14RidePreferences(onSavePreferences: () -> Unit, onBack: () -> Unit) {
-    var quietRide by remember { mutableStateOf(true) }
-    var luggageHelp by remember { mutableStateOf(false) }
-    var wheelchairReq by remember { mutableStateOf(false) }
+fun FareRow(title: String, amount: String, color: Color = LuxuryUiTokens.Text) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(title, color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+        Text(amount, color = color, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+    }
+}
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+// Screen 14: Ride Preferences (CRUD)
+@Composable
+fun Screen14RidePreferences(
+    quietRide: Boolean,
+    onQuietRideChange: (Boolean) -> Unit,
+    acComfort: Boolean,
+    onAcComfortChange: (Boolean) -> Unit,
+    luggageAssistance: Boolean,
+    onLuggageChange: (Boolean) -> Unit,
+    wheelchair: Boolean,
+    onWheelchairChange: (Boolean) -> Unit,
+    onSavePreferences: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold) }
-            Text("Ride Preferences", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
+            }
+            Text("14 · Ride Preferences", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
+
         Spacer(modifier = Modifier.height(16.dp))
+        PreferenceSwitchRow("Quiet Ride", "Driver avoids non-essential conversation", quietRide, onQuietRideChange)
+        PreferenceSwitchRow("Fan / Cooling Ventilation", "Maximum airflow in electric cabin", acComfort, onAcComfortChange)
+        PreferenceSwitchRow("Luggage Assistance", "Driver helps load bags at pickup", luggageAssistance, onLuggageChange)
+        PreferenceSwitchRow("Wheelchair Accessible", "Ramp and priority seating", wheelchair, onWheelchairChange)
 
-        PreferenceToggle("Quiet Ride", "Pilot maintains silent commute", quietRide) { quietRide = it }
-        PreferenceToggle("Luggage Assistance", "Assistance loading bags onto rear deck", luggageHelp) { luggageHelp = it }
-        PreferenceToggle("Step-Free / Accessibility", "Lowered kerb boarding assistance", wheelchairReq) { wheelchairReq = it }
-
-        Spacer(modifier = Modifier.weight(1f))
-        GoldActionButton(text = "SAVE PREFERENCES", onClick = onSavePreferences)
+        Spacer(modifier = Modifier.height(24.dp))
+        GoldActionButton(text = "SAVE RIDE PREFERENCES", onClick = onSavePreferences)
     }
 }
 
 @Composable
-fun PreferenceToggle(title: String, desc: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Surface(
-        color = LuxuryUiTokens.Card,
-        border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+fun PreferenceSwitchRow(title: String, desc: String, isChecked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        Row(modifier = Modifier.padding(14.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Text)
-                Text(desc, fontSize = 11.sp, color = LuxuryUiTokens.Muted)
+                Text(title, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text(desc, color = LuxuryUiTokens.Muted, fontSize = 11.sp)
             }
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                colors = SwitchDefaults.colors(checkedThumbColor = LuxuryUiTokens.Gold, checkedTrackColor = LuxuryUiTokens.GoldDark)
-            )
+            Switch(checked = isChecked, onCheckedChange = onCheckedChange, colors = SwitchDefaults.colors(checkedThumbColor = LuxuryUiTokens.Gold))
         }
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 15: PAYMENT METHOD (UPI, Card, Wallet, Cash)
-// -------------------------------------------------------------
+// Screen 15: Payment Method
 @Composable
-fun Screen15PaymentMethod(walletBalance: Int, onSelectPayment: () -> Unit, onBack: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+fun Screen15PaymentMethod(
+    walletBalance: Int,
+    savedVpas: List<SavedPaymentVpa>,
+    onSelectPayment: () -> Unit,
+    onAddVpa: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold) }
-            Text("Payment Method", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-
-        LuxuryPaymentItem("UPI (Google Pay / PhonePe / Paytm)", "Instant zero-fee digital settlement", onSelectPayment)
-        LuxuryPaymentItem("E-Wallet Balance", "Available: ₹ $walletBalance", onSelectPayment)
-        LuxuryPaymentItem("Credit / Debit Card", "Visa •••• 4821", onSelectPayment)
-        LuxuryPaymentItem("Cash to Pilot", "Pay exact cash upon ride completion", onSelectPayment)
-    }
-}
-
-@Composable
-fun LuxuryPaymentItem(title: String, desc: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        color = LuxuryUiTokens.Card,
-        border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column {
-                Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Text)
-                Text(desc, fontSize = 11.sp, color = LuxuryUiTokens.Muted)
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
             }
-            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = LuxuryUiTokens.Gold)
+            Text("15 · Select Payment Method", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
+
+        Spacer(modifier = Modifier.height(14.dp))
+        LuxuryCardItem("E-Rickshaw Wallet", "Available: ₹$walletBalance.00 (Tap to Pay)")
+
+        savedVpas.forEach { vpa ->
+            LuxuryCardItem(vpa.bank, "${vpa.vpa} • UPI")
+        }
+
+        LuxuryCardItem("Cash on Delivery", "Pay exact cash to chauffeur at drop-off")
+
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = onAddVpa,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = LuxuryUiTokens.Gold),
+            border = BorderStroke(1.dp, LuxuryUiTokens.Gold),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("+ Link New UPI ID", fontWeight = FontWeight.Bold)
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "CONFIRM PAYMENT METHOD (16)", onClick = onSelectPayment)
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 16: CONFIRM BOOKING (Route, Fare, Book now)
-// -------------------------------------------------------------
+// Screen 16: Confirm Booking
 @Composable
 fun Screen16ConfirmBooking(
     pickup: String,
@@ -1134,607 +2072,538 @@ fun Screen16ConfirmBooking(
     onTriggerOutofZone: () -> Unit,
     onBack: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold) }
-            Text("Confirm E-Rickshaw Booking", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Surface(
-            color = LuxuryUiTokens.Card,
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text("PICKUP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-                Text(pickup, fontSize = 13.sp, color = LuxuryUiTokens.Text, modifier = Modifier.padding(bottom = 8.dp))
-                Divider(color = LuxuryUiTokens.Border)
-                Text("DROP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold, modifier = Modifier.padding(top = 8.dp))
-                Text(destination, fontSize = 13.sp, color = LuxuryUiTokens.Text)
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
             }
+            Text("16 · Confirm Booking", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
 
-        LuxuryFareRow("Vehicle Category", category)
-        LuxuryFareRow("Total Estimated Fare", "₹ $totalFare", LuxuryUiTokens.Gold)
-        LuxuryFareRow("Payment Mode", "UPI / Cash to Pilot")
+        Spacer(modifier = Modifier.height(16.dp))
+        LuxuryCardItem("Category", category)
+        LuxuryCardItem("Pickup Point", pickup)
+        LuxuryCardItem("Destination", destination)
+        LuxuryCardItem("Total Fare", "₹ $totalFare.00 (All Inclusive)")
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "CONFIRM & DISPATCH CHAUFFEUR (18)", onClick = onConfirmBooking)
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            GoldActionButton(text = "CONFIRM AND BOOK RIDE", modifier = Modifier.weight(1f), onClick = onConfirmBooking)
+        Spacer(modifier = Modifier.height(8.dp))
+        TextButton(onClick = onTriggerOutofZone, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            Text("Simulate Out-of-Zone Alert (09)", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
         }
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 17: OUT-OF-ZONE ALERT (Restricted road, Change drop)
-// -------------------------------------------------------------
+// Screen 17: Out of Zone
 @Composable
 fun Screen17OutOfZone(onChangeDestination: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Icon(Icons.Default.Warning, contentDescription = null, tint = LuxuryUiTokens.RedAlert, modifier = Modifier.size(54.dp))
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("RESTRICTED OPERATIONAL ZONE", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.RedAlert)
-        Text(
-            "Selected destination falls along an elevated highway or restricted expressway where E-Rickshaws are not legally permitted to ply.",
-            fontSize = 12.sp,
-            color = LuxuryUiTokens.Muted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(vertical = 12.dp)
-        )
-        GoldActionButton(text = "CHANGE DROP LOCATION", onClick = onChangeDestination)
+        Spacer(modifier = Modifier.height(14.dp))
+        Text("DESTINATION OUT OF BOUNDS", color = LuxuryUiTokens.RedAlert, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Commercial E-Rickshaws operate strictly within Delhi municipal territory.", color = LuxuryUiTokens.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "CHANGE DESTINATION", onClick = onChangeDestination)
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 18: SEARCHING DRIVER (Radar pulse, Offer timer, Cancel)
-// -------------------------------------------------------------
+// Screen 18: Searching Radar
 @Composable
 fun Screen18SearchingRadar(secondsLeft: Int, onCancel: () -> Unit) {
-    val infiniteTransition = rememberInfiniteTransition()
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.4f,
-        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse)
-    )
-
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // Radar Pulse Ring
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.size(160.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size((140 * pulseScale).dp)
-                    .background(LuxuryUiTokens.Gold.copy(alpha = 0.15f), CircleShape)
-                    .border(2.dp, LuxuryUiTokens.Gold.copy(alpha = 0.4f), CircleShape)
-            )
-            Box(
-                modifier = Modifier
-                    .size(80.dp)
-                    .background(LuxuryUiTokens.Card, CircleShape)
-                    .border(2.dp, LuxuryUiTokens.Gold, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("${secondsLeft}s", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-            }
-        }
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("CONNECTING WITH CHAUFFEUR", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Radar broadcast to nearby certified E-Rickshaws", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
 
         Spacer(modifier = Modifier.height(24.dp))
-        Text("LOCATING NEAREST PILOT", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        Text("Broadcasting dispatch offer to 14 active E-Rickshaw pilots nearby...", fontSize = 12.sp, color = LuxuryUiTokens.Muted, textAlign = TextAlign.Center)
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(140.dp)) {
+            CircularProgressIndicator(
+                progress = { secondsLeft / 20f },
+                color = LuxuryUiTokens.Gold,
+                strokeWidth = 8.dp,
+                trackColor = Color(0xFF222228),
+                modifier = Modifier.fillMaxSize()
+            )
+            Text("${secondsLeft}s", color = LuxuryUiTokens.Gold, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        }
 
-        Spacer(modifier = Modifier.height(32.dp))
-        Button(
-            onClick = onCancel,
-            colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card),
-            border = BorderStroke(1.dp, LuxuryUiTokens.RedAlert),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Text("CANCEL SEARCH", color = LuxuryUiTokens.RedAlert, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(28.dp))
+        OutlinedButton(onClick = onCancel, border = BorderStroke(1.dp, LuxuryUiTokens.RedAlert), colors = ButtonDefaults.outlinedButtonColors(contentColor = LuxuryUiTokens.RedAlert)) {
+            Text("Cancel Booking Request")
         }
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 19: DRIVER FOUND & SCREEN 20: DRIVER ARRIVING
-// -------------------------------------------------------------
+// Screen 19: Driver Found
 @Composable
-fun Screen19DriverFound(
-    driverName: String,
-    plate: String,
-    rating: String,
-    startOtp: String,
-    etaMinutes: Int,
-    onProceedToArriving: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = LuxuryUiTokens.GreenSuccess, modifier = Modifier.size(48.dp))
-        Spacer(modifier = Modifier.height(10.dp))
-        Text("PILOT ASSIGNED", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-
-        Surface(
-            color = LuxuryUiTokens.Card,
-            border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(driverName, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Text)
-                Text("Saarthi Electric EV • $plate • $rating", fontSize = 12.sp, color = LuxuryUiTokens.Muted)
-                Spacer(modifier = Modifier.height(14.dp))
-                Text("START RIDE OTP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Muted)
-                Text(startOtp, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 6.sp, color = LuxuryUiTokens.Gold)
-                Text("Share this 4-digit code with the pilot when boarding", fontSize = 10.sp, color = LuxuryUiTokens.Muted)
-            }
-        }
-
-        Text("Pilot is $etaMinutes mins away from your pickup point", fontSize = 12.sp, color = LuxuryUiTokens.Gold)
+fun Screen19DriverFound(driverName: String, plate: String, rating: String, startOtp: String, etaMinutes: Int, onProceedToArriving: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("19 · CHAUFFEUR ASSIGNED", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(modifier = Modifier.height(16.dp))
-        GoldActionButton(text = "TRACK ARRIVAL", onClick = onProceedToArriving)
+
+        Box(modifier = Modifier.size(80.dp).background(LuxuryUiTokens.Card, CircleShape).border(2.dp, LuxuryUiTokens.Gold, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Person, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(44.dp))
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(driverName, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text("$rating · Commercial EV Saarthi Prime ($plate)", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+
+        Spacer(modifier = Modifier.height(20.dp))
+        LuxuryCardItem("Driver ETA", "$etaMinutes Minutes away (Approaching Gate 2)")
+        LuxuryCardItem("Boarding Start PIN", "$startOtp (Share when driver arrives)")
+
+        Spacer(modifier = Modifier.height(24.dp))
+        GoldActionButton(text = "TRACK DRIVER ARRIVAL (20)", onClick = onProceedToArriving)
     }
 }
 
+// Screen 20: Driver Arriving
 @Composable
-fun Screen20DriverArriving(
-    driverName: String,
-    plate: String,
-    startOtp: String,
-    etaMinutes: Int,
-    onCall: () -> Unit,
-    onChat: () -> Unit,
-    onBoarded: () -> Unit,
-    onCancel: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Map Tracking Area
-        Box(modifier = Modifier.fillMaxWidth().weight(1f).background(Color(0xFF131318))) {
-            Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("PILOT IS ARRIVING", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-                Text("ETA $etaMinutes MINS", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = LuxuryUiTokens.Text)
-            }
-        }
+fun Screen20DriverArriving(driverName: String, plate: String, startOtp: String, etaMinutes: Int, onCall: () -> Unit, onChat: () -> Unit, onBoarded: () -> Unit, onCancel: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("20 · Chauffeur Arriving", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Bottom Driver & OTP Card
-        Surface(
-            color = LuxuryUiTokens.Card,
-            border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Gold), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column {
-                        Text(driverName, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Text)
-                        Text("$plate • White E-Rickshaw", fontSize = 11.sp, color = LuxuryUiTokens.Muted)
+                        Text(driverName, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(plate, color = LuxuryUiTokens.Gold, fontSize = 12.sp)
                     }
-                    Surface(color = LuxuryUiTokens.FieldBg, border = BorderStroke(1.dp, LuxuryUiTokens.Gold), shape = RoundedCornerShape(6.dp)) {
-                        Text("OTP: $startOtp", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = onCall, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.FieldBg), border = BorderStroke(1.dp, LuxuryUiTokens.Border), modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Default.Phone, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Call", color = LuxuryUiTokens.Text, fontSize = 12.sp)
-                    }
-                    Button(onClick = onChat, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.FieldBg), border = BorderStroke(1.dp, LuxuryUiTokens.Border), modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Default.Email, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Chat", color = LuxuryUiTokens.Text, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        IconButton(onClick = onChat, modifier = Modifier.background(Color(0xFF222228), CircleShape)) {
+                            Icon(Icons.Default.Send, contentDescription = "Chat", tint = LuxuryUiTokens.Gold, modifier = Modifier.size(16.dp))
+                        }
+                        IconButton(onClick = onCall, modifier = Modifier.background(LuxuryUiTokens.Gold, CircleShape)) {
+                            Icon(Icons.Default.Call, contentDescription = "Call", tint = Color.Black, modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
-
                 Spacer(modifier = Modifier.height(10.dp))
-                GoldActionButton(text = "BOARDED - START TRIP", onClick = onBoarded)
+                Text("ETA: $etaMinutes MIN · Approaching Pickup", color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold)
+                Text("Start OTP: $startOtp", color = LuxuryUiTokens.Gold, fontSize = 13.sp, fontWeight = FontWeight.Black)
             }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "I HAVE BOARDED (START RIDE 23)", onClick = onBoarded)
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(onClick = onCancel, colors = ButtonDefaults.outlinedButtonColors(contentColor = LuxuryUiTokens.RedAlert), border = BorderStroke(1.dp, LuxuryUiTokens.RedAlert), modifier = Modifier.fillMaxWidth()) {
+            Text("Cancel Ride (15)")
         }
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 21: RIDE CHAT & SCREEN 22: MASKED CALL
-// -------------------------------------------------------------
+// Screen 21: Ride Chat (CRUD)
 @Composable
-fun Screen21RideChat(driverName: String, onBack: () -> Unit) {
+fun Screen21RideChat(driverName: String, messages: List<ChatBubbleItem>, onSendMessage: (String) -> Unit, onBack: () -> Unit) {
+    var replyText by remember { mutableStateOf("") }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold) }
-            Text("Chat with $driverName", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        LuxuryCardItem("Ramesh Kumar (Pilot)", "I am at Gate 2 near the auto stand.")
-        LuxuryCardItem("You", "Yes, reaching in 1 minute in black jacket.")
-        Spacer(modifier = Modifier.weight(1f))
-        Text("QUICK REPLIES", fontSize = 10.sp, color = LuxuryUiTokens.Muted, fontWeight = FontWeight.Bold)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card)) {
-                Text("I am here", fontSize = 11.sp, color = LuxuryUiTokens.Gold)
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
             }
-            Button(onClick = {}, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card)) {
-                Text("Waiting at Gate 2", fontSize = 11.sp, color = LuxuryUiTokens.Gold)
+            Text("21 · Chat with $driverName", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            messages.forEach { msg ->
+                CustomerChatBubble(msg.message, isCustomer = msg.isCustomer)
+            }
+        }
+
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = replyText,
+                onValueChange = { replyText = it },
+                placeholder = { Text("Type quick reply…", color = LuxuryUiTokens.Muted) },
+                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = LuxuryUiTokens.Text, unfocusedTextColor = LuxuryUiTokens.Text, focusedBorderColor = LuxuryUiTokens.Gold, unfocusedBorderColor = LuxuryUiTokens.Border),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(
+                onClick = {
+                    if (replyText.isNotBlank()) {
+                        onSendMessage(replyText)
+                        replyText = ""
+                    }
+                },
+                modifier = Modifier.background(LuxuryUiTokens.Gold, CircleShape)
+            ) {
+                Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.Black)
             }
         }
     }
 }
 
+@Composable
+fun CustomerChatBubble(message: String, isCustomer: Boolean) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isCustomer) Arrangement.End else Arrangement.Start) {
+        Surface(
+            color = if (isCustomer) LuxuryUiTokens.Gold else LuxuryUiTokens.Card,
+            shape = RoundedCornerShape(10.dp),
+            border = if (!isCustomer) BorderStroke(1.dp, LuxuryUiTokens.Border) else null,
+            modifier = Modifier.widthIn(max = 260.dp)
+        ) {
+            Text(message, color = if (isCustomer) Color.Black else LuxuryUiTokens.Text, fontSize = 12.sp, modifier = Modifier.padding(10.dp))
+        }
+    }
+}
+
+// Screen 22: Masked Call
 @Composable
 fun Screen22MaskedCall(driverName: String, onEndCall: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(Icons.Default.Phone, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(54.dp))
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("NUMBER PRIVACY PROTECTED", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Muted)
-        Text(driverName, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Text)
-        Text("Calling via Secure Relay Server...", fontSize = 12.sp, color = LuxuryUiTokens.Gold, modifier = Modifier.padding(vertical = 8.dp))
-        Spacer(modifier = Modifier.height(30.dp))
-        Button(
-            onClick = onEndCall,
-            colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.RedAlert),
-            shape = CircleShape,
-            modifier = Modifier.size(60.dp)
-        ) {
-            Icon(Icons.Default.Close, contentDescription = "End Call", tint = Color.White)
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("NUMBER MASKED SECURE CALL", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Connected with $driverName (+91-XXXX-4821)", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Box(modifier = Modifier.size(90.dp).background(LuxuryUiTokens.Card, CircleShape).border(2.dp, LuxuryUiTokens.Gold, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Call, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(44.dp))
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+        Button(onClick = onEndCall, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.RedAlert), shape = RoundedCornerShape(10.dp)) {
+            Text("END CALL", color = Color.White, fontWeight = FontWeight.Bold)
         }
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 23: RIDE IN PROGRESS (Active Ride Isolation, SOS button)
-// -------------------------------------------------------------
+// Screen 23: Ride In Progress
 @Composable
-fun Screen23RideInProgress(
-    driverName: String,
-    destination: String,
-    onShare: () -> Unit,
-    onSos: () -> Unit,
-    onCompleteTrip: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Active Map View
-        Box(modifier = Modifier.fillMaxWidth().weight(1f).background(Color(0xFF101015))) {
-            // Floating Red/Gold SOS Panic Button (Rule 4: Always accessible during live ride)
-            Surface(
-                onClick = onSos,
-                color = LuxuryUiTokens.RedAlert,
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.dp, Color.White),
-                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-            ) {
-                Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Warning, contentDescription = "SOS", tint = Color.White, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("EMERGENCY SOS", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                }
-            }
+fun Screen23RideInProgress(driverName: String, destination: String, onShare: () -> Unit, onSos: () -> Unit, onCompleteTrip: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("23 · Ride in Progress", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Spacer(modifier = Modifier.height(12.dp))
 
-            Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("RIDE IN PROGRESS", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-                Text("Dropping at: $destination", fontSize = 12.sp, color = LuxuryUiTokens.Text)
-                Text("Speed: 22 km/h • 100% Electric", fontSize = 11.sp, color = LuxuryUiTokens.Muted)
-            }
-        }
-
-        // Persistent Ride Card with ETA & Driver
-        Surface(
-            color = LuxuryUiTokens.Card,
-            border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Gold), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Pilot: $driverName", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Text)
-                        Text("ETA to Destination: 7 mins", fontSize = 12.sp, color = LuxuryUiTokens.Gold)
-                    }
-                    Button(onClick = onShare, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.FieldBg), border = BorderStroke(1.dp, LuxuryUiTokens.Border)) {
-                        Icon(Icons.Default.Share, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Share", color = LuxuryUiTokens.Text, fontSize = 11.sp)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                GoldActionButton(text = "DROP AND COMPLETE RIDE", onClick = onCompleteTrip)
+                Text("En Route to Destination", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                Text(destination, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("ETA: 12 MINS · Chauffeur: $driverName", color = LuxuryUiTokens.Gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
+
+        Spacer(modifier = Modifier.height(14.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onShare, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card), border = BorderStroke(1.dp, LuxuryUiTokens.Border), modifier = Modifier.weight(1f)) {
+                Text("Share Trip (21)", color = LuxuryUiTokens.Gold, fontSize = 11.sp)
+            }
+            Button(onClick = onSos, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.RedAlert), modifier = Modifier.weight(1f)) {
+                Text("SOS (20)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        GoldActionButton(text = "ARRIVE AT DESTINATION (28)", onClick = onCompleteTrip)
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 24: SHARE TRIP & SCREEN 25: SOS PANIC & SCREEN 26: FARE SPLIT
-// -------------------------------------------------------------
+// Screen 24: Share Trip
 @Composable
 fun Screen24ShareTrip(onDismiss: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onDismiss) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold) }
-            Text("Share Live Journey", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        }
-        Spacer(modifier = Modifier.height(16.dp))
-        LuxuryCardItem("WhatsApp Share", "Send live tracking link to family & trusted contacts")
-        LuxuryCardItem("SMS Live Link", "https://e-rickshaw.in/live/ride-4821")
-        LuxuryCardItem("Hide Exact Address", "Only displays vehicle plate and route corridor")
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("SHARE LIVE TRIP TELEMETRY", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Real-time GPS tracking link copied to clipboard.", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "BACK TO RIDE", onClick = onDismiss)
     }
 }
 
+// Screen 25: SOS Panic
 @Composable
 fun Screen25SosPanic(onDismiss: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(Icons.Default.Warning, contentDescription = null, tint = LuxuryUiTokens.RedAlert, modifier = Modifier.size(60.dp))
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("EMERGENCY POLICE & SOC DESK", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.RedAlert)
-        Text("Hold to confirm. Local PCR Van (112) and 24x7 HQ command will be immediately alerted with your live GPS location.", fontSize = 12.sp, color = LuxuryUiTokens.Muted, textAlign = TextAlign.Center)
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.RedAlert), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().height(48.dp)) {
-            Text("DISPATCH EMERGENCY SOS", color = Color.White, fontWeight = FontWeight.Bold)
-        }
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Icon(Icons.Default.Warning, contentDescription = null, tint = LuxuryUiTokens.RedAlert, modifier = Modifier.size(54.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+        Text("EMERGENCY 112 DISPATCHED", color = LuxuryUiTokens.RedAlert, fontWeight = FontWeight.Black, fontSize = 18.sp)
+        Text("Police helpline 112 dialed and live location sent to Fleet Safety Command.", color = LuxuryUiTokens.Text, fontSize = 12.sp, textAlign = TextAlign.Center)
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "DISMISS ALERT", onClick = onDismiss)
     }
 }
 
+// Screen 26: Fare Split
 @Composable
 fun Screen26FareSplit(totalFare: Int, onDone: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Split Fare with Co-Passengers", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        Spacer(modifier = Modifier.height(12.dp))
-        LuxuryCardItem("Total Fare", "₹ $totalFare")
-        LuxuryCardItem("Passenger 1 (You)", "₹ ${totalFare / 2}")
-        LuxuryCardItem("Passenger 2", "₹ ${totalFare / 2} • Request Sent")
-        Spacer(modifier = Modifier.weight(1f))
-        GoldActionButton(text = "CONFIRM SPLIT", onClick = onDone)
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("SPLIT FARE WITH PASSENGERS", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Share ₹$totalFare evenly (₹${totalFare / 2} each)", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "DONE", onClick = onDone)
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 27: CANCEL RIDE (Reasons, Fee notice, Confirm)
-// -------------------------------------------------------------
+// Screen 27: Cancel Ride
 @Composable
 fun Screen27CancelRide(onKeepRide: () -> Unit, onConfirmCancel: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Cancel Ride?", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        Text("A cancellation fee of ₹20 applies if pilot has already arrived.", fontSize = 12.sp, color = LuxuryUiTokens.Muted, modifier = Modifier.padding(vertical = 8.dp))
-
-        listOf(
-            "Pilot is taking too long / not moving",
-            "Booked by mistake",
-            "Found alternate transit (Metro)",
-            "Pilot asked to cancel"
-        ).forEach { reason ->
-            Surface(
-                onClick = onConfirmCancel,
-                color = LuxuryUiTokens.Card,
-                border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            ) {
-                Text(reason, fontSize = 12.sp, color = LuxuryUiTokens.Text, modifier = Modifier.padding(12.dp))
-            }
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("CANCEL ASSIGNMENT", color = LuxuryUiTokens.RedAlert, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text("A standard ₹20 fee applies if cancelled after chauffeur has accepted.", color = LuxuryUiTokens.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "KEEP RIDE", onClick = onKeepRide)
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(onClick = onConfirmCancel, colors = ButtonDefaults.outlinedButtonColors(contentColor = LuxuryUiTokens.RedAlert), border = BorderStroke(1.dp, LuxuryUiTokens.RedAlert), modifier = Modifier.fillMaxWidth()) {
+            Text("CONFIRM CANCEL (₹20 FEE)")
         }
-
-        Spacer(modifier = Modifier.weight(1f))
-        GoldActionButton(text = "KEEP MY RIDE", onClick = onKeepRide)
     }
 }
 
-// -------------------------------------------------------------
-// SCREEN 28: TRIP SUMMARY & SCREEN 29: PAYMENT & SCREEN 30: RATE DRIVER
-// -------------------------------------------------------------
+// Screen 28: Trip Summary
 @Composable
 fun Screen28TripSummary(totalFare: Int, distanceKm: Double, durationMins: Int, onPay: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = LuxuryUiTokens.GreenSuccess, modifier = Modifier.size(54.dp))
-        Spacer(modifier = Modifier.height(10.dp))
-        Text("YOU HAVE ARRIVED!", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        Text("Thank you for riding electric and reducing urban carbon footprint", fontSize = 11.sp, color = LuxuryUiTokens.Muted)
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("28 · Trip Completed", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Text("₹ $totalFare", fontSize = 42.sp, fontWeight = FontWeight.ExtraBold, color = LuxuryUiTokens.Gold, modifier = Modifier.padding(vertical = 16.dp))
+        Icon(Icons.Default.Check, contentDescription = null, tint = LuxuryUiTokens.Gold, modifier = Modifier.size(50.dp))
+        Text("₹ $totalFare.00", color = LuxuryUiTokens.Gold, fontSize = 34.sp, fontWeight = FontWeight.Black)
+        Text("Total Fare · $distanceKm km driven in $durationMins mins", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
 
-        LuxuryFareRow("Total Distance", "$distanceKm km")
-        LuxuryFareRow("Ride Time", "$durationMins mins")
-        LuxuryFareRow("Tailpipe CO₂ Saved", "420 grams")
-
-        Spacer(modifier = Modifier.weight(1f))
-        GoldActionButton(text = "PROCEED TO PAY", onClick = onPay)
+        Spacer(modifier = Modifier.height(24.dp))
+        GoldActionButton(text = "PROCEED TO SETTLEMENT (29)", onClick = onPay)
     }
 }
 
+// Screen 29: Payment Settle
 @Composable
 fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Settle Ride Fare", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        Text("Amount Payable: ₹ $amount", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = LuxuryUiTokens.Text, modifier = Modifier.padding(vertical = 12.dp))
-
-        LuxuryPaymentItem("Pay via UPI (GPay / PhonePe)", "Instant online zero-fee settlement", onPaymentDone)
-        LuxuryPaymentItem("Pay Cash to Pilot", "Hand ₹ $amount cash to pilot", onPaymentDone)
-        LuxuryPaymentItem("Deduct from E-Wallet", "Auto-debit from available balance", onPaymentDone)
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("29 · FARE SETTLEMENT", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("₹ $amount", color = LuxuryUiTokens.Gold, fontSize = 38.sp, fontWeight = FontWeight.Black)
+        Spacer(modifier = Modifier.height(20.dp))
+        GoldActionButton(text = "PAY VIA WALLET / UPI (CONFIRM)", onClick = onPaymentDone)
     }
 }
 
+// Screen 30: Rate Driver
 @Composable
 fun Screen30RateDriver(driverName: String, onSubmitted: () -> Unit) {
     var stars by remember { mutableIntStateOf(5) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("How was your ride with $driverName?", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold, textAlign = TextAlign.Center)
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("30 · Rate Chauffeur", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 5 Gold Stars
+        Text("How was your trip with $driverName?", color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Spacer(modifier = Modifier.height(14.dp))
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for (i in 1..5) {
-                Icon(
-                    imageVector = Icons.Default.Star,
-                    contentDescription = null,
-                    tint = if (i <= stars) LuxuryUiTokens.Gold else LuxuryUiTokens.Border,
-                    modifier = Modifier.size(36.dp).clickable { stars = i }
-                )
+                IconButton(onClick = { stars = i }) {
+                    Icon(Icons.Default.Star, contentDescription = null, tint = if (i <= stars) LuxuryUiTokens.Gold else Color(0xFF333338), modifier = Modifier.size(36.dp))
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
-        Text("WHAT MADE IT GREAT?", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Muted)
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+        GoldActionButton(text = "SUBMIT 5-STAR RATING", onClick = onSubmitted)
+    }
+}
 
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip("Clean EV")
-            Chip("Polite Pilot")
-            Chip("Safe Route")
+// =========================================================================
+// TAB 2: RIDES & DISPUTES (CRUD)
+// =========================================================================
+@Composable
+fun RidesTabContent(
+    supportTickets: List<SupportTicketItem>,
+    onRepeatRide: () -> Unit,
+    onOpenDispute: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Your Past Trips", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            TextButton(onClick = onOpenDispute) {
+                Text("+ Raise Dispute (23)", color = LuxuryUiTokens.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
-        GoldActionButton(text = "SUBMIT RATING", onClick = onSubmitted)
-    }
-}
+        Spacer(modifier = Modifier.height(10.dp))
+        LuxuryCardItem("Trip #8491 · Completed", "CP Metro Gate 2 → Khan Market · ₹128 Cash Paid")
+        LuxuryCardItem("Trip #8410 · Completed", "New Delhi Railway Station → Karol Bagh · ₹110 UPI")
 
-@Composable
-fun Chip(text: String) {
-    Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Gold), shape = RoundedCornerShape(12.dp)) {
-        Text(text, fontSize = 11.sp, color = LuxuryUiTokens.Gold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-    }
-}
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("ACTIVE SUPPORT DISPUTES (CRUD)", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(8.dp))
 
-// -------------------------------------------------------------
-// RIDES TAB: SCREENS 31 TO 34
-// -------------------------------------------------------------
-@Composable
-fun RidesTabContent(onSelectRideDetail: (String) -> Unit, onRepeatRide: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Ride History", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-        Spacer(modifier = Modifier.height(12.dp))
-
-        listOf(
-            Triple("Today, 2:15 PM", "Model Town -> Rajiv Chowk Gate 2", "₹ 128 • Completed"),
-            Triple("Yesterday, 9:30 AM", "Chandni Chowk -> Old Delhi Stn", "₹ 40 • Completed"),
-            Triple("28 Oct, 6:00 PM", "Vishwa Vidyalaya -> Mall Road", "₹ 20 • Cancelled")
-        ).forEach { (time, route, status) ->
-            Surface(
-                color = LuxuryUiTokens.Card,
-                border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            ) {
+        supportTickets.forEach { ticket ->
+            Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(time, fontSize = 11.sp, color = LuxuryUiTokens.Muted)
-                        Text(status, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (status.contains("Completed")) LuxuryUiTokens.Gold else LuxuryUiTokens.RedAlert)
+                        Text(ticket.id, color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(ticket.status, color = LuxuryUiTokens.GreenSuccess, fontSize = 11.sp)
                     }
-                    Text(route, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = LuxuryUiTokens.Text, modifier = Modifier.padding(vertical = 4.dp))
-                    Button(onClick = onRepeatRide, colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.FieldBg), border = BorderStroke(1.dp, LuxuryUiTokens.Gold), modifier = Modifier.align(Alignment.End)) {
-                        Text("Repeat Ride", color = LuxuryUiTokens.Gold, fontSize = 10.sp)
-                    }
+                    Text(ticket.subject, color = LuxuryUiTokens.Text, fontSize = 12.sp, modifier = Modifier.padding(vertical = 2.dp))
                 }
             }
         }
     }
 }
 
-// -------------------------------------------------------------
-// WALLET TAB: SCREENS 35 TO 40
-// -------------------------------------------------------------
+// =========================================================================
+// TAB 3: WALLET & CARDS (CRUD)
+// =========================================================================
 @Composable
-fun WalletTabContent(balance: Int, onAddMoney: (Int) -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("E-Rickshaw Wallet", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
+fun WalletTabContent(
+    balance: Int,
+    transactions: List<WalletTxn>,
+    savedVpas: List<SavedPaymentVpa>,
+    onAddMoneyClick: () -> Unit,
+    onAddVpaClick: () -> Unit,
+    onDeleteVpa: (String) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("E-Rickshaw Luxury Wallet", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Gold Wallet Card matching .big
-        Surface(
-            color = LuxuryUiTokens.Card,
-            border = BorderStroke(1.dp, LuxuryUiTokens.Gold),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+        Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Gold), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("AVAILABLE BALANCE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Muted)
-                Text("₹ $balance.00", fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = LuxuryUiTokens.Gold, modifier = Modifier.padding(vertical = 6.dp))
-                Text("Auto top-up enabled • Linked UPI VPA", fontSize = 11.sp, color = LuxuryUiTokens.Muted)
+                Text("TOTAL BALANCE", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("₹ $balance.00", color = LuxuryUiTokens.Gold, fontSize = 36.sp, fontWeight = FontWeight.Black)
+                Spacer(modifier = Modifier.height(10.dp))
+                GoldActionButton(text = "+ TOP-UP WALLET BALANCE", onClick = onAddMoneyClick)
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-        Text("QUICK TOP-UP", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Muted)
-        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("SAVED PAYMENT VPAs (CRUD)", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onAddVpaClick) {
+                Text("+ Link UPI", color = LuxuryUiTokens.Gold, fontSize = 11.sp)
+            }
+        }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            listOf(100, 250, 500, 1000).forEach { amt ->
-                Button(
-                    onClick = { onAddMoney(amt) },
-                    colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Card),
-                    border = BorderStroke(1.dp, LuxuryUiTokens.Gold),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("+₹$amt", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
+        savedVpas.forEach { vpa ->
+            Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Text(vpa.bank, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(vpa.vpa, color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                    IconButton(onClick = { onDeleteVpa(vpa.id) }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = LuxuryUiTokens.RedAlert, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
-        Text("PROMOS & REFERRALS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Muted)
+        Spacer(modifier = Modifier.height(14.dp))
+        Text("RECENT TRANSACTIONS", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        LuxuryCardItem("Refer & Earn", "Share code RICKSHAW100 with friends and earn ₹50 each")
-        LuxuryCardItem("Active Offers", "METRO10: Flat ₹10 Off on Metro Feeder rides")
+
+        transactions.forEach { txn ->
+            Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Text(txn.title, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(txn.time, color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                    Text(
+                        text = (if (txn.isCredit) "+ ₹" else "- ₹") + txn.amount,
+                        color = if (txn.isCredit) LuxuryUiTokens.GreenSuccess else LuxuryUiTokens.RedAlert,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        }
     }
 }
 
-// -------------------------------------------------------------
-// ACCOUNT TAB: SCREENS 43 TO 50
-// -------------------------------------------------------------
+// =========================================================================
+// TAB 4: ACCOUNT, CONTACTS & PROFILE (CRUD)
+// =========================================================================
 @Composable
-fun AccountTabContent(onSignOut: () -> Unit) {
+fun AccountTabContent(
+    userName: String,
+    userPhone: String,
+    userEmail: String,
+    savedPlaces: List<SavedPlace>,
+    emergencyContacts: List<EmergencyContactItem>,
+    onEditProfile: () -> Unit,
+    onAddContact: () -> Unit,
+    onDeleteContact: (String) -> Unit,
+    onToggleContactNotify: (String) -> Unit,
+    onDeleteSavedPlace: (String) -> Unit,
+    onSignOut: () -> Unit
+) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("Account & Settings", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
+        Text("Account & Profile", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Profile Avatar Card
+        // Profile Card
         Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(46.dp).background(LuxuryUiTokens.Gold, CircleShape), contentAlignment = Alignment.Center) {
-                    Text("SS", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+            Row(modifier = Modifier.padding(14.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(46.dp).background(LuxuryUiTokens.Gold, CircleShape), contentAlignment = Alignment.Center) {
+                        Text("SS", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(userName, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(userPhone, color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+                        Text(userEmail, color = LuxuryUiTokens.Gold, fontSize = 11.sp)
+                    }
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text("Sunil Sharma", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Text)
-                    Text("+91 98765 43210 • Gold Tier Rider", fontSize = 12.sp, color = LuxuryUiTokens.Muted)
+                IconButton(onClick = onEditProfile) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit Profile", tint = LuxuryUiTokens.Gold, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("EMERGENCY SOS CONTACTS (CRUD)", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onAddContact) {
+                Text("+ Add Contact", color = LuxuryUiTokens.Gold, fontSize = 11.sp)
+            }
+        }
+
+        emergencyContacts.forEach { contact ->
+            Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column {
+                        Text(contact.name, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("${contact.phone} (${contact.relationship})", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(
+                            checked = contact.notifyOnSos,
+                            onCheckedChange = { onToggleContactNotify(contact.id) },
+                            colors = SwitchDefaults.colors(checkedThumbColor = LuxuryUiTokens.RedAlert)
+                        )
+                        IconButton(onClick = { onDeleteContact(contact.id) }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = LuxuryUiTokens.RedAlert, modifier = Modifier.size(16.dp))
+                        }
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
-        LuxuryCardItem("Emergency Contacts", "2 Contacts designated for SOS alerts")
-        LuxuryCardItem("Help Centre & FAQs", "24x7 Customer Support Desk & Tickets")
-        LuxuryCardItem("Report Lost Item", "Report item left in E-Rickshaw")
-        LuxuryCardItem("Language", "English / Hindi")
-        LuxuryCardItem("Loyalty Sanctuary", "1,450 Points • 12 Ride Streak")
+        Text("SAVED PLACES (CRUD)", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(6.dp))
+
+        savedPlaces.forEach { place ->
+            Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(place.title, color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(place.address, color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                    IconButton(onClick = { onDeleteSavedPlace(place.id) }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = LuxuryUiTokens.RedAlert, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(20.dp))
         Button(
@@ -1744,25 +2613,18 @@ fun AccountTabContent(onSignOut: () -> Unit) {
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("SIGN OUT OF DEVICE", color = LuxuryUiTokens.RedAlert, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("LOGOUT OF DEVICE (04)", color = LuxuryUiTokens.RedAlert, fontWeight = FontWeight.Bold)
         }
     }
 }
 
-// -------------------------------------------------------------
-// HELPER COMPONENTS
-// -------------------------------------------------------------
+// Reusable Helper UI Components
 @Composable
 fun LuxuryCardItem(title: String, desc: String) {
-    Surface(
-        color = LuxuryUiTokens.Card,
-        border = BorderStroke(1.dp, LuxuryUiTokens.Border),
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-    ) {
+    Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = LuxuryUiTokens.Gold)
-            Text(desc, fontSize = 11.sp, color = LuxuryUiTokens.Muted)
+            Text(title, color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text(desc, color = LuxuryUiTokens.Muted, fontSize = 11.sp)
         }
     }
 }
