@@ -132,9 +132,19 @@ fun DriverLuxuryFlowScreens(
     val scope = rememberCoroutineScope()
 
     // Driver Core State
+    var activeRideId by remember { mutableStateOf<String?>("RIDE-1082") }
     var isApproved by remember { mutableStateOf(true) } // Gatekeeper rule: Screen 07 if false
     var isOnline by remember { mutableStateOf(true) }
     var flowStep by remember { mutableStateOf(DriverFlowStep.DRIVER_HOME) }
+
+    // Live Availability Sync Hook
+    LaunchedEffect(isOnline) {
+        try {
+            DriverApiClient.getService().setAvailability(DriverAvailabilityPayload(isOnline))
+        } catch (t: Throwable) {
+            Log.w("DriverFlow", "Live availability network call fallback: ${t.message}")
+        }
+    }
 
     // Active Ride Data
     var currentRideFare by remember { mutableIntStateOf(145) }
