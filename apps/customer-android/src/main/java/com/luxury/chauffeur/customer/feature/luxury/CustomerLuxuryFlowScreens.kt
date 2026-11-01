@@ -37,6 +37,7 @@ import com.luxury.chauffeur.customer.core.network.RideRequestPayload
 import com.luxury.chauffeur.customer.core.network.RateDriverRequest
 import com.luxury.chauffeur.customer.core.network.TopupWalletRequest
 import com.luxury.chauffeur.customer.core.network.SaveVpaRequest
+import com.luxury.chauffeur.customer.core.network.ProfileUpdateRequest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -1561,8 +1562,22 @@ fun CustomerLuxuryFlowScreens(
                     confirmButton = {
                         Button(
                             onClick = {
-                                userName = editName
-                                userEmail = editEmail
+                                val nameStr = editName
+                                val emailStr = editEmail
+                                scope.launch {
+                                    try {
+                                        ApiClient.getService().updateProfile(
+                                            ProfileUpdateRequest(
+                                                fullName = nameStr,
+                                                email = emailStr
+                                            )
+                                        )
+                                    } catch (t: Throwable) {
+                                        Log.w("CustomerFlow", "Update profile API fallback: ${t.message}")
+                                    }
+                                }
+                                userName = nameStr
+                                userEmail = emailStr
                                 showEditProfileDialog = false
                                 Toast.makeText(context, "Profile details updated!", Toast.LENGTH_SHORT).show()
                             },

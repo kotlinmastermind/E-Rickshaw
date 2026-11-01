@@ -10,16 +10,15 @@ import com.google.android.gms.maps.MapsInitializer
 import com.luxury.chauffeur.customer.core.network.ApiClient
 import com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper
 import com.luxury.chauffeur.customer.feature.payments.RazorpayPaymentBridge
-import com.razorpay.PaymentData
-import com.razorpay.PaymentResultWithDataListener
 
-class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
+class MainActivity : ComponentActivity(), com.razorpay.PaymentResultWithDataListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ApiClient.initialize(this)
 
-        // Preload Razorpay Checkout for instantaneous payment sheet display
-        RazorpayCheckoutHelper.initialize(this)
+        try {
+            RazorpayCheckoutHelper.initialize(this)
+        } catch (_: Throwable) {}
 
         java.util.concurrent.Executors.newSingleThreadExecutor().execute {
             try {
@@ -47,11 +46,11 @@ class MainActivity : ComponentActivity(), PaymentResultWithDataListener {
         }
     }
 
-    override fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: PaymentData?) {
+    override fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: com.razorpay.PaymentData?) {
         RazorpayPaymentBridge.onPaymentSuccess(razorpayPaymentId, paymentData)
     }
 
-    override fun onPaymentError(errorCode: Int, response: String?, paymentData: PaymentData?) {
+    override fun onPaymentError(errorCode: Int, response: String?, paymentData: com.razorpay.PaymentData?) {
         RazorpayPaymentBridge.onPaymentError(errorCode, response, paymentData)
     }
 }

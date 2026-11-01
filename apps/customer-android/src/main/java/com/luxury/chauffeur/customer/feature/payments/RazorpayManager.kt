@@ -2,8 +2,6 @@ package com.luxury.chauffeur.customer.feature.payments
 
 import android.app.Activity
 import android.util.Log
-import com.razorpay.Checkout
-import com.razorpay.PaymentData
 import org.json.JSONObject
 
 object RazorpayConfig {
@@ -26,15 +24,32 @@ object RazorpayPaymentBridge {
         this.callback = cb
     }
 
-    fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: PaymentData?) {
-        val paymentId = razorpayPaymentId ?: paymentData?.paymentId ?: ""
-        val orderId = paymentData?.orderId ?: ""
-        val signature = paymentData?.signature ?: ""
+    fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: Any?) {
+        var paymentId = razorpayPaymentId.orEmpty()
+        var orderId = ""
+        var signature = ""
+
+        if (paymentData != null) {
+            try {
+                if (paymentData is com.razorpay.PaymentData) {
+                    paymentId = razorpayPaymentId ?: paymentData.paymentId.orEmpty()
+                    orderId = paymentData.orderId.orEmpty()
+                    signature = paymentData.signature.orEmpty()
+                } else {
+                    val pId = paymentData.javaClass.getMethod("getPaymentId").invoke(paymentData)?.toString()
+                    val oId = paymentData.javaClass.getMethod("getOrderId").invoke(paymentData)?.toString()
+                    val sig = paymentData.javaClass.getMethod("getSignature").invoke(paymentData)?.toString()
+                    if (paymentId.isBlank()) paymentId = pId.orEmpty()
+                    orderId = oId.orEmpty()
+                    signature = sig.orEmpty()
+                }
+            } catch (_: Exception) {}
+        }
         Log.i(TAG, "Payment Success: payId=$paymentId, orderId=$orderId, signature=$signature")
         callback?.onPaymentSuccess(paymentId, orderId, signature)
     }
 
-    fun onPaymentError(code: Int, response: String?, paymentData: PaymentData?) {
+    fun onPaymentError(code: Int, response: String?, paymentData: Any?) {
         val errorMsg = response ?: "Payment cancelled or failed (Code $code)"
         Log.w(TAG, "Payment Error ($code): $errorMsg")
         callback?.onPaymentError(code, errorMsg)
@@ -46,7 +61,7 @@ object RazorpayCheckoutHelper {
 
     fun initialize(activity: Activity) {
         try {
-            Checkout.preload(activity.applicationContext)
+            com.razorpay.Checkout.preload(activity.applicationContext)
             Log.d(TAG, "Razorpay Checkout preloaded successfully.")
         } catch (e: Exception) {
             Log.w(TAG, "Razorpay preload warning: ${e.message}")
@@ -65,15 +80,14 @@ object RazorpayCheckoutHelper {
     ) {
         RazorpayPaymentBridge.setCallback(callback)
 
-        val checkout = Checkout()
-        checkout.setKeyID(keyId)
-
         try {
+            val checkout = com.razorpay.Checkout()
+            checkout.setKeyID(keyId)
+
             val options = JSONObject()
             options.put("name", RazorpayConfig.COMPANY_NAME)
             options.put("description", "Luxury Chauffeur Ride Payment #${rideId.take(10)}")
             options.put("currency", RazorpayConfig.DEFAULT_CURRENCY)
-            // Amount in paise
             val amountPaise = (amountRupees * 100).toLong()
             options.put("amount", amountPaise)
             options.put("order_id", orderId)
@@ -104,4 +118,3 @@ object RazorpayCheckoutHelper {
         }
     }
 }
-

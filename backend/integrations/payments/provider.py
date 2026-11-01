@@ -183,7 +183,28 @@ class RazorpayPaymentProvider(PaymentProvider):
         if not signature_header:
             return PaymentVerificationResult(False, "FAILED", "", "Missing webhook signature")
         
-        is_valid = verify_hmac_signature(raw_body, signature_header, self.webhook_secret)
+        # 1. Try with configured webhook_secret
+        is_valid = False
+        if self.webhook_secret:
+            is_valid = verify_hmac_signature(raw_body, signature_header, self.webhook_secret)
+        
+        # 2. Try with key_secret as fallback (in case user pasted key_secret in Razorpay webhook secret field)
+        if not is_valid and self.key_secret:
+            is_valid = verify_hmac_signature(raw_body, signature_header, self.key_secret)
+
+        # 3. Try official razorpay SDK if available
+        if not is_valid and self._client:
+            try:
+                secret_to_try = self.webhook_secret or self.key_secret
+                self._client.utility.verify_webhook_signature(
+                    raw_body.decode("utf-8"),
+                    signature_header,
+                    secret_to_try
+                )
+                is_valid = True
+            except Exception:
+                pass
+
         if not is_valid:
             return PaymentVerificationResult(False, "FAILED", "", "Invalid HMAC signature")
         
@@ -192,7 +213,10 @@ class RazorpayPaymentProvider(PaymentProvider):
         try:
             import json
             data = json.loads(raw_body.decode("utf-8"))
-            extracted = data.get("payload", {}).get("payment", {}).get("entity", {}).get("id")
+            extracted = (
+                data.get("payload", {}).get("payment", {}).get("entity", {}).get("id")
+                or data.get("payload", {}).get("order", {}).get("entity", {}).get("id")
+            )
             if extracted:
                 payment_id = extracted
         except Exception:

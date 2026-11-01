@@ -255,8 +255,45 @@ class DriverLocationForegroundService : Service() {
         }
     }
 
+    private var telemetryWebSocket: okhttp3.WebSocket? = null
+
+    private fun ensureWebSocketConnected() {
+        if (telemetryWebSocket != null) return
+        try {
+            val token = DriverApiClient.getToken().orEmpty()
+            val wsUrl = DriverApiClient.getWebSocketUrl("api/v1/ws/location?token=$token")
+            val request = okhttp3.Request.Builder().url(wsUrl).build()
+            telemetryWebSocket = DriverApiClient.getOkHttpClient().newWebSocket(
+                request,
+                object : okhttp3.WebSocketListener() {
+                    override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
+                        Log.d(TAG, "WebSocket Driver Telemetry Stream connected successfully")
+                    }
+                    override fun onFailure(webSocket: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
+                        Log.w(TAG, "WebSocket Driver Telemetry Stream failure: ${t.message}")
+                        telemetryWebSocket = null
+                    }
+                    override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
+                        telemetryWebSocket = null
+                    }
+                }
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to connect telemetry WebSocket: ${e.message}")
+        }
+    }
+
     private fun sendLocationPing(location: Location, source: String) {
         val mock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) location.isMock else location.isFromMockProvider
+        
+        // 1. Send over real-time WebSocket Stream
+        try {
+            ensureWebSocketConnected()
+            val wsPayload = """{"latitude":${location.latitude},"longitude":${location.longitude},"heading":${location.bearing},"speed_mps":${location.speed},"source":"$source"}"""
+            telemetryWebSocket?.send(wsPayload)
+        } catch (_: Exception) {}
+
+        // 2. Send over REST HTTP Ping Backup
         serviceScope.launch(Dispatchers.IO) {
             try {
                 DriverApiClient.getService().pingLocation(
