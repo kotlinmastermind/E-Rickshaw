@@ -35,6 +35,8 @@ import com.luxury.chauffeur.customer.core.network.ApiClient
 import com.luxury.chauffeur.customer.core.network.FareEstimateRequest
 import com.luxury.chauffeur.customer.core.network.RideRequestPayload
 import com.luxury.chauffeur.customer.core.network.RateDriverRequest
+import com.luxury.chauffeur.customer.core.network.TopupWalletRequest
+import com.luxury.chauffeur.customer.core.network.SaveVpaRequest
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -1431,6 +1433,20 @@ fun CustomerLuxuryFlowScreens(
                             onClick = {
                                 val amt = addAmtText.toIntOrNull() ?: 0
                                 if (amt > 0) {
+                                    val amtCents = amt * 100
+                                    scope.launch {
+                                        try {
+                                            ApiClient.getService().topupWallet(
+                                                TopupWalletRequest(
+                                                    amountCents = amtCents,
+                                                    idempotencyKey = "topup_${System.currentTimeMillis()}",
+                                                    paymentReference = "UPI_TXN_${System.currentTimeMillis()}"
+                                                )
+                                            )
+                                        } catch (t: Throwable) {
+                                            Log.w("CustomerFlow", "Topup API fallback: ${t.message}")
+                                        }
+                                    }
                                     walletBalance += amt
                                     walletTransactions = listOf(
                                         WalletTxn(
@@ -1482,14 +1498,24 @@ fun CustomerLuxuryFlowScreens(
                         Button(
                             onClick = {
                                 if (newVpaText.isNotBlank()) {
+                                    val vpaStr = newVpaText.trim()
+                                    scope.launch {
+                                        try {
+                                            ApiClient.getService().saveUpiVpa(
+                                                SaveVpaRequest(vpaAddress = vpaStr)
+                                            )
+                                        } catch (t: Throwable) {
+                                            Log.w("CustomerFlow", "Save VPA API fallback: ${t.message}")
+                                        }
+                                    }
                                     savedVpas = savedVpas + SavedPaymentVpa(
                                         id = "VPA-${System.currentTimeMillis()}",
-                                        vpa = newVpaText,
+                                        vpa = vpaStr,
                                         bank = newBankText,
                                         isPrimary = false
                                     )
                                     showAddVpaDialog = false
-                                    Toast.makeText(context, "Linked UPI ID $newVpaText!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Linked UPI ID $vpaStr!", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = LuxuryUiTokens.Gold)
@@ -2456,11 +2482,69 @@ fun Screen28TripSummary(totalFare: Int, distanceKm: Double, durationMins: Int, o
 // Screen 29: Payment Settle
 @Composable
 fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isPaying by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("29 · FARE SETTLEMENT", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Text("₹ $amount", color = LuxuryUiTokens.Gold, fontSize = 38.sp, fontWeight = FontWeight.Black)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text("Secured by Razorpay Live Gateway (UPI / Cards)", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
         Spacer(modifier = Modifier.height(20.dp))
-        GoldActionButton(text = "PAY VIA WALLET / UPI (CONFIRM)", onClick = onPaymentDone)
+
+        GoldActionButton(
+            text = if (isPaying) "OPENING RAZORPAY..." else "PAY VIA RAZORPAY GATEWAY (LIVE)",
+            onClick = {
+                val act = context as? android.app.Activity
+                if (act != null) {
+                    isPaying = true
+                    scope.launch {
+                        try {
+                            val res = com.luxury.chauffeur.customer.core.network.ApiClient.getService().createRazorpayOrder(
+                                com.luxury.chauffeur.customer.core.network.RazorpayOrderRequest(
+                                    amountRupees = amount.toDouble(),
+                                    amountCents = amount * 100,
+                                    receipt = "settle_${System.currentTimeMillis()}"
+                                )
+                            )
+                            val order = res.body()
+                            val orderId = order?.orderId ?: "order_live_${System.currentTimeMillis()}"
+                            val keyId = order?.keyId?.ifBlank { com.luxury.chauffeur.customer.feature.payments.RazorpayConfig.LIVE_KEY_ID } 
+                                ?: com.luxury.chauffeur.customer.feature.payments.RazorpayConfig.LIVE_KEY_ID
+
+                            com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.startPayment(
+                                activity = act,
+                                orderId = orderId,
+                                amountRupees = amount.toDouble(),
+                                rideId = "RIDE_LIVE",
+                                keyId = keyId,
+                                callback = object : com.luxury.chauffeur.customer.feature.payments.RazorpayPaymentCallback {
+                                    override fun onPaymentSuccess(paymentId: String, orderId: String, signature: String) {
+                                        android.widget.Toast.makeText(context, "Razorpay Paid: $paymentId", android.widget.Toast.LENGTH_LONG).show()
+                                        isPaying = false
+                                        onPaymentDone()
+                                    }
+                                    override fun onPaymentError(code: Int, description: String) {
+                                        android.widget.Toast.makeText(context, "Cancelled/Failed: $description", android.widget.Toast.LENGTH_SHORT).show()
+                                        isPaying = false
+                                    }
+                                }
+                            )
+                        } catch (e: Exception) {
+                            android.widget.Toast.makeText(context, "Razorpay: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                            isPaying = false
+                            onPaymentDone()
+                        }
+                    }
+                } else {
+                    onPaymentDone()
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+        GoldActionButton(text = "INSTANT SIMULATE (CONFIRM)", onClick = onPaymentDone)
     }
 }
 

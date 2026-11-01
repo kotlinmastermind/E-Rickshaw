@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     GOOGLE_MAPS_API_KEY: Optional[str] = "AIzaSyBCd1pDJ_1KeajQKHUQG-8QqlB5OpwmmOo"
 
     # Payments Integration (Razorpay / UPI)
-    RAZORPAY_KEY_ID: Optional[str] = "rzp_test_luxury_chauffeur_mock"
-    RAZORPAY_KEY_SECRET: Optional[str] = "rzp_test_secret_chauffeur_mock"
+    RAZORPAY_KEY_ID: Optional[str] = os.getenv("RAZORPAY_KEY_ID", "rzp_live_TunGmzfpWlcatO")
+    RAZORPAY_KEY_SECRET: Optional[str] = os.getenv("RAZORPAY_KEY_SECRET", "CSIhchRsNTdHx270VZthHSUE")
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = "whsec_luxury_payment_hmac_test_2026"
 
     # Primary SMS Gateway: Google Firebase Authentication (Free 10,000 Telecom SMS/month)

@@ -10,6 +10,19 @@ from backend.application.services.settlement_advanced_service import SettlementA
 
 router = APIRouter(prefix="/payments", tags=["Payments & Settlements"])
 
+class RazorpayOrderRequest(BaseModel):
+    amount_rupees: Optional[float] = None
+    amount_cents: Optional[int] = None
+    ride_id: Optional[str] = None
+    receipt: Optional[str] = None
+    notes: Optional[dict] = None
+
+class RazorpayVerifyRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+    ride_id: Optional[str] = None
+
 class PaymentIntentRequest(BaseModel):
     ride_id: str
     idempotency_key: str = Field(..., min_length=8)
@@ -82,6 +95,155 @@ async def payment_webhook(
     body = await request.body()
     service = PaymentService(db)
     return await service.process_webhook(raw_body=body, signature_header=x_razorpay_signature or "")
+
+@router.get("/razorpay/config")
+async def get_razorpay_config():
+    from backend.core.config import settings
+    return {
+        "key_id": settings.RAZORPAY_KEY_ID or "rzp_live_TunGmzfpWlcatO",
+        "currency": "INR",
+        "company_name": "Luxury Chauffeur Mobility",
+        "theme_color": "#D4AF37",
+        "is_live": not (settings.RAZORPAY_KEY_ID or "").startswith("rzp_test")
+    }
+
+@router.post("/razorpay/create-order")
+@router.post("/create-order")
+async def create_razorpay_order(
+    payload: RazorpayOrderRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    import time
+    from backend.core.config import settings
+    from backend.integrations.payments.provider import get_payment_provider
+    from backend.domain.models import Ride, Payment
+    from sqlalchemy import select
+
+    provider = get_payment_provider()
+    
+    # Calculate amount in paise (1 INR = 100 paise)
+    if payload.amount_cents:
+        amount_paise = int(payload.amount_cents)
+    elif payload.amount_rupees:
+        amount_paise = int(round(payload.amount_rupees * 100))
+    elif payload.ride_id:
+        ride_res = await db.execute(select(Ride).where(Ride.id == payload.ride_id))
+        ride = ride_res.scalar_one_or_none()
+        if ride:
+            amount_paise = int(ride.final_fare_cents or ride.estimated_fare_cents or 10000)
+        else:
+            amount_paise = 10000
+    else:
+        amount_paise = 10000 # default ₹100
+
+    receipt = payload.receipt or f"rcpt_{payload.ride_id or user.id[:8]}_{int(time.time())}"
+    notes = payload.notes or {}
+    notes["user_id"] = user.id
+    if payload.ride_id:
+        notes["ride_id"] = payload.ride_id
+
+    order = await provider.create_razorpay_order(
+        amount_cents=amount_paise,
+        currency="INR",
+        receipt=receipt,
+        notes=notes
+    )
+
+    # If ride_id is given, synchronize Payment in database
+    if payload.ride_id:
+        stmt = select(Payment).where(Payment.ride_id == payload.ride_id)
+        res = await db.execute(stmt)
+        payment = res.scalar_one_or_none()
+        if not payment:
+            payment = Payment(
+                ride_id=payload.ride_id,
+                customer_id=user.id,
+                amount_cents=amount_paise,
+                currency="INR",
+                status="CREATED",
+                payment_method="RAZORPAY",
+                provider_name="RAZORPAY",
+                provider_order_id=order.get("id")
+            )
+            db.add(payment)
+        else:
+            payment.provider_order_id = order.get("id")
+            payment.amount_cents = amount_paise
+            payment.provider_name = "RAZORPAY"
+        await db.commit()
+
+    return {
+        "order_id": order.get("id"),
+        "amount": order.get("amount", amount_paise),
+        "amount_rupees": round(amount_paise / 100.0, 2),
+        "currency": order.get("currency", "INR"),
+        "key_id": settings.RAZORPAY_KEY_ID or "rzp_live_TunGmzfpWlcatO",
+        "receipt": order.get("receipt", receipt),
+        "status": order.get("status", "created")
+    }
+
+@router.post("/razorpay/verify")
+@router.post("/verify")
+async def verify_razorpay_payment(
+    payload: RazorpayVerifyRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.integrations.payments.provider import get_payment_provider
+    from backend.domain.models import Payment, PaymentEvent, Ride
+    from sqlalchemy import select
+
+    provider = get_payment_provider()
+    is_valid = provider.verify_payment_signature(
+        razorpay_order_id=payload.razorpay_order_id,
+        razorpay_payment_id=payload.razorpay_payment_id,
+        razorpay_signature=payload.razorpay_signature
+    )
+
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Razorpay payment verification failed: Invalid HMAC-SHA256 signature."
+        )
+
+    # Find and update Payment in DB
+    payment = None
+    if payload.ride_id:
+        p_res = await db.execute(select(Payment).where(Payment.ride_id == payload.ride_id))
+        payment = p_res.scalar_one_or_none()
+    
+    if not payment and payload.razorpay_order_id:
+        p_res = await db.execute(select(Payment).where(Payment.provider_order_id == payload.razorpay_order_id))
+        payment = p_res.scalar_one_or_none()
+
+    if payment:
+        payment.status = "CAPTURED"
+        payment.provider_payment_id = payload.razorpay_payment_id
+        payment.provider_signature = payload.razorpay_signature
+        event = PaymentEvent(
+            payment_id=payment.id,
+            event_type="PAYMENT_CAPTURED",
+            payload_json=f'{{"order_id": "{payload.razorpay_order_id}", "payment_id": "{payload.razorpay_payment_id}", "user_id": "{user.id}"}}'
+        )
+        db.add(event)
+
+    if payload.ride_id:
+        r_res = await db.execute(select(Ride).where(Ride.id == payload.ride_id))
+        ride = r_res.scalar_one_or_none()
+        if ride:
+            ride.status = "COMPLETED"
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": "Payment verified and recorded successfully.",
+        "payment_id": payload.razorpay_payment_id,
+        "order_id": payload.razorpay_order_id,
+        "ride_id": payload.ride_id,
+        "status": "CAPTURED"
+    }
 
 # ----------------- Part 4 Saved Methods & Tokenization (Features 85 & 86) -----------------
 @router.get("/saved-methods")

@@ -692,6 +692,47 @@ data class TrackingDto(
     @SerializedName("heading") val heading: Double
 )
 
+data class RazorpayOrderRequest(
+    @SerializedName("ride_id") val rideId: String? = null,
+    @SerializedName("amount_cents") val amountCents: Int? = null,
+    @SerializedName("amount_rupees") val amountRupees: Double? = null,
+    @SerializedName("receipt") val receipt: String? = null
+)
+
+data class RazorpayOrderResponse(
+    @SerializedName("order_id") val orderId: String,
+    @SerializedName("amount") val amount: Int,
+    @SerializedName("amount_rupees") val amountRupees: Double,
+    @SerializedName("currency") val currency: String,
+    @SerializedName("key_id") val keyId: String,
+    @SerializedName("receipt") val receipt: String? = null,
+    @SerializedName("status") val status: String? = null
+)
+
+data class RazorpayVerifyRequest(
+    @SerializedName("razorpay_order_id") val razorpayOrderId: String,
+    @SerializedName("razorpay_payment_id") val razorpayPaymentId: String,
+    @SerializedName("razorpay_signature") val razorpaySignature: String,
+    @SerializedName("ride_id") val rideId: String? = null
+)
+
+data class RazorpayVerifyResponse(
+    @SerializedName("success") val success: Boolean,
+    @SerializedName("message") val message: String,
+    @SerializedName("payment_id") val paymentId: String? = null,
+    @SerializedName("order_id") val orderId: String? = null,
+    @SerializedName("ride_id") val rideId: String? = null,
+    @SerializedName("status") val status: String? = null
+)
+
+data class RazorpayConfigResponse(
+    @SerializedName("key_id") val keyId: String,
+    @SerializedName("currency") val currency: String,
+    @SerializedName("company_name") val companyName: String,
+    @SerializedName("theme_color") val themeColor: String,
+    @SerializedName("is_live") val isLive: Boolean
+)
+
 data class PaymentIntentRequest(
     @SerializedName("ride_id") val rideId: String,
     @SerializedName("idempotency_key") val idempotencyKey: String
@@ -703,7 +744,8 @@ data class PaymentIntentResponse(
     @SerializedName("amount_cents") val amountCents: Int,
     @SerializedName("currency") val currency: String,
     @SerializedName("client_token") val clientToken: String,
-    @SerializedName("provider") val provider: String
+    @SerializedName("provider") val provider: String,
+    @SerializedName("key_id") val keyId: String? = null
 )
 
 data class RateDriverRequest(
@@ -850,7 +892,7 @@ data class RouteDetailsDto(
     @SerializedName("distance_km") val distanceKm: Double,
     @SerializedName("duration_minutes") val durationMinutes: Double,
     @SerializedName("polyline") val polyline: String? = null,
-    @SerializedName("provider") val provider: String? = null,
+    @SerializedName("provider") val provider: String,
     @SerializedName("points") val points: List<RoutePointDto>? = null,
     @SerializedName("route_label") val routeLabel: String? = null
 )
@@ -1080,6 +1122,15 @@ interface CustomerApiService {
 
     @POST("api/v1/rides/{id}/cancel")
     suspend fun cancelRide(@Path("id") rideId: String, @Body payload: Map<String, String>): Response<Map<String, Any>>
+
+@GET("api/v1/payments/razorpay/config")
+    suspend fun getRazorpayConfig(): Response<RazorpayConfigResponse>
+
+    @POST("api/v1/payments/razorpay/create-order")
+    suspend fun createRazorpayOrder(@Body payload: RazorpayOrderRequest): Response<RazorpayOrderResponse>
+
+    @POST("api/v1/payments/razorpay/verify")
+    suspend fun verifyRazorpayPayment(@Body payload: RazorpayVerifyRequest): Response<RazorpayVerifyResponse>
 
     @POST("api/v1/payments/intent")
     suspend fun createPaymentIntent(@Body payload: PaymentIntentRequest): Response<PaymentIntentResponse>

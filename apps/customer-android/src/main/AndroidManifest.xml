@@ -58,6 +58,11 @@
             android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />
 
+        <!-- Razorpay Live Payment Gateway Key -->
+        <meta-data
+            android:name="com.razorpay.ApiKey"
+            android:value="rzp_live_TunGmzfpWlcatO" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

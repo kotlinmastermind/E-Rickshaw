@@ -107,7 +107,8 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.runtime)
-    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("com.razorpay:checkout:1.6.40")
 
     implementation(libs.retrofit)
     implementation(libs.converter.gson)

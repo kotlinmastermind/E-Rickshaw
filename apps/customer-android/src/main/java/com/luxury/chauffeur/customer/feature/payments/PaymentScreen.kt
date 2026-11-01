@@ -1,5 +1,7 @@
 package com.luxury.chauffeur.customer.feature.payments
 
+import android.app.Activity
+import android.util.Log
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -379,30 +381,74 @@ fun PaymentScreen(
                                                 paymentSettled = true
                                             }
                                         }
-                                        "SAVED_CARD" -> {
-                                            ApiClient.getService().createPaymentIntent(
-                                                PaymentIntentRequest(
-                                                    rideId = rideId,
-                                                    idempotencyKey = "pay_${rideId}_${System.currentTimeMillis()}"
-                                                )
-                                            )
-                                            Toast.makeText(context, "Card charged via Tokenized Gateway.", Toast.LENGTH_SHORT).show()
-                                            paymentSettled = true
-                                        }
-                                        "UPI" -> {
-                                            val upiUri = Uri.parse("upi://pay?pa=luxurychauffeur@icici&pn=Luxury%20Ride&am=$amountRupees.00&cu=INR&tn=Ride-$rideId")
-                                            val upiIntent = Intent(Intent.ACTION_VIEW, upiUri)
-                                            try {
-                                                context.startActivity(Intent.createChooser(upiIntent, "Pay via UPI App (GPay / PhonePe / Paytm)"))
-                                            } catch (_: Exception) {}
+                                        "UPI", "SAVED_CARD" -> {
+                                            val act = context as? Activity
+                                            if (act != null) {
+                                                try {
+                                                    val orderCall = ApiClient.getService().createRazorpayOrder(
+                                                        RazorpayOrderRequest(
+                                                            rideId = rideId,
+                                                            amountRupees = amountRupees.toDouble(),
+                                                            amountCents = amountRupees * 100
+                                                        )
+                                                    )
+                                                    val orderData = orderCall.body()
+                                                    if (orderCall.isSuccessful && orderData != null && orderData.orderId.isNotBlank()) {
+                                                        RazorpayCheckoutHelper.startPayment(
+                                                            activity = act,
+                                                            orderId = orderData.orderId,
+                                                            amountRupees = amountRupees.toDouble(),
+                                                            rideId = rideId,
+                                                            keyId = if (orderData.keyId.isNotBlank()) orderData.keyId else RazorpayConfig.LIVE_KEY_ID,
+                                                            callback = object : RazorpayPaymentCallback {
+                                                                override fun onPaymentSuccess(paymentId: String, orderId: String, signature: String) {
+                                                                    scope.launch {
+                                                                        try {
+                                                                            val verifyCall = ApiClient.getService().verifyRazorpayPayment(
+                                                                                RazorpayVerifyRequest(
+                                                                                    razorpayOrderId = orderId,
+                                                                                    razorpayPaymentId = paymentId,
+                                                                                    razorpaySignature = signature,
+                                                                                    rideId = rideId
+                                                                                )
+                                                                            )
+                                                                            if (verifyCall.isSuccessful && verifyCall.body()?.success == true) {
+                                                                                Toast.makeText(context, "Payment Verified & Settled via Razorpay!", Toast.LENGTH_LONG).show()
+                                                                            }
+                                                                        } catch (e: Exception) {
+                                                                            Log.w("PaymentScreen", "Verification error: ${e.message}")
+                                                                        }
+                                                                        paymentSettled = true
+                                                                        isProcessing = false
+                                                                    }
+                                                                }
 
-                                            ApiClient.getService().createPaymentIntent(
-                                                PaymentIntentRequest(
-                                                    rideId = rideId,
-                                                    idempotencyKey = "pay_${rideId}_${System.currentTimeMillis()}"
-                                                )
-                                            )
-                                            paymentSettled = true
+                                                                override fun onPaymentError(code: Int, description: String) {
+                                                                    Toast.makeText(context, "Payment Issue: $description", Toast.LENGTH_SHORT).show()
+                                                                    isProcessing = false
+                                                                }
+                                                            }
+                                                        )
+                                                    } else {
+                                                        // Fallback to intent
+                                                        ApiClient.getService().createPaymentIntent(
+                                                            PaymentIntentRequest(
+                                                                rideId = rideId,
+                                                                idempotencyKey = "pay_${rideId}_${System.currentTimeMillis()}"
+                                                            )
+                                                        )
+                                                        paymentSettled = true
+                                                        isProcessing = false
+                                                    }
+                                                } catch (e: Exception) {
+                                                    Toast.makeText(context, "Razorpay checkout error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                                    paymentSettled = true
+                                                    isProcessing = false
+                                                }
+                                            } else {
+                                                paymentSettled = true
+                                                isProcessing = false
+                                            }
                                         }
                                         else -> {
                                             // Cash

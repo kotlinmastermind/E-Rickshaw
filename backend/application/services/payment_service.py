@@ -1,3 +1,4 @@
+from backend.core.config import settings
 import json
 import hashlib
 from datetime import datetime, timezone
@@ -53,7 +54,8 @@ class PaymentService:
             "amount_cents": payment.amount_cents,
             "currency": payment.currency,
             "client_token": intent.client_token,
-            "provider": intent.provider
+            "provider": intent.provider,
+            "key_id": settings.RAZORPAY_KEY_ID
         }
 
     async def process_webhook(self, raw_body: bytes, signature_header: str) -> Dict[str, Any]:
