@@ -2500,55 +2500,182 @@ fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var isPaying by remember { mutableStateOf(false) }
+    var selectedMethod by remember { mutableStateOf("UPI") } // "UPI", "RAZORPAY", "CASH"
 
-    Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    fun launchRazorpayFlow(act: android.app.Activity) {
+        isPaying = true
+        scope.launch {
+            try {
+                val res = com.luxury.chauffeur.customer.core.network.ApiClient.getService().createRazorpayOrder(
+                    com.luxury.chauffeur.customer.core.network.RazorpayOrderRequest(
+                        amountRupees = amount.toDouble(),
+                        amountCents = amount * 100,
+                        receipt = "settle_${System.currentTimeMillis()}"
+                    )
+                )
+                val order = res.body()
+                val orderId = order?.orderId ?: "order_live_${System.currentTimeMillis()}"
+                val keyId = order?.keyId?.ifBlank { com.luxury.chauffeur.customer.feature.payments.RazorpayConfig.LIVE_KEY_ID } 
+                    ?: com.luxury.chauffeur.customer.feature.payments.RazorpayConfig.LIVE_KEY_ID
+
+                com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.startPayment(
+                    activity = act,
+                    orderId = orderId,
+                    amountRupees = amount.toDouble(),
+                    rideId = "RIDE_LIVE",
+                    keyId = keyId,
+                    forceUpiFirst = true,
+                    callback = object : com.luxury.chauffeur.customer.feature.payments.RazorpayPaymentCallback {
+                        override fun onPaymentSuccess(paymentId: String, orderId: String, signature: String) {
+                            android.widget.Toast.makeText(context, "Razorpay Paid: $paymentId", android.widget.Toast.LENGTH_LONG).show()
+                            isPaying = false
+                            onPaymentDone()
+                        }
+                        override fun onPaymentError(code: Int, description: String) {
+                            android.widget.Toast.makeText(context, "Payment Notice: $description", android.widget.Toast.LENGTH_SHORT).show()
+                            isPaying = false
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(context, "Razorpay: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                isPaying = false
+                onPaymentDone()
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
         Text("29 · FARE SETTLEMENT", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text("₹ $amount", color = LuxuryUiTokens.Gold, fontSize = 38.sp, fontWeight = FontWeight.Black)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text("₹ $amount", color = LuxuryUiTokens.Gold, fontSize = 40.sp, fontWeight = FontWeight.Black)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text("Instant UPI (GPay/PhonePe/Paytm) & Razorpay Live", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 1. Direct UPI Instant (GPay / PhonePe / Paytm / BHIM)
+        Surface(
+            color = if (selectedMethod == "UPI") LuxuryUiTokens.Gold.copy(alpha = 0.12f) else LuxuryUiTokens.Card,
+            border = BorderStroke(if (selectedMethod == "UPI") 1.5.dp else 1.dp, if (selectedMethod == "UPI") LuxuryUiTokens.Gold else LuxuryUiTokens.Border),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { selectedMethod = "UPI" }
+                .padding(vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("⚡ Pay via UPI (GPay / PhonePe / Paytm)", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Instant 1-tap app launch with zero friction", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                }
+                RadioButton(
+                    selected = (selectedMethod == "UPI"),
+                    onClick = { selectedMethod = "UPI" },
+                    colors = RadioButtonDefaults.colors(selectedColor = LuxuryUiTokens.Gold, unselectedColor = LuxuryUiTokens.Muted)
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(6.dp))
-        Text("Secured by Razorpay Live Gateway (UPI / Cards)", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+
+        // 2. Razorpay Live Gateway (All UPI, Cards, Netbanking)
+        Surface(
+            color = if (selectedMethod == "RAZORPAY") LuxuryUiTokens.Gold.copy(alpha = 0.12f) else LuxuryUiTokens.Card,
+            border = BorderStroke(if (selectedMethod == "RAZORPAY") 1.5.dp else 1.dp, if (selectedMethod == "RAZORPAY") LuxuryUiTokens.Gold else LuxuryUiTokens.Border),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { selectedMethod = "RAZORPAY" }
+                .padding(vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("💳 Razorpay Live Gateway", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Cards, Netbanking, Wallets, UPI & QR Code", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                }
+                RadioButton(
+                    selected = (selectedMethod == "RAZORPAY"),
+                    onClick = { selectedMethod = "RAZORPAY" },
+                    colors = RadioButtonDefaults.colors(selectedColor = LuxuryUiTokens.Gold, unselectedColor = LuxuryUiTokens.Muted)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // 3. Cash Handover
+        Surface(
+            color = if (selectedMethod == "CASH") LuxuryUiTokens.Gold.copy(alpha = 0.12f) else LuxuryUiTokens.Card,
+            border = BorderStroke(if (selectedMethod == "CASH") 1.5.dp else 1.dp, if (selectedMethod == "CASH") LuxuryUiTokens.Gold else LuxuryUiTokens.Border),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { selectedMethod = "CASH" }
+                .padding(vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("💵 Chauffeur Cash Handover", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Physical payment to chauffeur at destination", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                }
+                RadioButton(
+                    selected = (selectedMethod == "CASH"),
+                    onClick = { selectedMethod = "CASH" },
+                    colors = RadioButtonDefaults.colors(selectedColor = LuxuryUiTokens.Gold, unselectedColor = LuxuryUiTokens.Muted)
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(20.dp))
 
         GoldActionButton(
-            text = if (isPaying) "OPENING RAZORPAY..." else "PAY VIA RAZORPAY GATEWAY (LIVE)",
+            text = when {
+                isPaying -> "OPENING PAYMENT..."
+                selectedMethod == "UPI" -> "PAY ₹$amount VIA UPI (GPAY/PHONEPE)"
+                selectedMethod == "RAZORPAY" -> "PAY ₹$amount VIA RAZORPAY GATEWAY"
+                else -> "CONFIRM CASH SETTLEMENT (₹$amount)"
+            },
             onClick = {
                 val act = context as? android.app.Activity
                 if (act != null) {
-                    isPaying = true
-                    scope.launch {
-                        try {
-                            val res = com.luxury.chauffeur.customer.core.network.ApiClient.getService().createRazorpayOrder(
-                                com.luxury.chauffeur.customer.core.network.RazorpayOrderRequest(
-                                    amountRupees = amount.toDouble(),
-                                    amountCents = amount * 100,
-                                    receipt = "settle_${System.currentTimeMillis()}"
-                                )
-                            )
-                            val order = res.body()
-                            val orderId = order?.orderId ?: "order_live_${System.currentTimeMillis()}"
-                            val keyId = order?.keyId?.ifBlank { com.luxury.chauffeur.customer.feature.payments.RazorpayConfig.LIVE_KEY_ID } 
-                                ?: com.luxury.chauffeur.customer.feature.payments.RazorpayConfig.LIVE_KEY_ID
-
-                            com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.startPayment(
-                                activity = act,
-                                orderId = orderId,
+                    when (selectedMethod) {
+                        "UPI" -> {
+                            val launched = com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.launchDirectUpiIntent(
+                                context = context,
                                 amountRupees = amount.toDouble(),
-                                rideId = "RIDE_LIVE",
-                                keyId = keyId,
-                                callback = object : com.luxury.chauffeur.customer.feature.payments.RazorpayPaymentCallback {
-                                    override fun onPaymentSuccess(paymentId: String, orderId: String, signature: String) {
-                                        android.widget.Toast.makeText(context, "Razorpay Paid: $paymentId", android.widget.Toast.LENGTH_LONG).show()
-                                        isPaying = false
-                                        onPaymentDone()
-                                    }
-                                    override fun onPaymentError(code: Int, description: String) {
-                                        android.widget.Toast.makeText(context, "Cancelled/Failed: $description", android.widget.Toast.LENGTH_SHORT).show()
-                                        isPaying = false
-                                    }
-                                }
+                                rideId = "RIDE_LIVE_${System.currentTimeMillis()}"
                             )
-                        } catch (e: Exception) {
-                            android.widget.Toast.makeText(context, "Razorpay: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
-                            isPaying = false
+                            if (!launched) {
+                                // If direct standalone UPI app not installed, fallback to Razorpay gateway with UPI preselected!
+                                launchRazorpayFlow(act)
+                            } else {
+                                onPaymentDone()
+                            }
+                        }
+                        "RAZORPAY" -> {
+                            launchRazorpayFlow(act)
+                        }
+                        else -> {
+                            android.widget.Toast.makeText(context, "Cash settlement confirmed: ₹$amount", android.widget.Toast.LENGTH_SHORT).show()
                             onPaymentDone()
                         }
                     }

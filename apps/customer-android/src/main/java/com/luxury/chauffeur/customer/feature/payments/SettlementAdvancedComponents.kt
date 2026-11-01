@@ -284,14 +284,14 @@ fun UpiDeepLinkCheckoutDialog(
                     LuxuryGoldButton(
                         text = "OPEN UPI APP (GPAY / PHONEPE)",
                         onClick = {
-                            val uri = upiData?.upiIntentUri
-                            if (uri != null) {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
-                                try {
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "No UPI app found. Please copy VPA.", Toast.LENGTH_SHORT).show()
-                                }
+                            val uri = upiData?.upiIntentUri ?: "upi://pay?pa=luxurychauffeur@icici&pn=Luxury%20Chauffeur%20Mobility&am=${String.format(java.util.Locale.US, "%.2f", amountRupees)}&cu=INR&tn=Ride-${rideId.take(8)}"
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+                            try {
+                                val chooser = Intent.createChooser(intent, "Pay via UPI App")
+                                chooser.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                context.startActivity(chooser)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "No UPI app found. Please copy VPA.", Toast.LENGTH_SHORT).show()
                             }
                         },
                         modifier = Modifier.fillMaxWidth()

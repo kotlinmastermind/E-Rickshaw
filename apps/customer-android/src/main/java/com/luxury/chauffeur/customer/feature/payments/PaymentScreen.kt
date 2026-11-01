@@ -400,6 +400,7 @@ fun PaymentScreen(
                                                             amountRupees = amountRupees.toDouble(),
                                                             rideId = rideId,
                                                             keyId = if (orderData.keyId.isNotBlank()) orderData.keyId else RazorpayConfig.LIVE_KEY_ID,
+                                                            forceUpiFirst = (selectedMethod == "UPI"),
                                                             callback = object : RazorpayPaymentCallback {
                                                                 override fun onPaymentSuccess(paymentId: String, orderId: String, signature: String) {
                                                                     scope.launch {

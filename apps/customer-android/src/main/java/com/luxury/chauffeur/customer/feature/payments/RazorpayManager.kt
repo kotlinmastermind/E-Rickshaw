@@ -1,7 +1,11 @@
 package com.luxury.chauffeur.customer.feature.payments
 
 import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
+import org.json.JSONArray
 import org.json.JSONObject
 
 object RazorpayConfig {
@@ -9,6 +13,7 @@ object RazorpayConfig {
     const val COMPANY_NAME = "Luxury Chauffeur Mobility"
     const val THEME_COLOR = "#D4AF37"
     const val DEFAULT_CURRENCY = "INR"
+    const val DEFAULT_UPI_VPA = "luxurychauffeur@icici"
 }
 
 interface RazorpayPaymentCallback {
@@ -25,26 +30,16 @@ object RazorpayPaymentBridge {
     }
 
     fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: Any?) {
-        var paymentId = razorpayPaymentId.orEmpty()
+        var paymentId = razorpayPaymentId ?: ""
         var orderId = ""
         var signature = ""
 
-        if (paymentData != null) {
-            try {
-                if (paymentData is com.razorpay.PaymentData) {
-                    paymentId = razorpayPaymentId ?: paymentData.paymentId.orEmpty()
-                    orderId = paymentData.orderId.orEmpty()
-                    signature = paymentData.signature.orEmpty()
-                } else {
-                    val pId = paymentData.javaClass.getMethod("getPaymentId").invoke(paymentData)?.toString()
-                    val oId = paymentData.javaClass.getMethod("getOrderId").invoke(paymentData)?.toString()
-                    val sig = paymentData.javaClass.getMethod("getSignature").invoke(paymentData)?.toString()
-                    if (paymentId.isBlank()) paymentId = pId.orEmpty()
-                    orderId = oId.orEmpty()
-                    signature = sig.orEmpty()
-                }
-            } catch (_: Exception) {}
+        if (paymentData is com.razorpay.PaymentData) {
+            if (paymentId.isBlank()) paymentId = paymentData.paymentId.orEmpty()
+            orderId = paymentData.orderId.orEmpty()
+            signature = paymentData.signature.orEmpty()
         }
+
         Log.i(TAG, "Payment Success: payId=$paymentId, orderId=$orderId, signature=$signature")
         callback?.onPaymentSuccess(paymentId, orderId, signature)
     }
@@ -76,6 +71,7 @@ object RazorpayCheckoutHelper {
         customerPhone: String? = null,
         customerEmail: String? = null,
         keyId: String = RazorpayConfig.LIVE_KEY_ID,
+        forceUpiFirst: Boolean = true,
         callback: RazorpayPaymentCallback
     ) {
         RazorpayPaymentBridge.setCallback(callback)
@@ -91,7 +87,9 @@ object RazorpayCheckoutHelper {
             val amountPaise = (amountRupees * 100).toLong()
             options.put("amount", amountPaise)
             options.put("order_id", orderId)
+            options.put("send_sms_hash", true)
 
+            // Prefill with customer info and prioritize UPI
             val prefill = JSONObject()
             if (!customerPhone.isNullOrBlank()) {
                 prefill.put("contact", customerPhone)
@@ -99,22 +97,97 @@ object RazorpayCheckoutHelper {
             if (!customerEmail.isNullOrBlank()) {
                 prefill.put("email", customerEmail)
             }
+            if (forceUpiFirst) {
+                prefill.put("method", "upi")
+            }
             options.put("prefill", prefill)
 
+            // Styling Theme (Champagne Gold)
             val theme = JSONObject()
             theme.put("color", RazorpayConfig.THEME_COLOR)
+            theme.put("hide_topbar", false)
             options.put("theme", theme)
 
+            // Auto Retries
             val retryObj = JSONObject()
             retryObj.put("enabled", true)
             retryObj.put("max_count", 2)
             options.put("retry", retryObj)
 
-            Log.i(TAG, "Launching Razorpay Checkout for Order: $orderId, ₹$amountRupees")
+            // Custom Display sequence that forces UPI to show at the top of Razorpay Checkout
+            val config = JSONObject()
+            val display = JSONObject()
+            val blocks = JSONObject()
+
+            // 1. UPI Block (Primary)
+            val upiBlock = JSONObject()
+            upiBlock.put("name", "Pay using UPI (GPay, PhonePe, Paytm, QR)")
+            val upiInstruments = JSONArray()
+            val upiInst = JSONObject()
+            upiInst.put("method", "upi")
+            upiInstruments.put(upiInst)
+            upiBlock.put("instruments", upiInstruments)
+            blocks.put("upi_block", upiBlock)
+
+            // 2. Other Payment Methods (Cards, Netbanking, Wallets)
+            val otherBlock = JSONObject()
+            otherBlock.put("name", "Other Payment Modes (Cards, Netbanking, Wallets)")
+            val otherInstruments = JSONArray()
+            val cardInst = JSONObject()
+            cardInst.put("method", "card")
+            otherInstruments.put(cardInst)
+            val nbInst = JSONObject()
+            nbInst.put("method", "netbanking")
+            otherInstruments.put(nbInst)
+            val walletInst = JSONObject()
+            walletInst.put("method", "wallet")
+            otherInstruments.put(walletInst)
+            otherBlock.put("instruments", otherInstruments)
+            blocks.put("other_block", otherBlock)
+
+            display.put("blocks", blocks)
+            val sequence = JSONArray()
+            sequence.put("block.upi_block")
+            sequence.put("block.other_block")
+            display.put("sequence", sequence)
+
+            val preferences = JSONObject()
+            preferences.put("show_default_blocks", true)
+            display.put("preferences", preferences)
+
+            config.put("display", display)
+            options.put("config", config)
+            options.put("display", display)
+
+            Log.i(TAG, "Launching Razorpay Checkout with UPI Priority for Order: $orderId, ₹$amountRupees")
             checkout.open(activity, options)
         } catch (e: Exception) {
             Log.e(TAG, "Error opening Razorpay checkout: ${e.message}", e)
             callback.onPaymentError(-1, "Unable to launch Razorpay gateway: ${e.localizedMessage}")
+        }
+    }
+
+    /**
+     * Fallback Direct UPI Intent launcher to open Google Pay, PhonePe, Paytm directly
+     */
+    fun launchDirectUpiIntent(
+        context: Context,
+        amountRupees: Double,
+        rideId: String,
+        payeeVpa: String = RazorpayConfig.DEFAULT_UPI_VPA,
+        payeeName: String = RazorpayConfig.COMPANY_NAME
+    ): Boolean {
+        return try {
+            val formattedAmount = String.format(java.util.Locale.US, "%.2f", amountRupees)
+            val uri = Uri.parse("upi://pay?pa=$payeeVpa&pn=${Uri.encode(payeeName)}&mc=5511&tr=$rideId&tn=RidePayment-${rideId.take(8)}&am=$formattedAmount&cu=INR")
+            val intent = Intent(Intent.ACTION_VIEW, uri)
+            val chooser = Intent.createChooser(intent, "Pay via UPI App (Google Pay / PhonePe / Paytm)")
+            chooser.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            context.startActivity(chooser)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Direct UPI Intent launch failed: ${e.message}")
+            false
         }
     }
 }
