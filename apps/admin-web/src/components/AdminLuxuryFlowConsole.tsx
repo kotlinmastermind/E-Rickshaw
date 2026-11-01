@@ -1,20 +1,93 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Download, Menu } from 'lucide-react';
+import { Search, Filter, Download, Menu, Link2, ChevronRight, Copy, Check } from 'lucide-react';
 import { AdminRealMap } from './AdminRealMap';
 
 export interface AdminLuxuryFlowConsoleProps {
   onSignOut?: () => void;
+  onOpenSignIn?: () => void;
   adminUser?: any;
 }
 
+export const ADMIN_SCREENS = [
+  { id: 1, slug: 'login', code: 'f', title: 'Login + MFA', desc: 'Email, Password, OTP', group: 'Authentication' },
+  { id: 2, slug: 'dashboard', code: 'd', title: 'Live Dashboard', desc: 'KPIs, Rides chart, Alerts', group: 'Operations' },
+  { id: 3, slug: 'search', code: 'l', title: 'Global Search', desc: 'Rides, Users, Drivers', group: 'Operations' },
+  { id: 4, slug: 'audit-logs', code: 'l', title: 'Audit Logs', desc: 'Actor, Action, Filters', group: 'Governance' },
+  { id: 5, slug: 'live-map', code: 'm', title: 'Live Map', desc: 'Rides, Drivers, Zones (Real Map)', group: 'Operations' },
+  { id: 6, slug: 'dispatch', code: 'l', title: 'Dispatch Monitor', desc: 'Offers, Timeouts, Retries', group: 'Operations' },
+  { id: 7, slug: 'rides', code: 'l', title: 'Ride List', desc: 'Filters, Status, Export', group: 'Rides' },
+  { id: 8, slug: 'ride-detail', code: 'd', title: 'Ride Detail', desc: 'Timeline, Fare, Chat', group: 'Rides' },
+  { id: 9, slug: 'drivers', code: 'l', title: 'Driver List', desc: 'Status, Rating, Filters', group: 'Chauffeurs' },
+  { id: 10, slug: 'onboarding', code: 'l', title: 'Onboarding Queue', desc: 'Tickets, Assign, SLA', group: 'Chauffeurs' },
+  { id: 11, slug: 'doc-review', code: 'd', title: 'Document Review', desc: 'Preview, Approve, Reject', group: 'Chauffeurs' },
+  { id: 12, slug: 'driver-profile', code: 'd', title: 'Driver Profile', desc: 'Docs, Wallet, Trips', group: 'Chauffeurs' },
+  { id: 13, slug: 'fatigue-spoof', code: 'l', title: 'Fatigue / Spoof Alerts', desc: 'Risk score, Action', group: 'Chauffeurs' },
+  { id: 14, slug: 'customers', code: 'l', title: 'Customers', desc: 'Search, Profile, Tier', group: 'Customers' },
+  { id: 15, slug: 'loyalty', code: 'd', title: 'Loyalty Mgmt', desc: 'Tiers, Points rules', group: 'Customers' },
+  { id: 16, slug: 'categories', code: 'l', title: 'Vehicle Categories', desc: 'Amenities, Capacity, Active', group: 'Fleet' },
+  { id: 17, slug: 'vehicles', code: 'l', title: 'Vehicles', desc: 'Plate, PUC, Fitness', group: 'Fleet' },
+  { id: 18, slug: 'fare-rules', code: 'f', title: 'Fare Rules', desc: 'Base, Per km, Commission', group: 'Pricing' },
+  { id: 19, slug: 'surge-rules', code: 'f', title: 'Surge Rules', desc: 'Zone, Multiplier, Schedule', group: 'Pricing' },
+  { id: 20, slug: 'geofence-editor', code: 'm', title: 'Geofence Editor', desc: 'Polygon, Zone type (Real Map)', group: 'Pricing' },
+  { id: 21, slug: 'road-restrictions', code: 'm', title: 'Road Restrictions', desc: 'Segment, Type, Active (Real Map)', group: 'Pricing' },
+  { id: 22, slug: 'payments', code: 'l', title: 'Payments', desc: 'Gateway, Status, Filters', group: 'Finance' },
+  { id: 23, slug: 'refunds', code: 'l', title: 'Refunds & Disputes', desc: 'Amount, Resolve', group: 'Finance' },
+  { id: 24, slug: 'payouts', code: 'l', title: 'Driver Payouts', desc: 'Requests, Approve', group: 'Finance' },
+  { id: 25, slug: 'sos-console', code: 'l', title: 'SOS Console', desc: 'Live alerts, Contacts, Notes', group: 'Safety' },
+  { id: 26, slug: 'incidents', code: 'l', title: 'Incidents', desc: 'Ticket, Severity, Evidence', group: 'Safety' },
+  { id: 27, slug: 'support-tickets', code: 'l', title: 'Support Tickets', desc: 'SLA, Priority, Assign', group: 'Support' },
+  { id: 28, slug: 'promos', code: 'f', title: 'Promos & Referrals', desc: 'Code, Limits, Validity', group: 'Growth' },
+  { id: 29, slug: 'broadcasts', code: 'f', title: 'Broadcasts', desc: 'Audience, Message, Schedule', group: 'Growth' },
+  { id: 30, slug: 'roles-governance', code: 'd', title: 'Roles, Analytics & Latency', desc: 'RBAC matrix, Route latency, Reports', group: 'Governance' }
+];
+
+const getScreenFromHash = (): number => {
+  if (typeof window === 'undefined') return 2;
+  const raw = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
+  if (!raw) return 2;
+  const match = ADMIN_SCREENS.find(s => s.slug === raw || s.id.toString() === raw);
+  return match ? match.id : 2;
+};
+
 export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
   onSignOut,
+  onOpenSignIn,
   adminUser
 }) => {
-  // Navigation State (Active Screen 01 to 30)
-  const [selectedScreenId, setSelectedScreenId] = useState<number>(2); // 02: Live dashboard default
+  // Navigation State with Clean URL Hash Routing for every screen
+  const [selectedScreenId, setSelectedScreenId] = useState<number>(getScreenFromHash);
   const [globalSearch, setGlobalSearch] = useState<string>('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [copiedLinkToast, setCopiedLinkToast] = useState<boolean>(false);
+
+  // Navigate to screen and update URL hash so every page has its own link
+  const navigateTo = (screenId: number) => {
+    const target = ADMIN_SCREENS.find(s => s.id === screenId);
+    if (target) {
+      setSelectedScreenId(target.id);
+      window.location.hash = `#/${target.slug}`;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  // URL Hash Synchronizer
+  useEffect(() => {
+    const handleHashChange = () => {
+      const screenId = getScreenFromHash();
+      setSelectedScreenId(screenId);
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    window.addEventListener('popstate', handleHashChange);
+
+    if (!window.location.hash || window.location.hash === '#') {
+      window.location.hash = '#/dashboard';
+    }
+
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('popstate', handleHashChange);
+    };
+  }, []);
 
   // Active SOS Banner State (High Priority Per ui.html Spec)
   const [activeSosAlert, setActiveSosAlert] = useState<{ id: string; driver: string; plate: string; loc: string; time: string } | null>({
@@ -62,40 +135,6 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
     }
   }, [toastPermissionDenied]);
 
-  // Sidebar screen items mapped from D.adm
-  const ADMIN_SCREENS = [
-    { id: 1, code: 'f', title: 'Login + MFA', desc: 'Email, Password, OTP', group: 'Authentication' },
-    { id: 2, code: 'd', title: 'Live Dashboard', desc: 'KPIs, Rides chart, Alerts', group: 'Operations' },
-    { id: 3, code: 'l', title: 'Global Search', desc: 'Rides, Users, Drivers', group: 'Operations' },
-    { id: 4, code: 'l', title: 'Audit Logs', desc: 'Actor, Action, Filters', group: 'Governance' },
-    { id: 5, code: 'm', title: 'Live Map', desc: 'Rides, Drivers, Zones (Real Map)', group: 'Operations' },
-    { id: 6, code: 'l', title: 'Dispatch Monitor', desc: 'Offers, Timeouts, Retries', group: 'Operations' },
-    { id: 7, code: 'l', title: 'Ride List', desc: 'Filters, Status, Export', group: 'Rides' },
-    { id: 8, code: 'd', title: 'Ride Detail', desc: 'Timeline, Fare, Chat', group: 'Rides' },
-    { id: 9, code: 'l', title: 'Driver List', desc: 'Status, Rating, Filters', group: 'Chauffeurs' },
-    { id: 10, code: 'l', title: 'Onboarding Queue', desc: 'Tickets, Assign, SLA', group: 'Chauffeurs' },
-    { id: 11, code: 'd', title: 'Document Review', desc: 'Preview, Approve, Reject', group: 'Chauffeurs' },
-    { id: 12, code: 'd', title: 'Driver Profile', desc: 'Docs, Wallet, Trips', group: 'Chauffeurs' },
-    { id: 13, code: 'l', title: 'Fatigue / Spoof Alerts', desc: 'Risk score, Action', group: 'Chauffeurs' },
-    { id: 14, code: 'l', title: 'Customers', desc: 'Search, Profile, Tier', group: 'Customers' },
-    { id: 15, code: 'd', title: 'Loyalty Mgmt', desc: 'Tiers, Points rules', group: 'Customers' },
-    { id: 16, code: 'l', title: 'Vehicle Categories', desc: 'Amenities, Capacity, Active', group: 'Fleet' },
-    { id: 17, code: 'l', title: 'Vehicles', desc: 'Plate, PUC, Fitness', group: 'Fleet' },
-    { id: 18, code: 'f', title: 'Fare Rules', desc: 'Base, Per km, Commission', group: 'Pricing' },
-    { id: 19, code: 'f', title: 'Surge Rules', desc: 'Zone, Multiplier, Schedule', group: 'Pricing' },
-    { id: 20, code: 'm', title: 'Geofence Editor', desc: 'Polygon, Zone type (Real Map)', group: 'Pricing' },
-    { id: 21, code: 'm', title: 'Road Restrictions', desc: 'Segment, Type, Active (Real Map)', group: 'Pricing' },
-    { id: 22, code: 'l', title: 'Payments', desc: 'Gateway, Status, Filters', group: 'Finance' },
-    { id: 23, code: 'l', title: 'Refunds & Disputes', desc: 'Amount, Resolve', group: 'Finance' },
-    { id: 24, code: 'l', title: 'Driver Payouts', desc: 'Requests, Approve', group: 'Finance' },
-    { id: 25, code: 'l', title: 'SOS Console', desc: 'Live alerts, Contacts, Notes', group: 'Safety' },
-    { id: 26, code: 'l', title: 'Incidents', desc: 'Ticket, Severity, Evidence', group: 'Safety' },
-    { id: 27, code: 'l', title: 'Support Tickets', desc: 'SLA, Priority, Assign', group: 'Support' },
-    { id: 28, code: 'f', title: 'Promos & Referrals', desc: 'Code, Limits, Validity', group: 'Growth' },
-    { id: 29, code: 'f', title: 'Broadcasts', desc: 'Audience, Message, Schedule', group: 'Growth' },
-    { id: 30, code: 'd', title: 'Roles, Analytics & Latency', desc: 'RBAC matrix, Route latency, Reports', group: 'Governance' }
-  ];
-
   const currentScreen = ADMIN_SCREENS.find(s => s.id === selectedScreenId) || ADMIN_SCREENS[1];
 
   return (
@@ -136,7 +175,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
-              onClick={() => setSelectedScreenId(25)}
+              onClick={() => navigateTo(25)}
               style={{
                 background: '#ffffff',
                 color: '#000000',
@@ -230,7 +269,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             onChange={e => {
               setGlobalSearch(e.target.value);
               if (selectedScreenId !== 3 && e.target.value.length > 0) {
-                setSelectedScreenId(3);
+                navigateTo(3);
               }
             }}
             style={{
@@ -246,13 +285,20 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
           />
         </div>
 
-        {/* Action Controls & Popup Simulators */}
+        {/* Action Controls & Direct URL Tools */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
-            onClick={() => setPopupFilters(true)}
+            onClick={() => {
+              if (navigator.clipboard) {
+                navigator.clipboard.writeText(window.location.href);
+                setCopiedLinkToast(true);
+                setTimeout(() => setCopiedLinkToast(false), 2500);
+              }
+            }}
+            title="Copy direct shareable link for this specific screen"
             style={{
               background: '#16161a',
-              border: '1px solid #333',
+              border: '1px solid #d4af3755',
               color: '#d4af37',
               borderRadius: 8,
               padding: '6px 12px',
@@ -264,7 +310,27 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
               gap: 5
             }}
           >
-            <Filter size={13} /> Filters (18)
+            {copiedLinkToast ? <Check size={13} color="#22c55e" /> : <Copy size={13} />}
+            {copiedLinkToast ? 'Link Copied!' : 'Copy Page Link'}
+          </button>
+
+          <button
+            onClick={() => setPopupFilters(true)}
+            style={{
+              background: '#16161a',
+              border: '1px solid #333',
+              color: '#f2ead3',
+              borderRadius: 8,
+              padding: '6px 12px',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5
+            }}
+          >
+            <Filter size={13} /> Filters
           </button>
 
           <button
@@ -283,29 +349,127 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
               gap: 5
             }}
           >
-            <Download size={13} /> Export (12)
+            <Download size={13} /> Export
           </button>
 
-          <button
-            onClick={() => {
-              if (onSignOut) onSignOut();
-              else setPopupSessionTimeout(true);
-            }}
-            style={{
-              background: '#221111',
-              border: '1px solid #ef444455',
-              color: '#ef4444',
-              borderRadius: 8,
-              padding: '6px 12px',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: 'pointer'
-            }}
-          >
-            Logout
-          </button>
+          {adminUser ? (
+            <button
+              onClick={() => {
+                if (onSignOut) onSignOut();
+                else setPopupSessionTimeout(true);
+              }}
+              style={{
+                background: '#221111',
+                border: '1px solid #ef444455',
+                color: '#ef4444',
+                borderRadius: 8,
+                padding: '6px 12px',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              Logout
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                if (onOpenSignIn) onOpenSignIn();
+                else navigateTo(1);
+              }}
+              style={{
+                background: 'linear-gradient(135deg, #d4af37, #aa820a)',
+                border: 'none',
+                color: '#000000',
+                borderRadius: 8,
+                padding: '6px 14px',
+                fontSize: 11,
+                fontWeight: 800,
+                cursor: 'pointer'
+              }}
+            >
+              Sign In
+            </button>
+          )}
         </div>
       </header>
+
+      {/* 2.1 BREADCRUMBS & DIRECT QUICK LINKS BAR */}
+      <div style={{
+        background: '#0e0e11',
+        borderBottom: '1px solid #1f1f24',
+        padding: '8px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 10,
+        fontSize: 11
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <a
+            href="#/dashboard"
+            onClick={(e) => { e.preventDefault(); navigateTo(2); }}
+            style={{ color: '#d4af37', textDecoration: 'none', fontWeight: 700 }}
+          >
+            Admin Panel
+          </a>
+          <ChevronRight size={12} color="#8d8672" />
+          <span style={{ color: '#8d8672' }}>{currentScreen.group}</span>
+          <ChevronRight size={12} color="#8d8672" />
+          <span style={{ color: '#ffffff', fontWeight: 600 }}>
+            Screen {currentScreen.id.toString().padStart(2, '0')}: {currentScreen.title}
+          </span>
+          <span style={{
+            background: '#1a1a20',
+            color: '#8d8672',
+            padding: '1px 6px',
+            borderRadius: 4,
+            marginLeft: 6,
+            fontSize: 10,
+            fontFamily: 'monospace'
+          }}>
+            #{currentScreen.slug}
+          </span>
+        </div>
+
+        {/* Quick Screen Category Links */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ color: '#8d8672', fontSize: 10 }}>QUICK JUMP:</span>
+          {[
+            { id: 2, label: 'Dashboard', slug: 'dashboard' },
+            { id: 5, label: 'Live Map', slug: 'live-map' },
+            { id: 6, label: 'Dispatch', slug: 'dispatch' },
+            { id: 7, label: 'Rides', slug: 'rides' },
+            { id: 9, label: 'Drivers', slug: 'drivers' },
+            { id: 14, label: 'Customers', slug: 'customers' },
+            { id: 16, label: 'Fleet', slug: 'categories' },
+            { id: 18, label: 'Fares', slug: 'fare-rules' },
+            { id: 20, label: 'Geofences', slug: 'geofence-editor' },
+            { id: 22, label: 'Payments', slug: 'payments' },
+            { id: 24, label: 'Payouts', slug: 'payouts' },
+            { id: 25, label: 'SOS', slug: 'sos-console' }
+          ].map(q => (
+            <a
+              key={q.id}
+              href={`#/${q.slug}`}
+              onClick={(e) => { e.preventDefault(); navigateTo(q.id); }}
+              style={{
+                color: selectedScreenId === q.id ? '#000000' : '#d4af37',
+                background: selectedScreenId === q.id ? '#d4af37' : '#16161a',
+                border: '1px solid #d4af3744',
+                padding: '2px 8px',
+                borderRadius: 4,
+                textDecoration: 'none',
+                fontWeight: 600,
+                fontSize: 10
+              }}
+            >
+              {q.label}
+            </a>
+          ))}
+        </div>
+      </div>
 
       {/* 3. MAIN WORKBENCH: SIDEBAR + SCREEN VIEWPORT */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -327,54 +491,86 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
           </div>
 
           <div style={{ padding: '8px 6px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {ADMIN_SCREENS.map(s => {
+            {ADMIN_SCREENS.map((s, idx) => {
               const isSelected = selectedScreenId === s.id;
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => setSelectedScreenId(s.id)}
-                  title={s.title}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    background: isSelected ? 'linear-gradient(90deg, rgba(212, 175, 55, 0.2), rgba(212, 175, 55, 0.05))' : 'transparent',
-                    border: isSelected ? '1px solid #d4af37' : '1px solid transparent',
-                    color: isSelected ? '#d4af37' : '#f2ead3',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    fontSize: 12
-                  }}
-                >
-                  <span style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 4,
-                    background: isSelected ? '#d4af37' : '#1e1e24',
-                    color: isSelected ? '#000' : '#8d8672',
-                    fontWeight: 800,
-                    fontSize: 10,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}>
-                    {s.id.toString().padStart(2, '0')}
-                  </span>
+              const prevGroup = idx > 0 ? ADMIN_SCREENS[idx - 1].group : null;
+              const isNewGroup = s.group !== prevGroup;
 
-                  {!sidebarCollapsed && (
-                    <div style={{ overflow: 'hidden' }}>
-                      <div style={{ fontWeight: isSelected ? 700 : 500, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                        {s.title}
-                      </div>
-                      <div style={{ fontSize: 10, color: '#8d8672', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                        {s.desc}
-                      </div>
+              return (
+                <React.Fragment key={s.id}>
+                  {isNewGroup && !sidebarCollapsed && (
+                    <div style={{
+                      padding: '10px 8px 4px',
+                      fontSize: 9,
+                      fontWeight: 800,
+                      color: '#8d8672',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em'
+                    }}>
+                      {s.group}
                     </div>
                   )}
-                </button>
+
+                  <a
+                    href={`#/${s.slug}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigateTo(s.id);
+                    }}
+                    title={`${s.title} · Direct link: #/${s.slug}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      background: isSelected ? 'linear-gradient(90deg, rgba(212, 175, 55, 0.2), rgba(212, 175, 55, 0.05))' : 'transparent',
+                      border: isSelected ? '1px solid #d4af37' : '1px solid transparent',
+                      color: isSelected ? '#d4af37' : '#f2ead3',
+                      textAlign: 'left',
+                      textDecoration: 'none',
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 4,
+                      background: isSelected ? '#d4af37' : '#1e1e24',
+                      color: isSelected ? '#000' : '#8d8672',
+                      fontWeight: 800,
+                      fontSize: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      {s.id.toString().padStart(2, '0')}
+                    </span>
+
+                    {!sidebarCollapsed && (
+                      <div style={{ overflow: 'hidden', flex: 1 }}>
+                        <div style={{
+                          fontWeight: isSelected ? 700 : 500,
+                          whiteSpace: 'nowrap',
+                          textOverflow: 'ellipsis',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}>
+                          <span>{s.title}</span>
+                          {isSelected && <Link2 size={11} color="#d4af37" />}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#8d8672', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                          /{s.slug}
+                        </div>
+                      </div>
+                    )}
+                  </a>
+                </React.Fragment>
               );
             })}
           </div>
@@ -406,7 +602,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                 <button
                   onClick={() => {
                     setToastSaved(true);
-                    setSelectedScreenId(2);
+                    navigateTo(2);
                   }}
                   style={{ background: 'linear-gradient(90deg, #b8962e, #d4af37)', color: '#000', border: 'none', borderRadius: 8, padding: 12, fontWeight: 800, marginTop: 12, cursor: 'pointer' }}
                 >
@@ -425,7 +621,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                   <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Real-time telemetry KPIs, revenue metrics, and system alert feed.</p>
                 </div>
                 <button
-                  onClick={() => setSelectedScreenId(5)}
+                  onClick={() => navigateTo(5)}
                   style={{ background: '#d4af37', color: '#000', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 800, fontSize: 12, cursor: 'pointer' }}
                 >
                   View Real Fleet Map (05) →
@@ -460,7 +656,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
               <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 16, borderRadius: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <span style={{ color: '#d4af37', fontWeight: 700, fontSize: 13 }}>Live Operational Overview (Delhi NCR)</span>
-                  <button onClick={() => setSelectedScreenId(5)} style={{ background: 'transparent', border: '1px solid #333', color: '#8d8672', borderRadius: 6, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>
+                  <button onClick={() => navigateTo(5)} style={{ background: 'transparent', border: '1px solid #333', color: '#8d8672', borderRadius: 6, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>
                     Full Map →
                   </button>
                 </div>
@@ -483,7 +679,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                       <b style={{ color: '#d4af37' }}>Trip #8491</b> · Priya Sharma → Connaught Place
                       <div style={{ fontSize: 11, color: '#8d8672' }}>Completed · Fare: ₹145 · Chauffeur: Suresh Kumar</div>
                     </div>
-                    <button onClick={() => setSelectedScreenId(8)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
+                    <button onClick={() => navigateTo(8)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
                       Inspect Ride →
                     </button>
                   </div>
@@ -492,7 +688,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                       <b style={{ color: '#d4af37' }}>Chauffeur Suresh Kumar</b> · DL-1ER-4821
                       <div style={{ fontSize: 11, color: '#8d8672' }}>Rating 4.88 ★ · Gold Tier · Saarthi EV</div>
                     </div>
-                    <button onClick={() => setSelectedScreenId(12)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
+                    <button onClick={() => navigateTo(12)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
                       View Profile →
                     </button>
                   </div>
@@ -562,7 +758,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                   <button onClick={() => setPopupPublishSurge(true)} style={{ background: '#d4af37', color: '#000', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                     Publish Surge (08)
                   </button>
-                  <button onClick={() => setSelectedScreenId(20)} style={{ background: '#16161a', border: '1px solid #333', color: '#d4af37', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                  <button onClick={() => navigateTo(20)} style={{ background: '#16161a', border: '1px solid #333', color: '#d4af37', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                     Geofence Editor (20) →
                   </button>
                 </div>
@@ -633,7 +829,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                       <td style={{ padding: '10px 14px', color: '#d4af37', fontWeight: 700 }}>₹ 145</td>
                       <td style={{ padding: '10px 14px' }}><span style={{ color: '#10b981', background: '#10b98115', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>Completed</span></td>
                       <td style={{ padding: '10px 14px' }}>
-                        <button onClick={() => setSelectedScreenId(8)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}>
+                        <button onClick={() => navigateTo(8)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}>
                           Detail (08)
                         </button>
                       </td>
@@ -662,7 +858,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h2 style={{ color: '#d4af37', margin: 0 }}>08 · Ride Detail Inspection (#8491)</h2>
-                <button onClick={() => setSelectedScreenId(7)} style={{ background: '#16161a', border: '1px solid #333', color: '#d4af37', padding: '6px 12px', borderRadius: 8, fontSize: 11, cursor: 'pointer' }}>
+                <button onClick={() => navigateTo(7)} style={{ background: '#16161a', border: '1px solid #333', color: '#d4af37', padding: '6px 12px', borderRadius: 8, fontSize: 11, cursor: 'pointer' }}>
                   ← Back to Ride List
                 </button>
               </div>
@@ -700,7 +896,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h2 style={{ color: '#d4af37', margin: 0 }}>09 · Chauffeur Partner Directory</h2>
-                <button onClick={() => setSelectedScreenId(10)} style={{ background: '#d4af37', color: '#000', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                <button onClick={() => navigateTo(10)} style={{ background: '#d4af37', color: '#000', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                   Onboarding Queue (10) →
                 </button>
               </div>
@@ -725,7 +921,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                       <td style={{ padding: '10px 14px', color: '#d4af37', fontWeight: 700 }}>₹ 2,450</td>
                       <td style={{ padding: '10px 14px' }}><span style={{ color: '#10b981', background: '#10b98115', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>Active Online</span></td>
                       <td style={{ padding: '10px 14px', display: 'flex', gap: 6 }}>
-                        <button onClick={() => setSelectedScreenId(12)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}>
+                        <button onClick={() => navigateTo(12)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}>
                           Profile (12)
                         </button>
                         <button onClick={() => setPopupWalletAdjust(true)} style={{ background: '#222', color: '#f2ead3', border: '1px solid #333', padding: '4px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}>
@@ -843,7 +1039,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                   <button onClick={() => window.open('tel:112')} style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
                     Call Delhi Police 112
                   </button>
-                  <button onClick={() => setSelectedScreenId(5)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', borderRadius: 6, padding: '6px 14px', fontSize: 11, cursor: 'pointer' }}>
+                  <button onClick={() => navigateTo(5)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', borderRadius: 6, padding: '6px 14px', fontSize: 11, cursor: 'pointer' }}>
                     Track on Real Map
                   </button>
                 </div>
@@ -1057,7 +1253,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             <button
               onClick={() => {
                 setPopupSessionTimeout(false);
-                setSelectedScreenId(1);
+                navigateTo(1);
               }}
               style={{ background: 'linear-gradient(90deg, #b8962e, #d4af37)', color: '#000', border: 'none', borderRadius: 8, padding: '10px 24px', fontWeight: 800, marginTop: 16, cursor: 'pointer', width: '100%' }}
             >
