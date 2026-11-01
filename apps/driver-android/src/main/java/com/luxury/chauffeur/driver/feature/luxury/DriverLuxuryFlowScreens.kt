@@ -400,6 +400,15 @@ fun DriverLuxuryFlowScreens(
                     pickupAddr = pickupAddress,
                     dropAddr = dropAddress,
                     onAccept = {
+                        activeRideId?.let { rId ->
+                            scope.launch {
+                                try {
+                                    DriverApiClient.getService().acceptRide(rId)
+                                } catch (t: Throwable) {
+                                    Log.w("DriverFlow", "acceptRide network call fallback: ${t.message}")
+                                }
+                            }
+                        }
                         isOfferActive = false
                         flowStep = DriverFlowStep.NAVIGATE_TO_PICKUP
                     },
@@ -425,6 +434,15 @@ fun DriverLuxuryFlowScreens(
                     onOpenChat = { flowStep = DriverFlowStep.RIDE_CHAT },
                     onOpenMaps = { showPopupNavApp = true },
                     onArrived = {
+                        activeRideId?.let { rId ->
+                            scope.launch {
+                                try {
+                                    DriverApiClient.getService().notifyArrived(rId)
+                                } catch (t: Throwable) {
+                                    Log.w("DriverFlow", "notifyArrived network call fallback: ${t.message}")
+                                }
+                            }
+                        }
                         isArrived = true
                         showPopupArrived = true
                         flowStep = DriverFlowStep.ARRIVED_AND_OTP
@@ -474,6 +492,15 @@ fun DriverLuxuryFlowScreens(
                 DriverFlowStep.COLLECT_PAYMENT -> DriverCollectPaymentScreen(
                     fare = currentRideFare,
                     onPaymentConfirmed = {
+                        activeRideId?.let { rId ->
+                            scope.launch {
+                                try {
+                                    DriverApiClient.getService().finishTrip(rId, FinishTripPayload())
+                                } catch (t: Throwable) {
+                                    Log.w("DriverFlow", "finishTrip network call fallback: ${t.message}")
+                                }
+                            }
+                        }
                         todayEarnings += currentRideFare
                         walletBalance += currentRideFare
                         totalTripsToday += 1
@@ -801,6 +828,15 @@ fun DriverLuxuryFlowScreens(
                     primaryButton = "Start Trip Now",
                     secondaryButton = "Back",
                     onPrimary = {
+                        activeRideId?.let { rId ->
+                            scope.launch {
+                                try {
+                                    DriverApiClient.getService().startTrip(rId, StartTripPayload(otpCode = enteredOtp.trim()))
+                                } catch (t: Throwable) {
+                                    Log.w("DriverFlow", "startTrip network call fallback: ${t.message}")
+                                }
+                            }
+                        }
                         showPopupStartTripConfirm = false
                         flowStep = DriverFlowStep.TRIP_IN_PROGRESS
                     },

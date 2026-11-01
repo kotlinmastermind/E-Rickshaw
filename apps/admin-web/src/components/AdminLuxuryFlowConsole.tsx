@@ -901,13 +901,16 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             </div>
           )}
 
-          {/* SCREEN 04: Audit Logs */}
+          {/* SCREEN 04: Security Audit Logs */}
           {selectedScreenId === 4 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ color: '#d4af37', margin: 0 }}>04 · Compliance Audit Logs</h2>
-                <button onClick={() => setPopupExportData(true)} style={{ background: '#16161a', border: '1px solid #333', color: '#d4af37', padding: '6px 12px', borderRadius: 8, fontSize: 11, cursor: 'pointer' }}>
-                  Export CSV
+                <div>
+                  <h2 style={{ color: '#d4af37', margin: 0 }}>04 · Security Audit Trail & Immutable Log</h2>
+                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Cryptographically hashed administrator access, policy shifts, and sensitive record audits.</p>
+                </div>
+                <button onClick={() => setPopupExportData(true)} style={{ background: '#16161a', border: '1px solid #333', color: '#f2ead3', borderRadius: 8, padding: '6px 12px', fontSize: 11, cursor: 'pointer' }}>
+                  <Download size={13} style={{ display: 'inline', marginRight: 4 }} /> Export Audit CSV
                 </button>
               </div>
 
@@ -915,35 +918,35 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: '#0f0f12', color: '#8d8672', borderBottom: '1px solid #2a2a2e', textAlign: 'left' }}>
-                      <th style={{ padding: '10px 14px' }}>Actor</th>
-                      <th style={{ padding: '10px 14px' }}>Action</th>
-                      <th style={{ padding: '10px 14px' }}>Target Table</th>
-                      <th style={{ padding: '10px 14px' }}>Details & Reason</th>
                       <th style={{ padding: '10px 14px' }}>Timestamp</th>
+                      <th style={{ padding: '10px 14px' }}>Actor</th>
+                      <th style={{ padding: '10px 14px' }}>Action & Scope</th>
+                      <th style={{ padding: '10px 14px' }}>Resource ID</th>
+                      <th style={{ padding: '10px 14px' }}>IP Address</th>
+                      <th style={{ padding: '10px 14px' }}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr style={{ borderBottom: '1px solid #1f1f24' }}>
-                      <td style={{ padding: '10px 14px', color: '#d4af37' }}>admin@luxury.in</td>
-                      <td style={{ padding: '10px 14px' }}><span style={{ color: '#10b981' }}>APPROVE_DRIVER</span></td>
-                      <td style={{ padding: '10px 14px', color: '#8d8672' }}>drivers</td>
-                      <td style={{ padding: '10px 14px' }}>Approved Chauffeur Suresh Kumar (DL-1ER-4821)</td>
-                      <td style={{ padding: '10px 14px', color: '#8d8672' }}>Today 10:14 AM</td>
-                    </tr>
-                    <tr style={{ borderBottom: '1px solid #1f1f24' }}>
-                      <td style={{ padding: '10px 14px', color: '#d4af37' }}>admin@luxury.in</td>
-                      <td style={{ padding: '10px 14px' }}><span style={{ color: '#f59e0b' }}>WALLET_ADJUST</span></td>
-                      <td style={{ padding: '10px 14px', color: '#8d8672' }}>driver_wallets</td>
-                      <td style={{ padding: '10px 14px' }}>Adjusted +₹250 Weekend Quest Bonus</td>
-                      <td style={{ padding: '10px 14px', color: '#8d8672' }}>Today 09:40 AM</td>
-                    </tr>
-                    <tr style={{ borderBottom: '1px solid #1f1f24' }}>
-                      <td style={{ padding: '10px 14px', color: '#d4af37' }}>finance_lead@luxury.in</td>
-                      <td style={{ padding: '10px 14px' }}><span style={{ color: '#3b82f6' }}>CONFIRM_REFUND</span></td>
-                      <td style={{ padding: '10px 14px', color: '#8d8672' }}>refunds</td>
-                      <td style={{ padding: '10px 14px' }}>Approved ₹145 refund for Trip #8410 (Route issue)</td>
-                      <td style={{ padding: '10px 14px', color: '#8d8672' }}>Yesterday 06:12 PM</td>
-                    </tr>
+                    {[
+                      { time: 'Just now', actor: 'admin@luxurychauffeur.in', action: 'FARE_RULE_PUBLISH', resource: 'E_RICKSHAW_STANDARD (v1.2)', ip: '203.192.204.14', status: 'SUCCESS' },
+                      { time: '4 mins ago', actor: 'ops@luxurychauffeur.in', action: 'DRIVER_DOC_APPROVE', resource: 'DOC-9921 (DL Verification)', ip: '49.36.12.89', status: 'SUCCESS' },
+                      { time: '12 mins ago', actor: 'soc@luxurychauffeur.in', action: 'SOS_RESOLVE', resource: 'INC-8812 (Connaught Place)', ip: '103.21.244.2', status: 'SUCCESS' },
+                      { time: '28 mins ago', actor: 'finance@luxurychauffeur.in', action: 'BATCH_PAYOUT_SETTLE', resource: 'PAYOUT-4821 (₹ 18,400)', ip: '14.139.60.10', status: 'SUCCESS' },
+                      { time: '1 hour ago', actor: 'admin@luxurychauffeur.in', action: 'GEOFENCE_POLYGON_CREATE', resource: 'NDLS Surge Corridor', ip: '203.192.204.14', status: 'SUCCESS' }
+                    ].map((row, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #1f1f24' }}>
+                        <td style={{ padding: '10px 14px', color: '#8d8672', fontFamily: 'monospace' }}>{row.time}</td>
+                        <td style={{ padding: '10px 14px', color: '#f2ead3', fontWeight: 600 }}>{row.actor}</td>
+                        <td style={{ padding: '10px 14px', color: '#d4af37', fontWeight: 700 }}>{row.action}</td>
+                        <td style={{ padding: '10px 14px', color: '#f2ead3' }}>{row.resource}</td>
+                        <td style={{ padding: '10px 14px', color: '#8d8672', fontFamily: 'monospace' }}>{row.ip}</td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{ color: '#22c55e', background: '#22c55e15', padding: '2px 8px', borderRadius: 4, fontWeight: 700, fontSize: 10 }}>
+                            {row.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -975,22 +978,31 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
           {/* SCREEN 06: Dispatch Monitor */}
           {selectedScreenId === 6 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <h2 style={{ color: '#d4af37', margin: 0 }}>06 · Dispatch Algorithm Monitor</h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-                <div style={{ background: '#16161a', padding: 16, borderRadius: 10, border: '1px solid #2a2a2e' }}>
-                  <div style={{ color: '#8d8672', fontSize: 11 }}>20-Second Offer Timeouts</div>
-                  <div style={{ fontSize: 24, color: '#f59e0b', fontWeight: 800 }}>3.2%</div>
-                  <div style={{ color: '#10b981', fontSize: 11 }}>Under 5% threshold</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h2 style={{ color: '#d4af37', margin: 0 }}>06 · Dispatch Engine & Offer Monitor</h2>
+                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Real-time 20-second offer rings, driver timeouts, fare bump multipliers, and allocation retries.</p>
                 </div>
-                <div style={{ background: '#16161a', padding: 16, borderRadius: 10, border: '1px solid #2a2a2e' }}>
-                  <div style={{ color: '#8d8672', fontSize: 11 }}>Auto-Accept Ratio</div>
-                  <div style={{ fontSize: 24, color: '#10b981', fontWeight: 800 }}>88.4%</div>
-                  <div style={{ color: '#8d8672', fontSize: 11 }}>High chauffeur responsiveness</div>
+                <button onClick={() => navigateTo(5)} style={{ background: '#d4af37', color: '#000', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                  Open Fleet Map (05) →
+                </button>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 18, borderRadius: 12 }}>
+                  <div style={{ fontSize: 11, color: '#8d8672' }}>Active Broadcast Offers</div>
+                  <div style={{ fontSize: 26, color: '#d4af37', fontWeight: 900 }}>14 Offers</div>
+                  <div style={{ fontSize: 11, color: '#22c55e', marginTop: 4 }}>Avg Match Time: 12.4s</div>
                 </div>
-                <div style={{ background: '#16161a', padding: 16, borderRadius: 10, border: '1px solid #2a2a2e' }}>
-                  <div style={{ color: '#8d8672', fontSize: 11 }}>Average Dispatch Latency</div>
-                  <div style={{ fontSize: 24, color: '#d4af37', fontWeight: 800 }}>1.4 seconds</div>
-                  <div style={{ color: '#10b981', fontSize: 11 }}>Optimized proximity index</div>
+                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 18, borderRadius: 12 }}>
+                  <div style={{ fontSize: 11, color: '#8d8672' }}>Driver Acceptance Rate</div>
+                  <div style={{ fontSize: 26, color: '#f2ead3', fontWeight: 900 }}>92.8 %</div>
+                  <div style={{ fontSize: 11, color: '#10b981', marginTop: 4 }}>Optimal Chauffeur Availability</div>
+                </div>
+                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 18, borderRadius: 12 }}>
+                  <div style={{ fontSize: 11, color: '#8d8672' }}>3-Retry Fare Bumps</div>
+                  <div style={{ fontSize: 26, color: '#eab308', fontWeight: 900 }}>2 Trips</div>
+                  <div style={{ fontSize: 11, color: '#8d8672', marginTop: 4 }}>+₹15 automatic driver incentive</div>
                 </div>
               </div>
             </div>
@@ -1057,14 +1069,30 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             </div>
           )}
 
-          {/* SCREEN 08: Ride Detail */}
+          {/* SCREEN 08: Ride Detail (with Real GPS Route Map) */}
           {selectedScreenId === 8 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ color: '#d4af37', margin: 0 }}>08 · Ride Detail Inspection (#8491)</h2>
-                <button onClick={() => navigateTo(7)} style={{ background: '#16161a', border: '1px solid #333', color: '#d4af37', padding: '6px 12px', borderRadius: 8, fontSize: 11, cursor: 'pointer' }}>
-                  ← Back to Ride List
+                <div>
+                  <h2 style={{ color: '#d4af37', margin: 0 }}>08 · Ride Detail Inspection (#8491)</h2>
+                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Real Leaflet GPS telemetry route with pickup, destination, and live waypoint playback.</p>
+                </div>
+                <button onClick={() => navigateTo(7)} style={{ background: '#16161a', border: '1px solid #333', color: '#d4af37', padding: '6px 14px', borderRadius: 8, fontSize: 11, cursor: 'pointer' }}>
+                  ← Back to Ride List (07)
                 </button>
+              </div>
+
+              {/* REAL GPS ROUTE MAP CANVAS */}
+              <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 14, borderRadius: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ color: '#d4af37', fontWeight: 800, fontSize: 12 }}>
+                    📍 LIVE TRIP ROUTE: CP Metro Gate 2 → Khan Market Entrance
+                  </span>
+                  <span style={{ color: '#10b981', fontSize: 11, fontWeight: 700, background: '#10b98115', padding: '2px 8px', borderRadius: 4 }}>
+                    ● COMPLETED · 4.2 KM · ₹145
+                  </span>
+                </div>
+                <AdminRealMap height={320} mode="ride_route" selectedScreenTitle="Ride #8491 Route" />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
@@ -1139,203 +1167,6 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             </div>
           )}
 
-          {/* SCREEN 11: Document Review */}
-          {selectedScreenId === 11 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <h2 style={{ color: '#d4af37', margin: 0 }}>11 · Chauffeur Document Audit & Verification</h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
-                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 16, borderRadius: 12 }}>
-                  <div style={{ color: '#d4af37', fontWeight: 700, marginBottom: 8 }}>Commercial Driving License</div>
-                  <div style={{ height: 140, background: '#0f0f12', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8d8672', border: '1px dashed #444' }}>
-                    [DL-0420188921 Preview]
-                  </div>
-                  <div style={{ fontSize: 11, color: '#10b981', marginTop: 8 }}>Verified with Sarathi Parivahan API</div>
-                </div>
-
-                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 16, borderRadius: 12 }}>
-                  <div style={{ color: '#d4af37', fontWeight: 700, marginBottom: 8 }}>Vehicle Registration (RC)</div>
-                  <div style={{ height: 140, background: '#0f0f12', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8d8672', border: '1px dashed #444' }}>
-                    [Commercial EV RC Preview]
-                  </div>
-                  <div style={{ fontSize: 11, color: '#10b981', marginTop: 8 }}>Permit Active until 2029</div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-                <button
-                  onClick={() => setPopupApproveDriver(true)}
-                  style={{ background: 'linear-gradient(90deg, #10b981, #059669)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 800, cursor: 'pointer' }}
-                >
-                  Approve Chauffeur (04)
-                </button>
-                <button
-                  onClick={() => setPopupRejectDocs(true)}
-                  style={{ background: '#221111', color: '#ef4444', border: '1px solid #ef444455', borderRadius: 8, padding: '10px 20px', fontWeight: 700, cursor: 'pointer' }}
-                >
-                  Reject with Reason (05)
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* SCREEN 20: Geofence Editor (Real Map) */}
-          {selectedScreenId === 20 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h2 style={{ color: '#d4af37', margin: 0 }}>20 · Interactive Geofence Editor</h2>
-                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Click map directly to plot multi-point polygon boundaries for operating zones.</p>
-                </div>
-                <button
-                  onClick={() => setPopupDeleteGeofence(true)}
-                  style={{ background: '#221111', color: '#ef4444', border: '1px solid #ef444455', borderRadius: 8, padding: '6px 12px', fontSize: 11, cursor: 'pointer' }}
-                >
-                  Delete Selected Geofence (07)
-                </button>
-              </div>
-
-              <AdminRealMap height="540px" mode="geofence_editor" selectedScreenTitle="Geofence Polygon Studio" />
-            </div>
-          )}
-
-          {/* SCREEN 21: Road Restrictions (Real Map) */}
-          {selectedScreenId === 21 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h2 style={{ color: '#d4af37', margin: 0 }}>21 · Road Restrictions & Safety Corridors</h2>
-                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Enforce restricted expressways, one-way zones, and waterlogging hazards for commercial E-Rickshaws.</p>
-                </div>
-              </div>
-
-              <AdminRealMap height="540px" mode="road_restrictions" selectedScreenTitle="Restricted Road Vectors" />
-            </div>
-          )}
-
-          {/* SCREEN 25: SOS Console */}
-          {selectedScreenId === 25 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h2 style={{ color: '#ef4444', margin: 0 }}>25 · Emergency SOS Incident Command Center</h2>
-                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Priority Fleet SOC desk directly connected with Government 112 Dispatch.</p>
-                </div>
-                <button
-                  onClick={() => setPopupResolveSos(true)}
-                  style={{ background: '#10b981', color: '#000', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 800, fontSize: 12, cursor: 'pointer' }}
-                >
-                  Resolve Alert (11)
-                </button>
-              </div>
-
-              <div style={{ background: '#1c1111', border: '1px solid #ef4444', padding: 18, borderRadius: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <b style={{ color: '#ef4444', fontSize: 14 }}>🚨 ALERT SOS-9912 ACTIVE</b>
-                  <span style={{ fontSize: 12, color: '#f2ead3' }}>Dispatched: 2 mins ago</span>
-                </div>
-                <div style={{ fontSize: 12, color: '#f2ead3', marginTop: 8 }}>
-                  <b>Driver:</b> Suresh Kumar (DL-1ER-4821) · Phone: +91 98765 43210
-                </div>
-                <div style={{ fontSize: 12, color: '#8d8672', marginTop: 2 }}>
-                  <b>GPS Location:</b> 28.6315° N, 77.2167° E (Outer Circle Pillar 14, Connaught Place)
-                </div>
-                <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-                  <button onClick={() => window.open('tel:112')} style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
-                    Call Delhi Police 112
-                  </button>
-                  <button onClick={() => navigateTo(5)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', borderRadius: 6, padding: '6px 14px', fontSize: 11, cursor: 'pointer' }}>
-                    Track on Real Map
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* SCREEN 04: Security Audit Logs */}
-          {selectedScreenId === 4 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h2 style={{ color: '#d4af37', margin: 0 }}>04 · Security Audit Trail & Immutable Log</h2>
-                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Cryptographically hashed administrator access, policy shifts, and sensitive record audits.</p>
-                </div>
-                <button onClick={() => setPopupExportData(true)} style={{ background: '#16161a', border: '1px solid #333', color: '#f2ead3', borderRadius: 8, padding: '6px 12px', fontSize: 11, cursor: 'pointer' }}>
-                  <Download size={13} style={{ display: 'inline', marginRight: 4 }} /> Export Audit CSV
-                </button>
-              </div>
-
-              <div style={{ background: '#16161a', border: '1px solid #2a2a2e', borderRadius: 12, overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ background: '#0f0f12', color: '#8d8672', borderBottom: '1px solid #2a2a2e', textAlign: 'left' }}>
-                      <th style={{ padding: '10px 14px' }}>Timestamp</th>
-                      <th style={{ padding: '10px 14px' }}>Actor</th>
-                      <th style={{ padding: '10px 14px' }}>Action & Scope</th>
-                      <th style={{ padding: '10px 14px' }}>Resource ID</th>
-                      <th style={{ padding: '10px 14px' }}>IP Address</th>
-                      <th style={{ padding: '10px 14px' }}>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      { time: 'Just now', actor: 'admin@luxurychauffeur.in', action: 'FARE_RULE_PUBLISH', resource: 'E_RICKSHAW_STANDARD (v1.2)', ip: '203.192.204.14', status: 'SUCCESS' },
-                      { time: '4 mins ago', actor: 'ops@luxurychauffeur.in', action: 'DRIVER_DOC_APPROVE', resource: 'DOC-9921 (DL Verification)', ip: '49.36.12.89', status: 'SUCCESS' },
-                      { time: '12 mins ago', actor: 'soc@luxurychauffeur.in', action: 'SOS_RESOLVE', resource: 'INC-8812 (Connaught Place)', ip: '103.21.244.2', status: 'SUCCESS' },
-                      { time: '28 mins ago', actor: 'finance@luxurychauffeur.in', action: 'BATCH_PAYOUT_SETTLE', resource: 'PAYOUT-4821 (₹ 18,400)', ip: '14.139.60.10', status: 'SUCCESS' },
-                      { time: '1 hour ago', actor: 'admin@luxurychauffeur.in', action: 'GEOFENCE_POLYGON_CREATE', resource: 'NDLS Surge Corridor', ip: '203.192.204.14', status: 'SUCCESS' }
-                    ].map((row, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #1f1f24' }}>
-                        <td style={{ padding: '10px 14px', color: '#8d8672', fontFamily: 'monospace' }}>{row.time}</td>
-                        <td style={{ padding: '10px 14px', color: '#f2ead3', fontWeight: 600 }}>{row.actor}</td>
-                        <td style={{ padding: '10px 14px', color: '#d4af37', fontWeight: 700 }}>{row.action}</td>
-                        <td style={{ padding: '10px 14px', color: '#f2ead3' }}>{row.resource}</td>
-                        <td style={{ padding: '10px 14px', color: '#8d8672', fontFamily: 'monospace' }}>{row.ip}</td>
-                        <td style={{ padding: '10px 14px' }}>
-                          <span style={{ color: '#22c55e', background: '#22c55e15', padding: '2px 8px', borderRadius: 4, fontWeight: 700, fontSize: 10 }}>
-                            {row.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* SCREEN 06: Dispatch Monitor */}
-          {selectedScreenId === 6 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <h2 style={{ color: '#d4af37', margin: 0 }}>06 · Dispatch Engine & Offer Monitor</h2>
-                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Real-time 20-second offer rings, driver timeouts, fare bump multipliers, and allocation retries.</p>
-                </div>
-                <button onClick={() => navigateTo(5)} style={{ background: '#d4af37', color: '#000', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                  Open Fleet Map (05) →
-                </button>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
-                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 18, borderRadius: 12 }}>
-                  <div style={{ fontSize: 11, color: '#8d8672' }}>Active Broadcast Offers</div>
-                  <div style={{ fontSize: 26, color: '#d4af37', fontWeight: 900 }}>14 Offers</div>
-                  <div style={{ fontSize: 11, color: '#22c55e', marginTop: 4 }}>Avg Match Time: 12.4s</div>
-                </div>
-                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 18, borderRadius: 12 }}>
-                  <div style={{ fontSize: 11, color: '#8d8672' }}>Driver Acceptance Rate</div>
-                  <div style={{ fontSize: 26, color: '#f2ead3', fontWeight: 900 }}>92.8 %</div>
-                  <div style={{ fontSize: 11, color: '#10b981', marginTop: 4 }}>Optimal Chauffeur Availability</div>
-                </div>
-                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 18, borderRadius: 12 }}>
-                  <div style={{ fontSize: 11, color: '#8d8672' }}>3-Retry Fare Bumps</div>
-                  <div style={{ fontSize: 26, color: '#eab308', fontWeight: 900 }}>2 Trips</div>
-                  <div style={{ fontSize: 11, color: '#8d8672', marginTop: 4 }}>+₹15 automatic driver incentive</div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* SCREEN 10: Onboarding SLA Queue */}
           {selectedScreenId === 10 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1387,6 +1218,45 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* SCREEN 11: Document Review */}
+          {selectedScreenId === 11 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <h2 style={{ color: '#d4af37', margin: 0 }}>11 · Chauffeur Document Audit & Verification</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 16, borderRadius: 12 }}>
+                  <div style={{ color: '#d4af37', fontWeight: 700, marginBottom: 8 }}>Commercial Driving License</div>
+                  <div style={{ height: 140, background: '#0f0f12', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8d8672', border: '1px dashed #444' }}>
+                    [DL-0420188921 Preview]
+                  </div>
+                  <div style={{ fontSize: 11, color: '#10b981', marginTop: 8 }}>Verified with Sarathi Parivahan API</div>
+                </div>
+
+                <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 16, borderRadius: 12 }}>
+                  <div style={{ color: '#d4af37', fontWeight: 700, marginBottom: 8 }}>Vehicle Registration (RC)</div>
+                  <div style={{ height: 140, background: '#0f0f12', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8d8672', border: '1px dashed #444' }}>
+                    [Commercial EV RC Preview]
+                  </div>
+                  <div style={{ fontSize: 11, color: '#10b981', marginTop: 8 }}>Permit Active until 2029</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                <button
+                  onClick={() => setPopupApproveDriver(true)}
+                  style={{ background: 'linear-gradient(90deg, #10b981, #059669)', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 20px', fontWeight: 800, cursor: 'pointer' }}
+                >
+                  Approve Chauffeur (04)
+                </button>
+                <button
+                  onClick={() => setPopupRejectDocs(true)}
+                  style={{ background: '#221111', color: '#ef4444', border: '1px solid #ef444455', borderRadius: 8, padding: '10px 20px', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Reject with Reason (05)
+                </button>
               </div>
             </div>
           )}
@@ -1831,6 +1701,28 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             </div>
           )}
 
+          {/* SCREEN 20: Interactive Geofence Editor (Real Map) */}
+          {selectedScreenId === 20 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h2 style={{ color: '#d4af37', margin: 0 }}>20 · Interactive Geofence Polygon Editor</h2>
+                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Click the real map to plot multi-point polygon boundaries for operating zones and surge sectors.</p>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setPopupDeleteGeofence(true)} style={{ background: '#221111', color: '#ef4444', border: '1px solid #ef444455', borderRadius: 8, padding: '6px 12px', fontSize: 11, cursor: 'pointer' }}>
+                    Delete Geofence (07)
+                  </button>
+                  <button onClick={() => navigateTo(21)} style={{ background: '#16161a', border: '1px solid #333', color: '#d4af37', borderRadius: 8, padding: '6px 14px', fontSize: 11, cursor: 'pointer' }}>
+                    Road Restrictions (21) →
+                  </button>
+                </div>
+              </div>
+
+              <AdminRealMap height="560px" mode="geofence_editor" selectedScreenTitle="Geofence Polygon Studio" />
+            </div>
+          )}
+
           {/* SCREEN 21: Road Restrictions & Closures */}
           {selectedScreenId === 21 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -2008,6 +1900,54 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* SCREEN 25: Emergency SOS Incident Command Center (Real Map) */}
+          {selectedScreenId === 25 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h2 style={{ color: '#ef4444', margin: 0 }}>25 · Emergency SOS Incident Command Center</h2>
+                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Priority Fleet SOC desk directly connected with Government 112 Dispatch and live GPS tracking.</p>
+                </div>
+                <button
+                  onClick={() => setPopupResolveSos(true)}
+                  style={{ background: '#10b981', color: '#000', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 800, fontSize: 12, cursor: 'pointer' }}
+                >
+                  Resolve Alert (11)
+                </button>
+              </div>
+
+              {/* REAL MAP FOR ACTIVE SOS LOCATION */}
+              <div style={{ background: '#16161a', border: '1px solid #ef444466', padding: 14, borderRadius: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ color: '#ef4444', fontWeight: 800, fontSize: 13 }}>🚨 LIVE INCIDENT GPS POSITION: Connaught Place Outer Circle, Radial 4 Underpass</span>
+                  <span style={{ color: '#ef4444', fontSize: 11, fontWeight: 700, background: '#ef444420', padding: '2px 8px', borderRadius: 4 }}>CRITICAL SOS ALERT</span>
+                </div>
+                <AdminRealMap height={360} mode="sos_incident" selectedScreenTitle="SOS Live GPS Beacon" />
+              </div>
+
+              <div style={{ background: '#1c1111', border: '1px solid #ef4444', padding: 18, borderRadius: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b style={{ color: '#ef4444', fontSize: 14 }}>🚨 ALERT SOS-9912 ACTIVE</b>
+                  <span style={{ fontSize: 12, color: '#f2ead3' }}>Dispatched: 2 mins ago</span>
+                </div>
+                <div style={{ fontSize: 12, color: '#f2ead3', marginTop: 8 }}>
+                  <b>Driver:</b> Suresh Kumar (DL-1ER-4821) · Phone: +91 98765 43210
+                </div>
+                <div style={{ fontSize: 12, color: '#8d8672', marginTop: 2 }}>
+                  <b>GPS Location:</b> 28.6315° N, 77.2167° E (Outer Circle Pillar 14, Connaught Place)
+                </div>
+                <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                  <button onClick={() => window.open('tel:112')} style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                    Call Delhi Police 112
+                  </button>
+                  <button onClick={() => navigateTo(5)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', borderRadius: 6, padding: '6px 14px', fontSize: 11, cursor: 'pointer' }}>
+                    Track on Fleet Map (05) →
+                  </button>
+                </div>
               </div>
             </div>
           )}
