@@ -1,11 +1,13 @@
 from contextlib import asynccontextmanager
 import asyncio
 import logging
+import os
 import time
 import uuid
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from backend.core.config import settings
 from backend.infrastructure.database.session import init_db, async_session_maker
 from backend.domain.models import VehicleCategory, FareRule, User
@@ -250,13 +252,36 @@ app.include_router(driver_safety.router, prefix=settings.API_V1_STR)
 app.include_router(driver_financials.router, prefix=settings.API_V1_STR)
 app.include_router(analytics_bi.router, prefix=settings.API_V1_STR)
 
+# --- Dynamic Admin Web Panel Hosting on Render ---
+STATIC_ADMIN_DIR = os.path.join(os.path.dirname(__file__), "static", "admin")
+if os.path.exists(STATIC_ADMIN_DIR):
+    assets_dir = os.path.join(STATIC_ADMIN_DIR, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="admin_assets")
+        app.mount("/admin/assets", StaticFiles(directory=assets_dir), name="admin_nested_assets")
+
+@app.get("/admin", include_in_schema=False)
+@app.get("/admin/{full_path:path}", include_in_schema=False)
+async def serve_admin_panel(full_path: str = ""):
+    """Dynamically serve the Luxury Admin Panel SPA from Render."""
+    index_file = os.path.join(STATIC_ADMIN_DIR, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return HTMLResponse("<h1>Luxury Admin Panel initializing on Render...</h1>", status_code=200)
+
 @app.get("/", tags=["Root"])
-async def root():
-    """Welcome and API discovery root endpoint."""
+async def root(request: Request):
+    """Welcome and API discovery root endpoint or Admin Panel SPA for web browsers."""
+    accept = request.headers.get("accept", "")
+    index_file = os.path.join(STATIC_ADMIN_DIR, "index.html")
+    # If a browser requests the root URL, dynamically serve the Admin Panel SPA
+    if "text/html" in accept and os.path.exists(index_file):
+        return FileResponse(index_file)
     return {
         "service": settings.PROJECT_NAME,
         "version": "1.0.0",
         "status": "OPERATIONAL",
+        "admin_panel_url": "/admin",
         "docs_url": "/docs",
         "health_url": "/health/ready",
         "privacy_policy": "/privacy-policy",
@@ -335,6 +360,21 @@ async def privacy_policy():
     </body>
     </html>
     """
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def catch_all_spa(full_path: str):
+    """Fallback handler to route SPA client-side routes (e.g. /dashboard, /rides, /fleet) to index.html."""
+    if full_path.startswith(("api/", "health", "docs", "openapi.json", "redoc", "privacy-policy", "ws")):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    
+    file_path = os.path.join(STATIC_ADMIN_DIR, full_path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+
+    index_file = os.path.join(STATIC_ADMIN_DIR, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 if __name__ == "__main__":
     import uvicorn
