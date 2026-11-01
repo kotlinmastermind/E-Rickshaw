@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>E-Rickshaw Platform – 130 Luxury Screens</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{color-scheme:dark;--bg:#0b0b0d;--c:#16161a;--g:#d4af37;--t:#f2ead3;--m:#8d8672;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:14px system-ui,Segoe UI,sans-serif}
+h1{margin:0;padding:20px 16px 4px;color:var(--g);font-weight:600}p.s{margin:0;padding:0 16px 12px;color:var(--m)}
+nav{display:flex;gap:8px;padding:8px 16px;position:sticky;top:0;background:var(--bg);z-index:5;overflow-x:auto}
+nav button{background:var(--c);color:var(--t);border:1px solid #333;border-radius:20px;padding:8px 16px;white-space:nowrap;cursor:pointer}
+nav button.on{background:var(--g);color:#000;border-color:var(--g);font-weight:bold}
+.grid{display:flex;flex-wrap:wrap;gap:18px;padding:16px;justify-content:center}
+.ph{width:190px;height:380px;background:#000;border:2px solid #2a2a2e;border-radius:26px;overflow:hidden;display:flex;flex-direction:column;position:relative}
+.ph.ad{width:340px;height:230px;border-radius:10px}
+.top{padding:10px 12px 6px;font-size:12px;color:var(--g);border-bottom:1px solid #222;display:flex;justify-content:space-between}
+.top i{color:var(--m);font-style:normal}
+.body{flex:1;padding:10px;display:flex;flex-direction:column;gap:7px;overflow:hidden}
+.map{flex:1;margin:-10px -10px 0;background:repeating-linear-gradient(0deg,#15151a 0 18px,#1c1c22 18px 19px),repeating-linear-gradient(90deg,transparent 0 18px,#1c1c22 18px 19px);position:relative;min-height:110px}
+.map:after{content:"";position:absolute;left:50%;top:40%;width:14px;height:14px;background:var(--g);border-radius:50% 50% 50% 0;transform:rotate(-45deg)}
+.sheet{background:var(--c);border-radius:16px 16px 0 0;margin:0 -10px -10px;padding:10px;display:flex;flex-direction:column;gap:6px}
+.r{background:var(--c);border:1px solid #2a2a2e;border-radius:10px;padding:8px 10px;font-size:11.5px}
+.f{background:#0f0f12;border:1px solid #333;border-radius:10px;padding:9px;font-size:11.5px;color:var(--m)}
+.b{background:linear-gradient(90deg,#b8962e,var(--g));color:#000;text-align:center;border-radius:10px;padding:9px;font-weight:700;font-size:12px;margin-top:auto}
+.big{font-size:26px;color:var(--g);text-align:center;padding:10px 0;font-weight:600}
+.c{text-align:center;margin:auto;color:var(--g);font-size:20px;letter-spacing:3px}
+.ch{display:inline-block;border:1px solid var(--g);color:var(--g);border-radius:12px;padding:3px 9px;font-size:11px}
+.bn{display:flex;justify-content:space-around;border-top:1px solid #222;padding:8px 0;font-size:10px;color:var(--m)}.bn b{color:var(--g)}
+.sec{padding:16px;max-width:900px;margin:auto;line-height:1.6}.sec h2{color:var(--g)}.sec li{margin-bottom:4px}
+.ov{position:absolute;inset:34px 0 0;display:flex;align-items:center;justify-content:center;background:#000b}.ov.bt{align-items:flex-end}.dl{background:var(--c);border:1px solid var(--g);border-radius:14px;padding:12px;width:88%;display:flex;flex-direction:column;gap:7px;font-size:12px;text-align:center}.dl b{color:var(--g);font-size:13px}.dl span{color:var(--m)}.dl .b{margin-top:2px}.sh{width:100%;border-radius:18px 18px 0 0;border-width:1px 0 0}.full .dl{width:100%;height:100%;border-radius:0;justify-content:center;border:0}.tt{position:absolute;bottom:14px;left:10px;right:10px;background:var(--g);color:#000;border-radius:20px;padding:8px;font-size:11.5px;text-align:center;font-weight:600}h2.ph2{color:var(--g);padding:10px 16px 0;margin:0}.lg{padding:0 16px;color:var(--m)}
+</style></head><body>
+<h1>E-Rickshaw Platform – Luxury UI</h1><p class="s">Customer 50 · Driver 50 · Admin 30 · 70 popups · gold-on-black wireframes, Rapido-style flow</p>
+<nav id="tabs"></nav><div id="v"></div>
+<script>
+const D={
+cust:`s|Splash|Logo,Tagline
+f|Language & permissions|Language list,Location,Notifications
+f|Phone login|+91 number,Send OTP
+f|OTP verify|6-box OTP,Resend 30s
+f|Profile setup|Avatar,Name,Email
+f|App lock|PIN,Biometric,Passkey
+l|MFA settings|Authenticator,SMS,Backup codes
+m|Home map|Where to?,Home / Work,Nearby rickshaws
+l|Search destination|Search bar,Recents,Favorites
+m|Pin drop|Centre pin,Address,Gate notes
+l|Multi-stop route|Pickup,Stop 1,Add stop,Drop
+l|Choose ride|Standard,Shared,Cargo,Metro Feeder
+d|Fare breakup|Total ₹,Base+km+time,Promo code
+f|Ride preferences|Quiet ride,AC temp,Luggage,Accessibility
+l|Payment method|UPI,Card,Wallet,Cash
+d|Confirm booking|Route,Fare,Book now
+p|Out-of-zone alert|Restricted road,Change drop
+m|Searching driver|Radar pulse,Offer timer,Cancel
+d|Driver found|Photo + rating,Plate,Start OTP,ETA
+m|Driver arriving|Live route,ETA,Call / Chat
+l|Ride chat|Messages,Quick replies
+p|Masked call|Driver name,Mute,End
+m|Ride in progress|Live route,Share,SOS
+f|Share trip|Contacts,Hide address,Expiry
+p|SOS panic|Hold to alert,Contacts notified,Call police
+l|Fare split|Co-passengers,Share ₹,Status
+f|Cancel ride|Reasons,Fee notice,Confirm
+d|Trip summary|Fare total,Distance / time,Receipt
+l|Payment|UPI,Card,Wallet,Cash
+f|Rate driver|Stars,Tag chips,Tip
+f|Fare dispute|Ride,Amount,Reason
+l|Refund status|Amount,Timeline,Gateway ref
+l|Ride history|Filter tabs,Ride cards
+d|Ride detail|Map,Fare,Invoice PDF
+d|Wallet home|Balance ₹,Add money,Recent txns
+f|Add money|Amount chips,Method,Auto top-up
+l|Transactions|Credit / debit,Filters
+l|Saved payments|UPI VPAs,Cards,Add new
+l|Promo codes|Apply field,Offer cards
+d|Refer & Earn|Code,Share,Rewards
+m|Pool booking|Route,Seat select,Fare
+m|Pool live trip|Stops order,Occupancy,Messages
+l|Emergency contacts|Contacts,Notify toggles,Add
+f|Report incident|Category,Severity,Evidence
+f|Lost item|Item type,Description,Ride
+l|Help centre|FAQs,Tickets,New ticket
+l|Ticket chat|Agent thread,Attach,CSAT
+l|Notifications|Offers,Ride alerts
+d|Loyalty|Tier,Points,Streak
+l|Profile & settings|Accessibility,Language,Logout`,
+drv:`f|Login OTP|Phone,OTP,Verify
+f|Profile|Photo,Name,Language
+f|Vehicle details|RC,Permit,PUC,Insurance
+f|Document upload|Aadhaar,DL,RC
+f|Selfie KYC|Camera frame,Liveness
+f|Bank / UPI verify|Account,IFSC,UPI VPA
+d|Approval tracker|Steps,Status,Support
+l|Rejected docs|Reason,Re-upload
+l|Training & terms|Videos,Accept
+m|Driver home|Online toggle,Today ₹,Demand zones
+m|Heatmap & surge|Heat zones,Multiplier
+p|Ride request|20s ring,Fare,Pickup km,Accept / Reject
+f|Auto-accept|Toggle,Max km,Min fare
+m|Navigate to pickup|Route,ETA,Call customer
+f|Arrived & OTP|4-digit OTP,Wait timer,Start
+m|Trip in progress|Route,Stops,SOS
+d|Drop & complete|Fare,Distance,Complete
+d|Collect payment|Cash / UPI,Confirm,Tip
+f|Rate customer|Stars,Tags
+d|Earnings dashboard|Today,Week chart,Trips
+d|Daily / weekly|Bar chart,Online hours
+l|Trip history|Date filter,Trip cards
+l|Ledger|Commission,Tips,Balance after
+d|Wallet balance|Balance,Withdraw
+f|Withdraw|Amount,Account,Fee
+l|Payout status|Requested,Processing,Paid
+l|Payout accounts|Bank,UPI,Primary
+l|Tips|Trip,Amount
+d|Statements|Month list,Download PDF
+d|Daily target|Progress ring,Bonus
+d|Weekly goals|Milestones,Bonus
+l|Incentives|Programs,Progress,Expiry
+d|Badge tier|Rating,Cancel rate,Tier
+l|Leaderboard|Rank,City top 10
+p|SOS|Hold,Contacts,Police
+p|Fatigue alert|Hours online,Rest timer
+l|Shift log|Start / end,Breaks,Earnings
+f|Report incident|Category,Details,Evidence
+f|Lost item|Item,Return plan
+p|Fake-GPS warning|Risk score,Fix steps
+m|Pool manager|Seats,Stop order,Occupancy
+m|Pool navigation|Next stop,Pickup list
+f|Pool broadcast|Quick messages,Send
+l|Ride chat|Thread,Quick replies
+l|Support tickets|List,New ticket
+l|Notifications|Broadcasts,Alerts
+l|Doc expiry|Expiring docs,Renew
+l|Ratings|Feedback,Tags,Dispute
+f|Settings|Language,Sound,Nav app
+l|Profile & vehicle|Switch vehicle,Docs,Logout`,
+adm:`f|Login + MFA|Email,Password,OTP
+d|Live dashboard|KPIs,Rides chart,Alerts
+l|Global search|Rides,Users,Drivers
+l|Audit logs|Actor,Action,Filters
+m|Live map|Rides,Drivers,Zones
+l|Dispatch monitor|Offers,Timeouts,Retries
+l|Ride list|Filters,Status,Export
+d|Ride detail|Timeline,Fare,Chat
+l|Driver list|Status,Rating,Filters
+l|Onboarding queue|Tickets,Assign,SLA
+d|Document review|Preview,Approve,Reject
+d|Driver profile|Docs,Wallet,Trips
+l|Fatigue / spoof alerts|Risk score,Action
+l|Customers|Search,Profile,Tier
+d|Loyalty mgmt|Tiers,Points rules
+l|Vehicle categories|Amenities,Capacity,Active
+l|Vehicles|Plate,PUC,Fitness
+f|Fare rules|Base,Per km,Commission
+f|Surge rules|Zone,Multiplier,Schedule
+m|Geofence editor|Polygon,Zone type
+m|Road restrictions|Segment,Type,Active
+l|Payments|Gateway,Status,Filters
+l|Refunds & disputes|Amount,Resolve
+l|Driver payouts|Requests,Approve
+l|SOS console|Live alerts,Contacts,Notes
+l|Incidents|Ticket,Severity,Evidence
+l|Support tickets|SLA,Priority,Assign
+f|Promos & referrals|Code,Limits,Validity
+f|Broadcasts|Audience,Message,Schedule
+d|Roles, analytics & latency|RBAC matrix,Route latency,Reports`};
+const NAV={cust:['Home','Rides','Wallet','Account'],drv:['Home','Earnings','Goals','Profile'],adm:null};
+function card(t,i,k,n){const[ty,nm,el]=t.split('|'),e=el.split(',');let h='';
+const rows=e.map(x=>`<div class="r">${x}</div>`).join('');
+if(ty=='m')h=`<div class="map"></div><div class="sheet">${rows}</div>`;
+else if(ty=='l')h=rows+rows;
+else if(ty=='f')h=e.map(x=>`<div class="f">${x}</div>`).join('')+`<div class="b">Continue</div>`;
+else if(ty=='d')h=`<div class="big">₹ 128</div>`+rows+`<div class="b">${e[e.length-1]}</div>`;
+else if(ty=='p')h=`<div class="big">${e[0]}</div>`+rows+`<div class="b">${e[e.length-1]}</div>`;
+else h=`<div class="c">${nm.toUpperCase()}</div>`+e.map(x=>`<div class="ch" style="align-self:center">${x}</div>`).join('');
+const bn=n?`<div class="bn">${n.map((x,j)=>j?`<span>${x}</span>`:`<b>${x}</b>`).join('')}</div>`:'';
+return`<div class="ph ${k=='adm'?'ad':''}"><div class="top">${nm}<i>${i+1}</i></div><div class="body">${h}</div>${bn}</div>`}
+const R=`<div class="sec"><h2>Navigation rules</h2>
+<h3>Customer app</h3><ul><li>Bottom nav (4 tabs): Home | Rides | Wallet | Account.</li><li>Booking flow is linear: Home → Search → Choose ride → Confirm → Searching → Driver found → Live ride → Summary → Payment → Rating.</li><li>During an active ride the bottom nav is hidden; a persistent ride card shows ETA and driver.</li><li>SOS floating button on every live-ride screen.</li><li>Back during a ride shows a confirm dialog and never cancels the ride.</li><li>Driver not found in 3 retries → Offer fare bump or Try again.</li><li>Out-of-zone / restricted road → alert before Confirm.</li></ul>
+<h3>Driver app</h3><ul><li>Bottom nav (4 tabs): Home | Earnings | Goals | Profile.</li><li>Unapproved driver sees only the Approval tracker, Home is locked.</li><li>Ride request is a full-screen overlay with a 20s timer; timeout = auto-reject and ride_assignments.status updated.</li><li>Trip state machine without skips: Accept → Navigate → Arrived → OTP → Start → Drop → Payment → Rate customer.</li><li>Offline: Home map dims, requests stop. Fatigue limit forces the rest screen.</li><li>Fake-GPS detection blocks going online until fixed.</li></ul>
+<h3>Admin website</h3><ul><li>Left sidebar + top global search + role-based menu; items hidden without admin_permissions.</li><li>Every destructive action (refund, ban, wallet adjust) needs a confirm modal and writes to audit_logs.</li><li>Ride detail links to Driver, Customer, Payment and Chat; the SOS console takes priority with a red banner everywhere.</li></ul>
+<h3>Popup rules (screens + popups combined)</h3><ul><li><b>4 popup types:</b> Dialog (centred, blocking, max 2 buttons), Bottom sheet (choices/forms, swipe-down or back to dismiss), Toast (3s auto-dismiss, never blocks), Full-screen overlay (critical, back and outside tap ignored).</li><li><b>Priority:</b> Session expired / Force logout &gt; SOS &gt; Driver ride request &gt; Fatigue / Fake-GPS &gt; Payment and network errors &gt; Info dialogs &gt; Toasts. Only one blocking popup at a time; lower-priority ones queue, toasts never queue.</li><li><b>Back press:</b> Dialog = same as secondary button; Sheet = dismiss; Full-screen = ignored. During an active ride, back never cancels the ride.</li><li><b>Outside tap:</b> dismisses Sheets only. Destructive dialogs (Cancel ride, Logout, Ban, Delete) never close on outside tap.</li><li><b>Route stack:</b> popups do not add to the back stack. Primary button either returns to the calling screen with a result or pushes the next screen (e.g. Driver arrived → Share OTP, Payment failed → Payment method).</li><li><b>Flow triggers (Customer):</b> Pickup confirm sheet → Surge / Fare changed → Searching; No driver found dialog after 3 retries; Driver arrived overlay → Ride in progress; Ride ended → Payment → Tip sheet → Rate prompt.</li><li><b>Flow triggers (Driver):</b> Go online dialog checks docs, GPS and fatigue; Ride request overlay (20s) → Navigate; Wrong OTP dialog blocks Start; Cash collect sheet → Rate customer; Fatigue overlay forces offline until the rest timer ends.</li><li><b>Admin:</b> every destructive dialog asks for a reason and writes audit_logs; refunds above the set limit need MFA re-auth; Session timeout overlay clears the sidebar state.</li><li><b>SOS:</b> Send-SOS dialog appears on Customer and Driver, a hold-to-confirm button prevents accidental triggers, and Admin receives a red banner plus the SOS console.</li><li><b>Offline:</b> No-internet dialog only blocks network actions; the live ride and map keep working with the last known state.</li><li><b>Every popup:</b> has a loading state on its primary button, an error toast on failure, and sends no analytics event until a button is tapped.</li></ul><h3>Common</h3><ul><li>Every screen has loading, empty and error states.</li><li>Money is stored in cents and shown in ₹.</li><li>Auth only via Firebase; Supabase is for data only.</li></ul></div>`;
+const P={cust:`d|Location permission|Allow location for pickup|Allow/Not now
+d|Notification permission|Get ride alerts|Allow/Skip
+d|Wrong OTP|2 attempts left|Retry
+b|Logout|Sign out of this device?|Logout/Stay
+d|No internet|Check connection|Retry
+d|GPS off|Turn on GPS|Open settings
+b|Confirm pickup|Pickup point + gate|Confirm/Adjust
+b|Add favourite|Label Home / Work|Save/Cancel
+d|Out of zone|Service not available here|Change drop
+d|Surge pricing|1.5x demand now|Book/Wait
+b|Fare changed|New fare shown|Accept/Cancel
+b|Promo applied|You saved ₹|Done
+d|No driver found|Retry or raise fare|Retry/Cancel
+x|Driver arrived|Share OTP 4821|Share OTP
+d|Cancel ride?|Fee ₹20 applies|Keep ride/Cancel
+d|End ride here?|Confirm early drop|Yes/No
+b|Add tip|₹10 / 20 / 50|Pay tip/Skip
+b|Payment failed|Try another method|Retry/Switch
+b|Low wallet|Add money to continue|Add money
+d|Send SOS?|Alerts contacts + police|Send/Cancel
+t|Trip shared|Link copied|—
+d|Rate driver|How was the ride?|Rate/Later
+b|Dispute submitted|Ticket created|Track
+x|Session expired|Please login again|Login`,
+drv:`d|Go online?|Docs and location OK|Go online/Later
+d|Go offline?|Active ride pending|Stay/Offline
+x|New ride request|20s timer + fare|Accept/Reject
+t|Request missed|Auto-rejected|—
+d|Reject reason|Too far / Traffic / Break|Submit/Back
+b|Navigation app|Choose Maps|Open
+d|Arrived|Customer notified|OK
+d|Wrong OTP|Ask customer again|Retry
+d|Start trip?|OTP verified|Start/Back
+b|Collect cash|Collect ₹128|Confirmed
+b|Customer cancelled|Cancel fee credited|Go online
+d|Cancel trip?|Penalty warning|Keep/Cancel
+x|Fatigue rest|Mandatory 20 min rest|Start rest
+d|Fake GPS|Disable mock location|Fix now
+d|Document expiring|DL expires in 7 days|Renew/Later
+d|Document rejected|Reason shown|Re-upload
+b|Confirm withdraw|Amount to bank|Confirm/Cancel
+d|Low balance|Minimum ₹100|OK
+b|Incentive unlocked|Bonus credited|Claim
+d|Send SOS?|Alerts HQ + contacts|Send/Cancel
+b|Surge zone|Move to hot area|Navigate
+d|Low battery|Under 15%|OK
+t|Poor network|Reconnecting…|—
+d|End shift?|Logout and go offline|Logout/Stay`,
+adm:`d|Confirm refund|Amount + reason|Approve/Cancel
+d|Ban user|Reason required|Ban/Cancel
+d|Wallet adjust|Amount + note|Apply/Cancel
+d|Approve driver|Docs verified|Approve/Reject
+d|Reject documents|Rejection reason|Submit
+b|Assign ticket|Pick agent|Assign
+d|Delete geofence|Irreversible|Delete/Cancel
+d|Publish surge|Zone + multiplier|Publish/Cancel
+b|Send broadcast|Audience count|Send/Schedule
+d|Force cancel ride|Reason required|Confirm/Cancel
+d|Resolve SOS|Add notes|Resolve
+b|Export data|CSV / PDF|Export
+d|Role change|Permission diff|Save/Cancel
+d|MFA required|Enter OTP|Verify
+x|Session timeout|Login again|Login
+t|Saved|Changes saved|—
+t|Permission denied|Contact superadmin|—
+b|Filters|Date, status, city|Apply/Reset
+d|Disable promo|Active users affected|Disable/Cancel
+b|Approve payouts|Batch total|Approve`};
+function pc(t,i,k){const[ty,nm,bd,bt]=t.split('|'),B=bt.split('/').filter(x=>x!='—');
+const bs=B.map((x,j)=>j?`<div class="f" style="text-align:center">${x}</div>`:`<div class="b">${x}</div>`).join('');
+let o;if(ty=='t')o=`<div class="tt">${nm}: ${bd}</div>`;
+else o=`<div class="ov ${ty=='b'?'bt':ty=='x'?'full':''}"><div class="dl ${ty=='b'?'sh':''}"><b>${nm}</b><span>${bd}</span>${bs}</div></div>`;
+return`<div class="ph ${k=='adm'?'ad':''}"><div class="top">${nm}<i>${i+1}</i></div><div class="body" style="opacity:.3"><div class="r">&nbsp;</div><div class="r">&nbsp;</div><div class="r">&nbsp;</div></div>${o}</div>`}
+function popView(){return`<p class="lg">Dialog = centred, blocking · Sheet = bottom, swipe-down · Toast = 3s, non-blocking · Full = critical, no dismiss</p>`+[['cust','Customer popups (24)'],['drv','Driver popups (24)'],['adm','Admin popups (20)']].map(([k,l])=>`<h2 class="ph2">${l}</h2><div class="grid">${P[k].split('\n').map((t,i)=>pc(t,i,k)).join('')}</div>`).join('')}
+const T=[['cust','Customer (50)'],['drv','Driver (50)'],['adm','Admin (30)'],['pop','Popups (68)'],['nav','Navigation rules']];
+const tb=document.getElementById('tabs'),v=document.getElementById('v');
+function show(k){[...tb.children].forEach((b,i)=>b.classList.toggle('on',T[i][0]==k));
+v.innerHTML=k=='nav'?R:k=='pop'?popView():`<div class="grid">${D[k].split('\n').map((t,i)=>card(t,i,k,t.startsWith('m|')||t.startsWith('d|Wallet')||/^(l\|(Ride history))/.test(t)?NAV[k]:null)).join('')}</div>`}
+T.forEach(t=>{const b=document.createElement('button');b.textContent=t[1];b.onclick=()=>show(t[0]);tb.append(b)});
+show('cust');
+</script></body></html>
+
