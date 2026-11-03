@@ -391,7 +391,7 @@ export const RideManagement: React.FC = () => {
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Vehicle & Plate: </span>
-                  <strong>{selectedRide.vehicle_model_override || 'Mercedes-Benz E-Class'} ({selectedRide.vehicle_plate_override || 'MH 01 DX 4921'})</strong>
+                  <strong>{selectedRide.vehicle_model_override || 'Saarthi Prime EV Rickshaw'} ({selectedRide.vehicle_plate_override || 'DL 1ER 8492'})</strong>
                 </div>
                 <div>
                   <span style={{ color: 'var(--text-muted)' }}>Masked Switchboard: </span>

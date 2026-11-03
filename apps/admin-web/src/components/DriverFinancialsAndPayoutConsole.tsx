@@ -80,107 +80,20 @@ export const DriverFinancialsAndPayoutConsole: React.FC = () => {
       if (sumRes) {
         setSummary(sumRes);
       } else {
-        // High-fidelity fallback
         setSummary({
-          completed_rides_count: 142,
-          platform_gross_rupees: 428500.0,
-          platform_commission_rupees: 85700.0,
-          chauffeur_net_disbursed_rupees: 354800.0,
-          tips_volume_rupees: 12000.0,
-          pending_welfare_requests: 2,
+          completed_rides_count: 0,
+          platform_gross_rupees: 0.0,
+          platform_commission_rupees: 0.0,
+          chauffeur_net_disbursed_rupees: 0.0,
+          tips_volume_rupees: 0.0,
+          pending_welfare_requests: 0,
           active_disbursement_batch: 'Automated NEFT/IMPS Daily 23:00 UTC',
           tax_withholding_compliance: 'Section 194C (1% TDS Active)'
         });
       }
 
-      if (recRes && recRes.length > 0) {
-        setReconciliations(recRes);
-      } else {
-        setReconciliations([
-          {
-            id: 'rec-1',
-            driver_id: 'd-101',
-            driver_name: 'Chauffeur Arjun Rathore',
-            driver_phone: '+91 98765 43210',
-            period: 'October 2026',
-            total_rides: 45,
-            gross_fare_rupees: 98000.0,
-            platform_commission_rupees: 19600.0,
-            tips_rupees: 4500.0,
-            bonuses_rupees: 5000.0,
-            tds_deducted_rupees: 879.0,
-            net_payout_rupees: 87021.0,
-            status: 'SETTLED',
-            settlement_utr: 'UTR20261025HDFC99824',
-            settled_at: '2026-10-25T14:30:00Z',
-            created_at: '2026-10-25T00:00:00Z'
-          },
-          {
-            id: 'rec-2',
-            driver_id: 'd-102',
-            driver_name: 'Chauffeur Balraj Singh',
-            driver_phone: '+91 98111 22334',
-            period: 'October 2026',
-            total_rides: 38,
-            gross_fare_rupees: 76500.0,
-            platform_commission_rupees: 15300.0,
-            tips_rupees: 3200.0,
-            bonuses_rupees: 3500.0,
-            tds_deducted_rupees: 679.0,
-            net_payout_rupees: 67221.0,
-            status: 'FAILED',
-            failure_reason: 'Beneficiary IFSC code merged into central hub',
-            failure_explanation: 'Bank rejected settlement: Branch IFSC HDFC0009988 has been consolidated. Driver account needs routing update.',
-            created_at: '2026-10-25T00:00:00Z'
-          },
-          {
-            id: 'rec-3',
-            driver_id: 'd-103',
-            driver_name: 'Chauffeur Vikramaditya Deshmukh',
-            driver_phone: '+91 98222 33445',
-            period: 'October 2026',
-            total_rides: 52,
-            gross_fare_rupees: 115000.0,
-            platform_commission_rupees: 23000.0,
-            tips_rupees: 6200.0,
-            bonuses_rupees: 7500.0,
-            tds_deducted_rupees: 1057.0,
-            net_payout_rupees: 104643.0,
-            status: 'SETTLED',
-            settlement_utr: 'UTR20261025ICICI7741',
-            settled_at: '2026-10-25T14:32:00Z',
-            created_at: '2026-10-25T00:00:00Z'
-          }
-        ]);
-      }
-
-      if (welRes && welRes.length > 0) {
-        setWelfareRequests(welRes);
-      } else {
-        setWelfareRequests([
-          {
-            id: 'wel-1',
-            driver_id: 'd-102',
-            support_type: 'MEDICAL_EMERGENCY',
-            amount_rupees: 20000.0,
-            reason: 'Emergency hospitalization charges for immediate family member.',
-            repayment_terms_weeks: 8,
-            status: 'SUBMITTED',
-            created_at: '2026-10-26T09:15:00Z'
-          },
-          {
-            id: 'wel-2',
-            driver_id: 'd-101',
-            support_type: 'VEHICLE_REPAIR',
-            amount_rupees: 12000.0,
-            reason: 'EV inverter cooling pump replacement required to resume VIP airport duty.',
-            repayment_terms_weeks: 4,
-            status: 'APPROVED',
-            admin_notes: 'Approved under executive fleet continuity relief fund.',
-            created_at: '2026-10-24T11:45:00Z'
-          }
-        ]);
-      }
+      setReconciliations(recRes || []);
+      setWelfareRequests(welRes || []);
     } catch (err) {
       console.warn('Failed to fetch admin financial data:', err);
     } finally {

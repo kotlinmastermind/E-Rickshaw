@@ -4,10 +4,10 @@ import { fetchWithAuth } from '../services/api';
 
 export const Dashboard: React.FC = () => {
   const [stats, setStats] = useState({
-    total_rides: 142,
-    active_rides: 6,
-    online_drivers: 18,
-    gross_booking_cents: 28400000,
+    total_rides: 0,
+    active_rides: 0,
+    online_drivers: 0,
+    gross_booking_cents: 0,
     platform_status: "OPERATIONAL"
   });
 

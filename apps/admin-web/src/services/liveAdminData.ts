@@ -221,13 +221,13 @@ export async function fetchLiveDashboardMetrics(): Promise<any> {
     console.warn('Dashboard stats API fallback:', err);
   }
   return {
-    total_rides: 14,
-    active_rides: 11,
-    completed_rides: 2,
-    gross_booking_cents: 311122,
+    total_rides: 0,
+    active_rides: 0,
+    completed_rides: 0,
+    gross_booking_cents: 0,
     currency: 'INR',
-    online_drivers: 4,
-    total_users: 27,
+    online_drivers: 0,
+    total_users: 1,
     platform_status: 'OPERATIONAL'
   };
 }

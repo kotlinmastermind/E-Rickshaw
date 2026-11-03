@@ -14,6 +14,38 @@ export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = (
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
+  // Password Recovery State
+  const [isForgotMode, setIsForgotMode] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [recoverySent, setRecoverySent] = useState(false);
+
+  const requestRecovery = async (e: FormEvent) => {
+    e.preventDefault(); setBusy(true); setError(''); setInfo('');
+    try {
+      await requestApi('/auth/recovery/request', { method: 'POST', body: JSON.stringify({ identifier: email.trim() }) }, false);
+      setRecoverySent(true);
+      setInfo('Password recovery instructions and security token dispatched to your email.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Recovery request failed.');
+    } finally { setBusy(false); }
+  };
+
+  const completeRecovery = async (e: FormEvent) => {
+    e.preventDefault(); setBusy(true); setError(''); setInfo('');
+    try {
+      await requestApi('/auth/recovery/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ identifier: email.trim(), recovery_code: recoveryCode.trim(), new_password: newPassword })
+      }, false);
+      setInfo('Password successfully updated. You may now sign in.');
+      setIsForgotMode(false);
+      setRecoverySent(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Password reset failed.');
+    } finally { setBusy(false); }
+  };
+
   const accept = (result: AuthResult) => {
     if (!result.access_token || result.user?.role !== 'admin' || result.user?.mfa_enabled !== true) {
       throw new Error('An MFA-verified administrator session was not returned.');
@@ -57,10 +89,30 @@ export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = (
       <div style={{ color: '#d4af37', fontFamily: 'Georgia,serif', letterSpacing: '.18em', fontSize: 12 }}>GRAND CHAUFFEUR</div>
       <h1 style={{ fontFamily: 'Georgia,serif', fontWeight: 500, fontSize: 30, margin: '12px 0 6px' }}>Executive access</h1>
       <p style={{ color: '#aca69c', lineHeight: 1.6, marginBottom: 24 }}>Sign in with an administrator account and verify with your authenticator. Customer and driver accounts cannot enter this console.</p>
-      {!challenge && !setup && <form onSubmit={signIn} style={{ display: 'grid', gap: 14 }}>
+      {!challenge && !setup && !isForgotMode && <form onSubmit={signIn} style={{ display: 'grid', gap: 14 }}>
         <label style={labelStyle}>Administrator email<input autoComplete="username" type="email" required value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} /></label>
         <label style={labelStyle}>Password<input autoComplete="current-password" type="password" required value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} /></label>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -4 }}>
+          <button type="button" onClick={() => { setIsForgotMode(true); setError(''); setInfo(''); }} style={{ background: 'none', border: 0, color: '#d4af37', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+            Forgot password / Recovery?
+          </button>
+        </div>
         <button disabled={busy} style={goldButton}>{busy ? 'Verifying credentials…' : 'Continue securely'}</button>
+      </form>}
+
+      {!challenge && !setup && isForgotMode && <form onSubmit={recoverySent ? completeRecovery : requestRecovery} style={{ display: 'grid', gap: 14 }}>
+        <div style={{ color: '#d4af37', fontSize: 14, fontWeight: 600 }}>Administrator Password Recovery</div>
+        <label style={labelStyle}>Registered email<input autoComplete="email" type="email" required value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} /></label>
+        {recoverySent && <>
+          <label style={labelStyle}>Recovery code / Token<input type="text" required placeholder="Enter code received" value={recoveryCode} onChange={e => setRecoveryCode(e.target.value)} style={inputStyle} /></label>
+          <label style={labelStyle}>New Password<input type="password" required placeholder="Min 8 characters" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={inputStyle} /></label>
+        </>}
+        <button disabled={busy} style={goldButton}>
+          {busy ? 'Processing…' : recoverySent ? 'Confirm & Reset Password' : 'Send Recovery Token'}
+        </button>
+        <button type="button" onClick={() => { setIsForgotMode(false); setRecoverySent(false); setError(''); setInfo(''); }} style={{ background: 'none', border: 0, color: '#aaa', fontSize: 12, cursor: 'pointer', marginTop: 4 }}>
+          ← Back to Sign In
+        </button>
       </form>}
       {info && <div role="status" style={noticeStyle}>{info}</div>}
       {info.includes('enrollment') && !setup && <button disabled={busy || !email || !password} onClick={() => void beginSetup()} style={goldButton}><KeyRound size={16} /> Begin authenticator setup</button>}

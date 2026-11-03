@@ -13,35 +13,7 @@ interface Chauffeur {
 }
 
 export const DriverManagement: React.FC = () => {
-  const [drivers, setDrivers] = useState<Chauffeur[]>([
-    {
-      id: "drv-001",
-      name: "Rajeshwar Varma",
-      license_number: "DL-MH01-2020-009988",
-      vehicle: "Mercedes-Benz E-Class (MH01-LX-0001)",
-      rating: 4.98,
-      total_trips: 340,
-      approval_status: "APPROVED",
-      documents: [
-        { type: "Commercial License", filename: "license_mh01.pdf", verified: true },
-        { type: "Vehicle RC", filename: "rc_eclass.pdf", verified: true },
-        { type: "Fleet Insurance", filename: "insurance_policy.pdf", verified: true }
-      ]
-    },
-    {
-      id: "drv-002",
-      name: "Devendra Patil",
-      license_number: "DL-MH02-2022-004412",
-      vehicle: "Range Rover Autobiography (MH01-LX-0002)",
-      rating: 5.0,
-      total_trips: 0,
-      approval_status: "PENDING",
-      documents: [
-        { type: "Commercial License", filename: "dl_patil.pdf", verified: false },
-        { type: "Vehicle RC", filename: "rc_rangerover.pdf", verified: false }
-      ]
-    }
-  ]);
+  const [drivers, setDrivers] = useState<Chauffeur[]>([]);
 
   const [selectedDriver, setSelectedDriver] = useState<Chauffeur | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");

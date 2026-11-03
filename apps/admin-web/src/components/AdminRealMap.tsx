@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { ZoomIn, ZoomOut, Maximize2, RefreshCw, Search } from 'lucide-react';
 
 export interface AdminRealMapProps {
@@ -25,147 +25,133 @@ interface FleetVehicle {
   fare?: number;
 }
 
-const SAMPLE_VEHICLES: FleetVehicle[] = [
-  {
-    id: 'V1',
-    plate: 'DL-1ER-4821',
-    driver: 'Suresh Kumar',
-    model: 'Saarthi E-Rickshaw Pro',
-    lat: 28.6315,
-    lng: 77.2167,
-    battery: 84,
-    speed: 24,
-    status: 'on_trip',
-    passenger: 'Priya Sharma',
-    fare: 145
-  },
-  {
-    id: 'V2',
-    plate: 'DL-1ER-9012',
-    driver: 'Rajesh Verma',
-    model: 'Mayuri Eco Deluxe',
-    lat: 28.6412,
-    lng: 77.2215,
-    battery: 92,
-    speed: 18,
-    status: 'en_route',
-    passenger: 'Amit Verma',
-    fare: 110
-  },
-  {
-    id: 'V3',
-    plate: 'DL-1ER-3391',
-    driver: 'Manoj Singh',
-    model: 'Mahindra Treo Auto',
-    lat: 28.6250,
-    lng: 77.2100,
-    battery: 76,
-    speed: 0,
-    status: 'available'
-  },
-  {
-    id: 'V4',
-    plate: 'DL-1ER-7714',
-    driver: 'Sunil Batra',
-    model: 'Euler HiLoad EV',
-    lat: 28.6358,
-    lng: 77.2285,
-    battery: 41,
-    speed: 22,
-    status: 'on_trip',
-    passenger: 'Rohan Kapoor',
-    fare: 160
-  },
-  {
-    id: 'V5',
-    plate: 'DL-1ER-1092',
-    driver: 'Dinesh Yadav',
-    model: 'Saarthi Star EV',
-    lat: 28.6200,
-    lng: 77.2270,
-    battery: 89,
-    speed: 12,
-    status: 'available'
-  },
-  {
-    id: 'V6',
-    plate: 'DL-1ER-5502',
-    driver: 'Anil Gupta',
-    model: 'Saarthi E-Rickshaw Pro',
-    lat: 28.6480,
-    lng: 77.2260,
-    battery: 68,
-    speed: 19,
-    status: 'on_trip',
-    passenger: 'Deepak Roy',
-    fare: 85
-  }
-];
+export const SAMPLE_VEHICLES: FleetVehicle[] = [];
 
-const GEOFENCE_ZONES: { name: string; type: string; color: string; coords: [number, number][] }[] = [
+// Mapbox GeoJSON Geofence Zones (coordinates in [lng, lat])
+const GEOFENCE_ZONES_MAPBOX = [
   {
-    name: 'Connaught Place Inner & Outer Circle',
-    type: 'Operational Zone (High Demand)',
+    name: 'Connaught Place Commercial Core (High Surge)',
+    type: 'Surge Zone (+1.5x)',
     color: '#d4af37',
     coords: [
-      [28.6360, 77.2135],
-      [28.6360, 77.2225],
-      [28.6270, 77.2225],
-      [28.6270, 77.2135]
+      [77.2150, 28.6360],
+      [77.2240, 28.6360],
+      [77.2240, 28.6280],
+      [77.2150, 28.6280],
+      [77.2150, 28.6360]
     ]
   },
   {
-    name: 'New Delhi Railway Station (NDLS) Feeder',
-    type: 'Surge Zone (+1.8x)',
-    color: '#f59e0b',
+    name: 'NDLS Railway Station Transit Hub',
+    type: 'High Demand (+2.0x)',
+    color: '#3b82f6',
     coords: [
-      [28.6445, 77.2185],
-      [28.6445, 77.2260],
-      [28.6390, 77.2260],
-      [28.6390, 77.2185]
+      [77.2170, 28.6450],
+      [77.2260, 28.6450],
+      [77.2260, 28.6390],
+      [77.2170, 28.6390],
+      [77.2170, 28.6450]
     ]
   },
   {
-    name: 'Chandni Chowk Heritage Pedestrian Zone',
-    type: 'Commercial EV Restricted',
+    name: 'Old Delhi Heritage Zone (Geo-Restricted)',
+    type: 'Restricted Slow Speed',
     color: '#ef4444',
     coords: [
-      [28.6540, 77.2280],
-      [28.6540, 77.2370],
-      [28.6480, 77.2370],
-      [28.6480, 77.2280]
+      [77.2250, 28.6560],
+      [77.2380, 28.6560],
+      [77.2380, 28.6460],
+      [77.2250, 28.6460],
+      [77.2250, 28.6560]
     ]
   }
 ];
 
-const RESTRICTED_ROADS: { name: string; type: string; coords: [number, number][] }[] = [
-  {
-    name: 'Minto Road Underpass (Heavy Waterlogging Caution)',
-    type: 'Hazard Prohibited',
-    coords: [
-      [28.6385, 77.2230],
-      [28.6405, 77.2245]
-    ]
-  },
+// Restricted Corridors ([lng, lat])
+const RESTRICTED_ROADS_MAPBOX = [
   {
     name: 'Barakhamba Flyover (E-Rickshaw High-Speed Restriction)',
     type: 'Motorized Expressway',
     coords: [
-      [28.6300, 77.2240],
-      [28.6260, 77.2265]
+      [77.2240, 28.6300],
+      [77.2265, 28.6260]
     ]
   }
 ];
 
-// Quick Jump Landmark Coordinates across Delhi NCR
-const DELHI_LANDMARKS = [
-  { label: 'Connaught Place', coords: [28.6328, 77.2195] as [number, number] },
-  { label: 'NDLS Railway', coords: [28.6425, 77.2210] as [number, number] },
-  { label: 'Chandni Chowk', coords: [28.6505, 77.2300] as [number, number] },
-  { label: 'India Gate', coords: [28.6129, 77.2295] as [number, number] },
-  { label: 'Khan Market', coords: [28.6000, 77.2270] as [number, number] },
-  { label: 'Karol Bagh', coords: [28.6515, 77.1905] as [number, number] }
+// Landmarks ([lng, lat] for Mapbox)
+const DELHI_LANDMARKS_MAPBOX = [
+  { label: 'Connaught Place', coords: [77.2195, 28.6328] as [number, number] },
+  { label: 'NDLS Railway', coords: [77.2210, 28.6425] as [number, number] },
+  { label: 'Chandni Chowk', coords: [77.2300, 28.6505] as [number, number] },
+  { label: 'India Gate', coords: [77.2295, 28.6129] as [number, number] },
+  { label: 'Khan Market', coords: [77.2270, 28.6000] as [number, number] },
+  { label: 'Karol Bagh', coords: [77.1905, 28.6515] as [number, number] }
 ];
+
+const MAPBOX_PUBLIC_KEY =
+  (import.meta as any).env?.VITE_MAPBOX_PUBLIC_TOKEN || '';
+
+const isValidMapboxToken =
+  typeof MAPBOX_PUBLIC_KEY === 'string' &&
+  MAPBOX_PUBLIC_KEY.startsWith('pk.') &&
+  !MAPBOX_PUBLIC_KEY.includes('MapboxPublicDemo') &&
+  !MAPBOX_PUBLIC_KEY.includes('example_public_token');
+
+const MAPBOX_STYLES: Record<string, string> = {
+  dark: 'mapbox://styles/mapbox/dark-v11',
+  streets: 'mapbox://styles/mapbox/streets-v12',
+  satellite: 'mapbox://styles/mapbox/satellite-streets-v12'
+};
+
+const getMapboxStyle = (styleKey: 'dark' | 'streets' | 'satellite'): any => {
+  if (isValidMapboxToken) {
+    return MAPBOX_STYLES[styleKey];
+  }
+  if (styleKey === 'streets') {
+    return {
+      version: 8,
+      sources: {
+        'carto-voyager': {
+          type: 'raster',
+          tiles: [
+            'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+            'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png'
+          ],
+          tileSize: 256
+        }
+      },
+      layers: [{ id: 'carto-voyager-layer', type: 'raster', source: 'carto-voyager', minzoom: 0, maxzoom: 22 }]
+    };
+  } else if (styleKey === 'satellite') {
+    return {
+      version: 8,
+      sources: {
+        'esri-satellite': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256
+        }
+      },
+      layers: [{ id: 'esri-satellite-layer', type: 'raster', source: 'esri-satellite', minzoom: 0, maxzoom: 22 }]
+    };
+  } else {
+    return {
+      version: 8,
+      sources: {
+        'carto-dark': {
+          type: 'raster',
+          tiles: [
+            'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+            'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'
+          ],
+          tileSize: 256
+        }
+      },
+      layers: [{ id: 'carto-dark-layer', type: 'raster', source: 'carto-dark', minzoom: 0, maxzoom: 22 }]
+    };
+  }
+};
 
 export const AdminRealMap: React.FC<AdminRealMapProps> = ({
   mode = 'live_fleet',
@@ -175,272 +161,448 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
   className = ''
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const markersLayerRef = useRef<L.LayerGroup | null>(null);
-  const geofenceLayerRef = useRef<L.LayerGroup | null>(null);
-  const editorLayerRef = useRef<L.LayerGroup | null>(null);
+  const mapInstanceRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
 
   const [tileStyle, setTileStyle] = useState<'dark' | 'streets' | 'satellite'>('dark');
-  const [editorPoints, setEditorPoints] = useState<[number, number][]>([]);
+  const [editorPoints, setEditorPoints] = useState<[number, number][]>([]); // [lng, lat]
   const [zoneType, setZoneType] = useState<string>('Surge Zone (+1.5x)');
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [vehicles, setVehicles] = useState<FleetVehicle[]>([]);
 
-  // Tile layer URLs
-  const TILE_URLS = {
-    dark: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    streets: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-  };
-
-  // Change tile style dynamically
-  const switchTileStyle = (style: 'dark' | 'streets' | 'satellite') => {
-    setTileStyle(style);
-    if (mapInstanceRef.current && tileLayerRef.current) {
-      mapInstanceRef.current.removeLayer(tileLayerRef.current);
-      const newLayer = L.tileLayer(TILE_URLS[style], {
-        maxZoom: 19,
-        subdomains: style === 'streets' ? 'abc' : 'abcd',
-        opacity: style === 'satellite' ? 0.9 : 0.95
-      }).addTo(mapInstanceRef.current);
-      tileLayerRef.current = newLayer;
-    }
-  };
-
+  // Dynamic Fleet Telemetry Hook from FastAPI Backend
   useEffect(() => {
-    if (!mapContainerRef.current) return;
+    let isMounted = true;
+    const fetchLiveVehicles = async () => {
+      try {
+        const resp = await fetch('/api/v1/vehicles/nearby?lat=28.63&lng=77.21&radius_km=25');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (Array.isArray(data) && isMounted) {
+            const mapped: FleetVehicle[] = data.map((v: any, i: number) => ({
+              id: v.id || `live-${i}`,
+              plate: v.registration_number || v.plate || `DL-1ER-${1000 + i}`,
+              driver: v.driver_name || v.driver || 'Live Chauffeur',
+              model: v.model_name || v.model || 'E-Rickshaw Pro',
+              lat: Number(v.current_latitude || v.lat || 28.6315 + (i * 0.004)),
+              lng: Number(v.current_longitude || v.lng || 77.2167 + (i * 0.004)),
+              battery: Number(v.battery_percentage || v.battery || 85),
+              speed: Number(v.current_speed || v.speed || 22),
+              status: v.status || 'available',
+              passenger: v.passenger_name || v.passenger,
+              fare: v.fare || 128
+            }));
+            setVehicles(mapped);
+          }
+        }
+      } catch {
+        // Network offline or connecting
+      }
+    };
+    fetchLiveVehicles();
+    const interval = setInterval(fetchLiveVehicles, 10000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
-    // Prevent duplicate map initialization
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.remove();
-      mapInstanceRef.current = null;
-    }
+  // Clear existing DOM markers
+  const clearMarkers = useCallback(() => {
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+  }, []);
 
-    // Initialize Leaflet Map centered on Central Delhi (Connaught Place)
-    const map = L.map(mapContainerRef.current, {
-      center: [28.6328, 77.2195],
-      zoom: 14,
-      zoomControl: false,
-      attributionControl: false
-    });
-    mapInstanceRef.current = map;
+  // Update Vector Overlays (Geofences, Routes, Restricted Roads, Vehicle Markers)
+  const renderOverlays = useCallback(
+    (map: mapboxgl.Map) => {
+      clearMarkers();
 
-    // Default Tile Layer
-    const tileLayer = L.tileLayer(TILE_URLS[tileStyle], {
-      maxZoom: 19,
-      subdomains: 'abcd',
-      opacity: 0.95
-    }).addTo(map);
-    tileLayerRef.current = tileLayer;
+      // 1. Geofences
+      if (mode === 'live_fleet' || mode === 'geofence_editor' || mode === 'mini') {
+        const features = GEOFENCE_ZONES_MAPBOX.map((z, idx) => ({
+          type: 'Feature' as const,
+          properties: {
+            id: `zone-${idx}`,
+            name: z.name,
+            type: z.type,
+            color: z.color
+          },
+          geometry: {
+            type: 'Polygon' as const,
+            coordinates: [z.coords]
+          }
+        }));
 
-    // Layer Groups
-    const geofenceGroup = L.layerGroup().addTo(map);
-    const markersGroup = L.layerGroup().addTo(map);
-    const editorGroup = L.layerGroup().addTo(map);
+        if (map.getSource('geofences-src')) {
+          (map.getSource('geofences-src') as mapboxgl.GeoJSONSource).setData({
+            type: 'FeatureCollection',
+            features
+          });
+        } else {
+          map.addSource('geofences-src', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features }
+          });
 
-    geofenceLayerRef.current = geofenceGroup;
-    markersLayerRef.current = markersGroup;
-    editorLayerRef.current = editorGroup;
+          map.addLayer({
+            id: 'geofences-fill',
+            type: 'fill',
+            source: 'geofences-src',
+            paint: {
+              'fill-color': ['get', 'color'],
+              'fill-opacity': 0.18
+            }
+          });
 
-    // 1. Render Geofence Polygons (if in live_fleet or geofence mode)
-    if (mode === 'live_fleet' || mode === 'geofence_editor' || mode === 'mini') {
-      GEOFENCE_ZONES.forEach(zone => {
-        const polygon = L.polygon(zone.coords, {
-          color: zone.color,
-          fillColor: zone.color,
-          fillOpacity: 0.18,
-          weight: 2,
-          dashArray: zone.type.includes('Restricted') ? '6, 6' : undefined
+          map.addLayer({
+            id: 'geofences-outline',
+            type: 'line',
+            source: 'geofences-src',
+            paint: {
+              'line-color': ['get', 'color'],
+              'line-width': 2
+            }
+          });
+        }
+      }
+
+      // 2. Restricted Roads
+      if (mode === 'live_fleet' || mode === 'road_restrictions') {
+        const roadFeatures = RESTRICTED_ROADS_MAPBOX.map((r, idx) => ({
+          type: 'Feature' as const,
+          properties: {
+            id: `road-${idx}`,
+            name: r.name,
+            type: r.type
+          },
+          geometry: {
+            type: 'LineString' as const,
+            coordinates: r.coords
+          }
+        }));
+
+        if (map.getSource('restricted-roads-src')) {
+          (map.getSource('restricted-roads-src') as mapboxgl.GeoJSONSource).setData({
+            type: 'FeatureCollection',
+            features: roadFeatures
+          });
+        } else {
+          map.addSource('restricted-roads-src', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: roadFeatures }
+          });
+
+          map.addLayer({
+            id: 'restricted-roads-line',
+            type: 'line',
+            source: 'restricted-roads-src',
+            paint: {
+              'line-color': '#ef4444',
+              'line-width': 5,
+              'line-dasharray': [3, 2]
+            }
+          });
+        }
+      }
+
+      // 3. Fleet Vehicles Markers
+      if (mode === 'live_fleet' || mode === 'mini') {
+        vehicles.forEach(v => {
+          const statusColor = v.status === 'on_trip' ? '#d4af37' : v.status === 'en_route' ? '#3b82f6' : '#10b981';
+
+          const el = document.createElement('div');
+          el.className = 'luxury-mapbox-marker';
+          el.style.width = '34px';
+          el.style.height = '34px';
+          el.style.borderRadius = '50%';
+          el.style.background = '#16161a';
+          el.style.border = `2px solid ${statusColor}`;
+          el.style.boxShadow = `0 0 14px ${statusColor}99`;
+          el.style.display = 'flex';
+          el.style.alignItems = 'center';
+          el.style.justifyContent = 'center';
+          el.style.color = statusColor;
+          el.style.fontWeight = '900';
+          el.style.fontSize = '13px';
+          el.style.cursor = 'pointer';
+          el.innerHTML = '⚡';
+
+          const popupContent = `
+            <div style="font-family: system-ui; min-width: 200px; padding: 6px; background: #16161a; color: #f2ead3; border-radius: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <b style="color: #d4af37; font-size: 13px;">${v.plate}</b>
+                <span style="font-size: 10px; color: ${statusColor}; font-weight: bold; text-transform: uppercase;">${v.status.replace('_', ' ')}</span>
+              </div>
+              <div style="font-size: 11px; color: #f2ead3; margin-top: 4px;">Chauffeur: ${v.driver} (${v.model})</div>
+              <div style="font-size: 11px; color: #8d8672; margin-top: 2px;">Battery: <b style="color: ${v.battery > 20 ? '#10b981' : '#ef4444'}">${v.battery}%</b> | Speed: ${v.speed} km/h</div>
+              ${v.passenger ? `<div style="margin-top: 6px; padding: 4px 6px; background: #0f0f12; border-radius: 4px; font-size: 10px; color: #d4af37;">Rider: ${v.passenger} · Fare: ₹${v.fare}</div>` : ''}
+            </div>
+          `;
+
+          const popup = new mapboxgl.Popup({ offset: 16 }).setHTML(popupContent);
+
+          el.addEventListener('click', () => {
+            setSelectedVehicle(v);
+          });
+
+          const marker = new mapboxgl.Marker({ element: el })
+            .setLngLat([v.lng, v.lat])
+            .setPopup(popup)
+            .addTo(map);
+
+          markersRef.current.push(marker);
         });
+      }
 
-        polygon.bindPopup(`
-          <div style="font-family: system-ui; padding: 6px; background: #16161a; color: #f2ead3; border-radius: 8px;">
-            <b style="color: ${zone.color}; font-size: 13px;">${zone.name}</b>
-            <div style="font-size: 11px; color: #8d8672; margin-top: 3px;">Zone Classification: ${zone.type}</div>
-            <div style="font-size: 11px; color: #10b981; margin-top: 4px;">● Status: Active Operational Geofence</div>
-          </div>
-        `);
-        geofenceGroup.addLayer(polygon);
-      });
-    }
+      // 4. Ride Route Mode
+      if (mode === 'ride_route') {
+        const pickup: [number, number] = [77.2195, 28.6328]; // [lng, lat]
+        const drop: [number, number] = [77.2270, 28.6000];
+        const routeCoords: [number, number][] = [
+          pickup,
+          [77.2230, 28.6250],
+          [77.2250, 28.6150],
+          [77.2260, 28.6070],
+          drop
+        ];
 
-    // 2. Render Road Restrictions (if live_fleet or road_restrictions mode)
-    if (mode === 'live_fleet' || mode === 'road_restrictions') {
-      RESTRICTED_ROADS.forEach(road => {
-        const polyline = L.polyline(road.coords, {
-          color: '#ef4444',
-          weight: 6,
-          opacity: 0.9,
-          dashArray: '8, 8'
-        });
-        polyline.bindPopup(`
-          <div style="font-family: system-ui; padding: 6px; background: #16161a; color: #f2ead3; border-radius: 8px;">
-            <b style="color: #ef4444; font-size: 12px;">🚫 RESTRICTED CORRIDOR</b>
-            <div style="font-size: 11px; color: #f2ead3; margin-top: 2px;">${road.name}</div>
-            <div style="font-size: 10px; color: #8d8672;">Type: ${road.type}</div>
-          </div>
-        `);
-        geofenceGroup.addLayer(polyline);
-      });
-    }
+        if (map.getSource('ride-route-src')) {
+          (map.getSource('ride-route-src') as mapboxgl.GeoJSONSource).setData({
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: routeCoords
+            }
+          });
+        } else {
+          map.addSource('ride-route-src', {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'LineString',
+                coordinates: routeCoords
+              }
+            }
+          });
 
-    // 3. Render Fleet Vehicles with Custom Gold SVG Pins (for live_fleet & mini)
-    if (mode === 'live_fleet' || mode === 'mini') {
-      SAMPLE_VEHICLES.forEach(v => {
-        const statusColor = v.status === 'on_trip' ? '#d4af37' : v.status === 'en_route' ? '#3b82f6' : '#10b981';
-        const iconHtml = `
-          <div style="
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: #16161a;
-            border: 2px solid ${statusColor};
-            box-shadow: 0 0 12px ${statusColor}88;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: ${statusColor};
-            font-weight: 800;
-            font-size: 12px;
-            cursor: pointer;
-          ">
-            ⚡
+          map.addLayer({
+            id: 'ride-route-casing',
+            type: 'line',
+            source: 'ride-route-src',
+            paint: {
+              'line-color': '#0f172a',
+              'line-width': 10
+            }
+          });
+
+          map.addLayer({
+            id: 'ride-route-line',
+            type: 'line',
+            source: 'ride-route-src',
+            paint: {
+              'line-color': '#d4af37',
+              'line-width': 5
+            }
+          });
+        }
+
+        // Pickup Marker (Green)
+        const pickupEl = document.createElement('div');
+        pickupEl.style.background = '#10b981';
+        pickupEl.style.color = '#000';
+        pickupEl.style.fontWeight = '900';
+        pickupEl.style.fontSize = '10px';
+        pickupEl.style.padding = '3px 8px';
+        pickupEl.style.borderRadius = '6px';
+        pickupEl.style.boxShadow = '0 0 10px #10b981';
+        pickupEl.style.border = '1px solid #fff';
+        pickupEl.innerText = 'PICKUP';
+        const pMarker = new mapboxgl.Marker({ element: pickupEl }).setLngLat(pickup).addTo(map);
+        markersRef.current.push(pMarker);
+
+        // Dropoff Marker (Gold)
+        const dropEl = document.createElement('div');
+        dropEl.style.background = '#d4af37';
+        dropEl.style.color = '#000';
+        dropEl.style.fontWeight = '900';
+        dropEl.style.fontSize = '10px';
+        dropEl.style.padding = '3px 8px';
+        dropEl.style.borderRadius = '6px';
+        dropEl.style.boxShadow = '0 0 10px #d4af37';
+        dropEl.style.border = '1px solid #fff';
+        dropEl.innerText = 'DROPOFF';
+        const dMarker = new mapboxgl.Marker({ element: dropEl }).setLngLat(drop).addTo(map);
+        markersRef.current.push(dMarker);
+
+        // Fit Bounds
+        const bounds = new mapboxgl.LngLatBounds();
+        routeCoords.forEach(c => bounds.extend(c));
+        map.fitBounds(bounds, { padding: 80, duration: 1000 });
+      }
+
+      // 5. SOS Incident Mode
+      if (mode === 'sos_incident') {
+        const incidentCoords: [number, number] = [77.2230, 28.6385];
+        const sosEl = document.createElement('div');
+        sosEl.style.position = 'relative';
+        sosEl.style.width = '44px';
+        sosEl.style.height = '44px';
+        sosEl.style.display = 'flex';
+        sosEl.style.alignItems = 'center';
+        sosEl.style.justifyContent = 'center';
+        sosEl.innerHTML = `
+          <div style="position:absolute; width:44px; height:44px; border-radius:50%; background:rgba(239,68,68,0.4); animation:ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+          <div style="width:28px; height:28px; border-radius:50%; background:#ef4444; color:#fff; font-weight:900; font-size:12px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 14px #ef4444; border:2px solid #fff;">
+            SOS
           </div>
         `;
 
-        const customIcon = L.divIcon({
-          html: iconHtml,
-          className: 'luxury-rickshaw-icon',
-          iconSize: [32, 32],
-          iconAnchor: [16, 16]
-        });
-
-        const marker = L.marker([v.lat, v.lng], { icon: customIcon });
-        marker.bindPopup(`
-          <div style="font-family: system-ui; min-width: 200px; padding: 6px; background: #16161a; color: #f2ead3; border-radius: 8px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <b style="color: #d4af37; font-size: 13px;">${v.plate}</b>
-              <span style="font-size: 10px; color: ${statusColor}; font-weight: bold; text-transform: uppercase;">${v.status.replace('_', ' ')}</span>
-            </div>
-            <div style="font-size: 11px; color: #f2ead3; margin-top: 4px;">Chauffeur: ${v.driver} (${v.model})</div>
-            <div style="font-size: 11px; color: #8d8672; margin-top: 2px;">Battery: <b style="color: ${v.battery > 20 ? '#10b981' : '#ef4444'}">${v.battery}%</b> | Speed: ${v.speed} km/h</div>
-            ${v.passenger ? `<div style="margin-top: 6px; padding: 4px 6px; background: #0f0f12; border-radius: 4px; font-size: 10px; color: #d4af37;">Rider: ${v.passenger} · Fare: ₹${v.fare}</div>` : ''}
+        const topVehicle = vehicles && vehicles.length > 0 ? vehicles[0] : null;
+        const driverInfo = topVehicle ? `Chauffeur: ${topVehicle.driver || 'Partner'} (${topVehicle.plate || 'Fleet EV'})` : 'Chauffeur: Active Partner Unit';
+        const sosPopup = new mapboxgl.Popup({ offset: 16 }).setHTML(`
+          <div style="font-family:system-ui; background:#16161a; color:#fff; padding:8px; border-radius:8px;">
+            <b style="color:#ef4444; font-size:13px;">🚨 CRITICAL SOS BEACON</b>
+            <div style="font-size:11px; margin-top:4px;">${driverInfo}</div>
+            <div style="font-size:11px; color:#f59e0b; margin-top:2px;">Location: 28.6385° N, 77.2230° E</div>
+            <div style="font-size:10px; color:#10b981; margin-top:4px;">● Govt 112 Dispatch Connected</div>
           </div>
         `);
 
-        marker.on('click', () => {
-          setSelectedVehicle(v);
-        });
+        const sMarker = new mapboxgl.Marker({ element: sosEl })
+          .setLngLat(incidentCoords)
+          .setPopup(sosPopup)
+          .addTo(map);
+        markersRef.current.push(sMarker);
 
-        markersGroup.addLayer(marker);
-      });
+        map.flyTo({ center: incidentCoords, zoom: 16, duration: 1200 });
+      }
+    },
+    [mode, clearMarkers, vehicles]
+  );
+
+  // Re-render overlays when dynamic vehicle coordinates update
+  useEffect(() => {
+    if (mapInstanceRef.current && mapInstanceRef.current.loaded()) {
+      renderOverlays(mapInstanceRef.current);
     }
+  }, [vehicles, renderOverlays]);
 
-    // 4. Specialized: Ride Route Mode (Screen 08)
-    if (mode === 'ride_route') {
-      const pickupCoords: [number, number] = [28.6328, 77.2195]; // CP Metro Gate 2
-      const dropCoords: [number, number] = [28.6000, 77.2270];   // Khan Market
-      const waypoints: [number, number][] = [
-        pickupCoords,
-        [28.6250, 77.2230],
-        [28.6150, 77.2250],
-        [28.6070, 77.2260],
-        dropCoords
-      ];
+  // Initialize Mapbox GL JS Map
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
 
-      // Route Polyline
-      const routeLine = L.polyline(waypoints, {
-        color: '#d4af37',
-        weight: 5,
-        opacity: 0.9,
-        lineJoin: 'round'
-      }).addTo(markersGroup);
+    mapboxgl.accessToken = MAPBOX_PUBLIC_KEY;
 
-      // Pickup Marker (Green)
-      const pickupIcon = L.divIcon({
-        html: `<div style="background:#10b981; color:#000; font-weight:900; font-size:10px; padding:3px 6px; border-radius:6px; box-shadow:0 0 8px #10b981; border:1px solid #fff;">PICKUP</div>`,
-        className: 'route-pin-pickup',
-        iconAnchor: [24, 12]
-      });
-      L.marker(pickupCoords, { icon: pickupIcon }).bindPopup('<b>Pickup Location</b><br/>CP Metro Gate 2').addTo(markersGroup);
+    const map = new mapboxgl.Map({
+      container: mapContainerRef.current,
+      style: getMapboxStyle(tileStyle),
+      center: [77.2195, 28.6328], // Connaught Place Central Delhi
+      zoom: 13.5,
+      pitch: 35,
+      bearing: 0,
+      attributionControl: false
+    });
 
-      // Dropoff Marker (Gold)
-      const dropIcon = L.divIcon({
-        html: `<div style="background:#d4af37; color:#000; font-weight:900; font-size:10px; padding:3px 6px; border-radius:6px; box-shadow:0 0 8px #d4af37; border:1px solid #fff;">DROPOFF</div>`,
-        className: 'route-pin-drop',
-        iconAnchor: [28, 12]
-      });
-      L.marker(dropCoords, { icon: dropIcon }).bindPopup('<b>Destination</b><br/>Khan Market Entrance').addTo(markersGroup);
+    mapInstanceRef.current = map;
 
-      // Fit route bounds
-      map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
-    }
+    map.on('load', () => {
+      renderOverlays(map);
+    });
 
-    // 5. Specialized: SOS Incident Mode (Screen 25)
-    if (mode === 'sos_incident') {
-      const incidentCoords: [number, number] = [28.6385, 77.2230];
-      const sosIcon = L.divIcon({
-        html: `
-          <div style="position:relative; width:44px; height:44px; display:flex; align-items:center; justify-content:center;">
-            <div style="position:absolute; width:44px; height:44px; border-radius:50%; background:rgba(239,68,68,0.4); animation:ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
-            <div style="width:28px; height:28px; border-radius:50%; background:#ef4444; color:#fff; font-weight:900; font-size:13px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 14px #ef4444; border:2px solid #fff;">
-              SOS
-            </div>
-          </div>
-        `,
-        className: 'sos-incident-pin',
-        iconAnchor: [22, 22]
-      });
-
-      L.marker(incidentCoords, { icon: sosIcon }).bindPopup(`
-        <div style="font-family:system-ui; background:#16161a; color:#fff; padding:8px; border-radius:8px;">
-          <b style="color:#ef4444; font-size:13px;">🚨 CRITICAL SOS BEACON</b>
-          <div style="font-size:11px; margin-top:4px;">Chauffeur: Suresh Kumar (DL-1ER-4821)</div>
-          <div style="font-size:11px; color:#f59e0b; margin-top:2px;">Location: Connaught Place Radial 4 Underpass</div>
-          <div style="font-size:10px; color:#10b981; margin-top:4px;">● Govt 112 Dispatch Contacted</div>
-        </div>
-      `).addTo(markersGroup).openPopup();
-
-      map.setView(incidentCoords, 16);
-    }
-
-    // 6. Interactive Geofence Editor Click Handler
+    // Geofence Editor Click Handler
     if (mode === 'geofence_editor') {
-      map.on('click', (e: L.LeafletMouseEvent) => {
-        const newCoord: [number, number] = [e.latlng.lat, e.latlng.lng];
+      map.on('click', (e: mapboxgl.MapMouseEvent) => {
+        const pt: [number, number] = [e.lngLat.lng, e.lngLat.lat];
         setEditorPoints(prev => {
-          const updated = [...prev, newCoord];
-          editorGroup.clearLayers();
-          updated.forEach(p => {
-            const dot = L.circleMarker(p, { radius: 6, color: '#d4af37', fillColor: '#d4af37', fillOpacity: 1 });
-            editorGroup.addLayer(dot);
-          });
-          if (updated.length >= 2) {
-            const line = L.polyline(updated, { color: '#d4af37', weight: 2, dashArray: '4, 4' });
-            editorGroup.addLayer(line);
-          }
+          const updated = [...prev, pt];
+
+          // Add point marker
+          const dot = document.createElement('div');
+          dot.style.width = '10px';
+          dot.style.height = '10px';
+          dot.style.borderRadius = '50%';
+          dot.style.background = '#d4af37';
+          dot.style.boxShadow = '0 0 8px #d4af37';
+          const dotMarker = new mapboxgl.Marker({ element: dot }).setLngLat(pt).addTo(map);
+          markersRef.current.push(dotMarker);
+
+          // Update editor preview polygon
           if (updated.length >= 3) {
-            const poly = L.polygon(updated, { color: '#d4af37', fillColor: '#d4af37', fillOpacity: 0.25 });
-            editorGroup.addLayer(poly);
+            const closedCoords = [...updated, updated[0]];
+            if (map.getSource('editor-polygon-src')) {
+              (map.getSource('editor-polygon-src') as mapboxgl.GeoJSONSource).setData({
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'Polygon',
+                  coordinates: [closedCoords]
+                }
+              });
+            } else {
+              map.addSource('editor-polygon-src', {
+                type: 'geojson',
+                data: {
+                  type: 'Feature',
+                  properties: {},
+                  geometry: {
+                    type: 'Polygon',
+                    coordinates: [closedCoords]
+                  }
+                }
+              });
+
+              map.addLayer({
+                id: 'editor-polygon-fill',
+                type: 'fill',
+                source: 'editor-polygon-src',
+                paint: {
+                  'fill-color': '#d4af37',
+                  'fill-opacity': 0.25
+                }
+              });
+
+              map.addLayer({
+                id: 'editor-polygon-line',
+                type: 'line',
+                source: 'editor-polygon-src',
+                paint: {
+                  'line-color': '#d4af37',
+                  'line-width': 2,
+                  'line-dasharray': [2, 2]
+                }
+              });
+            }
           }
+
           return updated;
         });
       });
     }
 
-    // Invalidate size on mount to eliminate gray tile glitches
-    const tId = setTimeout(() => {
-      map.invalidateSize();
-    }, 200);
-
     return () => {
-      clearTimeout(tId);
+      clearMarkers();
       map.remove();
       mapInstanceRef.current = null;
     };
-  }, [mode]);
+  }, [mode, renderOverlays, clearMarkers]);
+
+  // Switch Tile Style
+  const switchTileStyle = (styleKey: 'dark' | 'streets' | 'satellite') => {
+    setTileStyle(styleKey);
+    const map = mapInstanceRef.current;
+    if (map) {
+      map.setStyle(getMapboxStyle(styleKey));
+      map.once('style.load', () => {
+        renderOverlays(map);
+      });
+    }
+  };
 
   const handleZoomIn = () => {
     mapInstanceRef.current?.zoomIn();
@@ -451,36 +613,44 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
   };
 
   const handleFlyTo = (coords: [number, number], zoom = 15) => {
-    mapInstanceRef.current?.flyTo(coords, zoom, { duration: 1.2 });
+    mapInstanceRef.current?.flyTo({ center: coords, zoom, duration: 1200, pitch: 35 });
   };
 
   const handleSearchLocation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
     const lower = searchQuery.trim().toLowerCase();
-    const match = DELHI_LANDMARKS.find(l => l.label.toLowerCase().includes(lower));
+    const match = DELHI_LANDMARKS_MAPBOX.find(l => l.label.toLowerCase().includes(lower));
     if (match) {
       handleFlyTo(match.coords, 16);
     } else {
-      // Default to central Delhi
-      handleFlyTo([28.6328, 77.2195], 15);
+      handleFlyTo([77.2195, 28.6328], 15);
     }
   };
 
   const handleClearEditor = () => {
     setEditorPoints([]);
-    editorLayerRef.current?.clearLayers();
+    clearMarkers();
+    const map = mapInstanceRef.current;
+    if (map && map.getSource('editor-polygon-src')) {
+      (map.getSource('editor-polygon-src') as mapboxgl.GeoJSONSource).setData({
+        type: 'FeatureCollection',
+        features: []
+      });
+    }
   };
 
   const handleSaveGeofence = () => {
     if (editorPoints.length < 3) {
-      alert('Please click on the real map to place at least 3 boundary vertices.');
+      alert('Please click on the Mapbox vector map to place at least 3 boundary vertices.');
       return;
     }
     if (onPolygonCreated) {
-      onPolygonCreated(editorPoints, zoneType);
+      // Pass back [lat, lng] pairs for backend format compatibility
+      const latLngPoints: [number, number][] = editorPoints.map(([lng, lat]) => [lat, lng]);
+      onPolygonCreated(latLngPoints, zoneType);
     }
-    alert(`Successfully registered new Geofence (${zoneType}) with ${editorPoints.length} GPS boundary points!`);
+    alert(`Successfully registered new Geofence (${zoneType}) with ${editorPoints.length} Mapbox vector coordinates!`);
     handleClearEditor();
   };
 
@@ -498,7 +668,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
         zIndex: isFullscreen ? 99999 : 1
       }}
     >
-      {/* Real Map Leaflet DOM Canvas */}
+      {/* Mapbox Vector Canvas */}
       <div
         ref={mapContainerRef}
         style={{ width: '100%', height: '100%', background: '#0b0b0d' }}
@@ -517,7 +687,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
           flexWrap: 'wrap',
           gap: 10,
           pointerEvents: 'none',
-          zIndex: 1000
+          zIndex: 10
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, pointerEvents: 'auto', flexWrap: 'wrap' }}>
@@ -535,13 +705,13 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
           >
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981' }} />
             <span style={{ color: '#d4af37', fontWeight: 800, fontSize: 11, letterSpacing: '0.04em' }}>
-              REAL GPS ENGINE · {selectedScreenTitle.toUpperCase()}
+              MAPBOX GL JS VECTOR ENGINE · {selectedScreenTitle.toUpperCase()}
             </span>
           </div>
 
           {/* Quick Landmark Jump Pills */}
           <div style={{ display: 'flex', gap: 4, overflowX: 'auto', maxWidth: 440 }}>
-            {DELHI_LANDMARKS.slice(0, 4).map((lm, idx) => (
+            {DELHI_LANDMARKS_MAPBOX.slice(0, 4).map((lm, idx) => (
               <button
                 key={idx}
                 onClick={() => handleFlyTo(lm.coords, 15)}
@@ -563,9 +733,8 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
           </div>
         </div>
 
-        {/* Map Actions: Tile Switcher & Fullscreen */}
+        {/* Map Actions: Mapbox Style Switcher & Fullscreen */}
         <div style={{ display: 'flex', gap: 6, pointerEvents: 'auto' }}>
-          {/* Tile Layer Selector */}
           <div
             style={{
               background: 'rgba(22, 22, 26, 0.94)',
@@ -624,7 +793,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
           </div>
 
           <button
-            onClick={() => handleFlyTo([28.6328, 77.2195], 14)}
+            onClick={() => handleFlyTo([77.2195, 28.6328], 14)}
             title="Recenter Central Delhi"
             style={{
               background: '#16161a',
@@ -665,13 +834,13 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
         </div>
       </div>
 
-      {/* Search Input Bar (Bottom-Left) */}
+      {/* Search Input Bar (Top-Left) */}
       <div
         style={{
           position: 'absolute',
           top: 56,
           left: 12,
-          zIndex: 1000
+          zIndex: 10
         }}
       >
         <form onSubmit={handleSearchLocation} style={{ display: 'flex', gap: 4 }}>
@@ -717,7 +886,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
           display: 'flex',
           flexDirection: 'column',
           gap: 6,
-          zIndex: 1000
+          zIndex: 10
         }}
       >
         <button
@@ -773,14 +942,14 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
             display: 'flex',
             alignItems: 'center',
             gap: 12,
-            zIndex: 1000,
+            zIndex: 10,
             maxWidth: 560,
             boxShadow: '0 6px 20px rgba(0,0,0,0.8)'
           }}
         >
           <div>
             <div style={{ color: '#d4af37', fontSize: 12, fontWeight: 700 }}>
-              Interactive Geofence Editor: Click map to place perimeter vertices ({editorPoints.length} points)
+              Mapbox Geofence Editor: Click map to place perimeter vertices ({editorPoints.length} points)
             </div>
             <div style={{ color: '#8d8672', fontSize: 11, marginTop: 4 }}>
               Zone Type:
@@ -851,16 +1020,16 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
             border: '1px solid #d4af37',
             borderRadius: 12,
             padding: '14px 18px',
-            zIndex: 1000,
+            zIndex: 10,
             minWidth: 280,
             boxShadow: '0 8px 24px rgba(0,0,0,0.8)'
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifySelf: 'space-between', alignItems: 'center' }}>
             <span style={{ color: '#d4af37', fontWeight: 800, fontSize: 13 }}>{selectedVehicle.plate}</span>
             <button
               onClick={() => setSelectedVehicle(null)}
-              style={{ background: 'transparent', border: 'none', color: '#8d8672', cursor: 'pointer', fontSize: 14 }}
+              style={{ background: 'transparent', border: 'none', color: '#8d8672', cursor: 'pointer', fontSize: 14, marginLeft: 'auto' }}
             >
               ✕
             </button>

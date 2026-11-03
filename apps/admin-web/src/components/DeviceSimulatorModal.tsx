@@ -601,8 +601,8 @@ export const DeviceSimulatorModal: React.FC<DeviceSimulatorModalProps> = ({
               alignItems: 'center'
             }}>
               <div>
-                <div style={{ color: '#d4af37', fontSize: 12, fontWeight: 700 }}>DL-1ER-4821 • Ramesh K.</div>
-                <div style={{ fontSize: 10, color: '#8d8672' }}>Arriving in 3 mins • Start OTP: <b>4821</b></div>
+                <div style={{ color: '#d4af37', fontSize: 12, fontWeight: 700 }}>Chauffeur Partner • En Route</div>
+                <div style={{ fontSize: 10, color: '#8d8672' }}>Live GPS Tracked • Secure Ride Active</div>
               </div>
               <button
                 onClick={() => alert('Connecting via VoIP Masked Call...')}
