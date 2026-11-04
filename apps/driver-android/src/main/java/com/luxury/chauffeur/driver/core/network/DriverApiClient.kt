@@ -77,14 +77,14 @@ object DriverApiClient {
     }
 
     // Base URL used by Retrofit (Automatically selects local emulator 10.0.2.2 or online Render)
-    var baseUrl: String = if (isEmulator()) LOCAL_EMULATOR_BASE_URL else RENDER_BASE_URL
+    var baseUrl: String = RENDER_BASE_URL
 
     private var tokenManager: DriverTokenManager? = null
     private var service: DriverApiService? = null
 
     fun initialize(context: Context) {
         tokenManager = DriverTokenManager.getInstance(context)
-        baseUrl = if (isEmulator()) LOCAL_EMULATOR_BASE_URL else RENDER_BASE_URL
+        baseUrl = RENDER_BASE_URL
         service = createService()
     }
 
