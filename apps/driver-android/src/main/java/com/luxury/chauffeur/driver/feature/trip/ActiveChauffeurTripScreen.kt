@@ -14,7 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.core.map.LatLng
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.clickable

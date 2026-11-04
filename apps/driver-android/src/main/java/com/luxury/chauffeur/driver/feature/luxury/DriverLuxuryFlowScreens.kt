@@ -35,7 +35,7 @@ import com.luxury.chauffeur.driver.core.network.DriverApiClient
 import com.luxury.chauffeur.driver.core.network.DriverAvailabilityPayload
 import com.luxury.chauffeur.driver.core.network.StartTripPayload
 import com.luxury.chauffeur.driver.core.network.FinishTripPayload
-import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.core.map.LatLng
 import com.luxury.chauffeur.core.map.MapboxDirectionsService
 import com.luxury.chauffeur.core.map.MapboxSearchService
 import com.luxury.chauffeur.driver.feature.map.MapboxDriverMapView

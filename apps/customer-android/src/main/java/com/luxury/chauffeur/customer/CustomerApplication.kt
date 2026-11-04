@@ -125,7 +125,6 @@ class CustomerApplication : Application() {
             "Parcel.readException",
             "Phenotype",
             "Unable to update local snapshot",
-            "com.google.android.gms.maps",
             "com.google.android.gms"
         )
 

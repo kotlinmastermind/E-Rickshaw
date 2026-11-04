@@ -39,7 +39,7 @@ import com.luxury.chauffeur.customer.core.network.TopupWalletRequest
 import com.luxury.chauffeur.customer.core.network.SaveVpaRequest
 import com.luxury.chauffeur.customer.core.network.ProfileUpdateRequest
 import com.luxury.chauffeur.customer.core.network.VehicleCategoryDto
-import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.core.map.LatLng
 import com.luxury.chauffeur.core.map.AppMapDetailsCatalog
 import com.luxury.chauffeur.core.map.MapboxPlaceSuggestion
 import com.luxury.chauffeur.core.map.MapboxSearchService

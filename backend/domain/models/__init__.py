@@ -67,7 +67,14 @@ from backend.domain.models.models import (
     DriverPayoutAccount,
     DriverLedgerEntry,
     DriverIncentiveProgress,
-    RouteLatencyMetric
+    RouteLatencyMetric,
+    RideLocationHistory,
+    RideRoute,
+    GeofenceEvent,
+    RouteDeviationEvent,
+    MapApiUsageLog,
+    LocationSharingSession,
+    EmergencyLocationEvent,
 )
 
 import uuid

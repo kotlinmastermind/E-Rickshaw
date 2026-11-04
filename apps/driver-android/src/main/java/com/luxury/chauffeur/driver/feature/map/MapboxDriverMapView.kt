@@ -21,7 +21,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.core.map.LatLng
 import com.luxury.chauffeur.core.map.AppMapDetailsCatalog
 import com.luxury.chauffeur.core.map.MapboxSharedConfig
 import com.mapbox.geojson.Point

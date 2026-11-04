@@ -22,7 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.core.map.LatLng
 import com.luxury.chauffeur.customer.core.designsystem.*
 import com.luxury.chauffeur.customer.core.network.*
 import kotlinx.coroutines.launch

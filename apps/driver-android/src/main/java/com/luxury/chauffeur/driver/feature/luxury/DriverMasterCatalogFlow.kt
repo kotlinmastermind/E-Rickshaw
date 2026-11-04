@@ -45,6 +45,9 @@ import com.luxury.chauffeur.driver.core.network.DriverLocationPayload
 import com.luxury.chauffeur.driver.core.network.StartTripPayload
 import com.luxury.chauffeur.driver.core.network.FinishTripPayload
 import com.luxury.chauffeur.driver.core.security.DriverTokenManager
+import com.luxury.chauffeur.core.map.LatLng
+import com.luxury.chauffeur.core.map.MapboxCoordinate
+import com.luxury.chauffeur.driver.feature.map.MapboxDriverMapView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -1836,40 +1839,22 @@ fun Screen8PilotCockpitDutyToggle(
             .fillMaxSize()
             .background(DriverBlueprintTokens.BgCockpit)
     ) {
-        // Simulated 3D Mapbox View
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
+        val driverPos = remember { LatLng(28.6139, 77.2090) }
+        var currentSpeed by remember { mutableIntStateOf(24) }
+        var mapLayer by remember { mutableStateOf("DARK") }
+        var recenterTrigger by remember { mutableIntStateOf(0) }
 
-            // Background dark map tone
-            drawRect(color = DriverBlueprintTokens.BgMap)
-
-            // Grid roads
-            drawLine(
-                color = Color(0xFF1E293B),
-                start = Offset(w * 0.5f, 0f),
-                end = Offset(w * 0.5f, h),
-                strokeWidth = 24.dp.toPx()
-            )
-            drawLine(
-                color = Color(0xFF1E293B),
-                start = Offset(0f, h * 0.45f),
-                end = Offset(w, h * 0.45f),
-                strokeWidth = 20.dp.toPx()
-            )
-
-            // Active route polyline in emerald
-            val path = Path().apply {
-                moveTo(w * 0.5f, h * 0.85f)
-                lineTo(w * 0.5f, h * 0.45f)
-                lineTo(w * 0.82f, h * 0.32f)
-            }
-            drawPath(
-                path = path,
-                color = DriverBlueprintTokens.Emerald,
-                style = Stroke(width = 8.dp.toPx())
-            )
-        }
+        // Live Native Mapbox Driver Cockpit 3D Map
+        MapboxDriverMapView(
+            modifier = Modifier.fillMaxSize(),
+            driverLatLng = driverPos,
+            bearing = 45f,
+            currentSpeedKmh = if (isOnline) currentSpeed else 0,
+            mapLayer = mapLayer,
+            is3DMode = true,
+            recenterTrigger = recenterTrigger,
+            currentManeuverInstruction = if (isOnline) "Cruising in High-Demand Connaught Place Area" else "Pilot Offline • Turn duty ON to receive bookings"
+        )
 
         // Top Status Bar & Duty Online Switch
         Surface(
@@ -2332,10 +2317,28 @@ fun Screen11NavigationToPickup(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(DriverBlueprintTokens.BgMap),
-            contentAlignment = Alignment.Center
+                .background(DriverBlueprintTokens.BgMap)
         ) {
-            Text("🛺 3D Navigation to Pickup Active", color = DriverBlueprintTokens.Emerald, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            val driverPos = remember { LatLng(28.6180, 77.2115) }
+            val pickupPos = remember { LatLng(28.6139, 77.2090) }
+            val routePoints = remember {
+                listOf(
+                    LatLng(28.6180, 77.2115),
+                    LatLng(28.6150, 77.2100),
+                    LatLng(28.6139, 77.2090)
+                )
+            }
+            MapboxDriverMapView(
+                modifier = Modifier.fillMaxSize(),
+                driverLatLng = driverPos,
+                pickupLatLng = pickupPos,
+                pickupTitle = "Commuter Pickup Station",
+                routePoints = routePoints,
+                bearing = 190f,
+                currentSpeedKmh = 22,
+                is3DMode = true,
+                currentManeuverInstruction = "In 150m, turn right To Commuter Pickup Station"
+            )
         }
 
         // Bottom Arrival Button
@@ -2552,13 +2555,43 @@ fun Screen14TurnByTurnNavigationAudio(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(DriverBlueprintTokens.BgMap),
-            contentAlignment = Alignment.Center
+                .background(DriverBlueprintTokens.BgMap)
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Destination: $destination", color = DriverBlueprintTokens.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val driverPos = remember { LatLng(28.6200, 77.2130) }
+            val destPos = remember { LatLng(28.6328, 77.2197) }
+            val routePoints = remember {
+                listOf(
+                    LatLng(28.6200, 77.2130),
+                    LatLng(28.6250, 77.2160),
+                    LatLng(28.6328, 77.2197)
+                )
+            }
+            MapboxDriverMapView(
+                modifier = Modifier.fillMaxSize(),
+                driverLatLng = driverPos,
+                destLatLng = destPos,
+                destTitle = destination,
+                routePoints = routePoints,
+                bearing = 35f,
+                currentSpeedKmh = 26,
+                is3DMode = true,
+                currentManeuverInstruction = "Continue straight on Barakhamba Rd towards " + destination
+            )
+
+            // Floating Controls Card over Map
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = DriverBlueprintTokens.Slate900.copy(alpha = 0.92f),
+                border = BorderStroke(1.dp, DriverBlueprintTokens.Slate700),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = DriverBlueprintTokens.Slate800,

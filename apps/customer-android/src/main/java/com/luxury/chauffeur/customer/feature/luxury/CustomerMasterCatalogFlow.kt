@@ -50,6 +50,9 @@ import com.luxury.chauffeur.customer.core.network.TopupWalletRequest
 import com.luxury.chauffeur.customer.core.network.UnifiedLoginRequestPayload
 import com.luxury.chauffeur.customer.core.network.VehicleCategoryDto
 import com.luxury.chauffeur.customer.core.security.TokenManager
+import com.luxury.chauffeur.core.map.LatLng
+import com.luxury.chauffeur.core.map.MapboxCoordinate
+import com.luxury.chauffeur.customer.feature.map.MapboxCustomerMapView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -1757,41 +1760,58 @@ fun Screen07MapHomeGps(
             .fillMaxSize()
             .background(BlueprintTokens.BgMap)
     ) {
-        // Simulated Vector Map Canvas with Street Polylines
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val width = size.width
-            val height = size.height
+        var pickupLatLng by remember { mutableStateOf(LatLng(28.6139, 77.2090)) }
+        var currentMapLayer by remember { mutableStateOf("LIGHT") }
+        var recenterTrigger by remember { mutableIntStateOf(0) }
+        var pickupAddressText by remember { mutableStateOf("Connaught Place, New Delhi") }
 
-            // Streets
-            drawLine(
-                color = Color(0xFF1E2433),
-                start = Offset(-50f, height * 0.25f),
-                end = Offset(width + 50f, height * 0.32f),
-                strokeWidth = 32f
-            )
-            drawLine(
-                color = Color(0xFF1E2433),
-                start = Offset(width * 0.3f, -50f),
-                end = Offset(width * 0.45f, height + 50f),
-                strokeWidth = 40f
-            )
-            drawLine(
-                color = Color(0xFF1E2433),
-                start = Offset(-50f, height * 0.65f),
-                end = Offset(width + 50f, height * 0.55f),
-                strokeWidth = 48f
-            )
-
-            // Dash line feeder corridor
-            val path = Path().apply {
-                moveTo(-50f, height * 0.28f)
-                lineTo(width + 50f, height * 0.35f)
+        // Live Native Mapbox Vector Map
+        MapboxCustomerMapView(
+            modifier = Modifier.fillMaxSize(),
+            pickupLatLng = pickupLatLng,
+            pickupTitle = "Pickup: $pickupAddressText",
+            mapLayer = currentMapLayer,
+            recenterTrigger = recenterTrigger,
+            onMapClick = { clickedPos ->
+                pickupLatLng = clickedPos
+                pickupAddressText = "Pinned (%.4f, %.4f)".format(clickedPos.latitude, clickedPos.longitude)
             }
-            drawPath(
-                path = path,
-                color = Color(0x66D4AF37),
-                style = Stroke(width = 6f)
-            )
+        )
+
+        // Floating Recenter & Layer Switcher
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 80.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalAlignment = Alignment.End
+        ) {
+            FloatingActionButton(
+                onClick = { recenterTrigger++ },
+                modifier = Modifier.size(44.dp),
+                shape = CircleShape,
+                containerColor = BlueprintTokens.Slate900,
+                contentColor = BlueprintTokens.Amber,
+                elevation = FloatingActionButtonDefaults.elevation(6.dp)
+            ) {
+                Text("🎯", fontSize = 18.sp)
+            }
+            FloatingActionButton(
+                onClick = {
+                    currentMapLayer = when (currentMapLayer) {
+                        "LIGHT" -> "DARK"
+                        "DARK" -> "SATELLITE"
+                        else -> "LIGHT"
+                    }
+                },
+                modifier = Modifier.size(44.dp),
+                shape = CircleShape,
+                containerColor = BlueprintTokens.Slate900,
+                contentColor = Color.White,
+                elevation = FloatingActionButtonDefaults.elevation(6.dp)
+            ) {
+                Text("🗺️", fontSize = 18.sp)
+            }
         }
 
         // Blue GPS Location Pulse Marker
@@ -2810,22 +2830,29 @@ fun Screen15ActiveRideLive(
             .fillMaxSize()
             .background(BlueprintTokens.BgRide)
     ) {
-        // Map Route Canvas
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val width = size.width
-            val height = size.height
-
-            // Green route polyline
-            val route = Path().apply {
-                moveTo(width * 0.25f, height * 0.35f)
-                quadraticBezierTo(width * 0.5f, height * 0.45f, width * 0.72f, height * 0.6f)
-            }
-            drawPath(
-                path = route,
-                color = BlueprintTokens.Emerald,
-                style = Stroke(width = 14f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        val pickupPos = remember { LatLng(28.6139, 77.2090) }
+        val destPos = remember { LatLng(28.6328, 77.2197) }
+        var driverPos by remember { mutableStateOf(LatLng(28.6180, 77.2115)) }
+        val routePoints = remember {
+            listOf(
+                LatLng(28.6139, 77.2090),
+                LatLng(28.6180, 77.2115),
+                LatLng(28.6250, 77.2160),
+                LatLng(28.6328, 77.2197)
             )
         }
+
+        // Live Native Mapbox Vector Map with Driver Telemetry
+        MapboxCustomerMapView(
+            modifier = Modifier.fillMaxSize(),
+            pickupLatLng = pickupPos,
+            pickupTitle = "Pickup",
+            destLatLng = destPos,
+            destTitle = "Destination",
+            driverLatLng = driverPos,
+            routePoints = routePoints,
+            mapLayer = "DARK"
+        )
 
         // Top Status Pill
         Surface(

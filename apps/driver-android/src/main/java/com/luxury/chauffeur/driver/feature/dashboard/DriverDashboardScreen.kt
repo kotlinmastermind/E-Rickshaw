@@ -43,7 +43,7 @@ import com.google.android.gms.common.GoogleApiAvailability
 import android.location.LocationManager
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.core.map.LatLng
 import com.luxury.chauffeur.driver.feature.map.DriverMapView
 import android.content.Context
 import android.content.Intent

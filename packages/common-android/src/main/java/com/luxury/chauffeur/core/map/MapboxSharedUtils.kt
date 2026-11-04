@@ -68,8 +68,10 @@ data class MapboxCoordinate(
 ) {
     fun toLngLatString(): String = String.format(Locale.US, "%.6f,%.6f", longitude, latitude)
     fun toLatLngString(): String = String.format(Locale.US, "%.6f,%.6f", latitude, longitude)
-}
-
+}
+
+typealias LatLng = MapboxCoordinate
+
 object MapboxGeoUtils {
     private const val EARTH_RADIUS_METERS = 6371000.0
 

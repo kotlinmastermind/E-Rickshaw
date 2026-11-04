@@ -522,3 +522,255 @@ async def calculate_distance_matrix(payload: MatrixPayload):
             destinations=[p.model_dump() for p in payload.destinations]
         )
     return {"durations_seconds": [], "distances_meters": [], "provider": "UNSUPPORTED"}
+
+
+
+
+# =============================================================================
+# PHASE 5 MAPBOX MODULAR ENDPOINTS
+# =============================================================================
+
+@router.get("/config")
+async def get_map_config():
+    """Returns Mapbox client configuration, public token, and map style vector URLs."""
+    from backend.core.config import settings
+    return {
+        "mapbox_public_token": settings.MAPBOX_PUBLIC_TOKEN or "",
+        "default_center": {"latitude": 28.6139, "longitude": 77.2090},
+        "styles": {
+            "streets": "mapbox://styles/mapbox/streets-v12",
+            "dark": "mapbox://styles/mapbox/dark-v11",
+            "satellite": "mapbox://styles/mapbox/satellite-streets-v12",
+            "navigation_day": "mapbox://styles/mapbox/navigation-day-v1",
+            "navigation_night": "mapbox://styles/mapbox/navigation-night-v1"
+        }
+    }
+
+
+class MapSearchPayload(BaseModel):
+    query: str = Field(min_length=1, max_length=256)
+    proximity_lat: Optional[float] = Field(None, ge=-90, le=90)
+    proximity_lng: Optional[float] = Field(None, ge=-180, le=180)
+
+
+@router.post("/search")
+async def search_places_mapbox(payload: MapSearchPayload):
+    """Mapbox Places Search & Autocomplete API endpoint with geo proximity bias."""
+    from backend.application.services.mapbox_modular_services import MapSearchService
+    service = MapSearchService()
+    prox = (payload.proximity_lat, payload.proximity_lng) if payload.proximity_lat and payload.proximity_lng else None
+    results = await service.search_places(payload.query, prox)
+    return {"results": results, "count": len(results)}
+
+
+class MapRoutePreviewPayload(BaseModel):
+    origin_lat: float = Field(ge=-90, le=90)
+    origin_lng: float = Field(ge=-180, le=180)
+    destination_lat: float = Field(ge=-90, le=90)
+    destination_lng: float = Field(ge=-180, le=180)
+    intermediate_stops: Optional[List[CoordinateItem]] = None
+
+
+@router.post("/route-preview")
+async def route_preview_mapbox(payload: MapRoutePreviewPayload):
+    """Calculates multi-stop Mapbox route preview with distance, ETA and polyline."""
+    from backend.application.services.mapbox_modular_services import MapRoutingService
+    service = MapRoutingService()
+    stops = [(s.latitude, s.longitude) for s in payload.intermediate_stops] if payload.intermediate_stops else None
+    return await service.calculate_route(
+        origin=(payload.origin_lat, payload.origin_lng),
+        destination=(payload.destination_lat, payload.destination_lng),
+        intermediate_stops=stops
+    )
+
+
+class DriverTelemetryPayload(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    heading: Optional[float] = None
+    speed_kmh: Optional[float] = None
+    accuracy_meters: Optional[float] = None
+    ride_id: Optional[str] = None
+    source: str = "FUSED_GPS"
+
+
+@router.post("/driver-telemetry")
+async def ingest_driver_telemetry(
+    payload: DriverTelemetryPayload,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Ingests live driver location from Driver Android app, verifies spoofing,
+    evaluates geofences, and appends to ride_location_history if in active ride.
+    """
+    from sqlalchemy import select
+    from backend.domain.models import DriverProfile
+    from backend.application.services.mapbox_modular_services import (
+        DriverLocationService, LiveRideTrackingService, GeofenceService, RouteDeviationService
+    )
+
+    stmt = select(DriverProfile).where(DriverProfile.user_id == current_user.id)
+    res = await db.execute(stmt)
+    driver = res.scalar_one_or_none()
+    if not driver:
+        # Fallback to driver profile ID if user is already pilot profile
+        driver_id = current_user.id
+    else:
+        driver_id = driver.id
+
+    loc = await DriverLocationService.record_driver_location(
+        db=db,
+        driver_id=driver_id,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        heading=payload.heading,
+        speed_kmh=payload.speed_kmh,
+        accuracy_meters=payload.accuracy_meters,
+        source=payload.source
+    )
+
+    geofence_events = await GeofenceService.evaluate_geofences(
+        db=db,
+        driver_id=driver_id,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        ride_id=payload.ride_id
+    )
+
+    deviation_alert = None
+    if payload.ride_id:
+        await LiveRideTrackingService.record_ride_breadcrumb(
+            db=db,
+            ride_id=payload.ride_id,
+            driver_id=driver_id,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            heading=payload.heading,
+            speed_kmh=payload.speed_kmh,
+            accuracy_meters=payload.accuracy_meters
+        )
+        dev = await RouteDeviationService.check_route_deviation(
+            db=db,
+            ride_id=payload.ride_id,
+            driver_id=driver_id,
+            current_lat=payload.latitude,
+            current_lng=payload.longitude
+        )
+        if dev:
+            deviation_alert = {
+                "deviation_meters": dev.deviation_meters,
+                "severity": dev.severity
+            }
+
+    return {
+        "status": "RECORDED",
+        "location_id": loc.id,
+        "spoof_risk_score": loc.spoof_risk_score,
+        "geofence_events": geofence_events,
+        "deviation_alert": deviation_alert
+    }
+
+
+@router.get("/live-ride/{ride_id}")
+async def get_live_ride_map(
+    ride_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Authoritative live ride tracking endpoint returning driver position,
+    remaining distance, ETA, route polyline, and stale location detector.
+    """
+    from backend.application.services.mapbox_modular_services import LiveRideTrackingService
+    telemetry = await LiveRideTrackingService.get_latest_ride_telemetry(db, ride_id)
+    if not telemetry:
+        raise HTTPException(status_code=404, detail="Active ride telemetry not found")
+    return telemetry
+
+
+@router.get("/trip-history/{ride_id}")
+async def get_trip_history_breadcrumbs(
+    ride_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Returns full historical breadcrumb sequence for completed trip playback."""
+    from backend.application.services.mapbox_modular_services import TripHistoryService
+    crumbs = await TripHistoryService.get_trip_breadcrumbs(db, ride_id)
+    return {"ride_id": ride_id, "breadcrumbs": crumbs, "count": len(crumbs)}
+
+
+@router.get("/admin/fleet-map")
+async def get_admin_fleet_map(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Admin live fleet radar returning real-time pilot locations and status."""
+    from sqlalchemy import select, desc
+    from backend.domain.models import DriverProfile, DriverAvailability, DriverLocation
+
+    if current_user.role not in ["admin", "superadmin", "dispatcher"]:
+        raise HTTPException(status_code=403, detail="Admin permissions required")
+
+    stmt = (
+        select(DriverProfile, DriverAvailability, DriverLocation)
+        .outerjoin(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
+        .outerjoin(DriverLocation, DriverLocation.driver_id == DriverProfile.id)
+        .order_by(desc(DriverLocation.recorded_at))
+    )
+    res = await db.execute(stmt)
+    rows = res.all()
+
+    fleet = {}
+    for prof, avail, loc in rows:
+        if prof.id not in fleet and loc:
+            st = avail.status if avail else "OFFLINE"
+            mapped_status = "available" if st == "AVAILABLE" else ("on_trip" if st == "BUSY" else "en_route")
+            fleet[prof.id] = {
+                "id": prof.id,
+                "driver": prof.badge_number or "Pilot",
+                "plate": prof.license_number or "DL-9988",
+                "model": "RideGo E-Rickshaw EV",
+                "lat": loc.latitude,
+                "lng": loc.longitude,
+                "speed": loc.speed or 0.0,
+                "heading": loc.heading or 0.0,
+                "battery": 88,
+                "status": mapped_status,
+                "last_seen": loc.recorded_at.isoformat()
+            }
+
+    return {"fleet": list(fleet.values()), "count": len(fleet)}
+
+
+class EmergencyPingPayload(BaseModel):
+    alert_id: str
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    ride_id: Optional[str] = None
+    speed_kmh: Optional[float] = None
+    accuracy_meters: Optional[float] = None
+    battery_level: Optional[float] = None
+
+
+@router.post("/emergency-ping")
+async def record_emergency_ping(
+    payload: EmergencyPingPayload,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Ingests critical GPS telemetry during an active SOS emergency event."""
+    from backend.application.services.mapbox_modular_services import EmergencyLocationService
+    ev = await EmergencyLocationService.record_emergency_ping(
+        db=db,
+        alert_id=payload.alert_id,
+        user_id=current_user.id,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        ride_id=payload.ride_id,
+        speed_kmh=payload.speed_kmh,
+        accuracy_meters=payload.accuracy_meters,
+        battery_level=payload.battery_level
+    )
+    return {"status": "EMERGENCY_PING_RECORDED", "event_id": ev.id}

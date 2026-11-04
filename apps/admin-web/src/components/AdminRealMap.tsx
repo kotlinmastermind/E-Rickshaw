@@ -177,7 +177,31 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
     let isMounted = true;
     const fetchLiveVehicles = async () => {
       try {
-        const resp = await fetch('/api/v1/vehicles/nearby?lat=28.63&lng=77.21&radius_km=25');
+        // 1. Try dedicated FastAPI location fleet-map endpoint first
+        let resp = await fetch('/api/v1/location/admin/fleet-map');
+        if (resp.ok) {
+          const fleetData = await resp.json();
+          if (fleetData?.drivers && Array.isArray(fleetData.drivers) && isMounted) {
+            const mapped: FleetVehicle[] = fleetData.drivers.map((d: any, i: number) => ({
+              id: d.driver_id || `driver-${i}`,
+              plate: d.license_plate || `DL-1ER-${1000 + i}`,
+              driver: d.driver_name || 'Pilot',
+              model: d.vehicle_model || 'E-Rickshaw Fleet',
+              lat: Number(d.latitude || 28.6315 + (i * 0.003)),
+              lng: Number(d.longitude || 77.2167 + (i * 0.003)),
+              battery: Number(d.battery_level || 85),
+              speed: Number(d.speed_kmh || 20),
+              status: (d.status === 'on_trip' || d.status === 'en_route') ? d.status : 'available',
+              passenger: d.ride_id ? `Trip: ${d.ride_id.slice(0, 8)}` : undefined,
+              fare: d.fare || 128
+            }));
+            setVehicles(mapped);
+            return;
+          }
+        }
+
+        // 2. Fallback to vehicles nearby
+        resp = await fetch('/api/v1/vehicles/nearby?lat=28.63&lng=77.21&radius_km=25');
         if (resp.ok) {
           const data = await resp.json();
           if (Array.isArray(data) && isMounted) {

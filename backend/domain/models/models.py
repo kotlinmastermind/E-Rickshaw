@@ -1532,6 +1532,102 @@ class RouteLatencyMetric(Base):
 
 
 
+
+
+class RideLocationHistory(Base):
+    __tablename__ = "ride_location_history"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, index=True)
+    driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=False, index=True)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    heading: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    speed_kmh: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    accuracy_meters: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class RideRoute(Base):
+    __tablename__ = "ride_routes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, index=True)
+    polyline: Mapped[str] = mapped_column(Text, nullable=False)
+    waypoints_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    distance_km: Mapped[float] = mapped_column(Float, nullable=False)
+    duration_minutes: Mapped[float] = mapped_column(Float, nullable=False)
+    traffic_aware: Mapped[bool] = mapped_column(Boolean, default=True)
+    route_label: Mapped[str] = mapped_column(String(64), default="Mapbox Driving")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class GeofenceEvent(Base):
+    __tablename__ = "geofence_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=False, index=True)
+    zone_id: Mapped[str] = mapped_column(String(36), ForeignKey("geofence_zones.id"), nullable=False, index=True)
+    ride_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)  # ENTER, EXIT, DWELL
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class RouteDeviationEvent(Base):
+    __tablename__ = "route_deviation_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, index=True)
+    driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=False, index=True)
+    deviation_meters: Mapped[float] = mapped_column(Float, nullable=False)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), default="WARNING")  # INFO, WARNING, CRITICAL
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class MapApiUsageLog(Base):
+    __tablename__ = "map_api_usage_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    service_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    endpoint: Mapped[str] = mapped_column(String(128), nullable=False)
+    query_params_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    response_status: Mapped[int] = mapped_column(Integer, nullable=False)
+    latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    billable_units: Mapped[int] = mapped_column(Integer, default=1)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class LocationSharingSession(Base):
+    __tablename__ = "location_sharing_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, index=True)
+    share_token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class EmergencyLocationEvent(Base):
+    __tablename__ = "emergency_location_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    alert_id: Mapped[str] = mapped_column(String(36), ForeignKey("emergency_alerts.id", ondelete="CASCADE"), nullable=False, index=True)
+    ride_id: Mapped[Optional[str]] = mapped_column(String(36), index=True, nullable=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    speed_kmh: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    accuracy_meters: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    battery_level: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
 # =====================================================================
 # DECOMMISSIONED ENTERPRISE BLOAT MODELS (COMPATIBILITY STUBS)
 # These models have been dropped from database schema to optimize performance.
