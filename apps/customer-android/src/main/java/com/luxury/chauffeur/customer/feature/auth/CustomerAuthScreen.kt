@@ -525,7 +525,7 @@ fun CustomerAuthScreen(
                                 value = signInPhone,
                                 onValueChange = { signInPhone = it },
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("+91 98765 43210") },
+                                placeholder = { Text("Enter 10-digit mobile number") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)
@@ -679,7 +679,7 @@ fun CustomerAuthScreen(
                                 value = signUpName,
                                 onValueChange = { signUpName = it },
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("e.g. Ramesh Kumar") },
+                                placeholder = { Text("Enter your full name") },
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)
                             )
@@ -692,7 +692,7 @@ fun CustomerAuthScreen(
                                 value = signUpPhone,
                                 onValueChange = { signUpPhone = it },
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("+91 98765 43210") },
+                                placeholder = { Text("Enter 10-digit mobile number") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)
@@ -706,7 +706,7 @@ fun CustomerAuthScreen(
                                 value = signUpEmail,
                                 onValueChange = { signUpEmail = it },
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("ramesh@gmail.com") },
+                                placeholder = { Text("Enter email address") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)
@@ -812,7 +812,7 @@ fun CustomerAuthScreen(
                                 value = forgotPhone,
                                 onValueChange = { forgotPhone = it },
                                 modifier = Modifier.fillMaxWidth(),
-                                placeholder = { Text("+91 98765 43210") },
+                                placeholder = { Text("Enter 10-digit mobile number") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)

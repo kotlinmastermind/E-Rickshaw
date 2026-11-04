@@ -40,6 +40,8 @@ import android.content.Context
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.core.map.MapboxSearchService
+import com.luxury.chauffeur.core.map.MapboxDirectionsService
 import com.luxury.chauffeur.customer.core.designsystem.*
 import com.luxury.chauffeur.customer.core.network.*
 import com.luxury.chauffeur.customer.feature.fares.FareEstimateBreakdownDialog
@@ -190,17 +192,8 @@ fun LocationScreen(
     var flightTelemetry by remember { mutableStateOf<FlightStatusResponse?>(null) }
     var isCheckingFlight by remember { mutableStateOf(false) }
 
-    // Categories & Ride options
-    var dynamicCategories by remember {
-        mutableStateOf(
-            listOf(
-                LuxuryVehicleCategory("cat_1", "Standard E-Rickshaw", "Eco-friendly electric 3-wheeler for quick city commutes and local errands", 4, 20, "E_RICKSHAW_STANDARD", 36.0, 45.0, true, false, true, "1 Bag"),
-                LuxuryVehicleCategory("cat_2", "Shared E-Rickshaw (Eco-Pool)", "Ultra-affordable per-seat shared electric rickshaw on metro feeder routes", 4, 10, "E_RICKSHAW_SHARE", 35.0, 45.0, true, false, false, "Small Bag"),
-                LuxuryVehicleCategory("cat_3", "High-Speed Electric Auto", "Modern enclosed L5M electric auto rickshaw with weather doors", 3, 30, "E_AUTO", 38.0, 44.0, true, true, true, "2 Bags"),
-                LuxuryVehicleCategory("cat_4", "E-Loader Cargo", "Heavy-duty electric cargo loader for parcels, shop goods, and heavy luggage", 1, 50, "E_CARGO_LOADER", 34.0, 46.0, true, false, false, "400kg Cargo")
-            )
-        )
-    }
+    // Categories & Ride options (dynamically fetched from FastAPI backend)
+    var dynamicCategories by remember { mutableStateOf<List<LuxuryVehicleCategory>>(emptyList()) }
     var selectedCategoryIndex by remember { mutableIntStateOf(0) }
     var isCalculatingFare by remember { mutableStateOf(false) }
     var isSharedRide by remember { mutableStateOf(false) }
@@ -264,20 +257,21 @@ fun LocationScreen(
 
 
 
-    val defaultCuratedDestinations = remember {
-        listOf(
-            LuxuryPlace("Rajiv Chowk Metro Gate 2", "Connaught Place, New Delhi", 28.6328, 77.2197),
-            LuxuryPlace("Model Town Metro Hub", "Ring Road, Model Town, Delhi", 28.7032, 77.1937),
-            LuxuryPlace("Chandni Chowk Market", "Old Delhi Transit Corridor", 28.6506, 77.2303),
-            LuxuryPlace("Vishwa Vidyalaya Metro Gate 1", "North Campus, Mall Road, Delhi", 28.6948, 77.2144)
-        )
+    val defaultCuratedDestinations = remember(savedPins) {
+        savedPins.map {
+            LuxuryPlace(it.label, it.address, it.latitude, it.longitude)
+        }
     }
 
     // Reservation dispatch used by both the booking button and confirmation dialog.
     fun executeBespokeReservation() {
         if (isBookingInProgress) return
+        val dest = selectedDestination ?: defaultCuratedDestinations.firstOrNull()
+        if (dest == null) {
+            Toast.makeText(context, "Please select destination on map or search above", Toast.LENGTH_SHORT).show()
+            return
+        }
         isBookingInProgress = true
-        val dest = selectedDestination ?: defaultCuratedDestinations.first()
         val estId = serverEstimateId ?: "est_${System.currentTimeMillis()}"
 
         val stopsDto = intermediateStops.map {
@@ -693,26 +687,39 @@ fun LocationScreen(
         }
     }
 
-    // Autocomplete Search
+    // Autocomplete Search using Mapbox Search SDK / Geocoding API
     LaunchedEffect(destinationSearchQuery) {
         val query = destinationSearchQuery.trim()
         if (query.length >= 2) {
-            delay(300)
+            delay(250)
             isSearchingDestinations = true
             try {
-                val autoRes = ApiClient.getService().autocompletePlaces(query)
-                if (autoRes.isSuccessful && autoRes.body() != null) {
-                    val rawResults = autoRes.body()!!["results"] as? List<*>
-                    if (rawResults != null) {
-                        val parsed = rawResults.mapNotNull { item ->
-                            val map = item as? Map<*, *> ?: return@mapNotNull null
-                            val name = map["name"] as? String ?: return@mapNotNull null
-                            val address = map["address"] as? String ?: name
-                            val lat = (map["lat"] as? Number)?.toDouble() ?: (map["latitude"] as? Number)?.toDouble() ?: 28.6139
-                            val lng = (map["lng"] as? Number)?.toDouble() ?: (map["longitude"] as? Number)?.toDouble() ?: 77.2090
-                            LuxuryPlace(name = name, address = address, lat = lat, lng = lng)
+                // 1. Primary: Direct Mapbox Search Service
+                val mapboxResults = MapboxSearchService.searchPlaces(
+                    query = query,
+                    proximityLat = pickupLatLng.latitude,
+                    proximityLng = pickupLatLng.longitude
+                )
+                if (mapboxResults.isNotEmpty()) {
+                    dynamicDestinations = mapboxResults.map {
+                        LuxuryPlace(name = it.name, address = it.fullAddress, lat = it.latitude, lng = it.longitude)
+                    }
+                } else {
+                    // 2. Secondary: Backend Fallback
+                    val autoRes = ApiClient.getService().autocompletePlaces(query)
+                    if (autoRes.isSuccessful && autoRes.body() != null) {
+                        val rawResults = autoRes.body()!!["results"] as? List<*>
+                        if (rawResults != null) {
+                            val parsed = rawResults.mapNotNull { item ->
+                                val map = item as? Map<*, *> ?: return@mapNotNull null
+                                val name = map["name"] as? String ?: return@mapNotNull null
+                                val address = map["address"] as? String ?: name
+                                val lat = (map["lat"] as? Number)?.toDouble() ?: (map["latitude"] as? Number)?.toDouble() ?: 28.6139
+                                val lng = (map["lng"] as? Number)?.toDouble() ?: (map["longitude"] as? Number)?.toDouble() ?: 77.2090
+                                LuxuryPlace(name = name, address = address, lat = lat, lng = lng)
+                            }
+                            dynamicDestinations = parsed
                         }
-                        dynamicDestinations = parsed
                     }
                 }
             } catch (_: Exception) {
@@ -728,37 +735,59 @@ fun LocationScreen(
         }
     }
 
-    // Real Road Route & Navigation Guidance Engine
+    // Real Road Route & Navigation Guidance Engine using Mapbox Directions v5
     LaunchedEffect(pickupLatLng, selectedDestination) {
         val dest = selectedDestination
         if (dest != null) {
             isFetchingRoute = true
             try {
-                val routeRes = ApiClient.getService().getRouteDetails(
+                // 1. Primary: Direct Mapbox Driving NavigationRoute
+                val mbNav = MapboxDirectionsService.fetchNavigationRoute(
                     originLat = pickupLatLng.latitude,
                     originLng = pickupLatLng.longitude,
                     destLat = dest.lat,
                     destLng = dest.lng
                 )
-                if (routeRes.isSuccessful && routeRes.body() != null) {
-                    val r = routeRes.body()!!
-                    liveRouteDistanceKm = r.distanceKm
-                    liveRouteDurationMinutes = r.durationMinutes
-                    val pts = r.points?.map { LatLng(it.latitude, it.longitude) } ?: emptyList()
-                    liveRoutePoints = if (pts.isNotEmpty()) pts else listOf(pickupLatLng, LatLng(dest.lat, dest.lng))
-                }
-
-                try {
-                    val navRes = ApiClient.getService().getNavigationGuidance(
+                if (mbNav != null && mbNav.coordinates.isNotEmpty()) {
+                    liveRouteDistanceKm = mbNav.distanceKm
+                    liveRouteDurationMinutes = mbNav.durationMinutes
+                    liveRoutePoints = mbNav.coordinates.map { LatLng(it.latitude, it.longitude) }
+                    liveNavigationSteps = mbNav.steps.map {
+                        NavigationStepDto(
+                            instruction = it.instruction,
+                            maneuver = it.maneuver,
+                            distance = "${it.distanceMeters.toInt()}m",
+                            duration = "${it.durationSeconds.toInt()}s"
+                        )
+                    }
+                } else {
+                    // 2. Secondary: Backend Route Fallback
+                    val routeRes = ApiClient.getService().getRouteDetails(
                         originLat = pickupLatLng.latitude,
                         originLng = pickupLatLng.longitude,
                         destLat = dest.lat,
                         destLng = dest.lng
                     )
-                    if (navRes.isSuccessful && navRes.body() != null) {
-                        liveNavigationSteps = navRes.body()!!.steps
+                    if (routeRes.isSuccessful && routeRes.body() != null) {
+                        val r = routeRes.body()!!
+                        liveRouteDistanceKm = r.distanceKm
+                        liveRouteDurationMinutes = r.durationMinutes
+                        val pts = r.points?.map { LatLng(it.latitude, it.longitude) } ?: emptyList()
+                        liveRoutePoints = if (pts.isNotEmpty()) pts else listOf(pickupLatLng, LatLng(dest.lat, dest.lng))
                     }
-                } catch (_: Exception) {}
+
+                    try {
+                        val navRes = ApiClient.getService().getNavigationGuidance(
+                            originLat = pickupLatLng.latitude,
+                            originLng = pickupLatLng.longitude,
+                            destLat = dest.lat,
+                            destLng = dest.lng
+                        )
+                        if (navRes.isSuccessful && navRes.body() != null) {
+                            liveNavigationSteps = navRes.body()!!.steps
+                        }
+                    } catch (_: Exception) {}
+                }
             } catch (e: Exception) {
                 android.util.Log.w("LocationScreen", "Route fetch error: ${e.message}")
                 liveRoutePoints = listOf(pickupLatLng, LatLng(dest.lat, dest.lng))
@@ -775,7 +804,7 @@ fun LocationScreen(
 
     // Dynamic Fare Calculation (with 300ms debounce to prevent request flooding)
     LaunchedEffect(selectedDestination, selectedCategoryIndex, isSharedRide, selectedSeats, pickupLatLng, intermediateStops.size, isRoundTrip) {
-        val dest = selectedDestination ?: defaultCuratedDestinations.first()
+        val dest = selectedDestination ?: defaultCuratedDestinations.firstOrNull() ?: return@LaunchedEffect
         val cat = dynamicCategories.getOrNull(selectedCategoryIndex) ?: dynamicCategories.firstOrNull() ?: return@LaunchedEffect
         delay(300)
         isCalculatingFare = true
@@ -827,7 +856,7 @@ fun LocationScreen(
 
     // Feature 78: Compare all vehicle tiers
     fun loadComparisons() {
-        val dest = selectedDestination ?: defaultCuratedDestinations.first()
+        val dest = selectedDestination ?: defaultCuratedDestinations.firstOrNull() ?: return
         scope.launch {
             try {
                 val compRes = ApiClient.getService().compareVehicleFares(
@@ -850,7 +879,7 @@ fun LocationScreen(
 
     // Dialog components
     if (showTemplatesDialog) {
-        val dest = selectedDestination ?: defaultCuratedDestinations.first()
+        val dest = selectedDestination ?: defaultCuratedDestinations.firstOrNull() ?: LuxuryPlace("Selected Destination", pickupAddress, pickupLatLng.latitude, pickupLatLng.longitude)
         TripTemplatesDialog(
             currentPickupAddress = pickupAddress,
             currentPickupLatLng = pickupLatLng,
@@ -889,7 +918,7 @@ fun LocationScreen(
     }
 
     if (showTrafficRecDialog) {
-        val dest = selectedDestination ?: defaultCuratedDestinations.first()
+        val dest = selectedDestination ?: defaultCuratedDestinations.firstOrNull() ?: LuxuryPlace("Selected Destination", pickupAddress, pickupLatLng.latitude, pickupLatLng.longitude)
         TrafficRecommendationDialog(
             pickupLatLng = pickupLatLng,
             destLatLng = LatLng(dest.lat, dest.lng),
@@ -898,16 +927,18 @@ fun LocationScreen(
     }
 
     if (showRecurringDialog) {
-        val dest = selectedDestination ?: defaultCuratedDestinations.first()
-        val cat = dynamicCategories.getOrNull(selectedCategoryIndex) ?: dynamicCategories.first()
-        RecurringScheduleDialog(
-            pickupAddress = pickupAddress,
-            pickupLatLng = pickupLatLng,
-            destAddress = dest.address,
-            destLatLng = LatLng(dest.lat, dest.lng),
-            categoryId = cat.id,
-            onDismiss = { showRecurringDialog = false }
-        )
+        val dest = selectedDestination ?: defaultCuratedDestinations.firstOrNull() ?: LuxuryPlace("Selected Destination", pickupAddress, pickupLatLng.latitude, pickupLatLng.longitude)
+        val cat = dynamicCategories.getOrNull(selectedCategoryIndex) ?: dynamicCategories.firstOrNull()
+        if (cat != null) {
+            RecurringScheduleDialog(
+                pickupAddress = pickupAddress,
+                pickupLatLng = pickupLatLng,
+                destAddress = dest.address,
+                destLatLng = LatLng(dest.lat, dest.lng),
+                categoryId = cat.id,
+                onDismiss = { showRecurringDialog = false }
+            )
+        }
     }
 
     if (showDependentsDialog) {
@@ -1329,13 +1360,13 @@ fun LocationScreen(
                     .height(250.dp)
             ) {
                 Box {
-                    val destPlace = selectedDestination ?: defaultCuratedDestinations.first()
+                    val destPlace = selectedDestination ?: defaultCuratedDestinations.firstOrNull()
                     LuxuryMapView(
                         modifier = Modifier.fillMaxSize(),
                         pickupLatLng = pickupLatLng,
                         pickupTitle = if (isGpsLive) "MY GPS LOCATION" else "PICKUP PIN",
-                        destLatLng = selectedDestination?.let { LatLng(it.lat, it.lng) } ?: LatLng(destPlace.lat, destPlace.lng),
-                        destTitle = selectedDestination?.name ?: destPlace.name,
+                        destLatLng = selectedDestination?.let { LatLng(it.lat, it.lng) } ?: destPlace?.let { LatLng(it.lat, it.lng) },
+                        destTitle = selectedDestination?.name ?: destPlace?.name ?: "Search Destination",
                         routePoints = liveRoutePoints,
                         routeDistanceKm = liveRouteDistanceKm,
                         routeDurationMinutes = liveRouteDurationMinutes,
@@ -2419,8 +2450,8 @@ fun LocationScreen(
                     text = if (isBookingInProgress) "SECURING YOUR CHAUFFEUR..." else "CONFIRM RESERVATION",
                     onClick = {
                         if (isBookingInProgress) return@LuxuryButton
-                        val dest = selectedDestination ?: defaultCuratedDestinations.first()
-                        val activeCat = dynamicCategories.getOrNull(selectedCategoryIndex) ?: dynamicCategories.first()
+                        val dest = selectedDestination ?: defaultCuratedDestinations.firstOrNull() ?: return@LuxuryButton
+                        val activeCat = dynamicCategories.getOrNull(selectedCategoryIndex) ?: dynamicCategories.firstOrNull() ?: return@LuxuryButton
 
                         val summary = PrebookingPreferenceSummaryDto(
                             passengerName = if (bookingForSelf) "Guest Principal" else (passengerName.ifBlank { "VIP Guest" }),
@@ -2636,8 +2667,8 @@ fun LocationScreen(
     }
 
     if (showSharedRideFlow) {
-        val category = dynamicCategories.getOrNull(selectedCategoryIndex) ?: dynamicCategories.first()
-        val destination = selectedDestination ?: defaultCuratedDestinations.first()
+        val category = dynamicCategories.getOrNull(selectedCategoryIndex) ?: dynamicCategories.firstOrNull() ?: return
+        val destination = selectedDestination ?: defaultCuratedDestinations.firstOrNull() ?: return
         SharedRideBookingDialog(
             pickupAddress = pickupAddress,
             pickupLatitude = pickupLatLng.latitude,
@@ -2682,7 +2713,7 @@ fun LocationScreen(
     }
 
     if (showRouteAlternativesDialog) {
-        val dest = selectedDestination ?: defaultCuratedDestinations.first()
+        val dest = selectedDestination ?: defaultCuratedDestinations.firstOrNull() ?: return
         RouteAlternativesDialog(
             originLat = pickupLatLng.latitude,
             originLng = pickupLatLng.longitude,

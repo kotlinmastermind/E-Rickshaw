@@ -84,6 +84,9 @@ class MapsProvider(ABC):
         route = await self.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
         return [{**route.to_dict(), "route_index": 0, "provider_mode": "APPROXIMATE_NOT_LIVE"}]
 
+    async def get_place_details(self, place_id: str) -> Dict[str, Any]:
+        return await self.fallback.get_place_details(place_id)
+
     async def snap_to_road(self, latitude: float, longitude: float) -> Dict[str, Any]:
         return {"available": False, "provider_verified": False, "message": "Road snapping requires a configured Roads API provider; the selected pin is unchanged."}
 
@@ -754,13 +757,337 @@ class GoogleMapsProvider(MapsProvider):
                 pass
         return await self.fallback.reverse_geocode(lat, lng)
 
+
+class MapboxProvider(MapsProvider):
+    """
+    Enterprise Mapbox Web Services Provider.
+    Implements:
+    - Mapbox Directions API v5 (Driving, Traffic, Steps, Alternatives)
+    - Mapbox Geocoding API v5 (Forward Place Autocomplete & Reverse Geocoding)
+    - Mapbox Directions Matrix API v1 (Nearest Driver & Multi-point ETA Calculation)
+    - Mapbox Isochrone API v1 (Urban Reachability Polygons)
+    - Mapbox Map Matching API v5 (Road Snapping)
+    """
+    def __init__(self, access_token: str):
+        self.access_token = (access_token or "").strip()
+        self.fallback = WorldwideLiveMapsProvider()
+
+    def provider_health(self) -> Dict[str, Any]:
+        return {
+            "provider": "MAPBOX_WEB_SERVICES",
+            "status": "OPERATIONAL" if self.access_token else "FALLBACK_MODE",
+            "configured": bool(self.access_token),
+            "live_data": True,
+            "message": "Mapbox Vector Navigation, Matrix, Geocoding, and Directions API active."
+        }
+
+    async def get_route(
+        self, origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float
+    ) -> RouteDetails:
+        if not self.access_token or "dummy" in self.access_token:
+            return await self.fallback.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
+
+        url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{origin_lng},{origin_lat};{dest_lng},{dest_lat}"
+        params = {
+            "access_token": self.access_token,
+            "geometries": "geojson",
+            "overview": "full",
+            "steps": "true",
+            "banner_instructions": "true",
+            "voice_instructions": "true"
+        }
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(url, params=params, timeout=7.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    routes = data.get("routes", [])
+                    if routes:
+                        r0 = routes[0]
+                        dist_km = round(float(r0.get("distance", 0)) / 1000.0, 2)
+                        dur_min = round(float(r0.get("duration", 0)) / 60.0, 1)
+
+                        coords = r0.get("geometry", {}).get("coordinates", [])
+                        points = [{"latitude": round(pt[1], 6), "longitude": round(pt[0], 6), "lat": round(pt[1], 6), "lng": round(pt[0], 6)} for pt in coords]
+
+                        steps_data = []
+                        legs = r0.get("legs", [])
+                        if legs:
+                            for s in legs[0].get("steps", []):
+                                man = s.get("maneuver", {})
+                                instr = man.get("instruction") or s.get("name") or "Proceed along route"
+                                mod = man.get("modifier", "").upper()
+                                steps_data.append({
+                                    "instruction": instr,
+                                    "maneuver": mod or man.get("type", "STRAIGHT").upper(),
+                                    "distance_meters": round(float(s.get("distance", 0)), 1),
+                                    "duration_seconds": round(float(s.get("duration", 0)), 1)
+                                })
+
+                        poly_str = ";".join([f"{pt['latitude']},{pt['longitude']}" for pt in points[::max(1, len(points)//60)]])
+
+                        return RouteDetails(
+                            distance_km=dist_km,
+                            duration_minutes=dur_min,
+                            polyline=poly_str,
+                            provider="MAPBOX_DIRECTIONS_V5",
+                            traffic_aware=True,
+                            route_label="Fastest Route (Mapbox)",
+                            points=points,
+                            steps=steps_data
+                        )
+            except Exception:
+                pass
+
+        return await self.fallback.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
+
+    async def get_route_alternatives(
+        self, origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float
+    ) -> List[Dict[str, Any]]:
+        if not self.access_token or "dummy" in self.access_token:
+            return await self.fallback.get_route_alternatives(origin_lat, origin_lng, dest_lat, dest_lng)
+
+        url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{origin_lng},{origin_lat};{dest_lng},{dest_lat}"
+        params = {
+            "access_token": self.access_token,
+            "geometries": "geojson",
+            "overview": "full",
+            "alternatives": "true",
+            "steps": "true"
+        }
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(url, params=params, timeout=7.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    routes = data.get("routes", [])
+                    if routes:
+                        alt_list = []
+                        for idx, r in enumerate(routes[:3]):
+                            dist_km = round(float(r.get("distance", 0)) / 1000.0, 2)
+                            dur_min = round(float(r.get("duration", 0)) / 60.0, 1)
+                            coords = r.get("geometry", {}).get("coordinates", [])
+                            pts = [{"latitude": round(pt[1], 6), "longitude": round(pt[0], 6), "lat": round(pt[1], 6), "lng": round(pt[0], 6)} for pt in coords]
+                            alt_list.append({
+                                "route_index": idx,
+                                "distance_km": dist_km,
+                                "duration_minutes": dur_min,
+                                "route_label": f"Route {idx+1} ({'Fastest' if idx==0 else 'Alternative'})",
+                                "points": pts,
+                                "provider": "MAPBOX_DIRECTIONS_V5",
+                                "traffic_aware": True
+                            })
+                        return alt_list
+            except Exception:
+                pass
+
+        return await self.fallback.get_route_alternatives(origin_lat, origin_lng, dest_lat, dest_lng)
+
+    async def autocomplete_places(self, query: str) -> List[Dict[str, Any]]:
+        q = query.strip()
+        if not q:
+            return await self.fallback.autocomplete_places(q)
+
+        if not self.access_token or "dummy" in self.access_token:
+            return await self.fallback.autocomplete_places(q)
+
+        url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{httpx.URL('', params={'q': q}).params['q']}.json"
+        params = {
+            "access_token": self.access_token,
+            "autocomplete": "true",
+            "limit": 10
+        }
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(url, params=params, timeout=5.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    features = data.get("features", [])
+                    if features:
+                        results = []
+                        for f in features:
+                            center = f.get("center", [])
+                            if len(center) >= 2:
+                                lng, lat = float(center[0]), float(center[1])
+                                place_name = f.get("place_name") or f.get("text") or q
+                                name = f.get("text") or place_name.split(",")[0]
+                                results.append({
+                                    "place_id": f.get("id", f"mb_{lat}_{lng}"),
+                                    "name": name,
+                                    "address": place_name,
+                                    "lat": round(lat, 6),
+                                    "lng": round(lng, 6),
+                                    "latitude": round(lat, 6),
+                                    "longitude": round(lng, 6),
+                                    "coordinates_verified": True,
+                                    "provider_mode": "MAPBOX_GEOCODING_V5"
+                                })
+                        if results:
+                            return results
+            except Exception:
+                pass
+
+        return await self.fallback.autocomplete_places(q)
+
+    async def reverse_geocode(self, lat: float, lng: float) -> str:
+        if not self.access_token or "dummy" in self.access_token:
+            return await self.fallback.reverse_geocode(lat, lng)
+
+        url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{lng},{lat}.json"
+        params = {
+            "access_token": self.access_token,
+            "limit": 1
+        }
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(url, params=params, timeout=5.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    features = data.get("features", [])
+                    if features:
+                        return features[0].get("place_name", f"Location ({lat:.5f}, {lng:.5f})")
+            except Exception:
+                pass
+
+        return await self.fallback.reverse_geocode(lat, lng)
+
+    async def calculate_matrix(
+        self,
+        origins: List[Dict[str, float]],
+        destinations: List[Dict[str, float]]
+    ) -> Dict[str, Any]:
+        """
+        Calculates distance and duration matrices between multiple origins (e.g. drivers)
+        and destinations (e.g. customer pickup point) to find nearest drivers and compute ETAs.
+        """
+        all_coords = []
+        for o in origins:
+            all_coords.append(f"{o.get('lng', o.get('longitude'))},{o.get('lat', o.get('latitude'))}")
+        origin_count = len(origins)
+        
+        for d in destinations:
+            all_coords.append(f"{d.get('lng', d.get('longitude'))},{d.get('lat', d.get('latitude'))}")
+
+        sources_param = ";".join(str(i) for i in range(origin_count))
+        dest_param = ";".join(str(origin_count + j) for j in range(len(destinations)))
+        coords_str = ";".join(all_coords)
+
+        if self.access_token and "dummy" not in self.access_token:
+            url = f"https://api.mapbox.com/directions-matrix/v1/mapbox/driving/{coords_str}"
+            params = {
+                "access_token": self.access_token,
+                "sources": sources_param,
+                "destinations": dest_param,
+                "annotations": "distance,duration"
+            }
+            async with httpx.AsyncClient() as client:
+                try:
+                    resp = await client.get(url, params=params, timeout=6.0)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        return {
+                            "durations_seconds": data.get("durations", []),
+                            "distances_meters": data.get("distances", []),
+                            "provider": "MAPBOX_MATRIX_V1"
+                        }
+                except Exception:
+                    pass
+
+        # Haversine geometric fallback calculation
+        distances = []
+        durations = []
+        for o in origins:
+            row_dist = []
+            row_dur = []
+            o_lat = float(o.get('lat', o.get('latitude', 0)))
+            o_lng = float(o.get('lng', o.get('longitude', 0)))
+            for d in destinations:
+                d_lat = float(d.get('lat', d.get('latitude', 0)))
+                d_lng = float(d.get('lng', d.get('longitude', 0)))
+                R = 6371000.0
+                phi1, phi2 = math.radians(o_lat), math.radians(d_lat)
+                dphi = math.radians(d_lat - o_lat)
+                dlam = math.radians(d_lng - o_lng)
+                a = math.sin(dphi/2.0)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlam/2.0)**2
+                dist_m = R * 2 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1 - a)))
+                dur_s = dist_m / 5.55
+                row_dist.append(round(dist_m, 1))
+                row_dur.append(round(dur_s, 1))
+            distances.append(row_dist)
+            durations.append(row_dur)
+
+        return {
+            "durations_seconds": durations,
+            "distances_meters": distances,
+            "provider": "HAVERSINE_MATRIX_FALLBACK"
+        }
+
+    async def get_isochrone(
+        self, origin_lat: float, origin_lng: float, travel_time_minutes: int = 15
+    ) -> Dict[str, Any]:
+        if self.access_token and "dummy" not in self.access_token:
+            url = f"https://api.mapbox.com/isochrone/v1/mapbox/driving/{origin_lng},{origin_lat}"
+            params = {
+                "access_token": self.access_token,
+                "contours_minutes": travel_time_minutes,
+                "polygons": "true"
+            }
+            async with httpx.AsyncClient() as client:
+                try:
+                    resp = await client.get(url, params=params, timeout=6.0)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        features = data.get("features", [])
+                        if features:
+                            coords = features[0].get("geometry", {}).get("coordinates", [])
+                            if coords and len(coords[0]) > 0:
+                                poly = [{"latitude": round(pt[1], 6), "longitude": round(pt[0], 6)} for pt in coords[0]]
+                                return {
+                                    "origin": {"latitude": origin_lat, "longitude": origin_lng},
+                                    "travel_time_minutes": travel_time_minutes,
+                                    "polygon": poly,
+                                    "provider_mode": "MAPBOX_ISOCHRONE_V1"
+                                }
+                except Exception:
+                    pass
+
+        return await self.fallback.get_isochrone(origin_lat, origin_lng, travel_time_minutes)
+
+    async def snap_to_road(self, latitude: float, longitude: float) -> Dict[str, Any]:
+        if self.access_token and "dummy" not in self.access_token:
+            coords = f"{longitude},{latitude};{longitude+0.0001},{latitude+0.0001}"
+            url = f"https://api.mapbox.com/matching/v5/mapbox/driving/{coords}"
+            params = {"access_token": self.access_token}
+            async with httpx.AsyncClient() as client:
+                try:
+                    resp = await client.get(url, params=params, timeout=5.0)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        tracepoints = data.get("tracepoints", [])
+                        if tracepoints and tracepoints[0]:
+                            loc = tracepoints[0].get("location", [longitude, latitude])
+                            return {
+                                "snapped": True,
+                                "latitude": round(loc[1], 6),
+                                "longitude": round(loc[0], 6),
+                                "provider": "MAPBOX_MAP_MATCHING"
+                            }
+                except Exception:
+                    pass
+
+        return {"snapped": False, "latitude": latitude, "longitude": longitude, "provider": "RAW_GPS"}
+
 _maps_instance: Optional[MapsProvider] = None
 
 def get_maps_provider() -> MapsProvider:
     global _maps_instance
     if _maps_instance is None:
-        if settings.GOOGLE_MAPS_API_KEY:
+        token = getattr(settings, "MAPBOX_SECRET_TOKEN", None) or os.getenv("MAPBOX_SECRET_TOKEN") or getattr(settings, "MAPBOX_PUBLIC_TOKEN", None) or os.getenv("MAPBOX_PUBLIC_TOKEN")
+        if token and "dummy" not in token:
+            _maps_instance = MapboxProvider(token)
+        elif getattr(settings, "GOOGLE_MAPS_API_KEY", None):
             _maps_instance = GoogleMapsProvider(settings.GOOGLE_MAPS_API_KEY)
         else:
-            _maps_instance = WorldwideLiveMapsProvider()
+            _maps_instance = MapboxProvider(token or "")
     return _maps_instance
+

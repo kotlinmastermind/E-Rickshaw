@@ -3,6 +3,7 @@ package com.luxury.chauffeur.customer.feature.payments
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.util.Log
 import org.json.JSONArray
@@ -51,8 +52,21 @@ object RazorpayPaymentBridge {
     }
 }
 
+data class UpiAppInfo(
+    val id: String,
+    val name: String,
+    val packageName: String,
+    val isInstalled: Boolean
+)
+
 object RazorpayCheckoutHelper {
     private const val TAG = "RazorpayCheckout"
+
+    const val PACKAGE_GPAY = "com.google.android.apps.nbu.paisa.user"
+    const val PACKAGE_PHONEPE = "com.phonepe.app"
+    const val PACKAGE_PAYTM = "net.one97.paytm"
+    const val PACKAGE_BHIM = "in.org.npci.upiapp"
+    const val PACKAGE_CRED = "com.dreamplug.androidapp"
 
     fun initialize(activity: Activity) {
         try {
@@ -63,6 +77,11 @@ object RazorpayCheckoutHelper {
         }
     }
 
+    /**
+     * Start Razorpay Checkout with reliable UPI priority.
+     * Cleanly configured so Razorpay's API correctly reveals UPI (GPay, PhonePe, Paytm, QR, UPI ID)
+     * alongside Cards, Netbanking, Wallets and Pay Later.
+     */
     fun startPayment(
         activity: Activity,
         orderId: String,
@@ -78,7 +97,7 @@ object RazorpayCheckoutHelper {
 
         try {
             val checkout = com.razorpay.Checkout()
-            checkout.setKeyID(keyId)
+            checkout.setKeyID(keyId.ifBlank { RazorpayConfig.LIVE_KEY_ID })
 
             val options = JSONObject()
             options.put("name", RazorpayConfig.COMPANY_NAME)
@@ -86,10 +105,16 @@ object RazorpayCheckoutHelper {
             options.put("currency", RazorpayConfig.DEFAULT_CURRENCY)
             val amountPaise = (amountRupees * 100).toLong()
             options.put("amount", amountPaise)
-            options.put("order_id", orderId)
+
+            // Only attach order_id if it's a real order created on Razorpay's servers
+            if (orderId.isNotBlank() && orderId.startsWith("order_") &&
+                !orderId.startsWith("order_live_") && !orderId.startsWith("order_fake") && !orderId.startsWith("rcpt_")
+            ) {
+                options.put("order_id", orderId)
+            }
             options.put("send_sms_hash", true)
 
-            // Prefill with customer info and prioritize UPI
+            // Customer Prefill
             val prefill = JSONObject()
             if (!customerPhone.isNullOrBlank()) {
                 prefill.put("contact", customerPhone)
@@ -97,12 +122,9 @@ object RazorpayCheckoutHelper {
             if (!customerEmail.isNullOrBlank()) {
                 prefill.put("email", customerEmail)
             }
-            if (forceUpiFirst) {
-                prefill.put("method", "upi")
-            }
             options.put("prefill", prefill)
 
-            // Styling Theme (Champagne Gold)
+            // Styling Theme (Luxury Gold)
             val theme = JSONObject()
             theme.put("color", RazorpayConfig.THEME_COLOR)
             theme.put("hide_topbar", false)
@@ -111,69 +133,67 @@ object RazorpayCheckoutHelper {
             // Auto Retries
             val retryObj = JSONObject()
             retryObj.put("enabled", true)
-            retryObj.put("max_count", 2)
+            retryObj.put("max_count", 3)
             options.put("retry", retryObj)
 
-            // Explicitly enable payment methods
-            val methodObj = JSONObject()
-            methodObj.put("upi", true)
-            methodObj.put("card", true)
-            methodObj.put("netbanking", true)
-            methodObj.put("wallet", true)
-            methodObj.put("emi", true)
-            options.put("method", methodObj)
+            // Display & Block Configuration: Enforces UPI Block (GPay, PhonePe, Paytm, QR, UPI ID) as #1
+            val configObj = JSONObject()
+            val displayObj = JSONObject()
+            val blocksObj = JSONObject()
 
-            // Custom Display sequence that forces UPI to show at the top of Razorpay Checkout
-            val config = JSONObject()
-            val display = JSONObject()
-            val blocks = JSONObject()
+            // 1. Preferred UPI Block
+            val upiBlock = JSONObject().apply {
+                put("name", "Pay via UPI (GPay, PhonePe, Paytm, QR, UPI ID)")
+                val instrumentsArray = JSONArray()
+                val upiInstrument = JSONObject().apply {
+                    put("method", "upi")
+                    val flowsArray = JSONArray().apply {
+                        put("intent")
+                        put("qr")
+                        put("collect")
+                    }
+                    put("flows", flowsArray)
+                }
+                instrumentsArray.put(upiInstrument)
+                put("instruments", instrumentsArray)
+            }
+            blocksObj.put("preferred_upi", upiBlock)
 
-            // 1. UPI Block (Primary - Intent, QR, and Collect/VPA)
-            val upiBlock = JSONObject()
-            upiBlock.put("name", "UPI / QR / Google Pay / PhonePe / Paytm")
-            val upiInstruments = JSONArray()
-            val upiInst = JSONObject()
-            upiInst.put("method", "upi")
-            val upiFlows = JSONArray()
-            upiFlows.put("intent")
-            upiFlows.put("collect")
-            upiFlows.put("qr")
-            upiInst.put("flows", upiFlows)
-            upiInstruments.put(upiInst)
-            upiBlock.put("instruments", upiInstruments)
-            blocks.put("upi_block", upiBlock)
+            // 2. All Other Payment Options Block
+            val otherBlock = JSONObject().apply {
+                put("name", "Other Payment Options (Cards, Netbanking, Wallets)")
+                val otherInstruments = JSONArray().apply {
+                    put(JSONObject().put("method", "card"))
+                    put(JSONObject().put("method", "netbanking"))
+                    put(JSONObject().put("method", "wallet"))
+                    put(JSONObject().put("method", "emi"))
+                    put(JSONObject().put("method", "paylater"))
+                }
+                put("instruments", otherInstruments)
+            }
+            blocksObj.put("other_methods", otherBlock)
 
-            // 2. Other Payment Methods (Cards, Netbanking, Wallets)
-            val otherBlock = JSONObject()
-            otherBlock.put("name", "Other Payment Modes (Cards, Netbanking, Wallets)")
-            val otherInstruments = JSONArray()
-            val cardInst = JSONObject()
-            cardInst.put("method", "card")
-            otherInstruments.put(cardInst)
-            val nbInst = JSONObject()
-            nbInst.put("method", "netbanking")
-            otherInstruments.put(nbInst)
-            val walletInst = JSONObject()
-            walletInst.put("method", "wallet")
-            otherInstruments.put(walletInst)
-            otherBlock.put("instruments", otherInstruments)
-            blocks.put("other_block", otherBlock)
+            displayObj.put("blocks", blocksObj)
 
-            display.put("blocks", blocks)
-            val sequence = JSONArray()
-            sequence.put("block.upi_block")
-            sequence.put("block.other_block")
-            display.put("sequence", sequence)
+            // Sequence: UPI block strictly placed FIRST
+            val sequenceArray = JSONArray().apply {
+                put("block.preferred_upi")
+                put("block.other_methods")
+            }
+            displayObj.put("sequence", sequenceArray)
 
-            val preferences = JSONObject()
-            preferences.put("show_default_blocks", true)
-            display.put("preferences", preferences)
+            val preferencesObj = JSONObject().apply {
+                put("show_default_blocks", true)
+            }
+            displayObj.put("preferences", preferencesObj)
 
-            config.put("display", display)
-            options.put("config", config)
-            options.put("display", display)
+            configObj.put("display", displayObj)
+            options.put("config", configObj)
 
-            Log.i(TAG, "Launching Razorpay Checkout with UPI Priority for Order: $orderId, ₹$amountRupees")
+            // Also directly attach display for SDK variants that read options.display
+            options.put("display", displayObj)
+
+            Log.i(TAG, "Opening Razorpay Checkout for ₹$amountRupees (orderId: $orderId, UPI first: $forceUpiFirst)")
             checkout.open(activity, options)
         } catch (e: Exception) {
             Log.e(TAG, "Error opening Razorpay checkout: ${e.message}", e)
@@ -182,7 +202,51 @@ object RazorpayCheckoutHelper {
     }
 
     /**
-     * Fallback Direct UPI Intent launcher to open Google Pay, PhonePe, Paytm directly
+     * Check if a specific UPI package is installed on the user's Android device
+     */
+    fun isAppInstalled(context: Context, packageName: String): Boolean {
+        return try {
+            context.packageManager.getPackageInfo(packageName, PackageManager.GET_ACTIVITIES)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Get list of popular UPI apps and whether they are installed
+     */
+    fun getPopularUpiApps(context: Context): List<UpiAppInfo> {
+        return listOf(
+            UpiAppInfo("gpay", "Google Pay", PACKAGE_GPAY, isAppInstalled(context, PACKAGE_GPAY)),
+            UpiAppInfo("phonepe", "PhonePe", PACKAGE_PHONEPE, isAppInstalled(context, PACKAGE_PHONEPE)),
+            UpiAppInfo("paytm", "Paytm UPI", PACKAGE_PAYTM, isAppInstalled(context, PACKAGE_PAYTM)),
+            UpiAppInfo("bhim", "BHIM UPI", PACKAGE_BHIM, isAppInstalled(context, PACKAGE_BHIM)),
+            UpiAppInfo("cred", "CRED UPI", PACKAGE_CRED, isAppInstalled(context, PACKAGE_CRED))
+        )
+    }
+
+    /**
+     * Build the standard NPCI compliant UPI Intent URI
+     */
+    fun buildUpiUri(
+        amountRupees: Double,
+        rideId: String,
+        payeeVpa: String = RazorpayConfig.DEFAULT_UPI_VPA,
+        payeeName: String = RazorpayConfig.COMPANY_NAME,
+        transactionNote: String = "Luxury Ride Settlement"
+    ): Uri {
+        val formattedAmount = String.format(java.util.Locale.US, "%.2f", amountRupees)
+        val cleanRideId = rideId.filter { it.isLetterOrDigit() }.take(16).ifBlank { "RIDE${System.currentTimeMillis()}" }
+        val encodedName = Uri.encode(payeeName)
+        val encodedNote = Uri.encode("$transactionNote $cleanRideId")
+        return Uri.parse(
+            "upi://pay?pa=$payeeVpa&pn=$encodedName&mc=4121&tr=$cleanRideId&tn=$encodedNote&am=$formattedAmount&cu=INR"
+        )
+    }
+
+    /**
+     * Fallback Direct UPI Intent launcher to open Google Pay, PhonePe, Paytm directly via Android system chooser
      */
     fun launchDirectUpiIntent(
         context: Context,
@@ -193,7 +257,7 @@ object RazorpayCheckoutHelper {
     ): Boolean {
         return try {
             val formattedAmount = String.format(java.util.Locale.US, "%.2f", amountRupees)
-            val uri = Uri.parse("upi://pay?pa=$payeeVpa&pn=${Uri.encode(payeeName)}&mc=5511&tr=$rideId&tn=RidePayment-${rideId.take(8)}&am=$formattedAmount&cu=INR")
+            val uri = buildUpiUri(amountRupees, rideId, payeeVpa, payeeName)
             val intent = Intent(Intent.ACTION_VIEW, uri)
             val chooser = Intent.createChooser(intent, "Pay ₹$formattedAmount via UPI (GPay / PhonePe / Paytm / BHIM)")
             chooser.flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -206,7 +270,7 @@ object RazorpayCheckoutHelper {
     }
 
     /**
-     * Launch a specific UPI App directly by package name (e.g. GPay, PhonePe, Paytm)
+     * Launch a specific UPI App directly by package name (e.g. GPay, PhonePe, Paytm, BHIM)
      */
     fun launchSpecificUpiApp(
         context: Context,
@@ -217,15 +281,15 @@ object RazorpayCheckoutHelper {
         payeeName: String = RazorpayConfig.COMPANY_NAME
     ): Boolean {
         return try {
-            val formattedAmount = String.format(java.util.Locale.US, "%.2f", amountRupees)
-            val uri = Uri.parse("upi://pay?pa=$payeeVpa&pn=${Uri.encode(payeeName)}&mc=5511&tr=$rideId&tn=RidePayment-${rideId.take(8)}&am=$formattedAmount&cu=INR")
-            val intent = Intent(Intent.ACTION_VIEW, uri)
-            intent.setPackage(packageName)
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            val uri = buildUpiUri(amountRupees, rideId, payeeVpa, payeeName)
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage(packageName)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
             context.startActivity(intent)
             true
         } catch (e: Exception) {
-            Log.w(TAG, "Targeted launch for $packageName failed, falling back to chooser: ${e.message}")
+            Log.w(TAG, "Targeted launch for $packageName failed, falling back to general chooser: ${e.message}")
             launchDirectUpiIntent(context, amountRupees, rideId, payeeVpa, payeeName)
         }
     }

@@ -155,7 +155,7 @@ fun AddPayoutAccountDialog(
                     OutlinedTextField(
                         value = upiId,
                         onValueChange = { upiId = it },
-                        label = { Text("UPI Virtual Payment Address (e.g. arjun@okhdfcbank)", color = DriverColors.TextMuted, fontSize = 12.sp) },
+                        label = { Text("UPI Virtual Payment Address (e.g. username@upi)", color = DriverColors.TextMuted, fontSize = 12.sp) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = DriverColors.ChauffeurGold,

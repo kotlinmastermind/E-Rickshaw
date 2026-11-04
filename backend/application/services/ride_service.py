@@ -180,72 +180,73 @@ class RideService:
 
         now = datetime.now(timezone.utc)
 
-        # An authenticated driver can accept only their own live, persisted offer.
-        offer_result = await self.db.execute(
-            select(RideAssignment).where(
-                RideAssignment.ride_id == ride_id,
-                RideAssignment.driver_id == driver.id,
-                RideAssignment.status == "OFFERED",
-                RideAssignment.expires_at > now,
-            ).with_for_update()
-        )
-        offer = offer_result.scalar_one_or_none()
-        if offer is None:
-            raise HTTPException(status_code=409, detail="This dispatch offer expired or is no longer assigned to you.")
+        from backend.infrastructure.cache.redis_client import redis_client
+        async with redis_client.distributed_lock(f"lock:ride:{ride_id}", timeout_seconds=10):
+            # An authenticated driver can accept only their own live, persisted offer.
+            offer_result = await self.db.execute(
+                select(RideAssignment).where(
+                    RideAssignment.ride_id == ride_id,
+                    RideAssignment.driver_id == driver.id,
+                    RideAssignment.status == "OFFERED",
+                    RideAssignment.expires_at > now,
+                ).with_for_update()
+            )
+            offer = offer_result.scalar_one_or_none()
+            if offer is None:
+                raise HTTPException(status_code=409, detail="This dispatch offer expired or is no longer assigned to you.")
 
-        # Atomic conditional update
-        update_stmt = (
-            update(Ride)
-            .where(
-                and_(
-                    Ride.id == ride_id,
-                    Ride.status == RideStatus.REQUESTED.value,
-                    Ride.assigned_driver_id.is_(None)
+            # Atomic conditional update
+            update_stmt = (
+                update(Ride)
+                .where(
+                    and_(
+                        Ride.id == ride_id,
+                        Ride.status == RideStatus.REQUESTED.value,
+                        Ride.assigned_driver_id.is_(None)
+                    )
+                )
+                .values(
+                    status=RideStatus.ASSIGNED.value,
+                    assigned_driver_id=driver.id,
+                    assigned_at=now
                 )
             )
-            .values(
-                status=RideStatus.ASSIGNED.value,
-                assigned_driver_id=driver.id,
-                assigned_at=now
+            result = await self.db.execute(update_stmt)
+            if result.rowcount == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This luxury ride has already been accepted by another chauffeur or is no longer available."
+                )
+
+            # Mark driver availability as busy
+            avail_stmt = (
+                update(DriverAvailability)
+                .where(DriverAvailability.driver_id == driver.id)
+                .values(is_busy=True, updated_at=now)
             )
-        )
-        result = await self.db.execute(update_stmt)
-        if result.rowcount == 0:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="This luxury ride has already been accepted by another chauffeur or is no longer available."
+            await self.db.execute(avail_stmt)
+
+            # Record assignment & state event
+            offer.status = "ACCEPTED"
+            offer.is_accepted = True
+            offer.responded_at = now
+
+            # Clear Redis offer safety key
+            try:
+                await redis_client.delete(f"dispatch:offer:{ride_id}:{driver.id}")
+            except Exception:
+                pass
+
+            event = RideStatusEvent(
+                ride_id=ride_id,
+                previous_status=RideStatus.REQUESTED.value,
+                new_status=RideStatus.ASSIGNED.value,
+                triggered_by_user_id=driver_user_id,
+                trigger_actor=ActorRole.DRIVER.value,
+                notes=f"Accepted by chauffeur {driver.id}"
             )
-
-        # Mark driver availability as busy
-        avail_stmt = (
-            update(DriverAvailability)
-            .where(DriverAvailability.driver_id == driver.id)
-            .values(is_busy=True, updated_at=now)
-        )
-        await self.db.execute(avail_stmt)
-
-        # Record assignment & state event
-        offer.status = "ACCEPTED"
-        offer.is_accepted = True
-        offer.responded_at = now
-
-        # Clear Redis offer safety key
-        try:
-            from backend.infrastructure.cache.redis_client import redis_client
-            await redis_client.delete(f"dispatch:offer:{ride_id}:{driver.id}")
-        except Exception:
-            pass
-
-        event = RideStatusEvent(
-            ride_id=ride_id,
-            previous_status=RideStatus.REQUESTED.value,
-            new_status=RideStatus.ASSIGNED.value,
-            triggered_by_user_id=driver_user_id,
-            trigger_actor=ActorRole.DRIVER.value,
-            notes=f"Accepted by chauffeur {driver.id}"
-        )
-        self.db.add(event)
-        await self.db.commit()
+            self.db.add(event)
+            await self.db.commit()
 
         # Broadcast live status update to WebSocket subscribers
         await self._broadcast_ride_update(ride_id, RideStatus.ASSIGNED.value)

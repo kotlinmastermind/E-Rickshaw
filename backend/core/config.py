@@ -32,13 +32,15 @@ class Settings(BaseSettings):
         "rediss://default:gQAAAAAAA6FxAAIgcDFlMDE2ZjlkMDZlZTQ0ODIwYjg5NzdiODFkMmU1YzM4OQ@optimum-aphid-237937.upstash.io:6379"
     )
 
-    # Google Maps Platform (Configurable external boundary)
-    GOOGLE_MAPS_API_KEY: Optional[str] = "AIzaSyBCd1pDJ_1KeajQKHUQG-8QqlB5OpwmmOo"
+    # Mapbox Web Services Integration (Directions, Geocoding, Matrix & Isochrone)
+    MAPBOX_SECRET_TOKEN: Optional[str] = os.getenv("MAPBOX_SECRET_TOKEN", "")
+    MAPBOX_PUBLIC_TOKEN: Optional[str] = os.getenv("MAPBOX_PUBLIC_TOKEN", "")
+    GOOGLE_MAPS_API_KEY: Optional[str] = None
 
     # Payments Integration (Razorpay / UPI)
     RAZORPAY_KEY_ID: Optional[str] = os.getenv("RAZORPAY_KEY_ID", "rzp_live_TunGmzfpWlcatO")
     RAZORPAY_KEY_SECRET: Optional[str] = os.getenv("RAZORPAY_KEY_SECRET", "CSIhchRsNTdHx270VZthHSUE")
-    RAZORPAY_WEBHOOK_SECRET: Optional[str] = "whsec_luxury_payment_hmac_test_2026"
+    RAZORPAY_WEBHOOK_SECRET: Optional[str] = os.getenv("RAZORPAY_WEBHOOK_SECRET", "CSIhchRsNTdHx270VZthHSUE")
 
     # Primary SMS Gateway: Google Firebase Authentication (Free 10,000 Telecom SMS/month)
     SMS_PROVIDER: str = "firebase"

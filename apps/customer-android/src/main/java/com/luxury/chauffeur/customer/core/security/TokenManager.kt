@@ -46,6 +46,10 @@ class TokenManager(context: Context) {
             .apply()
     }
 
+    fun saveToken(token: String) {
+        prefs.edit().putString(KEY_TOKEN, token).apply()
+    }
+
     fun getToken(): String? = prefs.getString(KEY_TOKEN, null)
     fun getUserId(): String? = prefs.getString(KEY_USER_ID, null)
     fun getPhone(): String? = prefs.getString(KEY_PHONE, null)

@@ -516,3 +516,83 @@ h2.ph2 {
     flex-direction: row;
   }
 }
+
+/* Phone frame simulation & blueprint styles */
+.screen-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+.screen-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+.screen-scroll::-webkit-scrollbar-track { background: #07090e; }
+.screen-scroll::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+.screen-scroll::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+.phone-frame {
+  width: 360px;
+  height: 720px;
+  border-radius: 40px;
+  border: 8px solid #22222a;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  position: relative;
+  overflow: hidden;
+  background: #0b0b0f;
+  display: flex;
+  flex-direction: column;
+}
+.phone-notch {
+  width: 130px;
+  height: 22px;
+  background: #22222a;
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 14px;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.phone-speaker { width: 40px; height: 3px; background: #111; border-radius: 2px; }
+.phone-status-bar {
+  height: 34px;
+  padding: 8px 16px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  z-index: 40;
+}
+.phone-bottom-nav {
+  height: 58px;
+  background: rgba(15, 15, 22, 0.97);
+  backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 2px 6px 6px;
+  z-index: 45;
+}
+.phone-home-indicator {
+  width: 110px;
+  height: 3px;
+  background: #475569;
+  border-radius: 2px;
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 46;
+  pointer-events: none;
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.35); opacity: 0.2; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+.gps-pulse { animation: pulse-ring 2s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite; }

@@ -2,6 +2,8 @@ import json
 import time
 import asyncio
 import logging
+import uuid
+from contextlib import asynccontextmanager
 from typing import Optional, Any, Dict, Tuple
 from backend.core.config import settings
 
@@ -86,6 +88,25 @@ class InMemoryCacheFallback:
 
     async def exists(self, key: str) -> bool:
         return (await self.get(key)) is not None
+
+    async def acquire_lock(self, key: str, token: str, timeout: int) -> bool:
+        async with self._lock:
+            now = time.time()
+            if key in self._store:
+                val, expires_at = self._store[key]
+                if now < expires_at:
+                    return False
+            self._store[key] = (token, now + timeout)
+            return True
+
+    async def release_lock(self, key: str, token: str) -> bool:
+        async with self._lock:
+            if key in self._store:
+                val, _ = self._store[key]
+                if val == token:
+                    del self._store[key]
+                    return True
+            return False
 
 class RedisManager:
     """
@@ -216,6 +237,64 @@ class RedisManager:
         except Exception:
             self.is_connected = False
         return await self._fallback.exists(key)
+
+    RELEASE_LOCK_LUA = """
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("del", KEYS[1])
+    else
+        return 0
+    end
+    """
+
+    async def acquire_lock(self, key: str, token: str, timeout_seconds: int = 10) -> bool:
+        client = await self._get_redis()
+        try:
+            if client:
+                res = await client.set(key, token, nx=True, px=int(timeout_seconds * 1000))
+                return bool(res)
+        except Exception as e:
+            logger.warning(f"Redis acquire_lock failed, using memory fallback: {e}")
+            self.is_connected = False
+        return await self._fallback.acquire_lock(key, token, timeout_seconds)
+
+    async def release_lock(self, key: str, token: str) -> bool:
+        client = await self._get_redis()
+        try:
+            if client:
+                res = await client.eval(self.RELEASE_LOCK_LUA, 1, key, token)
+                return bool(res)
+        except Exception as e:
+            logger.warning(f"Redis release_lock failed, using memory fallback: {e}")
+            self.is_connected = False
+        return await self._fallback.release_lock(key, token)
+
+    @asynccontextmanager
+    async def distributed_lock(
+        self,
+        key: str,
+        timeout_seconds: int = 10,
+        retry_delay_seconds: float = 0.1,
+        max_retries: int = 30
+    ):
+        """
+        Distributed lock context manager protecting concurrent resource mutations.
+        Ensures strict mutual exclusion across async workers and load-balanced instances.
+        """
+        token = str(uuid.uuid4())
+        acquired = False
+        for attempt in range(max_retries):
+            acquired = await self.acquire_lock(key, token, timeout_seconds)
+            if acquired:
+                break
+            await asyncio.sleep(retry_delay_seconds)
+
+        if not acquired:
+            raise TimeoutError(f"Could not acquire distributed lock for key: {key} within timeout")
+
+        try:
+            yield token
+        finally:
+            await self.release_lock(key, token)
 
     async def health_check(self) -> Dict[str, Any]:
         """Observability health check reporting latency and backend status."""

@@ -25,30 +25,39 @@ fun DriverProfileScreen(
     onNavigateRideHistory: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
-    var fullName by remember { mutableStateOf("Rajeshwar Varma") }
-    var phoneNumber by remember { mutableStateOf("+91 98765 00001") }
-    var email by remember { mutableStateOf("driver@luxury.com") }
+    var fullName by remember { mutableStateOf("") }
+    var phoneNumber by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
     var city by remember { mutableStateOf("Delhi NCR") }
-    var username by remember { mutableStateOf("rajeshwar_varma") }
+    var username by remember { mutableStateOf("") }
     var avatarUrl by remember { mutableStateOf<String?>(null) }
-    var vehicleModel by remember { mutableStateOf("Mahindra Treo Electric") }
-    var vehiclePlate by remember { mutableStateOf("DL-01-ER-1001") }
+    var vehicleModel by remember { mutableStateOf("") }
+    var vehiclePlate by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showVehicleChangeDialog by remember { mutableStateOf(false) }
 
-    // Load real driver profile from backend API
+    // Load real driver profile and vehicle from backend API
     LaunchedEffect(Unit) {
         try {
             val res = DriverApiClient.getService().getMe()
             if (res.isSuccessful && res.body() != null) {
                 val me = res.body()!!
-                fullName = me["full_name"] as? String ?: fullName
-                phoneNumber = me["phone_number"] as? String ?: phoneNumber
-                email = me["email"] as? String ?: email
-                username = me["username"] as? String ?: username
+                fullName = (me["full_name"] as? String)?.ifBlank { null } ?: "Chauffeur Partner"
+                phoneNumber = me["phone_number"] as? String ?: ""
+                email = me["email"] as? String ?: ""
+                username = me["username"] as? String ?: ""
                 avatarUrl = me["avatar_url"] as? String
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val vehResp = DriverApiClient.getService().getOnboardingVehicles()
+            if (vehResp.isSuccessful && !vehResp.body().isNullOrEmpty()) {
+                val v = vehResp.body()!!.first()
+                vehicleModel = (v["model_name"] ?: v["make_model"] ?: "E-Rickshaw Fleet EV").toString()
+                vehiclePlate = (v["license_plate"] ?: v["plate_number"] ?: "").toString()
             }
         } catch (_: Exception) {}
     }

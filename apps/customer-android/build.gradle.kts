@@ -28,7 +28,7 @@ val localProps = Properties().apply {
 
 }
 
-val mapsApiKey: String = (localProps.getProperty("MAPS_API_KEY") ?: System.getenv("MAPS_API_KEY") ?: "AIzaSyBCd1pDJ_1KeajQKHUQG-8QqlB5OpwmmOo").trim()
+val mapboxPublicToken: String = (localProps.getProperty("MAPBOX_PUBLIC_TOKEN") ?: System.getenv("MAPBOX_PUBLIC_TOKEN") ?: "").trim()
 
 
 
@@ -56,7 +56,7 @@ android {
 
 
 
-        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+        manifestPlaceholders["MAPBOX_PUBLIC_TOKEN"] = mapboxPublicToken
 
 
 
@@ -147,13 +147,12 @@ android {
     }
 
     packaging {
-
         resources {
-
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-
         }
-
+        jniLibs {
+            useLegacyPackaging = false
+        }
     }
 
 }
@@ -199,8 +198,8 @@ dependencies {
     
 
     implementation(libs.play.services.maps)
-
     implementation(libs.play.services.location)
+    implementation(libs.mapbox.maps)
 
     
 

@@ -499,3 +499,26 @@ async def get_navigation_guidance(
         dest_lng=dest_lng
     )
 
+
+
+# =============================================================================
+# MAPBOX MATRIX API: MULTI-POINT ETA & DRIVER DISPATCH
+# =============================================================================
+class MatrixPayload(BaseModel):
+    origins: List[CoordinateItem] = Field(min_length=1, max_length=25)
+    destinations: List[CoordinateItem] = Field(min_length=1, max_length=25)
+
+
+@router.post("/matrix")
+async def calculate_distance_matrix(payload: MatrixPayload):
+    """
+    Mapbox Directions Matrix API: Computes travel times and driving distances
+    between candidate drivers and customer pickup point to select the optimal driver.
+    """
+    provider = get_maps_provider()
+    if hasattr(provider, "calculate_matrix"):
+        return await provider.calculate_matrix(
+            origins=[p.model_dump() for p in payload.origins],
+            destinations=[p.model_dump() for p in payload.destinations]
+        )
+    return {"durations_seconds": [], "distances_meters": [], "provider": "UNSUPPORTED"}

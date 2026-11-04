@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Application Brand & Identity -->
-    <string name="app_name">E-Rickshaw Partner</string>
+    <string name="app_name">RideGo Driver</string>
     <string name="driver_app_tagline">Pilot Cockpit &amp; Dispatch Console</string>
 
     <!-- Pilot Authentication -->
     <string name="driver_auth_title">Pilot Authentication</string>
-    <string name="driver_auth_subtitle">E-Rickshaw Partner &amp; Pilot Cockpit</string>
+    <string name="driver_auth_subtitle">RideGo Partner &amp; Pilot Cockpit</string>
     <string name="driver_phone_label">Registered Mobile Number</string>
     <string name="driver_password_label">Password</string>
     <string name="driver_login_btn">Pilot Cockpit Login</string>
-    <string name="driver_register_btn">Register as E-Rickshaw Pilot</string>
+    <string name="driver_register_btn">Register as RideGo Pilot</string>
     <string name="driver_vehicle_reg_title">Vehicle Registration</string>
-    <string name="driver_vehicle_type_standard">Standard E-Rickshaw</string>
-    <string name="driver_vehicle_type_share">Shared E-Rickshaw</string>
+    <string name="driver_vehicle_type_standard">Standard RideGo</string>
+    <string name="driver_vehicle_type_share">Shared RideGo</string>
     <string name="driver_vehicle_type_auto">High-Speed Electric Auto</string>
     <string name="driver_vehicle_type_cargo">E-Loader Cargo</string>
 
@@ -38,7 +38,7 @@
     <string name="trip_navigate_pickup">Navigate to Commuter Pickup</string>
     <string name="trip_arrived_pickup">I Have Arrived at Pickup</string>
     <string name="trip_enter_otp">Enter 4-Digit Commuter OTP</string>
-    <string name="trip_start_ride">Start E-Rickshaw Ride</string>
+    <string name="trip_start_ride">Start RideGo Ride</string>
     <string name="trip_in_transit">Ride in Progress to Dropoff</string>
     <string name="trip_complete_ride">Complete Ride &amp; Collect Fare</string>
     <string name="trip_fare_collected">Cash Collected: ₹%1$d</string>
@@ -52,7 +52,7 @@
     <!-- Documents & KYC -->
     <string name="kyc_title">Pilot Document Verification</string>
     <string name="kyc_dl">Commercial Driving License / Badge</string>
-    <string name="kyc_rc">E-Rickshaw Registration Certificate (RC)</string>
+    <string name="kyc_rc">RideGo Registration Certificate (RC)</string>
     <string name="kyc_insurance">Vehicle Commercial Insurance Policy</string>
     <string name="kyc_status_approved">VERIFIED &amp; APPROVED</string>
     <string name="kyc_status_pending">UNDER REVIEW</string>
@@ -95,4 +95,7 @@
     <string name="bg_location_title">Background Location Access</string>
     <string name="bg_location_msg">Please set location permission to \"Allow all the time\" so customers can see your arrival even when the app is minimized.</string>
     <string name="bg_location_btn">Open Location Settings</string>
+
+    <!-- Mapbox SDK Access Token -->
+    <string name="mapbox_access_token" translatable="false"></string>
 </resources>

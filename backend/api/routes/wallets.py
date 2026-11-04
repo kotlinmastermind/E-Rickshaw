@@ -25,6 +25,7 @@ async def get_my_wallet(
 ):
     return await WalletService.get_balance(db, user.id)
 
+@router.post("/topup")
 @router.post("/top-up")
 async def top_up_wallet(
     payload: TopUpRequest,

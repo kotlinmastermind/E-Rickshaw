@@ -62,16 +62,29 @@ object ResilientDns : Dns {
 object ApiClient {
     // Cloud Render URL (Production online server)
     const val RENDER_BASE_URL: String = "https://e-rickshaw-z32z.onrender.com/"
+    const val LOCAL_EMULATOR_BASE_URL: String = "http://10.0.2.2:8000/"
 
-    // Base URL used by Retrofit (Strictly points to online Render cloud server)
-    var baseUrl: String = RENDER_BASE_URL
+    fun isEmulator(): Boolean {
+        return android.os.Build.FINGERPRINT.startsWith("generic")
+            || android.os.Build.FINGERPRINT.startsWith("unknown")
+            || android.os.Build.MODEL.contains("google_sdk")
+            || android.os.Build.MODEL.contains("Emulator")
+            || android.os.Build.MODEL.contains("Android SDK built for x86")
+            || android.os.Build.HARDWARE.contains("goldfish")
+            || android.os.Build.HARDWARE.contains("ranchu")
+            || android.os.Build.PRODUCT.contains("sdk_gphone")
+            || android.os.Build.PRODUCT.contains("google_sdk")
+    }
+
+    // Base URL used by Retrofit (Automatically selects local emulator 10.0.2.2 or online Render)
+    var baseUrl: String = if (isEmulator()) LOCAL_EMULATOR_BASE_URL else RENDER_BASE_URL
 
     private var tokenManager: TokenManager? = null
     private var service: CustomerApiService? = null
 
     fun initialize(context: Context) {
         tokenManager = TokenManager.getInstance(context)
-        baseUrl = RENDER_BASE_URL
+        baseUrl = if (isEmulator()) LOCAL_EMULATOR_BASE_URL else RENDER_BASE_URL
         service = createService()
     }
 
@@ -116,7 +129,13 @@ object ApiClient {
                     requestBuilder.header("Authorization", "Bearer $token")
                 }
             }
-            chain.proceed(requestBuilder.build())
+            requestBuilder.header("Accept", "application/json")
+            requestBuilder.header("Content-Type", "application/json")
+            val response = chain.proceed(requestBuilder.build())
+            if (response.code == 401) {
+                tokenManager?.clear()
+            }
+            response
         }
         return OkHttpClient.Builder()
             .dns(ResilientDns)
@@ -146,7 +165,11 @@ object ApiClient {
 
             requestBuilder.header("Accept", "application/json")
             requestBuilder.header("Content-Type", "application/json")
-            chain.proceed(requestBuilder.build())
+            val response = chain.proceed(requestBuilder.build())
+            if (response.code == 401) {
+                tokenManager?.clear()
+            }
+            response
         }
 
         val client = OkHttpClient.Builder()

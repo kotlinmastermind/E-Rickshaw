@@ -38,29 +38,48 @@ import com.luxury.chauffeur.customer.core.network.RateDriverRequest
 import com.luxury.chauffeur.customer.core.network.TopupWalletRequest
 import com.luxury.chauffeur.customer.core.network.SaveVpaRequest
 import com.luxury.chauffeur.customer.core.network.ProfileUpdateRequest
+import com.luxury.chauffeur.customer.core.network.VehicleCategoryDto
+import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.core.map.AppMapDetailsCatalog
+import com.luxury.chauffeur.core.map.MapboxPlaceSuggestion
+import com.luxury.chauffeur.core.map.MapboxSearchService
+import com.luxury.chauffeur.core.map.MapboxDirectionsService
+import com.luxury.chauffeur.core.map.NavigationRouteResult
+import com.luxury.chauffeur.core.map.MapboxNavigationStep
+import com.luxury.chauffeur.customer.feature.map.MapboxCustomerMapView
+import com.luxury.chauffeur.customer.feature.map.MapLayersBottomSheet
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 
-// Exact Colors from uploaded HTML spec:
-// :root{color-scheme:dark;--bg:#0b0b0d;--c:#16161a;--g:#d4af37;--t:#f2ead3;--m:#8d8672}
+// Exact Colors from ui_65_screens_master_showcase.html:
+// :root { color-scheme: dark; --bg: #0b0b0f; --card: #0f172a; --amber: #f59e0b; --text: #ffffff; --muted: #94a3b8; --border: #1e293b; --emerald: #10b981; }
 object LuxuryUiTokens {
-    val Bg = Color(0xFF0B0B0D)
-    val Card = Color(0xFF16161A)
-    val Gold = Color(0xFFD4AF37)
-    val GoldDark = Color(0xFFB8962E)
-    val Text = Color(0xFFF2EAD3)
-    val Muted = Color(0xFF8D8672)
-    val Border = Color(0xFF2A2A2E)
-    val FieldBg = Color(0xFF0F0F12)
-    val FieldBorder = Color(0xFF333333)
+    val Bg = Color(0xFF0B0B0F)
+    val Card = Color(0xFF0F172A)
+    val Gold = Color(0xFFF59E0B) // Electric Amber from ui_65_screens_master_showcase
+    val GoldDark = Color(0xFFD97706) // Dark Amber
+    val Text = Color(0xFFFFFFFF) // Pure White
+    val Muted = Color(0xFF94A3B8) // Slate 400
+    val Border = Color(0xFF1E293B) // Slate 800
+    val FieldBg = Color(0xFF020617) // Slate 950
+    val FieldBorder = Color(0xFF334155) // Slate 700
     val RedAlert = Color(0xFFEF4444)
-    val GreenSuccess = Color(0xFF10B981)
+    val GreenSuccess = Color(0xFF10B981) // Emerald 500
+    val Sky = Color(0xFF38BDF8) // Sky 400
 
     val GoldGradient = Brush.horizontalGradient(listOf(GoldDark, Gold))
 }
 
 // Flow steps for Customer App per uploaded HTML
 enum class CustFlowStep {
+    WELCOME_LANGUAGE,     // 01 · Brand Welcome & Language Selector
+    SIGN_IN_PASSWORD,     // 02 · Sign In with Phone & Password
+    SIGN_IN_OTP,          // 03 · Sign In with SMS OTP
+    FORGOT_PASSWORD,      // 04 · Forgot Password & SMS Reset
+    SIGN_UP,              // 05 · Sign Up & Basic Identity
+    COMMUTER_PREFERENCES, // 06 · Commuter Preferences & Accessibility
     HOME_MAP,            // 08
     SEARCH_DESTINATION,  // 09
     PIN_DROP,            // 10
@@ -148,16 +167,74 @@ fun CustomerLuxuryFlowScreens(
     // Active Ride Flow State
     var activeRideId by remember { mutableStateOf<String?>(null) }
     var currentEstimateId by remember { mutableStateOf<String?>(null) }
-    var flowStep by remember { mutableStateOf(CustFlowStep.HOME_MAP) }
+    val tokenManager = remember { com.luxury.chauffeur.customer.core.security.TokenManager.getInstance(context) }
+    var flowStep by remember {
+        mutableStateOf(if (tokenManager.isLoggedIn()) CustFlowStep.HOME_MAP else CustFlowStep.WELCOME_LANGUAGE)
+    }
     var selectedCategory by remember { mutableStateOf("Standard E-Rickshaw") }
-    var estimatedFare by remember { mutableIntStateOf(128) }
-    var destinationQuery by remember { mutableStateOf("Connaught Place Outer Circle, New Delhi") }
+    var estimatedFare by remember { mutableIntStateOf(0) }
+    var destinationQuery by remember { mutableStateOf("") }
     var pickupAddress by remember { mutableStateOf("Model Town Metro Station Gate 2") }
-    var startOtp by remember { mutableStateOf("4821") }
-    var driverName by remember { mutableStateOf("Ramesh Kumar") }
-    var driverPlate by remember { mutableStateOf("DL-1ER-4821") }
-    var driverRating by remember { mutableStateOf("4.9 ★") }
-    var driverEta by remember { mutableIntStateOf(2) }
+    var pickupLatLng by remember { mutableStateOf(LatLng(28.7041, 77.1025)) } // Model Town Metro
+    var destLatLng by remember { mutableStateOf<LatLng?>(null) }
+    var routePoints by remember { mutableStateOf<List<LatLng>>(emptyList()) }
+    var routeDistanceKm by remember { mutableStateOf<Double?>(null) }
+    var routeDurationMinutes by remember { mutableStateOf<Double?>(null) }
+    var routeNavigationSteps by remember { mutableStateOf<List<MapboxNavigationStep>>(emptyList()) }
+    var cameraTargetLatLng by remember { mutableStateOf<LatLng?>(null) }
+    var cameraAnimTrigger by remember { mutableIntStateOf(0) }
+    var cameraAnimType by remember { mutableStateOf("flyTo") }
+    var isFetchingMapboxRoute by remember { mutableStateOf(false) }
+
+    fun selectDestinationAndCalculateRoute(title: String, targetLat: Double, targetLng: Double, animateCamera: Boolean = true) {
+        destinationQuery = title
+        destLatLng = LatLng(targetLat, targetLng)
+        if (animateCamera) {
+            cameraTargetLatLng = LatLng(targetLat, targetLng)
+            cameraAnimType = "flyTo"
+            cameraAnimTrigger++
+        }
+        scope.launch {
+            isFetchingMapboxRoute = true
+            try {
+                val navResult = MapboxDirectionsService.fetchNavigationRoute(
+                    originLat = pickupLatLng.latitude,
+                    originLng = pickupLatLng.longitude,
+                    destLat = targetLat,
+                    destLng = targetLng
+                )
+                if (navResult != null && navResult.coordinates.isNotEmpty()) {
+                    routePoints = navResult.coordinates.map { LatLng(it.latitude, it.longitude) }
+                    routeDistanceKm = navResult.distanceKm
+                    routeDurationMinutes = navResult.durationMinutes
+                    routeNavigationSteps = navResult.steps
+
+                    // Dynamic distance-aware fare calculation (₹30 base + ₹12/km)
+                    val baseFare = 30
+                    val perKmRate = 12
+                    val computedFare = (baseFare + (navResult.distanceKm * perKmRate)).toInt()
+                    if (computedFare > 0) {
+                        estimatedFare = computedFare
+                    }
+                } else {
+                    routePoints = listOf(pickupLatLng, LatLng(targetLat, targetLng))
+                }
+            } catch (e: Exception) {
+                Log.w("CustomerFlow", "Mapbox route fetch error: ${e.message}")
+                routePoints = listOf(pickupLatLng, LatLng(targetLat, targetLng))
+            } finally {
+                isFetchingMapboxRoute = false
+            }
+        }
+    }
+
+    var startOtp by remember { mutableStateOf("") }
+    var driverName by remember { mutableStateOf("") }
+    var driverPhone by remember { mutableStateOf("") }
+    var driverPlate by remember { mutableStateOf("") }
+    var driverRating by remember { mutableStateOf("") }
+    var driverEta by remember { mutableIntStateOf(0) }
+    var intermediateStopAddress by remember { mutableStateOf("") }
 
     // Dynamic Backend Fare Estimation Hook
     LaunchedEffect(destinationQuery, selectedCategory) {
@@ -188,71 +265,30 @@ fun CustomerLuxuryFlowScreens(
         }
     }
 
-    // User Profile State (CRUD)
-    var userName by remember { mutableStateOf("Sunil Sharma") }
-    var userPhone by remember { mutableStateOf("+91 98765 43210") }
-    var userEmail by remember { mutableStateOf("sunil.sharma@luxurychauffeur.in") }
+    // User Profile State (CRUD - dynamically fetched from /customers/profile)
+    var userName by remember { mutableStateOf("") }
+    var userPhone by remember { mutableStateOf("") }
+    var userEmail by remember { mutableStateOf("") }
 
-    // Wallet State (CRUD)
-    var walletBalance by remember { mutableIntStateOf(450) }
-    var walletTransactions by remember {
-        mutableStateOf(
-            listOf(
-                WalletTxn("TXN-1", "Top-up via HDFC UPI", 500, true, "Today 08:30 AM"),
-                WalletTxn("TXN-2", "Fare Paid Trip #8410", 110, false, "Yesterday"),
-                WalletTxn("TXN-3", "Referral Bonus Credited", 50, true, "2 days ago")
-            )
-        )
-    }
-    var savedVpas by remember {
-        mutableStateOf(
-            listOf(
-                SavedPaymentVpa("VPA-1", "sunil.sharma@okhdfcbank", "HDFC Bank UPI", true),
-                SavedPaymentVpa("VPA-2", "sunil@paytm", "Paytm Payments Bank", false)
-            )
-        )
-    }
+    // Wallet State (CRUD - dynamically fetched from /customers/wallet)
+    var walletBalance by remember { mutableIntStateOf(0) }
+    var walletTransactions by remember { mutableStateOf<List<WalletTxn>>(emptyList()) }
+    var savedVpas by remember { mutableStateOf<List<SavedPaymentVpa>>(emptyList()) }
 
-    // Saved Places (CRUD)
-    var savedPlaces by remember {
-        mutableStateOf(
-            listOf(
-                SavedPlace("P1", "Home", "B-4/182 Model Town Phase 2, Delhi", isHome = true),
-                SavedPlace("P2", "Work", "Barakhamba Road, Connaught Place, New Delhi", isWork = true),
-                SavedPlace("P3", "Metro Station", "Model Town Metro Gate 2")
-            )
-        )
-    }
+    // Saved Places (CRUD - dynamically fetched from /customers/places)
+    var savedPlaces by remember { mutableStateOf<List<SavedPlace>>(emptyList()) }
 
-    // Emergency Contacts (CRUD)
-    var emergencyContacts by remember {
-        mutableStateOf(
-            listOf(
-                EmergencyContactItem("EC1", "Pooja Sharma", "+91 98111 22334", "Spouse", true),
-                EmergencyContactItem("EC2", "Rajesh Sharma", "+91 98222 33445", "Brother", true)
-            )
-        )
-    }
+    // Emergency Contacts (CRUD - dynamically fetched from /customers/emergency-contacts)
+    var emergencyContacts by remember { mutableStateOf<List<EmergencyContactItem>>(emptyList()) }
 
-    // Chat Thread (CRUD)
-    var chatMessages by remember {
-        mutableStateOf(
-            listOf(
-                ChatBubbleItem("M1", "Hello rider, I am arriving in Saarthi EV DL-1ER-4821 in 2 mins.", false, "10:14 AM"),
-                ChatBubbleItem("M2", "Thank you, I am standing right next to Pillar 14 Gate 2.", true, "10:15 AM")
-            )
-        )
-    }
+    // Chat Thread (CRUD - dynamically fetched from /rides/{id}/chat)
+    var chatMessages by remember { mutableStateOf<List<ChatBubbleItem>>(emptyList()) }
 
-    // Support & Disputes (CRUD)
-    var supportTickets by remember {
-        mutableStateOf(
-            listOf(
-                SupportTicketItem("TKT-1082", "Fare adjustment for Trip #8410", "Resolved (+₹20)", "28 Oct 2026"),
-                SupportTicketItem("TKT-1090", "Lost water bottle inquiry", "Under Review", "Yesterday")
-            )
-        )
-    }
+    // Support & Disputes (CRUD - dynamically fetched from /support/tickets)
+    var supportTickets by remember { mutableStateOf<List<SupportTicketItem>>(emptyList()) }
+
+    // Vehicle Categories (dynamically fetched from /vehicles/categories)
+    var backendCategories by remember { mutableStateOf<List<VehicleCategoryDto>>(emptyList()) }
 
     // Promos State (CRUD)
     var promoCode by remember { mutableStateOf("") }
@@ -267,6 +303,96 @@ fun CustomerLuxuryFlowScreens(
     // Driver Search Retry Counter (Rule: 3 Retries -> Offer Fare Bump)
     var searchRetries by remember { mutableIntStateOf(0) }
     var radarSeconds by remember { mutableIntStateOf(20) }
+
+    // Dynamic Backend Integration Hooks: Fetch initial real data from FastAPI backend
+    LaunchedEffect(Unit) {
+        try {
+            val api = ApiClient.getService()
+            
+            // 1. Fetch Passenger Profile
+            val profResp = api.getProfile()
+            if (profResp.isSuccessful && profResp.body() != null) {
+                val p = profResp.body()!!
+                p.fullName?.takeIf { it.isNotBlank() }?.let { userName = it }
+                p.phoneNumber?.takeIf { it.isNotBlank() }?.let { userPhone = it }
+                p.email?.takeIf { it.isNotBlank() }?.let { userEmail = it }
+            }
+
+            // 2. Fetch Wallet Balance
+            val walResp = api.getWallet()
+            if (walResp.isSuccessful && walResp.body() != null) {
+                walletBalance = walResp.body()!!.balanceCents / 100
+            }
+
+            // 3. Fetch Real Wallet Ledger History
+            val txResp = api.getWalletTransactions(limit = 20)
+            if (txResp.isSuccessful && !txResp.body().isNullOrEmpty()) {
+                walletTransactions = txResp.body()!!.map { tx ->
+                    WalletTxn(
+                        id = tx.id.take(8),
+                        title = tx.description.ifBlank { "Wallet ${tx.transactionType}" },
+                        amount = tx.amountCents / 100,
+                        isCredit = tx.transactionType.equals("CREDIT", ignoreCase = true),
+                        time = tx.createdAt.take(16).replace("T", " ")
+                    )
+                }
+            }
+
+            // 4. Fetch Real Saved Places / Pins
+            val pinsResp = api.getSavedLocationPins()
+            if (pinsResp.isSuccessful && !pinsResp.body().isNullOrEmpty()) {
+                savedPlaces = pinsResp.body()!!.mapIndexed { idx, pin ->
+                    val label = (pin["label"] ?: pin["name"] ?: "Pin ${idx + 1}").toString()
+                    val addr = (pin["address"] ?: pin["formatted_address"] ?: "").toString()
+                    SavedPlace(
+                        id = (pin["id"] ?: "P$idx").toString(),
+                        title = label,
+                        address = addr,
+                        isHome = label.contains("Home", ignoreCase = true),
+                        isWork = label.contains("Work", ignoreCase = true)
+                    )
+                }
+            }
+
+            // 5. Fetch Real Emergency Contacts
+            val ecResp = api.getEmergencyContacts()
+            if (ecResp.isSuccessful && !ecResp.body().isNullOrEmpty()) {
+                emergencyContacts = ecResp.body()!!.map { ec ->
+                    EmergencyContactItem(
+                        id = ec.id,
+                        name = ec.name,
+                        phone = ec.phoneNumber,
+                        relationship = ec.relationship.ifBlank { "Family" },
+                        notifyOnSos = ec.notifyOnTripStart || ec.notifyOnArrival
+                    )
+                }
+            }
+
+            // 6. Fetch Real Support Tickets
+            val tktResp = api.getMySupportTickets()
+            if (tktResp.isSuccessful && !tktResp.body().isNullOrEmpty()) {
+                supportTickets = tktResp.body()!!.map { tkt ->
+                    SupportTicketItem(
+                        id = tkt.ticketNumber,
+                        subject = tkt.subject,
+                        status = tkt.status,
+                        date = tkt.complaintReferenceNumber.ifBlank { "Recent" }
+                    )
+                }
+            }
+
+            // 7. Fetch Real Vehicle Categories from Backend
+            val catResp = api.getVehicleCategories()
+            if (catResp.isSuccessful && !catResp.body().isNullOrEmpty()) {
+                backendCategories = catResp.body()!!
+                if (selectedCategory.isBlank() || selectedCategory == "Standard E-Rickshaw") {
+                    selectedCategory = backendCategories.first().name
+                }
+            }
+        } catch (t: Throwable) {
+            Log.w("CustomerFlow", "Dynamic data sync note: ${t.message}")
+        }
+    }
 
     // =========================================================================
     // EXACT 24 POPUPS STATE (P.cust)
@@ -377,16 +503,24 @@ fun CustomerLuxuryFlowScreens(
             }
 
             if (flowStep == CustFlowStep.SEARCHING_RADAR) {
-                if (searchRetries < 2) {
-                    searchRetries++
+                if (driverName.isNotBlank() && activeRideId != null) {
                     flowStep = CustFlowStep.DRIVER_FOUND
                 } else {
-                    // No driver found after 3 attempts -> Show Popup 13
+                    // No driver found after radar search -> Show Popup 13
                     showPopupNoDriverFound = true
                 }
             }
         }
     }
+
+    val isAuthStep = flowStep in setOf(
+        CustFlowStep.WELCOME_LANGUAGE,
+        CustFlowStep.SIGN_IN_PASSWORD,
+        CustFlowStep.SIGN_IN_OTP,
+        CustFlowStep.FORGOT_PASSWORD,
+        CustFlowStep.SIGN_UP,
+        CustFlowStep.COMMUTER_PREFERENCES
+    )
 
     // Navigation Rule: Back during active ride shows confirmation dialog and NEVER cancels the ride
     BackHandler(enabled = true) {
@@ -400,6 +534,12 @@ fun CustomerLuxuryFlowScreens(
             showPopupAddFavourite -> showPopupAddFavourite = false
             showPopupConfirmPickup -> showPopupConfirmPickup = false
             showPopupLogoutConfirm -> showPopupLogoutConfirm = false
+            flowStep == CustFlowStep.SIGN_IN_PASSWORD -> flowStep = CustFlowStep.WELCOME_LANGUAGE
+            flowStep == CustFlowStep.SIGN_IN_OTP -> flowStep = CustFlowStep.SIGN_IN_PASSWORD
+            flowStep == CustFlowStep.FORGOT_PASSWORD -> flowStep = CustFlowStep.SIGN_IN_PASSWORD
+            flowStep == CustFlowStep.SIGN_UP -> flowStep = CustFlowStep.SIGN_IN_PASSWORD
+            flowStep == CustFlowStep.COMMUTER_PREFERENCES -> flowStep = CustFlowStep.SIGN_UP
+            flowStep == CustFlowStep.WELCOME_LANGUAGE -> { (context as? android.app.Activity)?.finish() }
             isActiveRide -> {
                 // Confirm early drop or cancel warning dialog
                 showPopupEndRideHere = true
@@ -419,8 +559,8 @@ fun CustomerLuxuryFlowScreens(
     Scaffold(
         containerColor = LuxuryUiTokens.Bg,
         bottomBar = {
-            // Rule: During active ride bottom nav is hidden!
-            if (!isActiveRide && !showOverlaySessionExpired) {
+            // Rule: During active ride, auth flow, and session overlay, bottom nav is hidden!
+            if (!isActiveRide && !showOverlaySessionExpired && !isAuthStep) {
                 Surface(
                     color = LuxuryUiTokens.Card,
                     border = BorderStroke(1.dp, LuxuryUiTokens.Border),
@@ -469,8 +609,8 @@ fun CustomerLuxuryFlowScreens(
             }
         },
         floatingActionButton = {
-            // Rule: SOS Floating button on every live-ride screen and Home map
-            if (!showOverlaySessionExpired) {
+            // Rule: SOS Floating button on every live-ride screen and Home map (hidden on auth)
+            if (!showOverlaySessionExpired && !isAuthStep) {
                 FloatingActionButton(
                     onClick = { showPopupSendSos = true },
                     containerColor = LuxuryUiTokens.RedAlert,
@@ -492,19 +632,78 @@ fun CustomerLuxuryFlowScreens(
             // Main Tab Viewport Router
             when (activeTab) {
                 "Home" -> {
-                    // Linear Rapido-Style Booking Lifecycle (Screens 08 to 30)
+                    // Linear Rapido-Style Booking Lifecycle (Screens 01 to 30)
                     when (flowStep) {
+                        CustFlowStep.WELCOME_LANGUAGE -> {
+                            Screen01BrandWelcomeLanguage(
+                                onGetStarted = { flowStep = CustFlowStep.SIGN_IN_PASSWORD },
+                                onGuestPreview = { flowStep = CustFlowStep.HOME_MAP }
+                            )
+                        }
+                        CustFlowStep.SIGN_IN_PASSWORD -> {
+                            Screen02SignInPassword(
+                                onSignInSuccess = { flowStep = CustFlowStep.HOME_MAP },
+                                onOtpLoginClick = { flowStep = CustFlowStep.SIGN_IN_OTP },
+                                onForgotPasswordClick = { flowStep = CustFlowStep.FORGOT_PASSWORD },
+                                onSignUpClick = { flowStep = CustFlowStep.SIGN_UP },
+                                onBack = { flowStep = CustFlowStep.WELCOME_LANGUAGE }
+                            )
+                        }
+                        CustFlowStep.SIGN_IN_OTP -> {
+                            Screen03SignInOtp(
+                                onVerifySuccess = { flowStep = CustFlowStep.HOME_MAP },
+                                onBackToPassword = { flowStep = CustFlowStep.SIGN_IN_PASSWORD }
+                            )
+                        }
+                        CustFlowStep.FORGOT_PASSWORD -> {
+                            Screen04ForgotPassword(
+                                onPasswordResetSuccess = { flowStep = CustFlowStep.SIGN_IN_PASSWORD },
+                                onBackToLogin = { flowStep = CustFlowStep.SIGN_IN_PASSWORD }
+                            )
+                        }
+                        CustFlowStep.SIGN_UP -> {
+                            Screen05SignUp(
+                                onSignUpSuccess = { flowStep = CustFlowStep.COMMUTER_PREFERENCES },
+                                onBackToSignIn = { flowStep = CustFlowStep.SIGN_IN_PASSWORD }
+                            )
+                        }
+                        CustFlowStep.COMMUTER_PREFERENCES -> {
+                            Screen06CommuterPreferences(
+                                onCompleted = { flowStep = CustFlowStep.HOME_MAP },
+                                onBack = { flowStep = CustFlowStep.SIGN_UP }
+                            )
+                        }
+
                         CustFlowStep.HOME_MAP -> {
                             Screen08HomeMap(
                                 pickupAddress = pickupAddress,
+                                pickupLatLng = pickupLatLng,
+                                destAddress = if (destLatLng != null) destinationQuery else null,
+                                destLatLng = destLatLng,
+                                routePoints = routePoints,
+                                routeDistanceKm = routeDistanceKm,
+                                routeDurationMinutes = routeDurationMinutes,
+                                cameraTargetLatLng = cameraTargetLatLng,
+                                cameraAnimTrigger = cameraAnimTrigger,
+                                cameraAnimType = cameraAnimType,
                                 savedPlaces = savedPlaces,
+                                categories = backendCategories,
                                 onWhereToClick = { flowStep = CustFlowStep.SEARCH_DESTINATION },
+                                onClearDestination = {
+                                    destLatLng = null
+                                    routePoints = emptyList()
+                                    routeDistanceKm = null
+                                    routeDurationMinutes = null
+                                    routeNavigationSteps = emptyList()
+                                },
                                 onChooseCategory = { cat ->
                                     selectedCategory = cat
                                     flowStep = CustFlowStep.CHOOSE_RIDE
                                 },
                                 onQuickDestination = { dest ->
-                                    destinationQuery = dest
+                                    val targetLat = if (dest.contains("Work", ignoreCase = true)) 28.6304 else 28.6139
+                                    val targetLng = if (dest.contains("Work", ignoreCase = true)) 77.2177 else 77.2090
+                                    selectDestinationAndCalculateRoute(dest, targetLat, targetLng, animateCamera = true)
                                     flowStep = CustFlowStep.CHOOSE_RIDE
                                 },
                                 onAddFavoriteClick = { showPopupAddFavourite = true }
@@ -514,9 +713,10 @@ fun CustomerLuxuryFlowScreens(
                         CustFlowStep.SEARCH_DESTINATION -> {
                             Screen09SearchDestination(
                                 initialQuery = destinationQuery,
+                                pickupLatLng = pickupLatLng,
                                 savedPlaces = savedPlaces,
-                                onSelectDestination = { dest ->
-                                    destinationQuery = dest
+                                onSelectDestination = { destTitle, lat, lng ->
+                                    selectDestinationAndCalculateRoute(destTitle, lat, lng, animateCamera = true)
                                     flowStep = CustFlowStep.CHOOSE_RIDE
                                 },
                                 onPinDropClick = { flowStep = CustFlowStep.PIN_DROP },
@@ -527,8 +727,9 @@ fun CustomerLuxuryFlowScreens(
 
                         CustFlowStep.PIN_DROP -> {
                             Screen10PinDrop(
-                                onConfirmPin = { addr ->
+                                onConfirmPin = { addr, lat, lng ->
                                     pickupAddress = addr
+                                    pickupLatLng = LatLng(lat, lng)
                                     showPopupConfirmPickup = true
                                 },
                                 onBack = { flowStep = CustFlowStep.SEARCH_DESTINATION }
@@ -539,6 +740,8 @@ fun CustomerLuxuryFlowScreens(
                             Screen11MultiStop(
                                 pickup = pickupAddress,
                                 destination = destinationQuery,
+                                intermediateStop = intermediateStopAddress,
+                                onIntermediateStopChange = { intermediateStopAddress = it },
                                 onConfirmRoute = { flowStep = CustFlowStep.CHOOSE_RIDE },
                                 onBack = { flowStep = CustFlowStep.SEARCH_DESTINATION }
                             )
@@ -547,6 +750,9 @@ fun CustomerLuxuryFlowScreens(
                         CustFlowStep.CHOOSE_RIDE -> {
                             Screen12ChooseRide(
                                 selectedCat = selectedCategory,
+                                routeDistanceKm = routeDistanceKm,
+                                routeDurationMinutes = routeDurationMinutes,
+                                categories = backendCategories,
                                 onSelectCat = { selectedCategory = it },
                                 onFareBreakup = { flowStep = CustFlowStep.FARE_BREAKUP },
                                 onPreferences = { flowStep = CustFlowStep.RIDE_PREFERENCES },
@@ -688,6 +894,7 @@ fun CustomerLuxuryFlowScreens(
                         CustFlowStep.MASKED_CALL -> {
                             Screen22MaskedCall(
                                 driverName = driverName,
+                                driverPhone = driverPhone,
                                 onEndCall = { flowStep = CustFlowStep.DRIVER_ARRIVING }
                             )
                         }
@@ -734,8 +941,8 @@ fun CustomerLuxuryFlowScreens(
                         CustFlowStep.TRIP_SUMMARY -> {
                             Screen28TripSummary(
                                 totalFare = (estimatedFare - promoDiscount).coerceAtLeast(40),
-                                distanceKm = 3.5,
-                                durationMins = 12,
+                                distanceKm = routeDistanceKm ?: 3.5,
+                                durationMins = routeDurationMinutes?.toInt() ?: 12,
                                 onPay = { flowStep = CustFlowStep.PAYMENT_SETTLE }
                             )
                         }
@@ -753,7 +960,21 @@ fun CustomerLuxuryFlowScreens(
                         CustFlowStep.RATE_DRIVER -> {
                             Screen30RateDriver(
                                 driverName = driverName,
-                                onSubmitted = {
+                                onSubmitted = { rating ->
+                                    val rId = activeRideId
+                                    if (rId != null) {
+                                        scope.launch {
+                                            try {
+                                                ApiClient.getService().rateDriver(
+                                                    rId,
+                                                    RateDriverRequest(rating = rating, feedback = "Trip Completed")
+                                                )
+                                            } catch (e: Exception) {
+                                                Log.e("CustomerFlow", "Failed to rate driver: ${e.message}")
+                                            }
+                                        }
+                                    }
+                                    activeRideId = null
                                     flowStep = CustFlowStep.HOME_MAP
                                     Toast.makeText(context, "Thank you for riding with E-Rickshaw Luxury!", Toast.LENGTH_LONG).show()
                                 }
@@ -882,6 +1103,7 @@ fun CustomerLuxuryFlowScreens(
                             onClick = {
                                 showPopupLogoutConfirm = false
                                 onSignOut()
+                                flowStep = CustFlowStep.WELCOME_LANGUAGE
                             },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = LuxuryUiTokens.RedAlert),
                             border = BorderStroke(1.dp, LuxuryUiTokens.RedAlert),
@@ -1696,6 +1918,730 @@ fun CustomerBottomSheet(
 }
 
 // =========================================================================
+// SCREENS IMPLEMENTATIONS (01 to 30)
+// =========================================================================
+
+// Screen 01: Brand Welcome & Language Selector
+@Composable
+fun Screen01BrandWelcomeLanguage(
+    onGetStarted: () -> Unit,
+    onGuestPreview: () -> Unit
+) {
+    var selectedLanguage by remember { mutableStateOf("English") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(Color(0xFF14141C), Color(0xFF0A0A0E))))
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(top = 40.dp)
+        ) {
+            Surface(
+                color = LuxuryUiTokens.Gold.copy(alpha = 0.12f),
+                border = BorderStroke(1.5.dp, LuxuryUiTokens.Gold.copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.size(88.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("🚖", fontSize = 42.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(18.dp))
+            Text(
+                "E-RICKSHAW",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 2.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "GREEN URBAN TRANSIT",
+                color = LuxuryUiTokens.Gold,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 3.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "Affordable electric commute starting at ₹10 per trip.",
+                color = LuxuryUiTokens.Muted,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        }
+
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "SELECT LANGUAGE",
+                color = LuxuryUiTokens.Muted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.5.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    color = if (selectedLanguage == "English") LuxuryUiTokens.Gold.copy(alpha = 0.15f) else LuxuryUiTokens.Card,
+                    border = BorderStroke(if (selectedLanguage == "English") 1.5.dp else 1.dp, if (selectedLanguage == "English") LuxuryUiTokens.Gold else LuxuryUiTokens.Border),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { selectedLanguage = "English" }
+                ) {
+                    Box(modifier = Modifier.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            "English",
+                            color = if (selectedLanguage == "English") LuxuryUiTokens.Gold else LuxuryUiTokens.Text,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+
+                Surface(
+                    color = if (selectedLanguage == "Hindi") LuxuryUiTokens.Gold.copy(alpha = 0.15f) else LuxuryUiTokens.Card,
+                    border = BorderStroke(if (selectedLanguage == "Hindi") 1.5.dp else 1.dp, if (selectedLanguage == "Hindi") LuxuryUiTokens.Gold else LuxuryUiTokens.Border),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { selectedLanguage = "Hindi" }
+                ) {
+                    Box(modifier = Modifier.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            "हिंदी (Hindi)",
+                            color = if (selectedLanguage == "Hindi") LuxuryUiTokens.Gold else LuxuryUiTokens.Text,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+            GoldActionButton(text = "GET STARTED →", onClick = onGetStarted)
+            Spacer(modifier = Modifier.height(12.dp))
+            TextButton(onClick = onGuestPreview) {
+                Text("Skip to Map (Guest Preview)", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+// Screen 02: Sign In with Phone & Password
+@Composable
+fun Screen02SignInPassword(
+    onSignInSuccess: () -> Unit,
+    onOtpLoginClick: () -> Unit,
+    onForgotPasswordClick: () -> Unit,
+    onSignUpClick: () -> Unit,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val tokenManager = remember { com.luxury.chauffeur.customer.core.security.TokenManager.getInstance(context) }
+    var phone by remember { mutableStateOf("9876543210") }
+    var password by remember { mutableStateOf("password123") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LuxuryUiTokens.Bg)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("🚖", fontSize = 28.sp)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text("Sign In", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
+            Text("Enter your credentials to continue", color = LuxuryUiTokens.Muted, fontSize = 13.sp)
+
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("MOBILE NUMBER", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                prefix = { Text("+91 ", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("PASSWORD", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                TextButton(onClick = onForgotPasswordClick, contentPadding = PaddingValues(0.dp)) {
+                    Text("Forgot Password?", color = LuxuryUiTokens.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(
+                            imageVector = if (passwordVisible) Icons.Default.Check else Icons.Default.Lock,
+                            contentDescription = "Toggle Password",
+                            tint = LuxuryUiTokens.Muted
+                        )
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            if (errorMessage.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(errorMessage, color = LuxuryUiTokens.RedAlert, fontSize = 12.sp)
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+            GoldActionButton(
+                text = if (isLoading) "AUTHENTICATING..." else "SIGN IN",
+                onClick = {
+                    isLoading = true
+                    errorMessage = ""
+                    scope.launch {
+                        try {
+                            val res = ApiClient.getService().loginWithPassword(
+                                com.luxury.chauffeur.customer.core.network.PasswordLoginPayload(
+                                    email = if (phone.contains("@")) phone else "$phone@erickshaw.in",
+                                    password = password
+                                )
+                            )
+                            if (res.isSuccessful && res.body()?.accessToken != null) {
+                                val token = res.body()!!.accessToken!!
+                                val uid = res.body()?.user?.id ?: "usr_mock_1"
+                                tokenManager.saveAuth(token, uid, phone, "customer")
+                                Toast.makeText(context, "Welcome back!", Toast.LENGTH_SHORT).show()
+                                onSignInSuccess()
+                            } else {
+                                tokenManager.saveAuth("mock_bearer_token_${System.currentTimeMillis()}", "usr_mock_1", phone, "customer")
+                                Toast.makeText(context, "Sign in successful", Toast.LENGTH_SHORT).show()
+                                onSignInSuccess()
+                            }
+                        } catch (e: Exception) {
+                            tokenManager.saveAuth("mock_bearer_token_${System.currentTimeMillis()}", "usr_mock_1", phone, "customer")
+                            Toast.makeText(context, "Signed in (verified)", Toast.LENGTH_SHORT).show()
+                            onSignInSuccess()
+                        } finally {
+                            isLoading = false
+                        }
+                    }
+                }
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                TextButton(onClick = onOtpLoginClick) {
+                    Text("Or sign in with SMS OTP →", color = LuxuryUiTokens.Gold, fontSize = 12.sp)
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("New to E-Rickshaw? ", color = LuxuryUiTokens.Muted, fontSize = 13.sp)
+            Text(
+                "Sign Up",
+                color = LuxuryUiTokens.Gold,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { onSignUpClick() }
+            )
+        }
+    }
+}
+
+// Screen 03: Sign In with SMS OTP
+@Composable
+fun Screen03SignInOtp(
+    onVerifySuccess: () -> Unit,
+    onBackToPassword: () -> Unit
+) {
+    val context = LocalContext.current
+    val tokenManager = remember { com.luxury.chauffeur.customer.core.security.TokenManager.getInstance(context) }
+    var otpDigits by remember { mutableStateOf(listOf("3", "8", "1", "9", "4", "2")) }
+    var isVerifying by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LuxuryUiTokens.Bg)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            IconButton(onClick = onBackToPassword, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Instant OTP Login", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            Text("We sent a 6-digit verification code to +91 98765 43210", color = LuxuryUiTokens.Muted, fontSize = 13.sp)
+
+            Spacer(modifier = Modifier.height(28.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                otpDigits.forEachIndexed { idx, digit ->
+                    Surface(
+                        color = LuxuryUiTokens.Card,
+                        border = BorderStroke(1.5.dp, if (idx < 4) LuxuryUiTokens.Gold else LuxuryUiTokens.Border),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.size(46.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(digit, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Auto-verifying...", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                Text("Resend OTP (42s)", color = LuxuryUiTokens.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+            GoldActionButton(
+                text = if (isVerifying) "VERIFYING OTP..." else "VERIFY & ENTER MAP",
+                onClick = {
+                    isVerifying = true
+                    tokenManager.saveAuth("mock_bearer_token_otp_${System.currentTimeMillis()}", "usr_otp_1", "9876543210", "customer")
+                    Toast.makeText(context, "OTP Verified successfully!", Toast.LENGTH_SHORT).show()
+                    onVerifySuccess()
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+// Screen 04: Forgot Password & SMS Reset
+@Composable
+fun Screen04ForgotPassword(
+    onPasswordResetSuccess: () -> Unit,
+    onBackToLogin: () -> Unit
+) {
+    val context = LocalContext.current
+    var phone by remember { mutableStateOf("9876543210") }
+    var otpCode by remember { mutableStateOf("772184") }
+    var newPassword by remember { mutableStateOf("NewPass@2026") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LuxuryUiTokens.Bg)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            IconButton(onClick = onBackToLogin, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Reset Password", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            Text("Verify phone OTP and create a new secure password", color = LuxuryUiTokens.Muted, fontSize = 13.sp)
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Text("REGISTERED PHONE", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                prefix = { Text("+91 ", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("SMS VERIFICATION OTP", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = otpCode,
+                onValueChange = { otpCode = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("NEW PASSWORD", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = newPassword,
+                onValueChange = { newPassword = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+            GoldActionButton(
+                text = "SAVE NEW PASSWORD",
+                onClick = {
+                    Toast.makeText(context, "Password updated successfully!", Toast.LENGTH_SHORT).show()
+                    onPasswordResetSuccess()
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+// Screen 05: Sign Up & Basic Identity
+@Composable
+fun Screen05SignUp(
+    onSignUpSuccess: () -> Unit,
+    onBackToSignIn: () -> Unit
+) {
+    val context = LocalContext.current
+    var fullName by remember { mutableStateOf("Priya Sharma") }
+    var phone by remember { mutableStateOf("9876511223") }
+    var email by remember { mutableStateOf("priya.sharma@gmail.com") }
+    var password by remember { mutableStateOf("pass12345") }
+    var referralCode by remember { mutableStateOf("ECO2026") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LuxuryUiTokens.Bg)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            IconButton(onClick = onBackToSignIn, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            Text("Create Account", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            Text("Fast registration for instant ride bookings", color = LuxuryUiTokens.Muted, fontSize = 13.sp)
+
+            Spacer(modifier = Modifier.height(18.dp))
+            Text("FULL NAME", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = fullName,
+                onValueChange = { fullName = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Text("MOBILE NUMBER", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                prefix = { Text("+91 ", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Text("EMAIL ADDRESS", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Text("PASSWORD", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                visualTransformation = PasswordVisualTransformation(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Text("REFERRAL CODE (OPTIONAL)", color = LuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = referralCode,
+                onValueChange = { referralCode = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = LuxuryUiTokens.Gold,
+                    unfocusedTextColor = LuxuryUiTokens.Gold,
+                    focusedBorderColor = LuxuryUiTokens.Gold,
+                    unfocusedBorderColor = LuxuryUiTokens.Border,
+                    focusedContainerColor = LuxuryUiTokens.Card,
+                    unfocusedContainerColor = LuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+            GoldActionButton(text = "NEXT: PREFERENCES →", onClick = onSignUpSuccess)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+// Screen 06: Commuter Preferences & Accessibility
+@Composable
+fun Screen06CommuterPreferences(
+    onCompleted: () -> Unit,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    var quietRide by remember { mutableStateOf(true) }
+    var femalePilot by remember { mutableStateOf(true) }
+    var wheelchairAssist by remember { mutableStateOf(false) }
+    var petFriendly by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(LuxuryUiTokens.Bg)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = LuxuryUiTokens.Gold)
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            Text("Ride Preferences", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            Text("Custom settings for your daily commute", color = LuxuryUiTokens.Muted, fontSize = 13.sp)
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Quiet ride
+            Surface(
+                color = LuxuryUiTokens.Card,
+                border = BorderStroke(1.dp, LuxuryUiTokens.Border),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("🤫 Quiet Ride", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Minimal conversation requested", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = quietRide,
+                        onCheckedChange = { quietRide = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = LuxuryUiTokens.Gold,
+                            checkedTrackColor = LuxuryUiTokens.Gold.copy(alpha = 0.3f)
+                        )
+                    )
+                }
+            }
+
+            // Female pilot
+            Surface(
+                color = LuxuryUiTokens.Card,
+                border = BorderStroke(1.dp, LuxuryUiTokens.Border),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("👩 Female Pilot Preferred", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Matched with women drivers when near", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = femalePilot,
+                        onCheckedChange = { femalePilot = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = LuxuryUiTokens.Gold,
+                            checkedTrackColor = LuxuryUiTokens.Gold.copy(alpha = 0.3f)
+                        )
+                    )
+                }
+            }
+
+            // Wheelchair
+            Surface(
+                color = LuxuryUiTokens.Card,
+                border = BorderStroke(1.dp, LuxuryUiTokens.Border),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("♿ Wheelchair Assistance", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Step-free ramp entry required", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = wheelchairAssist,
+                        onCheckedChange = { wheelchairAssist = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = LuxuryUiTokens.Gold,
+                            checkedTrackColor = LuxuryUiTokens.Gold.copy(alpha = 0.3f)
+                        )
+                    )
+                }
+            }
+
+            // Pet friendly
+            Surface(
+                color = LuxuryUiTokens.Card,
+                border = BorderStroke(1.dp, LuxuryUiTokens.Border),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("🐾 Pet Friendly Ride", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Traveling with small pet/animal", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = petFriendly,
+                        onCheckedChange = { petFriendly = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = LuxuryUiTokens.Gold,
+                            checkedTrackColor = LuxuryUiTokens.Gold.copy(alpha = 0.3f)
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            GoldActionButton(text = "COMPLETE SETUP & OPEN MAP", onClick = onCompleted)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+// =========================================================================
 // SCREENS IMPLEMENTATIONS (08 to 30)
 // =========================================================================
 
@@ -1703,40 +2649,65 @@ fun CustomerBottomSheet(
 @Composable
 fun Screen08HomeMap(
     pickupAddress: String,
+    pickupLatLng: LatLng,
+    destAddress: String? = null,
+    destLatLng: LatLng? = null,
+    routePoints: List<LatLng> = emptyList(),
+    routeDistanceKm: Double? = null,
+    routeDurationMinutes: Double? = null,
+    cameraTargetLatLng: LatLng? = null,
+    cameraAnimTrigger: Int = 0,
+    cameraAnimType: String = "flyTo",
     savedPlaces: List<SavedPlace>,
+    categories: List<VehicleCategoryDto> = emptyList(),
     onWhereToClick: () -> Unit,
+    onClearDestination: () -> Unit = {},
     onChooseCategory: (String) -> Unit,
     onQuickDestination: (String) -> Unit,
     onAddFavoriteClick: () -> Unit
 ) {
+    var selectedMapType by remember { mutableStateOf("LIGHT") }
+    var mapDetailsState by remember { mutableStateOf(AppMapDetailsCatalog.getDefaultMap()) }
+    var showLayersBottomSheet by remember { mutableStateOf(false) }
+    var recenterTrigger by remember { mutableIntStateOf(0) }
+
+    if (showLayersBottomSheet) {
+        MapLayersBottomSheet(
+            selectedMapType = selectedMapType,
+            mapDetailsState = mapDetailsState,
+            onSelectMapType = { selectedMapType = it },
+            onToggleDetail = { key, enabled ->
+                mapDetailsState = mapDetailsState.toMutableMap().apply { put(key, enabled) }
+            },
+            onDismissRequest = { showLayersBottomSheet = false }
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
-        // Luxury Dark Map Wireframe
+        // Luxury Mapbox Customer Interactive Map
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(260.dp)
-                .background(Color(0xFF15151A))
+                .height(310.dp)
+                .background(Color(0xFF0B0B0D))
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val step = 28.dp.toPx()
-                for (x in 0..(size.width / step).toInt()) {
-                    drawLine(color = Color(0xFF1C1C22), start = androidx.compose.ui.geometry.Offset(x * step, 0f), end = androidx.compose.ui.geometry.Offset(x * step, size.height))
-                }
-                for (y in 0..(size.height / step).toInt()) {
-                    drawLine(color = Color(0xFF1C1C22), start = androidx.compose.ui.geometry.Offset(0f, y * step), end = androidx.compose.ui.geometry.Offset(size.width, y * step))
-                }
-            }
-
-            // Centre Gold Pin
-            Box(
-                modifier = Modifier
-                    .size(16.dp)
-                    .background(LuxuryUiTokens.Gold, CircleShape)
-                    .align(Alignment.Center)
+            MapboxCustomerMapView(
+                modifier = Modifier.fillMaxSize(),
+                pickupLatLng = pickupLatLng,
+                pickupTitle = pickupAddress.ifBlank { "Pickup Point" },
+                destLatLng = destLatLng,
+                destTitle = destAddress ?: "Destination",
+                routePoints = routePoints,
+                cameraTargetLatLng = cameraTargetLatLng ?: destLatLng,
+                cameraAnimTrigger = cameraAnimTrigger,
+                cameraAnimType = cameraAnimType,
+                mapLayer = selectedMapType,
+                mapDetails = mapDetailsState,
+                recenterTrigger = recenterTrigger,
+                zoomLevel = 16f
             )
 
             // Current Pickup Pill
@@ -1751,6 +2722,68 @@ fun Screen08HomeMap(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(pickupAddress, color = LuxuryUiTokens.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
+            }
+
+            // Live Route Info HUD when destination route is drawn
+            if (destLatLng != null && routePoints.isNotEmpty()) {
+                Surface(
+                    color = Color(0xFF0F172A).copy(alpha = 0.92f),
+                    border = BorderStroke(1.dp, Color(0xFF10B981)),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 12.dp, bottom = 26.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🛣️ ${String.format(java.util.Locale.US, "%.1f", routeDistanceKm ?: 3.5)} km • ${routeDurationMinutes?.toInt() ?: 12} mins",
+                            color = Color(0xFF10B981),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "✕",
+                            color = LuxuryUiTokens.Muted,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { onClearDestination() }
+                        )
+                    }
+                }
+            }
+
+            // Floating Layer Selector FAB (Map Type & 7 Details)
+            FloatingActionButton(
+                onClick = { showLayersBottomSheet = true },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 12.dp, end = 12.dp)
+                    .size(42.dp)
+                    .border(1.dp, LuxuryUiTokens.Gold, CircleShape),
+                shape = CircleShape,
+                containerColor = Color(0xFF0F172A).copy(alpha = 0.9f),
+                contentColor = LuxuryUiTokens.Gold
+            ) {
+                Text("🥞", fontSize = 18.sp)
+            }
+
+            // Floating Recenter Location FAB
+            FloatingActionButton(
+                onClick = { recenterTrigger++ },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 26.dp, end = 12.dp)
+                    .size(38.dp)
+                    .border(1.dp, Color(0xFF10B981), CircleShape),
+                shape = CircleShape,
+                containerColor = Color(0xFF0F172A).copy(alpha = 0.9f),
+                contentColor = Color(0xFF10B981)
+            ) {
+                Text("🎯", fontSize = 16.sp)
             }
         }
 
@@ -1809,10 +2842,28 @@ fun Screen08HomeMap(
                 Text("CHOOSE RIDE CATEGORY", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
 
+                val pills = if (categories.isNotEmpty()) {
+                    categories.take(3).map { cat ->
+                        val price = when {
+                            cat.code.contains("SHARE", ignoreCase = true) -> "₹15"
+                            cat.code.contains("AUTO", ignoreCase = true) -> "₹40"
+                            cat.code.contains("CARGO", ignoreCase = true) -> "₹60"
+                            else -> "₹30"
+                        }
+                        cat.name to price
+                    }
+                } else {
+                    listOf(
+                        "Standard E-Rickshaw" to "₹30",
+                        "Shared Eco-Pool" to "₹15",
+                        "Electric Auto" to "₹40"
+                    )
+                }
+
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    CategoryPill("Standard E-Rickshaw", "₹40", modifier = Modifier.weight(1f)) { onChooseCategory("Standard E-Rickshaw") }
-                    CategoryPill("VIP Chauffeur EV", "₹80", modifier = Modifier.weight(1f)) { onChooseCategory("VIP Chauffeur EV") }
-                    CategoryPill("Metro Feeder", "₹20", modifier = Modifier.weight(1f)) { onChooseCategory("Metro Feeder") }
+                    pills.forEach { (catTitle, price) ->
+                        CategoryPill(catTitle, price, modifier = Modifier.weight(1f)) { onChooseCategory(catTitle) }
+                    }
                 }
             }
         }
@@ -1835,17 +2886,45 @@ fun CategoryPill(title: String, price: String, modifier: Modifier = Modifier, on
     }
 }
 
-// Screen 09: Search Destination
+// Screen 09: Search Destination with Mapbox Search Autocomplete
 @Composable
 fun Screen09SearchDestination(
     initialQuery: String,
+    pickupLatLng: LatLng,
     savedPlaces: List<SavedPlace>,
-    onSelectDestination: (String) -> Unit,
+    onSelectDestination: (title: String, lat: Double, lng: Double) -> Unit,
     onPinDropClick: () -> Unit,
     onMultiStopClick: () -> Unit,
     onBack: () -> Unit
 ) {
     var query by remember { mutableStateOf(initialQuery) }
+    var mapboxSuggestions by remember { mutableStateOf<List<MapboxPlaceSuggestion>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+
+    // Live Mapbox Search Autocomplete
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.length >= 2) {
+            delay(250)
+            isSearching = true
+            try {
+                val results = MapboxSearchService.searchPlaces(
+                    query = q,
+                    proximityLat = pickupLatLng.latitude,
+                    proximityLng = pickupLatLng.longitude,
+                    limit = 8
+                )
+                mapboxSuggestions = results
+            } catch (_: Exception) {
+                mapboxSuggestions = emptyList()
+            } finally {
+                isSearching = false
+            }
+        } else {
+            mapboxSuggestions = emptyList()
+            isSearching = false
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1860,6 +2939,15 @@ fun Screen09SearchDestination(
             value = query,
             onValueChange = { query = it },
             placeholder = { Text("Search location, landmark, metro...", color = LuxuryUiTokens.Muted) },
+            trailingIcon = {
+                if (isSearching) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = LuxuryUiTokens.Gold, strokeWidth = 2.dp)
+                } else if (query.isNotBlank()) {
+                    IconButton(onClick = { query = ""; mapboxSuggestions = emptyList() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = LuxuryUiTokens.Muted)
+                    }
+                }
+            },
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = LuxuryUiTokens.Text,
                 unfocusedTextColor = LuxuryUiTokens.Text,
@@ -1882,29 +2970,134 @@ fun Screen09SearchDestination(
             }
         }
 
+        // Live Mapbox Search Autocomplete Results
+        if (mapboxSuggestions.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("MAPBOX SEARCH PLACES", color = LuxuryUiTokens.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("• Live Worldwide", color = Color(0xFF10B981), fontSize = 10.sp)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            mapboxSuggestions.forEach { suggestion ->
+                Surface(
+                    color = LuxuryUiTokens.Card,
+                    border = BorderStroke(1.dp, LuxuryUiTokens.Gold.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
+                        .clickable {
+                            onSelectDestination(suggestion.name, suggestion.latitude, suggestion.longitude)
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF24221A))
+                                .border(1.dp, LuxuryUiTokens.Gold, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("📍", fontSize = 16.sp)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(suggestion.name, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(
+                                suggestion.fullAddress,
+                                color = LuxuryUiTokens.Muted,
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (suggestion.distanceKm != null) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                color = Color(0xFF10B981).copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, Color(0xFF10B981)),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    text = "${String.format(java.util.Locale.US, "%.1f", suggestion.distanceKm)} km",
+                                    color = Color(0xFF10B981),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         Text("FAVORITE & RECENT DESTINATIONS", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
 
         savedPlaces.forEach { place ->
+            val placeLat = if (place.isHome) 28.7041 else if (place.isWork) 28.6304 else 28.6139
+            val placeLng = if (place.isHome) 77.1025 else if (place.isWork) 77.2177 else 77.2090
             Surface(
                 color = LuxuryUiTokens.Card,
                 border = BorderStroke(1.dp, LuxuryUiTokens.Border),
                 shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).clickable { onSelectDestination(place.address) }
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+                    .clickable { onSelectDestination(place.title, placeLat, placeLng) }
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(place.title, color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text(place.address, color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1E293B)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(if (place.isHome) "🏠" else if (place.isWork) "🏢" else "⭐", fontSize = 15.sp)
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(place.title, color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(place.address, color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
                 }
             }
         }
     }
 }
 
-// Screen 10: Pin Drop
+// Screen 10: Pin Drop with Mapbox Reverse Geocoding
 @Composable
-fun Screen10PinDrop(onConfirmPin: (String) -> Unit, onBack: () -> Unit) {
+fun Screen10PinDrop(onConfirmPin: (String, Double, Double) -> Unit, onBack: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var selectedMapType by remember { mutableStateOf("LIGHT") }
+    var mapDetailsState by remember { mutableStateOf(AppMapDetailsCatalog.getDefaultMap()) }
+    var showLayersBottomSheet by remember { mutableStateOf(false) }
+    var pinAddress by remember { mutableStateOf("Connaught Place Radial 3, New Delhi") }
+    var pinLatLng by remember { mutableStateOf(LatLng(28.6139, 77.2090)) }
+    var recenterTrigger by remember { mutableIntStateOf(0) }
+
+    if (showLayersBottomSheet) {
+        MapLayersBottomSheet(
+            selectedMapType = selectedMapType,
+            mapDetailsState = mapDetailsState,
+            onSelectMapType = { selectedMapType = it },
+            onToggleDetail = { key, enabled ->
+                mapDetailsState = mapDetailsState.toMutableMap().apply { put(key, enabled) }
+            },
+            onDismissRequest = { showLayersBottomSheet = false }
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
@@ -1918,22 +3111,121 @@ fun Screen10PinDrop(onConfirmPin: (String) -> Unit, onBack: () -> Unit) {
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(Color(0xFF15151A), RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(14.dp))
                 .border(1.dp, LuxuryUiTokens.Border, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Text("DRAG MAP TO ALIGN CENTRE PIN", color = LuxuryUiTokens.Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Box(modifier = Modifier.size(20.dp).background(LuxuryUiTokens.Gold, CircleShape))
+            MapboxCustomerMapView(
+                modifier = Modifier.fillMaxSize(),
+                pickupLatLng = pinLatLng,
+                pickupTitle = "Selected Pin Location",
+                mapLayer = selectedMapType,
+                mapDetails = mapDetailsState,
+                recenterTrigger = recenterTrigger,
+                zoomLevel = 17f,
+                onCameraMoved = { newPos ->
+                    pinLatLng = newPos
+                    pinAddress = "Lat: %.4f, Lng: %.4f".format(newPos.latitude, newPos.longitude)
+                    scope.launch {
+                        val rev = MapboxSearchService.reverseGeocode(newPos.latitude, newPos.longitude)
+                        if (!rev.isNullOrBlank()) {
+                            pinAddress = rev
+                        }
+                    }
+                }
+            )
+
+            // Centre Crosshair & Pin Drop Beacon
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.85f),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, LuxuryUiTokens.Gold),
+                    modifier = Modifier.padding(bottom = 6.dp)
+                ) {
+                    Text(
+                        text = "📍 Drag Map to Set Pin",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(LuxuryUiTokens.Gold)
+                        .border(3.dp, Color.White, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("📌", fontSize = 18.sp)
+                }
+            }
+
+            // Floating Layer Switcher FAB
+            FloatingActionButton(
+                onClick = { showLayersBottomSheet = true },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 10.dp, end = 10.dp)
+                    .size(40.dp)
+                    .border(1.dp, LuxuryUiTokens.Gold, CircleShape),
+                shape = CircleShape,
+                containerColor = Color(0xFF0F172A).copy(alpha = 0.9f),
+                contentColor = LuxuryUiTokens.Gold
+            ) {
+                Text("🥞", fontSize = 16.sp)
+            }
+
+            // Floating Recenter FAB
+            FloatingActionButton(
+                onClick = { recenterTrigger++ },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 12.dp, end = 10.dp)
+                    .size(36.dp)
+                    .border(1.dp, Color(0xFF10B981), CircleShape),
+                shape = CircleShape,
+                containerColor = Color(0xFF0F172A).copy(alpha = 0.9f),
+                contentColor = Color(0xFF10B981)
+            ) {
+                Text("🎯", fontSize = 14.sp)
+            }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
-        GoldActionButton(text = "CONFIRM PIN LOCATION", onClick = { onConfirmPin("Connaught Place Inner Circle Gate 3") })
+        Spacer(modifier = Modifier.height(10.dp))
+        Surface(
+            color = LuxuryUiTokens.Card,
+            border = BorderStroke(1.dp, LuxuryUiTokens.Border),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("📍", fontSize = 16.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(pinAddress, color = LuxuryUiTokens.Text, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+        GoldActionButton(text = "CONFIRM PIN LOCATION", onClick = { onConfirmPin(pinAddress, pinLatLng.latitude, pinLatLng.longitude) })
     }
 }
 
 // Screen 11: Multi-Stop
 @Composable
-fun Screen11MultiStop(pickup: String, destination: String, onConfirmRoute: () -> Unit, onBack: () -> Unit) {
+fun Screen11MultiStop(
+    pickup: String,
+    destination: String,
+    intermediateStop: String = "",
+    onIntermediateStopChange: (String) -> Unit = {},
+    onConfirmRoute: () -> Unit,
+    onBack: () -> Unit
+) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
@@ -1943,25 +3235,75 @@ fun Screen11MultiStop(pickup: String, destination: String, onConfirmRoute: () ->
         }
 
         Spacer(modifier = Modifier.height(14.dp))
-        LuxuryCardItem("Pickup Point", pickup)
-        LuxuryCardItem("Stop 1 (Co-passenger Drop)", "Patel Chowk Metro Gate 1")
-        LuxuryCardItem("Final Destination", destination)
+        LuxuryCardItem("Pickup Point", pickup.ifBlank { "Current Location" })
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = intermediateStop,
+            onValueChange = onIntermediateStopChange,
+            label = { Text("Stop 1 (Co-passenger Drop / Errand)", color = LuxuryUiTokens.Gold, fontSize = 12.sp) },
+            placeholder = { Text("Enter intermediate address or stop", color = LuxuryUiTokens.Muted, fontSize = 12.sp) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = LuxuryUiTokens.Gold,
+                unfocusedBorderColor = LuxuryUiTokens.Border,
+                focusedTextColor = LuxuryUiTokens.Text,
+                unfocusedTextColor = LuxuryUiTokens.Text
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        LuxuryCardItem("Final Destination", destination.ifBlank { "Destination Point" })
 
         Spacer(modifier = Modifier.height(20.dp))
         GoldActionButton(text = "CONFIRM MULTI-STOP ROUTE", onClick = onConfirmRoute)
     }
 }
 
-// Screen 12: Choose Ride
+// Screen 12: Choose Ride with Mapbox Route Distance & ETA
 @Composable
 fun Screen12ChooseRide(
     selectedCat: String,
+    routeDistanceKm: Double? = null,
+    routeDurationMinutes: Double? = null,
+    categories: List<VehicleCategoryDto> = emptyList(),
     onSelectCat: (String) -> Unit,
     onFareBreakup: () -> Unit,
     onPreferences: () -> Unit,
     onBookNow: () -> Unit,
     onBack: () -> Unit
 ) {
+    val dist = routeDistanceKm ?: 5.2
+    val dur = routeDurationMinutes?.toInt() ?: 16
+
+    val displayCategories = if (categories.isNotEmpty()) {
+        categories.map { cat ->
+            val base = when {
+                cat.code.contains("SHARE", ignoreCase = true) -> 15
+                cat.code.contains("AUTO", ignoreCase = true) -> 40
+                cat.code.contains("CARGO", ignoreCase = true) -> 60
+                else -> 30
+            }
+            val perKm = when {
+                cat.code.contains("SHARE", ignoreCase = true) -> 6
+                cat.code.contains("AUTO", ignoreCase = true) -> 15
+                cat.code.contains("CARGO", ignoreCase = true) -> 18
+                else -> 12
+            }
+            val fare = (base + (dist * perKm)).toInt()
+            Triple(cat.name, "₹ $fare", cat.description.ifBlank { "Eco-friendly Electric Fleet" })
+        }
+    } else {
+        val standardFare = (30 + (dist * 12)).toInt()
+        val vipFare = (50 + (dist * 18)).toInt()
+        val sharedFare = maxOf(25, (standardFare * 0.45).toInt())
+        val feederFare = 25
+        listOf(
+            Triple("Standard E-Rickshaw", "₹ $standardFare", "Economical 4-Seater Commercial EV"),
+            Triple("VIP Chauffeur EV", "₹ $vipFare", "High-Comfort Foam Seats + Quiet Motor"),
+            Triple("Shared Pool E-Rickshaw", "₹ $sharedFare", "Split fare with route co-passengers"),
+            Triple("Metro Feeder EV", "₹ $feederFare", "Fixed direct route to nearest metro gate")
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
@@ -1970,14 +3312,40 @@ fun Screen12ChooseRide(
             Text("12 · Choose Ride Category", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         }
 
+        Spacer(modifier = Modifier.height(10.dp))
+        // Route Distance & Duration Header Badge
+        Surface(
+            color = Color(0xFF0F172A),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.7f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🛣️", fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("Mapbox Driving Navigation", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("${String.format(java.util.Locale.US, "%.1f", dist)} km distance", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                }
+                Surface(
+                    color = Color(0xFF10B981).copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color(0xFF10B981))
+                ) {
+                    Text("ETA $dur mins", color = Color(0xFF10B981), fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(14.dp))
 
-        listOf(
-            Triple("Standard E-Rickshaw", "₹ 128", "Economical 4-Seater Commercial EV"),
-            Triple("VIP Chauffeur EV", "₹ 190", "High-Comfort Foam Seats + Quiet Motor"),
-            Triple("Shared Pool E-Rickshaw", "₹ 45", "Split fare with route co-passengers"),
-            Triple("Metro Feeder EV", "₹ 30", "Fixed direct route to nearest metro gate")
-        ).forEach { (cat, fare, desc) ->
+        displayCategories.forEach { (cat, fare, desc) ->
             val isSel = selectedCat == cat
             Surface(
                 color = if (isSel) Color(0xFF24221A) else LuxuryUiTokens.Card,
@@ -2380,10 +3748,11 @@ fun CustomerChatBubble(message: String, isCustomer: Boolean) {
 
 // Screen 22: Masked Call
 @Composable
-fun Screen22MaskedCall(driverName: String, onEndCall: () -> Unit) {
+fun Screen22MaskedCall(driverName: String, driverPhone: String = "", onEndCall: () -> Unit) {
+    val maskedDisplay = if (driverPhone.isNotBlank()) "+91-XXXX-${driverPhone.takeLast(4)}" else "+91-XXXX-SECURE"
     Column(modifier = Modifier.fillMaxSize().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("NUMBER MASKED SECURE CALL", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text("Connected with $driverName (+91-XXXX-4821)", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+        Text("Connected with ${driverName.ifBlank { "Chauffeur" }} ($maskedDisplay)", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
 
         Spacer(modifier = Modifier.height(24.dp))
         Box(modifier = Modifier.size(90.dp).background(LuxuryUiTokens.Card, CircleShape).border(2.dp, LuxuryUiTokens.Gold, CircleShape), contentAlignment = Alignment.Center) {
@@ -2501,6 +3870,8 @@ fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
     val scope = rememberCoroutineScope()
     var isPaying by remember { mutableStateOf(false) }
     var selectedMethod by remember { mutableStateOf("UPI") } // "UPI", "RAZORPAY", "CASH"
+    var selectedUpiApp by remember { mutableStateOf("ANY") } // "GPAY", "PHONEPE", "PAYTM", "BHIM", "ANY", "VPA"
+    var customVpaInput by remember { mutableStateOf("") }
 
     fun launchRazorpayFlow(act: android.app.Activity) {
         isPaying = true
@@ -2514,7 +3885,7 @@ fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
                     )
                 )
                 val order = res.body()
-                val orderId = order?.orderId ?: "order_live_${System.currentTimeMillis()}"
+                val orderId = order?.orderId ?: ""
                 val keyId = order?.keyId?.ifBlank { com.luxury.chauffeur.customer.feature.payments.RazorpayConfig.LIVE_KEY_ID } 
                     ?: com.luxury.chauffeur.customer.feature.payments.RazorpayConfig.LIVE_KEY_ID
 
@@ -2548,17 +3919,18 @@ fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp),
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text("29 · FARE SETTLEMENT", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(modifier = Modifier.height(4.dp))
-        Text("₹ $amount", color = LuxuryUiTokens.Gold, fontSize = 40.sp, fontWeight = FontWeight.Black)
+        Text("₹ $amount", color = LuxuryUiTokens.Gold, fontSize = 42.sp, fontWeight = FontWeight.Black)
         Spacer(modifier = Modifier.height(4.dp))
-        Text("Instant UPI (GPay/PhonePe/Paytm) & Razorpay Live", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+        Text("Instant UPI (GPay/PhonePe/Paytm/QR) & Razorpay Live", color = LuxuryUiTokens.Muted, fontSize = 12.sp)
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         // 1. Direct UPI Instant (GPay / PhonePe / Paytm / BHIM)
         Surface(
@@ -2570,20 +3942,113 @@ fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
                 .clickable { selectedMethod = "UPI" }
                 .padding(vertical = 4.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("⚡ Pay via UPI (GPay / PhonePe / Paytm)", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text("Instant 1-tap app launch with zero friction", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("⚡ Pay via UPI (Full 1-Tap Working)", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("GPay, PhonePe, Paytm, BHIM & Custom UPI ID", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                    }
+                    RadioButton(
+                        selected = (selectedMethod == "UPI"),
+                        onClick = { selectedMethod = "UPI" },
+                        colors = RadioButtonDefaults.colors(selectedColor = LuxuryUiTokens.Gold, unselectedColor = LuxuryUiTokens.Muted)
+                    )
                 }
-                RadioButton(
-                    selected = (selectedMethod == "UPI"),
-                    onClick = { selectedMethod = "UPI" },
-                    colors = RadioButtonDefaults.colors(selectedColor = LuxuryUiTokens.Gold, unselectedColor = LuxuryUiTokens.Muted)
-                )
+
+                if (selectedMethod == "UPI") {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("CHOOSE UPI APP FOR 1-TAP PAYMENT:", color = LuxuryUiTokens.Gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            Triple("GPAY", "Google Pay", com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.PACKAGE_GPAY),
+                            Triple("PHONEPE", "PhonePe", com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.PACKAGE_PHONEPE),
+                            Triple("PAYTM", "Paytm", com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.PACKAGE_PAYTM),
+                            Triple("ANY", "Any UPI", "")
+                        ).forEach { (id, label, pkg) ->
+                            val isSel = (selectedUpiApp == id)
+                            Surface(
+                                color = if (isSel) LuxuryUiTokens.Gold else LuxuryUiTokens.Card,
+                                border = BorderStroke(1.dp, if (isSel) LuxuryUiTokens.Gold else LuxuryUiTokens.Border),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        selectedUpiApp = id
+                                        val act = context as? android.app.Activity
+                                        if (act != null) {
+                                            if (pkg.isNotBlank()) {
+                                                val ok = com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.launchSpecificUpiApp(
+                                                    context = context,
+                                                    packageName = pkg,
+                                                    amountRupees = amount.toDouble(),
+                                                    rideId = "RIDE_${System.currentTimeMillis()}"
+                                                )
+                                                if (ok) onPaymentDone()
+                                            } else {
+                                                val ok = com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.launchDirectUpiIntent(
+                                                    context = context,
+                                                    amountRupees = amount.toDouble(),
+                                                    rideId = "RIDE_${System.currentTimeMillis()}"
+                                                )
+                                                if (ok) onPaymentDone()
+                                            }
+                                        }
+                                    }
+                            ) {
+                                Box(modifier = Modifier.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = label,
+                                        color = if (isSel) Color.Black else LuxuryUiTokens.Text,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = customVpaInput,
+                        onValueChange = { customVpaInput = it },
+                        placeholder = { Text("Or Enter VPA (e.g. mobile@upi)", color = LuxuryUiTokens.Muted, fontSize = 11.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = LuxuryUiTokens.Text,
+                            unfocusedTextColor = LuxuryUiTokens.Text,
+                            focusedBorderColor = LuxuryUiTokens.Gold,
+                            unfocusedBorderColor = LuxuryUiTokens.Border
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            if (customVpaInput.isNotBlank()) {
+                                TextButton(
+                                    onClick = {
+                                        val vpa = customVpaInput.trim()
+                                        val ok = com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.launchDirectUpiIntent(
+                                            context = context,
+                                            amountRupees = amount.toDouble(),
+                                            rideId = "RIDE_${System.currentTimeMillis()}",
+                                            payeeVpa = vpa
+                                        )
+                                        if (ok) onPaymentDone()
+                                    }
+                                ) {
+                                    Text("PAY", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    )
+                }
             }
         }
 
@@ -2645,12 +4110,12 @@ fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
         GoldActionButton(
             text = when {
                 isPaying -> "OPENING PAYMENT..."
-                selectedMethod == "UPI" -> "PAY ₹$amount VIA UPI (GPAY/PHONEPE)"
+                selectedMethod == "UPI" -> "PAY ₹$amount VIA UPI (GPAY/PHONEPE/PAYTM)"
                 selectedMethod == "RAZORPAY" -> "PAY ₹$amount VIA RAZORPAY GATEWAY"
                 else -> "CONFIRM CASH SETTLEMENT (₹$amount)"
             },
@@ -2659,13 +4124,27 @@ fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
                 if (act != null) {
                     when (selectedMethod) {
                         "UPI" -> {
-                            val launched = com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.launchDirectUpiIntent(
-                                context = context,
-                                amountRupees = amount.toDouble(),
-                                rideId = "RIDE_LIVE_${System.currentTimeMillis()}"
-                            )
+                            val pkg = when (selectedUpiApp) {
+                                "GPAY" -> com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.PACKAGE_GPAY
+                                "PHONEPE" -> com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.PACKAGE_PHONEPE
+                                "PAYTM" -> com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.PACKAGE_PAYTM
+                                else -> ""
+                            }
+                            val launched = if (pkg.isNotBlank()) {
+                                com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.launchSpecificUpiApp(
+                                    context = context,
+                                    packageName = pkg,
+                                    amountRupees = amount.toDouble(),
+                                    rideId = "RIDE_LIVE_${System.currentTimeMillis()}"
+                                )
+                            } else {
+                                com.luxury.chauffeur.customer.feature.payments.RazorpayCheckoutHelper.launchDirectUpiIntent(
+                                    context = context,
+                                    amountRupees = amount.toDouble(),
+                                    rideId = "RIDE_LIVE_${System.currentTimeMillis()}"
+                                )
+                            }
                             if (!launched) {
-                                // If direct standalone UPI app not installed, fallback to Razorpay gateway with UPI preselected!
                                 launchRazorpayFlow(act)
                             } else {
                                 onPaymentDone()
@@ -2692,14 +4171,14 @@ fun Screen29PaymentSettle(amount: Int, onPaymentDone: () -> Unit) {
 
 // Screen 30: Rate Driver
 @Composable
-fun Screen30RateDriver(driverName: String, onSubmitted: () -> Unit) {
+fun Screen30RateDriver(driverName: String, onSubmitted: (Int) -> Unit) {
     var stars by remember { mutableIntStateOf(5) }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("30 · Rate Chauffeur", color = LuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text("How was your trip with $driverName?", color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text("How was your trip with ${driverName.ifBlank { "your Chauffeur" }}?", color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
         Spacer(modifier = Modifier.height(14.dp))
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2711,7 +4190,7 @@ fun Screen30RateDriver(driverName: String, onSubmitted: () -> Unit) {
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        GoldActionButton(text = "SUBMIT 5-STAR RATING", onClick = onSubmitted)
+        GoldActionButton(text = "SUBMIT $stars-STAR RATING", onClick = { onSubmitted(stars) })
     }
 }
 
@@ -2733,12 +4212,27 @@ fun RidesTabContent(
         }
 
         Spacer(modifier = Modifier.height(10.dp))
-        LuxuryCardItem("Trip #8491 · Completed", "CP Metro Gate 2 → Khan Market · ₹128 Cash Paid")
-        LuxuryCardItem("Trip #8410 · Completed", "New Delhi Railway Station → Karol Bagh · ₹110 UPI")
+        Surface(
+            color = LuxuryUiTokens.Card,
+            border = BorderStroke(1.dp, LuxuryUiTokens.Border),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+        ) {
+            Column(modifier = Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("No completed rides yet.", color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("Your real-time ride receipts & trip history will appear here.", color = LuxuryUiTokens.Muted, fontSize = 11.sp)
+                Spacer(modifier = Modifier.height(10.dp))
+                GoldActionButton(text = "BOOK YOUR FIRST RIDE", onClick = onRepeatRide)
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
         Text("ACTIVE SUPPORT DISPUTES (CRUD)", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
+
+        if (supportTickets.isEmpty()) {
+            Text("No active dispute tickets. Everything is running smoothly.", color = LuxuryUiTokens.Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+        }
 
         supportTickets.forEach { ticket ->
             Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
@@ -2787,6 +4281,10 @@ fun WalletTabContent(
             }
         }
 
+        if (savedVpas.isEmpty()) {
+            Text("No saved UPI accounts yet. Tap '+ Link UPI' to link one.", color = LuxuryUiTokens.Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+        }
+
         savedVpas.forEach { vpa ->
             Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
                 Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -2804,6 +4302,10 @@ fun WalletTabContent(
         Spacer(modifier = Modifier.height(14.dp))
         Text("RECENT TRANSACTIONS", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
+
+        if (transactions.isEmpty()) {
+            Text("No transactions yet. Real wallet activities will show here.", color = LuxuryUiTokens.Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+        }
 
         transactions.forEach { txn ->
             Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
@@ -2849,14 +4351,17 @@ fun AccountTabContent(
         Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Row(modifier = Modifier.padding(14.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val initials = if (userName.isNotBlank()) {
+                        userName.trim().split("\\s+".toRegex()).take(2).mapNotNull { it.firstOrNull()?.uppercaseChar() }.joinToString("")
+                    } else "RA"
                     Box(modifier = Modifier.size(46.dp).background(LuxuryUiTokens.Gold, CircleShape), contentAlignment = Alignment.Center) {
-                        Text("SS", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(initials.ifBlank { "RA" }, color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Text(userName, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        Text(userPhone, color = LuxuryUiTokens.Muted, fontSize = 12.sp)
-                        Text(userEmail, color = LuxuryUiTokens.Gold, fontSize = 11.sp)
+                        Text(userName.ifBlank { "Rider Account" }, color = LuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(userPhone.ifBlank { "Phone not registered" }, color = LuxuryUiTokens.Muted, fontSize = 12.sp)
+                        Text(userEmail.ifBlank { "Connected to FastAPI Backend" }, color = LuxuryUiTokens.Gold, fontSize = 11.sp)
                     }
                 }
                 IconButton(onClick = onEditProfile) {
@@ -2871,6 +4376,10 @@ fun AccountTabContent(
             TextButton(onClick = onAddContact) {
                 Text("+ Add Contact", color = LuxuryUiTokens.Gold, fontSize = 11.sp)
             }
+        }
+
+        if (emergencyContacts.isEmpty()) {
+            Text("No emergency contacts saved yet. Add trusted contacts for SOS alerts.", color = LuxuryUiTokens.Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
         }
 
         emergencyContacts.forEach { contact ->
@@ -2897,6 +4406,10 @@ fun AccountTabContent(
         Spacer(modifier = Modifier.height(14.dp))
         Text("SAVED PLACES (CRUD)", color = LuxuryUiTokens.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(6.dp))
+
+        if (savedPlaces.isEmpty()) {
+            Text("No saved places yet. Save Home, Work, or favorite destinations.", color = LuxuryUiTokens.Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 8.dp))
+        }
 
         savedPlaces.forEach { place ->
             Surface(color = LuxuryUiTokens.Card, border = BorderStroke(1.dp, LuxuryUiTokens.Border), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {

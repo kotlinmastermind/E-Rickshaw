@@ -42,6 +42,36 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="geo" />
         </intent>
+
+        <!-- UPI Intent Apps Package Visibility (Android 11+) -->
+        <package android:name="com.google.android.apps.nbu.paisa.user" />
+        <package android:name="com.phonepe.app" />
+        <package android:name="net.one97.paytm" />
+        <package android:name="in.org.npci.upiapp" />
+        <package android:name="com.dreamplug.androidapp" />
+        <package android:name="com.myairtelapp" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.axis.mobile" />
+        <package android:name="com.csam.icici.bank.imobile" />
+        <package android:name="com.sbi.upi" />
+        <package android:name="com.mobikwik_new" />
+        <package android:name="in.amazon.mShop.android.shopping" />
+        <package android:name="com.amazon.mShop.android.shopping" />
+        <package android:name="com.freecharge.android" />
+        <package android:name="com.jupiter.money" />
+        <package android:name="com.bankofbaroda.upi" />
+        <package android:name="com.hdfcbank.payzapp" />
+        <package android:name="com.kotak.kaypay" />
+
+        <!-- UPI Protocol Scheme Intent Filters for Direct UPI -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="upi" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="upi" />
+        </intent>
     </queries>
 
     <application
@@ -55,16 +85,14 @@
         android:enableOnBackInvokedCallback="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
         
-        <!-- Google Maps Platform Android SDK API Key -->
+        <!-- Mapbox Maps & Navigation SDK Public Token -->
+        <meta-data
+            android:name="com.mapbox.token"
+            android:value="${MAPBOX_PUBLIC_TOKEN}" />
+
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="${MAPS_API_KEY}" />
-        <meta-data
-            android:name="com.google.android.maps.v2.RENDERER"
-            android:value="LEGACY" />
-        <meta-data
-            android:name="com.google.android.gms.version"
-            android:value="@integer/google_play_services_version" />
+            android:value="" />
 
         <activity
             android:name=".MainActivity"

@@ -48,7 +48,8 @@ if not settings.DATABASE_URL.startswith("sqlite"):
     engine_kwargs.update({
         "pool_pre_ping": True,
         "pool_size": 20,
-        "max_overflow": 10
+        "max_overflow": 10,
+        "isolation_level": "READ COMMITTED"
     })
 
 engine = create_async_engine(

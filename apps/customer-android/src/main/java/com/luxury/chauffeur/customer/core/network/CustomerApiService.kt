@@ -830,6 +830,31 @@ data class WalletDto(
     @SerializedName("is_frozen") val isFrozen: Boolean
 )
 
+data class WalletTransactionDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("transaction_type") val transactionType: String = "CREDIT",
+    @SerializedName("source") val source: String = "TOP_UP",
+    @SerializedName("amount_cents") val amountCents: Int = 0,
+    @SerializedName("balance_after_cents") val balanceAfterCents: Int = 0,
+    @SerializedName("running_balance_cents") val runningBalanceCents: Int = 0,
+    @SerializedName("reference_id") val referenceId: String? = null,
+    @SerializedName("description") val description: String = "",
+    @SerializedName("created_at") val createdAt: String = ""
+)
+
+data class RideChatMessageDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("sender_user_id") val senderUserId: String = "",
+    @SerializedName("sender_role") val senderRole: String = "CUSTOMER",
+    @SerializedName("message") val message: String = "",
+    @SerializedName("message_text") val messageText: String = "",
+    @SerializedName("sent_at") val sentAt: String = ""
+)
+
+data class SendChatMessageRequest(
+    @SerializedName("message_text") val messageText: String
+)
+
 data class TopupWalletRequest(
     @SerializedName("amount_cents") val amountCents: Int,
     @SerializedName("idempotency_key") val idempotencyKey: String,
@@ -1167,6 +1192,24 @@ interface CustomerApiService {
 
     @GET("api/v1/wallets/me")
     suspend fun getWallet(): Response<WalletDto>
+
+    @GET("api/v1/wallets/history")
+    suspend fun getWalletTransactions(
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0
+    ): Response<List<WalletTransactionDto>>
+
+    @GET("api/v1/rides/{ride_id}/chat/messages")
+    suspend fun getRideChatMessages(
+        @Path("ride_id") rideId: String
+    ): Response<List<RideChatMessageDto>>
+
+    @POST("api/v1/rides/{ride_id}/chat/messages")
+    suspend fun sendRideChatMessage(
+        @Path("ride_id") rideId: String,
+        @Body payload: SendChatMessageRequest
+    ): Response<RideChatMessageDto>
+
 
     @POST("api/v1/wallets/topup")
     suspend fun topupWallet(@Body payload: TopupWalletRequest): Response<Map<String, Any>>

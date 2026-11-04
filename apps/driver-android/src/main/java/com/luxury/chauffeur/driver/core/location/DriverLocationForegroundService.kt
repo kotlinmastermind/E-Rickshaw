@@ -283,6 +283,28 @@ class DriverLocationForegroundService : Service() {
         }
     }
 
+    private val offlineLocationQueue = java.util.concurrent.ConcurrentLinkedQueue<DriverLocationPayload>()
+    private val MAX_OFFLINE_BUFFER_SIZE = 60
+
+    private fun flushOfflineLocations() {
+        if (offlineLocationQueue.isEmpty()) return
+        serviceScope.launch(Dispatchers.IO) {
+            while (!offlineLocationQueue.isEmpty()) {
+                val queued = offlineLocationQueue.poll() ?: break
+                try {
+                    val resp = DriverApiClient.getService().pingLocation(queued)
+                    if (!resp.isSuccessful) {
+                        offlineLocationQueue.offer(queued)
+                        break
+                    }
+                } catch (e: Exception) {
+                    offlineLocationQueue.offer(queued)
+                    break
+                }
+            }
+        }
+    }
+
     private fun sendLocationPing(location: Location, source: String) {
         val mock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) location.isMock else location.isFromMockProvider
         
@@ -293,22 +315,32 @@ class DriverLocationForegroundService : Service() {
             telemetryWebSocket?.send(wsPayload)
         } catch (_: Exception) {}
 
-        // 2. Send over REST HTTP Ping Backup
+        // 2. Send over REST HTTP Ping Backup with Offline Buffering
+        val payload = DriverLocationPayload(
+            latitude = location.latitude,
+            longitude = location.longitude,
+            heading = location.takeIf { it.hasBearing() }?.bearing?.toDouble(),
+            speedMps = location.takeIf { it.hasSpeed() }?.speed?.toDouble(),
+            accuracyM = location.takeIf { it.hasAccuracy() }?.accuracy?.toDouble(),
+            isMockLocation = mock,
+            locationSource = source
+        )
+
         serviceScope.launch(Dispatchers.IO) {
             try {
-                DriverApiClient.getService().pingLocation(
-                    DriverLocationPayload(
-                        latitude = location.latitude,
-                        longitude = location.longitude,
-                        heading = location.takeIf { it.hasBearing() }?.bearing?.toDouble(),
-                        speedMps = location.takeIf { it.hasSpeed() }?.speed?.toDouble(),
-                        accuracyM = location.takeIf { it.hasAccuracy() }?.accuracy?.toDouble(),
-                        isMockLocation = mock,
-                        locationSource = source
-                    )
-                )
+                val resp = DriverApiClient.getService().pingLocation(payload)
+                if (resp.isSuccessful) {
+                    flushOfflineLocations()
+                } else {
+                    if (offlineLocationQueue.size < MAX_OFFLINE_BUFFER_SIZE) {
+                        offlineLocationQueue.offer(payload)
+                    }
+                }
             } catch (e: Exception) {
-                Log.d(TAG, "Driver location ping skipped/failed: ${e.message}")
+                Log.d(TAG, "Driver location ping network glitch, buffered in offline queue: ${e.message}")
+                if (offlineLocationQueue.size < MAX_OFFLINE_BUFFER_SIZE) {
+                    offlineLocationQueue.offer(payload)
+                }
             }
         }
     }

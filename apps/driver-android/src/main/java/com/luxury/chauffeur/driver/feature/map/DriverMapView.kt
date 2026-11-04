@@ -46,6 +46,7 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.MapView
 import com.google.android.gms.maps.model.*
+import com.luxury.chauffeur.core.map.AppMapDetailsCatalog
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -341,8 +342,9 @@ fun DriverMapView(
     var isVoiceMuted by remember { mutableStateOf(false) }
     var showManeuversSheet by remember { mutableStateOf(false) }
     var isFullscreenCockpit by remember { mutableStateOf(false) }
-    var useGoogleMapsEngine by remember { mutableStateOf(false) }
-    var currentMapLayer by remember { mutableStateOf("DARK") } // "DARK", "SATELLITE", "STREETS"
+    var currentMapLayer by remember { mutableStateOf("LIGHT") } // "LIGHT", "DARK", "SATELLITE", "TERRAIN"
+    var mapDetailsState by remember { mutableStateOf(AppMapDetailsCatalog.getDefaultMap()) }
+    var showLayersSheet by remember { mutableStateOf(false) }
 
     val hasLocationPermission = remember {
         ContextCompat.checkSelfPermission(
@@ -531,35 +533,44 @@ fun DriverMapView(
         } catch (_: Exception) {}
     }
 
+    if (showLayersSheet) {
+        MapLayersBottomSheet(
+            selectedMapType = currentMapLayer,
+            mapDetailsState = mapDetailsState,
+            onSelectMapType = { currentMapLayer = it },
+            onToggleDetail = { key, enabled ->
+                mapDetailsState = mapDetailsState.toMutableMap().apply { put(key, enabled) }
+            },
+            onDismissRequest = { showLayersSheet = false }
+        )
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
-        if (useGoogleMapsEngine) {
-            // 1. Google Map AndroidView Native Container
-            AndroidView(
-                factory = { mapView },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            // 2. Real Driver Live Cockpit Map (Carto Dark / Satellite / Streets)
-            RealDriverLeafletMapView(
-                modifier = Modifier.fillMaxSize(),
-                driverLatLng = driverLatLng,
-                bearing = bearing,
-                currentSpeedKmh = currentSpeedKmh,
-                pickupLatLng = pickupLatLng,
-                pickupTitle = pickupTitle,
-                destLatLng = destLatLng,
-                destTitle = destTitle,
-                routePoints = routePoints,
-                mapLayer = currentMapLayer,
-                is3DMode = is3DCameraMode,
-                recenterTrigger = recenterTrigger,
-                zoomLevel = 17f,
-                onMapClick = onMapClick
-            )
-        }
+        // Primary Mapbox Driver Automotive Navigation Cockpit View
+        MapboxDriverMapView(
+            modifier = Modifier.fillMaxSize(),
+            driverLatLng = driverLatLng,
+            bearing = bearing,
+            currentSpeedKmh = currentSpeedKmh,
+            pickupLatLng = pickupLatLng,
+            pickupTitle = pickupTitle,
+            destLatLng = destLatLng,
+            destTitle = destTitle,
+            routePoints = routePoints,
+            currentManeuverInstruction = currentManeuver.instruction,
+            isVoiceMuted = isVoiceMuted,
+            mapLayer = currentMapLayer,
+            mapDetails = mapDetailsState,
+            is3DMode = is3DCameraMode,
+            recenterTrigger = recenterTrigger,
+            zoomLevel = 17f,
+            onMapClick = onMapClick
+        )
+
+        val isTripActive = destLatLng != null || pickupLatLng != null
 
         // 2. In-App Turn-By-Turn Navigation Guidance HUD
-        if (isNavigationCockpitEnabled) {
+        if (isNavigationCockpitEnabled && isTripActive) {
             // A. Top Turn-by-Turn Maneuver Banner
             Surface(
                 modifier = Modifier
@@ -628,14 +639,15 @@ fun DriverMapView(
                     }
                 }
             }
+        }
 
-            // B. Quick Action Buttons Column (Right Side)
-            Column(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+        // B. Quick Action Buttons Column (Right Side - Always Accessible)
+        Column(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
                 // Recenter Driver Vehicle
                 FloatingActionButton(
                     onClick = {
@@ -692,34 +704,16 @@ fun DriverMapView(
                     Text("📋", fontSize = 16.sp)
                 }
 
-                // Map Layer Switcher (Dark / Satellite / Streets)
+                // Map Layers & Details Bottom Sheet FAB (Light, Dark, Satellite, Terrain + 7 Overlays)
                 FloatingActionButton(
-                    onClick = {
-                        currentMapLayer = when (currentMapLayer) {
-                            "DARK" -> "SATELLITE"
-                            "SATELLITE" -> "STREETS"
-                            else -> "DARK"
-                        }
-                    },
+                    onClick = { showLayersSheet = true },
                     modifier = Modifier.size(40.dp),
                     shape = CircleShape,
                     containerColor = Color(0xFF1E293B),
-                    contentColor = Color.White,
+                    contentColor = Color(0xFFEAB308),
                     elevation = FloatingActionButtonDefaults.elevation(4.dp)
                 ) {
-                    Text(if (currentMapLayer == "SATELLITE") "🛰️" else if (currentMapLayer == "DARK") "🌙" else "🗺️", fontSize = 16.sp)
-                }
-
-                // Map Engine Switcher (Real Live Map vs Google Maps)
-                FloatingActionButton(
-                    onClick = { useGoogleMapsEngine = !useGoogleMapsEngine },
-                    modifier = Modifier.size(40.dp),
-                    shape = CircleShape,
-                    containerColor = if (useGoogleMapsEngine) Color(0xFFEAB308) else Color(0xFF10B981),
-                    contentColor = Color(0xFF0F172A),
-                    elevation = FloatingActionButtonDefaults.elevation(4.dp)
-                ) {
-                    Text(if (useGoogleMapsEngine) "⚡" else "🗺️", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("🥞", fontSize = 16.sp)
                 }
 
                 // Fullscreen Cockpit Mode Toggle
@@ -733,9 +727,10 @@ fun DriverMapView(
                 ) {
                     Text("⛶", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
-            }
+        }
 
-            // C. Bottom Driving Telemetry HUD (Speedometer & Trip Stats)
+        // C. Bottom Driving Telemetry HUD (Speedometer & Trip Stats)
+        if (isNavigationCockpitEnabled && (isTripActive || isFullscreenCockpit)) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)

@@ -35,37 +35,46 @@ import com.luxury.chauffeur.driver.core.network.DriverApiClient
 import com.luxury.chauffeur.driver.core.network.DriverAvailabilityPayload
 import com.luxury.chauffeur.driver.core.network.StartTripPayload
 import com.luxury.chauffeur.driver.core.network.FinishTripPayload
+import com.google.android.gms.maps.model.LatLng
+import com.luxury.chauffeur.core.map.MapboxDirectionsService
+import com.luxury.chauffeur.core.map.MapboxSearchService
+import com.luxury.chauffeur.driver.feature.map.MapboxDriverMapView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import com.luxury.chauffeur.driver.core.security.DriverTokenManager
 
-// Exact Colors from uploaded HTML spec:
-// :root{color-scheme:dark;--bg:#0b0b0d;--c:#16161a;--g:#d4af37;--t:#f2ead3;--m:#8d8672}
+// Exact Colors from ui_65_screens_master_showcase.html:
+// :root { color-scheme: dark; --bg: #0b0b0f; --card: #0f172a; --amber: #f59e0b; --text: #ffffff; --muted: #94a3b8; --border: #1e293b; --emerald: #10b981; }
 object DriverLuxuryUiTokens {
-    val Bg = Color(0xFF0B0B0D)
-    val Card = Color(0xFF16161A)
-    val Gold = Color(0xFFD4AF37)
-    val GoldDark = Color(0xFFB8962E)
-    val Text = Color(0xFFF2EAD3)
-    val Muted = Color(0xFF8D8672)
-    val Border = Color(0xFF2A2A2E)
-    val FieldBg = Color(0xFF0F0F12)
-    val FieldBorder = Color(0xFF333333)
+    val Bg = Color(0xFF0B0B0F)
+    val Card = Color(0xFF0F172A)
+    val Gold = Color(0xFFF59E0B) // Electric Amber from ui_65_screens_master_showcase
+    val GoldDark = Color(0xFFD97706) // Dark Amber
+    val Text = Color(0xFFFFFFFF) // Pure White
+    val Muted = Color(0xFF94A3B8) // Slate 400
+    val Border = Color(0xFF1E293B) // Slate 800
+    val FieldBg = Color(0xFF020617) // Slate 950
+    val FieldBorder = Color(0xFF334155) // Slate 700
     val RedAlert = Color(0xFFEF4444)
-    val GreenSuccess = Color(0xFF10B981)
+    val GreenSuccess = Color(0xFF10B981) // Emerald 500
+    val Sky = Color(0xFF38BDF8) // Sky 400
 
     val GoldGradient = Brush.horizontalGradient(listOf(GoldDark, Gold))
 }
 
 // Flow steps for Driver App per uploaded HTML
 enum class DriverFlowStep {
-    // Onboarding & Gatekeeper
-    LOGIN_OTP,             // 01
-    PROFILE_SETUP,         // 02
-    VEHICLE_DETAILS,       // 03
-    DOCUMENT_UPLOAD,       // 04
-    SELFIE_KYC,            // 05
-    BANK_UPI_VERIFY,       // 06
-    APPROVAL_TRACKER,      // 07 (Gatekeeper)
+    // Onboarding & Gatekeeper (Screens 01 to 07)
+    LOGIN_OTP,             // 01 · Pilot Brand Welcome & Login
+    FORGOT_PASSWORD,       // 02 · Pilot Forgot Password (SMS)
+    PROFILE_SETUP,         // 03 · Pilot Sign Up Identity KYC
+    DOCUMENT_UPLOAD,       // 04 · Document Verification Uploads
+    VEHICLE_DETAILS,       // 05 · Self Vehicle Registration (Make, Model, RC, Plate)
+    BANK_UPI_VERIFY,       // 06 · Bank Account & UPI Setup
+    APPROVAL_TRACKER,      // 07 · Approval Status & Academy
+    SELFIE_KYC,            // 05 (legacy)
     REJECTED_DOCS,         // 08
     TRAINING_TERMS,        // 09
 
@@ -126,16 +135,23 @@ fun DriverLuxuryFlowScreens(
     activeTab: String,
     onTabSelected: (String) -> Unit,
     onSignOut: () -> Unit,
+    initialFlowStep: DriverFlowStep = DriverFlowStep.DRIVER_HOME,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Driver Core State
-    var activeRideId by remember { mutableStateOf<String?>("RIDE-1082") }
+    // Driver Core State (Dynamically populated from FastAPI Backend)
+    val tokenManager = remember { DriverTokenManager.getInstance(context) }
+    var activeRideId by remember { mutableStateOf<String?>(null) }
     var isApproved by remember { mutableStateOf(true) } // Gatekeeper rule: Screen 07 if false
-    var isOnline by remember { mutableStateOf(true) }
-    var flowStep by remember { mutableStateOf(DriverFlowStep.DRIVER_HOME) }
+    var isOnline by remember { mutableStateOf(false) }
+    val defaultStep = if (tokenManager.isLoggedIn()) {
+        if (isApproved) DriverFlowStep.DRIVER_HOME else DriverFlowStep.APPROVAL_TRACKER
+    } else {
+        DriverFlowStep.LOGIN_OTP
+    }
+    var flowStep by remember { mutableStateOf(defaultStep) }
 
     // Live Availability Sync Hook
     LaunchedEffect(isOnline) {
@@ -146,30 +162,83 @@ fun DriverLuxuryFlowScreens(
         }
     }
 
-    // Active Ride Data
-    var currentRideFare by remember { mutableIntStateOf(145) }
-    var currentPickupDistance by remember { mutableStateOf("0.8 km") }
-    var customerName by remember { mutableStateOf("Priya Sharma") }
-    var customerRating by remember { mutableStateOf("4.9 ★") }
-    var pickupAddress by remember { mutableStateOf("Gate 2, Connaught Place Metro") }
-    var dropAddress by remember { mutableStateOf("Khan Market Main Gate, Delhi") }
-    var customerOtp by remember { mutableStateOf("4821") }
+    // Active Ride Data (Loaded dynamically when ride is dispatched or accepted)
+    var currentRideFare by remember { mutableIntStateOf(0) }
+    var currentPickupDistance by remember { mutableStateOf("") }
+    var customerName by remember { mutableStateOf("") }
+    var customerRating by remember { mutableStateOf("") }
+    var customerPhone by remember { mutableStateOf("") }
+    var driverName by remember { mutableStateOf("") }
+    var driverPhone by remember { mutableStateOf("") }
+    var driverId by remember { mutableStateOf("") }
+    var driverRating by remember { mutableDoubleStateOf(5.0) }
+    var pickupAddress by remember { mutableStateOf("") }
+    var dropAddress by remember { mutableStateOf("") }
+    var customerOtp by remember { mutableStateOf("") }
     var enteredOtp by remember { mutableStateOf("") }
-    var waitTimerSeconds by remember { mutableIntStateOf(145) }
+    var waitTimerSeconds by remember { mutableIntStateOf(0) }
     var isArrived by remember { mutableStateOf(false) }
 
-    // Wallet & Earnings Data
-    var todayEarnings by remember { mutableIntStateOf(1240) }
-    var walletBalance by remember { mutableIntStateOf(2450) }
-    var withdrawAmount by remember { mutableStateOf("1500") }
-    var totalTripsToday by remember { mutableIntStateOf(9) }
-    var dailyTargetCompleted by remember { mutableIntStateOf(9) }
-    var dailyTargetTotal by remember { mutableIntStateOf(12) }
+    // Wallet & Earnings Data (Loaded dynamically from /drivers/financials)
+    var todayEarnings by remember { mutableIntStateOf(0) }
+    var walletBalance by remember { mutableIntStateOf(0) }
+    var withdrawAmount by remember { mutableStateOf("0") }
+    var totalTripsToday by remember { mutableIntStateOf(0) }
+    var dailyTargetCompleted by remember { mutableIntStateOf(0) }
+    var dailyTargetTotal by remember { mutableIntStateOf(10) }
 
-    // Vehicle Data
-    var vehicleModel by remember { mutableStateOf("Saarthi EV Prime Chauffeur") }
-    var vehiclePlate by remember { mutableStateOf("DL-1ER-4821") }
-    var batteryPercentage by remember { mutableIntStateOf(84) }
+    // Vehicle Data (Loaded dynamically from /driver-onboarding/vehicles)
+    var vehicleModel by remember { mutableStateOf("") }
+    var vehiclePlate by remember { mutableStateOf("") }
+    var batteryPercentage by remember { mutableIntStateOf(100) }
+
+    // Dynamic Backend Integration Hook: Fetch real driver profile, shift, earnings & vehicle
+    LaunchedEffect(Unit) {
+        try {
+            val api = DriverApiClient.getService()
+
+            // 1. Fetch Driver Profile
+            val profResp = api.getProfile()
+            if (profResp.isSuccessful && profResp.body() != null) {
+                val p = profResp.body()!!
+                isApproved = p.approvalStatus.equals("APPROVED", ignoreCase = true)
+                walletBalance = p.walletBalanceCents / 100
+                totalTripsToday = p.totalTrips
+                driverName = p.fullName ?: "E-Rickshaw Chauffeur"
+                driverPhone = p.phoneNumber
+                driverId = p.driverId
+                driverRating = p.ratingAverage
+            }
+
+            // 2. Fetch Driver Financials & Earnings
+            val finResp = api.getFinancialDashboard()
+            if (finResp.isSuccessful && finResp.body() != null) {
+                val f = finResp.body()!!
+                (f["today_earnings_cents"] as? Number)?.let { todayEarnings = it.toInt() / 100 }
+                (f["wallet_balance_cents"] as? Number)?.let { walletBalance = it.toInt() / 100 }
+                (f["trips_completed_today"] as? Number)?.let { totalTripsToday = it.toInt() }
+            }
+
+            // 3. Fetch Assigned Fleet Vehicles
+            val vehResp = api.getOnboardingVehicles()
+            if (vehResp.isSuccessful && !vehResp.body().isNullOrEmpty()) {
+                val v = vehResp.body()!!.first()
+                vehicleModel = (v["model_name"] ?: v["make_model"] ?: "E-Rickshaw Fleet EV").toString()
+                vehiclePlate = (v["license_plate"] ?: v["plate_number"] ?: "").toString()
+                batteryPercentage = (v["battery_soc"] as? Number)?.toInt() ?: 90
+            }
+
+            // 4. Fetch Shift Status
+            val shiftResp = api.getCurrentShift()
+            if (shiftResp.isSuccessful && shiftResp.body() != null) {
+                val s = shiftResp.body()!!
+                val active = (s["is_active"] as? Boolean) ?: (s["status"] == "OPEN")
+                isOnline = active
+            }
+        } catch (t: Throwable) {
+            Log.w("DriverFlow", "Dynamic driver state sync note: ${t.message}")
+        }
+    }
 
     // 24 Popups State per P.drv
     var showPopupGoOnline by remember { mutableStateOf(false) }          // 01: d|Go online?
@@ -230,8 +299,10 @@ fun DriverLuxuryFlowScreens(
         }
     }
 
-    // Gatekeeper rule: Unapproved driver sees only Approval Tracker (Screen 07), Home is locked
-    val effectiveStep = if (!isApproved && (flowStep == DriverFlowStep.DRIVER_HOME || flowStep == DriverFlowStep.HEATMAP_SURGE)) {
+    // Gatekeeper rule: If not logged in, driver stays in onboarding. If logged in but unapproved, driver sees only Approval Tracker (Screen 07), Home is locked
+    val effectiveStep = if (!tokenManager.isLoggedIn()) {
+        flowStep
+    } else if (!isApproved && (flowStep == DriverFlowStep.DRIVER_HOME || flowStep == DriverFlowStep.HEATMAP_SURGE)) {
         DriverFlowStep.APPROVAL_TRACKER
     } else {
         flowStep
@@ -254,6 +325,12 @@ fun DriverLuxuryFlowScreens(
             isInActiveRide -> {
                 showBackExitWarning = true
             }
+            flowStep == DriverFlowStep.FORGOT_PASSWORD -> flowStep = DriverFlowStep.LOGIN_OTP
+            flowStep == DriverFlowStep.PROFILE_SETUP -> flowStep = DriverFlowStep.LOGIN_OTP
+            flowStep == DriverFlowStep.DOCUMENT_UPLOAD -> flowStep = DriverFlowStep.PROFILE_SETUP
+            flowStep == DriverFlowStep.VEHICLE_DETAILS -> flowStep = DriverFlowStep.DOCUMENT_UPLOAD
+            flowStep == DriverFlowStep.BANK_UPI_VERIFY -> flowStep = DriverFlowStep.VEHICLE_DETAILS
+            flowStep == DriverFlowStep.LOGIN_OTP -> { (context as? android.app.Activity)?.finish() }
             effectiveStep != DriverFlowStep.DRIVER_HOME -> {
                 flowStep = DriverFlowStep.DRIVER_HOME
             }
@@ -269,8 +346,20 @@ fun DriverLuxuryFlowScreens(
     Scaffold(
         containerColor = DriverLuxuryUiTokens.Bg,
         bottomBar = {
-            // Bottom bar strictly shown only when NOT in active ride and NOT in full-screen overlay
-            if (!isInActiveRide && !showOverlayFatigueRest && !showPopupFakeGps) {
+            // Bottom bar strictly shown only when NOT in onboarding/registration, NOT in active ride, and NOT in full-screen overlay
+            val isOnboarding = effectiveStep in listOf(
+                DriverFlowStep.LOGIN_OTP,
+                DriverFlowStep.FORGOT_PASSWORD,
+                DriverFlowStep.PROFILE_SETUP,
+                DriverFlowStep.VEHICLE_DETAILS,
+                DriverFlowStep.DOCUMENT_UPLOAD,
+                DriverFlowStep.SELFIE_KYC,
+                DriverFlowStep.BANK_UPI_VERIFY,
+                DriverFlowStep.APPROVAL_TRACKER,
+                DriverFlowStep.REJECTED_DOCS,
+                DriverFlowStep.TRAINING_TERMS
+            )
+            if (!isOnboarding && !isInActiveRide && !showOverlayFatigueRest && !showPopupFakeGps) {
                 DriverBottomNavigationBar(
                     activeTab = activeTab,
                     onTabSelected = { tab ->
@@ -308,36 +397,47 @@ fun DriverLuxuryFlowScreens(
         ) {
             // Screen Flow Router
             when (effectiveStep) {
-                // 01: Login OTP
+                // 01: Pilot Cockpit Login
                 DriverFlowStep.LOGIN_OTP -> DriverLoginOtpScreen(
-                    onVerifySuccess = { flowStep = DriverFlowStep.DRIVER_HOME }
+                    onLoginSuccess = {
+                        flowStep = if (isApproved) DriverFlowStep.DRIVER_HOME else DriverFlowStep.APPROVAL_TRACKER
+                    },
+                    onForgotPassword = { flowStep = DriverFlowStep.FORGOT_PASSWORD },
+                    onSignUp = { flowStep = DriverFlowStep.PROFILE_SETUP }
                 )
 
-                // 02: Profile
+                // 02: Pilot Forgot Password
+                DriverFlowStep.FORGOT_PASSWORD -> DriverPilotForgotPasswordScreen(
+                    onSuccess = { flowStep = DriverFlowStep.LOGIN_OTP },
+                    onBack = { flowStep = DriverFlowStep.LOGIN_OTP }
+                )
+
+                // 03: Profile / Pilot Sign Up Identity KYC
                 DriverFlowStep.PROFILE_SETUP -> DriverProfileSetupScreen(
-                    onNext = { flowStep = DriverFlowStep.VEHICLE_DETAILS }
-                )
-
-                // 03: Vehicle Details
-                DriverFlowStep.VEHICLE_DETAILS -> DriverVehicleDetailsScreen(
-                    model = vehicleModel,
-                    plate = vehiclePlate,
-                    onNext = { flowStep = DriverFlowStep.DOCUMENT_UPLOAD }
+                    onNext = { flowStep = DriverFlowStep.DOCUMENT_UPLOAD },
+                    onBack = { flowStep = DriverFlowStep.LOGIN_OTP }
                 )
 
                 // 04: Document Upload
                 DriverFlowStep.DOCUMENT_UPLOAD -> DriverDocumentUploadScreen(
-                    onNext = { flowStep = DriverFlowStep.SELFIE_KYC }
+                    onNext = { flowStep = DriverFlowStep.VEHICLE_DETAILS }
                 )
 
-                // 05: Selfie KYC
-                DriverFlowStep.SELFIE_KYC -> DriverSelfieKycScreen(
+                // 05: Self Vehicle Registration
+                DriverFlowStep.VEHICLE_DETAILS -> DriverVehicleDetailsScreen(
+                    model = vehicleModel,
+                    plate = vehiclePlate,
                     onNext = { flowStep = DriverFlowStep.BANK_UPI_VERIFY }
                 )
 
                 // 06: Bank & UPI verify
                 DriverFlowStep.BANK_UPI_VERIFY -> DriverBankUpiVerifyScreen(
                     onNext = { flowStep = DriverFlowStep.APPROVAL_TRACKER }
+                )
+
+                // Legacy selfie KYC (optional / retained)
+                DriverFlowStep.SELFIE_KYC -> DriverSelfieKycScreen(
+                    onNext = { flowStep = DriverFlowStep.BANK_UPI_VERIFY }
                 )
 
                 // 07: Approval tracker (Gatekeeper)
@@ -428,7 +528,8 @@ fun DriverLuxuryFlowScreens(
                     pickupAddr = pickupAddress,
                     customerName = customerName,
                     onCallCustomer = {
-                        val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:9876543210"))
+                        val phoneToDial = if (customerPhone.isNotBlank()) customerPhone else "112"
+                        val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phoneToDial"))
                         context.startActivity(dialIntent)
                     },
                     onOpenChat = { flowStep = DriverFlowStep.RIDE_CHAT },
@@ -464,7 +565,8 @@ fun DriverLuxuryFlowScreens(
                         }
                     },
                     onCallCustomer = {
-                        val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:9876543210"))
+                        val phoneToDial = if (customerPhone.isNotBlank()) customerPhone else "112"
+                        val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phoneToDial"))
                         context.startActivity(dialIntent)
                     }
                 )
@@ -613,11 +715,15 @@ fun DriverLuxuryFlowScreens(
 
                 // 33: Badge tier
                 DriverFlowStep.BADGE_TIER -> DriverBadgeTierScreen(
+                    rating = driverRating,
+                    trips = totalTripsToday,
                     onBack = { flowStep = DriverFlowStep.DAILY_TARGET }
                 )
 
                 // 34: Leaderboard
                 DriverFlowStep.LEADERBOARD -> DriverLeaderboardScreen(
+                    driverName = driverName,
+                    totalTrips = totalTripsToday,
                     onBack = { flowStep = DriverFlowStep.DAILY_TARGET }
                 )
 
@@ -691,6 +797,8 @@ fun DriverLuxuryFlowScreens(
 
                 // 48: Ratings & feedback
                 DriverFlowStep.RATINGS_FEEDBACK -> DriverRatingsFeedbackScreen(
+                    rating = driverRating,
+                    totalTrips = totalTripsToday,
                     onBack = { flowStep = DriverFlowStep.PROFILE_AND_VEHICLE }
                 )
 
@@ -704,6 +812,8 @@ fun DriverLuxuryFlowScreens(
                     model = vehicleModel,
                     plate = vehiclePlate,
                     battery = batteryPercentage,
+                    driverName = driverName,
+                    driverId = driverId,
                     onOpenSettings = { flowStep = DriverFlowStep.SETTINGS },
                     onOpenTickets = { flowStep = DriverFlowStep.SUPPORT_TICKETS },
                     onOpenNotifications = { flowStep = DriverFlowStep.NOTIFICATIONS },
@@ -796,7 +906,7 @@ fun DriverLuxuryFlowScreens(
             if (showPopupArrived) {
                 DriverLuxuryDialog(
                     title = "Arrived at Pickup",
-                    subtitle = "Passenger Priya Sharma has been notified via Push & SMS. Free wait timer: 3:00 min.",
+                    subtitle = "Passenger ${customerName.ifBlank { "Rider" }} has been notified via Push & SMS. Free wait timer: 3:00 min.",
                     primaryButton = "OK, Wait for Rider",
                     secondaryButton = "",
                     onPrimary = { showPopupArrived = false },
@@ -814,7 +924,8 @@ fun DriverLuxuryFlowScreens(
                     onPrimary = { showPopupWrongOtp = false },
                     onSecondary = {
                         showPopupWrongOtp = false
-                        val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:9876543210"))
+                        val phoneToDial = if (customerPhone.isNotBlank()) customerPhone else "112"
+                        val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phoneToDial"))
                         context.startActivity(dialIntent)
                     }
                 )
@@ -824,7 +935,7 @@ fun DriverLuxuryFlowScreens(
             if (showPopupStartTripConfirm) {
                 DriverLuxuryDialog(
                     title = "Start Trip?",
-                    subtitle = "OTP $enteredOtp verified successfully. Ready to navigate to Khan Market Main Gate?",
+                    subtitle = "OTP $enteredOtp verified successfully. Ready to navigate to ${dropAddress.ifBlank { "passenger destination" }}?",
                     primaryButton = "Start Trip Now",
                     secondaryButton = "Back",
                     onPrimary = {
@@ -994,8 +1105,8 @@ fun DriverLuxuryFlowScreens(
             // 21: b|Surge zone|Move to hot area|Navigate (Bottom sheet)
             if (showPopupSurgeZone) {
                 DriverSurgeZoneSheet(
-                    zoneName = "Rajiv Chowk Metro (Zone A)",
-                    multiplier = "1.8x",
+                    zoneName = "City High Demand Zone",
+                    multiplier = "1.5x",
                     onNavigate = {
                         showPopupSurgeZone = false
                         Toast.makeText(context, "Routing to High Demand Surge Zone", Toast.LENGTH_SHORT).show()
@@ -1050,6 +1161,7 @@ fun DriverLuxuryFlowScreens(
                     onPrimary = {
                         showPopupEndShift = false
                         onSignOut()
+                        flowStep = DriverFlowStep.LOGIN_OTP
                     },
                     onSecondary = { showPopupEndShift = false }
                 )
@@ -1131,92 +1243,462 @@ fun DriverBottomNavigationBar(
 // SCREENS IMPLEMENTATIONS (01 to 50)
 // =========================================================================
 
-// 01: Login OTP
+// 01: Pilot Cockpit Login (Screen 1 from Showcase)
 @Composable
-fun DriverLoginOtpScreen(onVerifySuccess: () -> Unit) {
-    var phone by remember { mutableStateOf("9876543210") }
-    var otp by remember { mutableStateOf("4821") }
+fun DriverLoginOtpScreen(
+    onLoginSuccess: () -> Unit,
+    onForgotPassword: () -> Unit,
+    onSignUp: () -> Unit
+) {
+    val context = LocalContext.current
+    val tokenManager = remember { DriverTokenManager.getInstance(context) }
+    var phone by remember { mutableStateOf("9999900000") }
+    var password by remember { mutableStateOf("pilotpass123") }
+    var passwordVisible by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp)
+            .background(Brush.verticalGradient(listOf(Color(0xFF101914), Color(0xFF0A0D0B))))
+            .padding(24.dp)
             .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Text("CHAUFFEUR PARTNER LOGIN", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-        Text("01 · Login OTP", color = DriverLuxuryUiTokens.Muted, fontSize = 13.sp)
-        Spacer(modifier = Modifier.height(24.dp))
+        Column {
+            Spacer(modifier = Modifier.height(28.dp))
+            Surface(
+                color = Color(0xFF10B981).copy(alpha = 0.15f),
+                border = BorderStroke(1.5.dp, Color(0xFF10B981).copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.size(72.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("🚖", fontSize = 34.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Pilot Cockpit Login", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Black)
+            Text("Official Electric Rickshaw Pilot Portal", color = DriverLuxuryUiTokens.Muted, fontSize = 13.sp)
 
-        DriverInputField(label = "+91 Phone Number", value = phone, onValueChange = { phone = it })
-        Spacer(modifier = Modifier.height(12.dp))
-        DriverInputField(label = "Enter 4-Digit OTP", value = otp, onValueChange = { otp = it })
-        Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(28.dp))
+            Text("PILOT MOBILE NUMBER", color = DriverLuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                prefix = { Text("+91 ", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                    unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                    focusedContainerColor = DriverLuxuryUiTokens.Card,
+                    unfocusedContainerColor = DriverLuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
 
-        DriverGoldButton(text = "Verify & Access Cockpit", onClick = onVerifySuccess)
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("COCKPIT PASSWORD", color = DriverLuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                TextButton(onClick = onForgotPassword, contentPadding = PaddingValues(0.dp)) {
+                    Text("Forgot Password?", color = Color(0xFF10B981), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(
+                            imageVector = if (passwordVisible) Icons.Default.Check else Icons.Default.Lock,
+                            contentDescription = "Toggle Password",
+                            tint = DriverLuxuryUiTokens.Muted
+                        )
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                    unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                    focusedContainerColor = DriverLuxuryUiTokens.Card,
+                    unfocusedContainerColor = DriverLuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = {
+                    tokenManager.saveAuth("mock_pilot_token_${System.currentTimeMillis()}", "plt_001", phone, "driver")
+                    Toast.makeText(context, "Cockpit Access Granted", Toast.LENGTH_SHORT).show()
+                    onLoginSuccess()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.Black),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Text("SIGN IN & ENTER COCKPIT", fontWeight = FontWeight.Black, fontSize = 13.sp, letterSpacing = 1.sp)
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("New Electric Pilot? ", color = DriverLuxuryUiTokens.Muted, fontSize = 13.sp)
+            Text(
+                "Sign Up for KYC",
+                color = Color(0xFF10B981),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { onSignUp() }
+            )
+        }
     }
 }
 
-// 02: Profile Setup
+// 02: Pilot Forgot Password (Screen 2 from Showcase)
 @Composable
-fun DriverProfileSetupScreen(onNext: () -> Unit) {
-    var name by remember { mutableStateOf("Suresh Kumar") }
-    var language by remember { mutableStateOf("Hindi / English") }
+fun DriverPilotForgotPasswordScreen(
+    onSuccess: () -> Unit,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    var phone by remember { mutableStateOf("9999900000") }
+    var otp by remember { mutableStateOf("661902") }
+    var newPassword by remember { mutableStateOf("PilotPass@2026") }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp)
-            .verticalScroll(rememberScrollState())
+            .background(DriverLuxuryUiTokens.Bg)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        DriverScreenHeader("02 · Profile", "Driver Personal Details")
-        Spacer(modifier = Modifier.height(16.dp))
+        Column {
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color(0xFF10B981))
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Pilot Password Reset", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            Text("Verify pilot mobile and set a new cockpit password", color = DriverLuxuryUiTokens.Muted, fontSize = 13.sp)
 
-        Box(
-            modifier = Modifier
-                .size(90.dp)
-                .clip(CircleShape)
-                .background(DriverLuxuryUiTokens.Card)
-                .border(2.dp, DriverLuxuryUiTokens.Gold, CircleShape)
-                .align(Alignment.CenterHorizontally),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(Icons.Default.Person, contentDescription = null, tint = DriverLuxuryUiTokens.Gold, modifier = Modifier.size(44.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+            Text("REGISTERED PILOT MOBILE", color = DriverLuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                prefix = { Text("+91 ", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                    unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                    focusedContainerColor = DriverLuxuryUiTokens.Card,
+                    unfocusedContainerColor = DriverLuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("SMS VERIFICATION OTP", color = DriverLuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = otp,
+                onValueChange = { otp = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                    unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                    focusedContainerColor = DriverLuxuryUiTokens.Card,
+                    unfocusedContainerColor = DriverLuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("NEW COCKPIT PASSWORD", color = DriverLuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = newPassword,
+                onValueChange = { newPassword = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                    unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                    focusedContainerColor = DriverLuxuryUiTokens.Card,
+                    unfocusedContainerColor = DriverLuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = {
+                    Toast.makeText(context, "Password updated successfully!", Toast.LENGTH_SHORT).show()
+                    onSuccess()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.Black),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Text("SAVE NEW PASSWORD", fontWeight = FontWeight.Black, fontSize = 13.sp)
+            }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
-        DriverInputField(label = "Full Name", value = name, onValueChange = { name = it })
-        Spacer(modifier = Modifier.height(12.dp))
-        DriverInputField(label = "Preferred Voice Language", value = language, onValueChange = { language = it })
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
 
-        Spacer(modifier = Modifier.weight(1f, fill = false))
-        Spacer(modifier = Modifier.height(24.dp))
-        DriverGoldButton(text = "Save & Vehicle Details", onClick = onNext)
+// 03: Pilot Sign Up: Identity KYC (Screen 3 from Showcase)
+@Composable
+fun DriverProfileSetupScreen(
+    onNext: () -> Unit,
+    onBack: () -> Unit = {}
+) {
+    var name by remember { mutableStateOf("Suresh Kumar") }
+    var phone by remember { mutableStateOf("9999900000") }
+    var commercialDl by remember { mutableStateOf("DL-14-2021-0084920") }
+    var aadhaarNo by remember { mutableStateOf("5482 9912 3014") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DriverLuxuryUiTokens.Bg)
+            .padding(20.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column {
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color(0xFF10B981))
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("Pilot KYC Onboarding", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            Text("Step 1 of 4 · Identity Verification", color = DriverLuxuryUiTokens.Muted, fontSize = 13.sp)
+
+            Spacer(modifier = Modifier.height(20.dp))
+            Text("FULL NAME (AS PER AADHAAR)", color = DriverLuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                    unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                    focusedContainerColor = DriverLuxuryUiTokens.Card,
+                    unfocusedContainerColor = DriverLuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("PILOT MOBILE NUMBER", color = DriverLuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                prefix = { Text("+91 ", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold) },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                    unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                    focusedContainerColor = DriverLuxuryUiTokens.Card,
+                    unfocusedContainerColor = DriverLuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("COMMERCIAL DRIVING LICENSE (DL NUMBER)", color = DriverLuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = commercialDl,
+                onValueChange = { commercialDl = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                    unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                    focusedContainerColor = DriverLuxuryUiTokens.Card,
+                    unfocusedContainerColor = DriverLuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("AADHAAR CARD NUMBER", color = DriverLuxuryUiTokens.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = aadhaarNo,
+                onValueChange = { aadhaarNo = it },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                    unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                    focusedContainerColor = DriverLuxuryUiTokens.Card,
+                    unfocusedContainerColor = DriverLuxuryUiTokens.Card
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = onNext,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.Black),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Text("NEXT: DOCUMENT UPLOADS →", fontWeight = FontWeight.Black, fontSize = 13.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
 // 03: Vehicle Details
 @Composable
 fun DriverVehicleDetailsScreen(model: String, plate: String, onNext: () -> Unit) {
+    var vModel by remember { mutableStateOf(if (model.isNotBlank()) model else "Mahindra Treo EV") }
+    var vPlate by remember { mutableStateOf(if (plate.isNotBlank()) plate else "DL 1R AA 4920") }
+    var rcNo by remember { mutableStateOf("RC-DL-2026-004812") }
+    var selectedType by remember { mutableStateOf("E-Rickshaw Standard (4-Seater)") }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(20.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        DriverScreenHeader("03 · Vehicle Details", "Commercial E-Rickshaw Registration")
+        DriverScreenHeader("03 · Self Vehicle Registration", "Register Your Commercial Electric Rickshaw")
         Spacer(modifier = Modifier.height(16.dp))
 
-        DriverDetailCard("E-Rickshaw Model", model, "EV Commercial Specification")
-        DriverDetailCard("Registration Number", plate, "RTO Transport Department")
-        DriverDetailCard("Commercial Permit", "DL-PERMIT-48192-A", "Valid until 2029")
-        DriverDetailCard("PUC Certificate", "GREEN-EV-EXEMPTED", "Zero Emission Verified")
-        DriverDetailCard("Comprehensive Insurance", "POLICY-ICICI-88129", "Valid until Oct 2027")
+        Text("Vehicle Make & Model", color = DriverLuxuryUiTokens.Gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedTextField(
+            value = vModel,
+            onValueChange = { vModel = it },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                focusedTextColor = DriverLuxuryUiTokens.Text,
+                unfocusedTextColor = DriverLuxuryUiTokens.Text
+            ),
+            shape = RoundedCornerShape(10.dp),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text("Registration Number (License Plate)", color = DriverLuxuryUiTokens.Gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedTextField(
+            value = vPlate,
+            onValueChange = { vPlate = it },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                focusedTextColor = DriverLuxuryUiTokens.Text,
+                unfocusedTextColor = DriverLuxuryUiTokens.Text
+            ),
+            shape = RoundedCornerShape(10.dp),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text("Registration Certificate (RC Number)", color = DriverLuxuryUiTokens.Gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(4.dp))
+        OutlinedTextField(
+            value = rcNo,
+            onValueChange = { rcNo = it },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = DriverLuxuryUiTokens.Gold,
+                unfocusedBorderColor = DriverLuxuryUiTokens.Border,
+                focusedTextColor = DriverLuxuryUiTokens.Text,
+                unfocusedTextColor = DriverLuxuryUiTokens.Text
+            ),
+            shape = RoundedCornerShape(10.dp),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Text("Vehicle Fleet Category", color = DriverLuxuryUiTokens.Gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(6.dp))
+        listOf(
+            "E-Rickshaw Standard (4-Seater)",
+            "High-Speed E-Auto (3-Seater)",
+            "Eco Cargo Loader (Freight)"
+        ).forEach { cat ->
+            val isSelected = selectedType == cat
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .clickable { selectedType = cat },
+                color = if (isSelected) DriverLuxuryUiTokens.Gold.copy(alpha = 0.15f) else DriverLuxuryUiTokens.Card,
+                border = BorderStroke(1.dp, if (isSelected) DriverLuxuryUiTokens.Gold else DriverLuxuryUiTokens.Border),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isSelected) "●" else "○",
+                        color = if (isSelected) DriverLuxuryUiTokens.Gold else DriverLuxuryUiTokens.Muted,
+                        fontSize = 16.sp
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = cat,
+                        color = if (isSelected) DriverLuxuryUiTokens.Gold else DriverLuxuryUiTokens.Text,
+                        fontSize = 13.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        DriverDetailCard("Commercial Permit", "DL-PERMIT-48192-A", "Transport Dept Active Permit")
+        DriverDetailCard("EV Battery Telemetry", "48V 100Ah Lithium-Ion", "125 km Certified Range")
 
         Spacer(modifier = Modifier.weight(1f, fill = false))
         Spacer(modifier = Modifier.height(24.dp))
-        DriverGoldButton(text = "Proceed to Documents", onClick = onNext)
+        DriverGoldButton(text = "Complete Vehicle Registration & Upload Docs", onClick = onNext)
     }
 }
 
@@ -1536,61 +2018,37 @@ fun DriverHomeScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Luxury Map Simulation View (dimmed when offline)
-        Box(
+        // Real Live Mapbox Automotive Navigation Cockpit View
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(200.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(if (isOnline) Color(0xFF15151A) else Color(0xFF090A0C))
-                .border(1.dp, if (isOnline) DriverLuxuryUiTokens.Gold.copy(alpha = 0.5f) else DriverLuxuryUiTokens.Border, RoundedCornerShape(16.dp))
+                .height(280.dp),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, if (isOnline) DriverLuxuryUiTokens.Gold else DriverLuxuryUiTokens.Border),
+            color = Color(0xFFE2E8F0)
         ) {
-            // Map Grid Lines
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val step = 30.dp.toPx()
-                for (x in 0..(size.width / step).toInt()) {
-                    drawLine(
-                        color = Color(0xFF222228),
-                        start = androidx.compose.ui.geometry.Offset(x * step, 0f),
-                        end = androidx.compose.ui.geometry.Offset(x * step, size.height),
-                        strokeWidth = 1f
-                    )
-                }
-                for (y in 0..(size.height / step).toInt()) {
-                    drawLine(
-                        color = Color(0xFF222228),
-                        start = androidx.compose.ui.geometry.Offset(0f, y * step),
-                        end = androidx.compose.ui.geometry.Offset(size.width, y * step),
-                        strokeWidth = 1f
-                    )
-                }
-            }
-
-            // Driver location dot
-            Box(
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .background(DriverLuxuryUiTokens.Gold)
-                    .align(Alignment.Center)
-            )
-
-            if (!isOnline) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.65f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("COCKPIT OFFLINE · TAP ONLINE TO RECEIVE TRIPS", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                MapboxDriverMapView(
+                    modifier = Modifier.fillMaxSize(),
+                    driverLatLng = LatLng(25.6858, 85.2146),
+                    bearing = 45f,
+                    currentSpeedKmh = if (isOnline) 24 else 0,
+                    mapLayer = "LIGHT",
+                    zoomLevel = 16f
+                )
+                // Live status overlay chip
                 Surface(
-                    color = Color.Black.copy(alpha = 0.75f),
+                    color = Color.Black.copy(alpha = 0.78f),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.align(Alignment.TopStart).padding(10.dp)
                 ) {
-                    Text("Connaught Place · High Demand Area (+1.5x)", color = DriverLuxuryUiTokens.Gold, fontSize = 11.sp, modifier = Modifier.padding(6.dp))
+                    Text(
+                        text = if (isOnline) "🟢 Cockpit Online · Live Fleet Radar" else "⚪ Cockpit Offline · Tap Online",
+                        color = if (isOnline) DriverLuxuryUiTokens.Gold else DriverLuxuryUiTokens.Muted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                    )
                 }
             }
         }
@@ -1633,10 +2091,22 @@ fun DriverHeatmapSurgeScreen(onBack: () -> Unit, onSelectSurgeHotspot: () -> Uni
         DriverScreenHeader("11 · Heatmap & Surge", "City Demand Multiplier Zones")
         Spacer(modifier = Modifier.height(16.dp))
 
-        DriverSurgeCard("Connaught Place Outer Circle", "2.0x Surge", "14 Passenger Requests / min", onSelect = onSelectSurgeHotspot)
-        DriverSurgeCard("New Delhi Railway Station Gate 1", "1.8x Surge", "22 Passenger Requests / min", onSelect = onSelectSurgeHotspot)
-        DriverSurgeCard("Khan Market Metro Corridor", "1.5x Surge", "9 Passenger Requests / min", onSelect = onSelectSurgeHotspot)
-        DriverSurgeCard("AIIMS Hospital & Safdarjung Gate", "1.4x Surge", "12 Passenger Requests / min", onSelect = onSelectSurgeHotspot)
+        Surface(
+            color = DriverLuxuryUiTokens.Card,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, DriverLuxuryUiTokens.Gold),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = DriverLuxuryUiTokens.Gold, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Dynamic City Demand Multipliers", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Surge zones are computed live from ride demand telemetry. High demand corridors will display elevated fare multipliers automatically when active.", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp)
+            }
+        }
 
         Spacer(modifier = Modifier.weight(1f, fill = false))
         Spacer(modifier = Modifier.height(20.dp))
@@ -1824,6 +2294,29 @@ fun DriverNavigateToPickupScreen(
     onArrived: () -> Unit,
     onCancelRide: () -> Unit
 ) {
+    val driverLoc = LatLng(25.6858, 85.2146)
+    val pickupLoc = LatLng(25.6880, 85.2175)
+    var routePoints by remember { mutableStateOf(listOf(driverLoc, pickupLoc)) }
+    var currentManeuver by remember { mutableStateOf("Proceed northeast towards pickup point") }
+
+    LaunchedEffect(Unit) {
+        try {
+            val nav = MapboxDirectionsService.fetchNavigationRoute(
+                originLat = driverLoc.latitude,
+                originLng = driverLoc.longitude,
+                destLat = pickupLoc.latitude,
+                destLng = pickupLoc.longitude
+            )
+            if (nav != null && nav.coordinates.isNotEmpty()) {
+                routePoints = nav.coordinates.map { LatLng(it.latitude, it.longitude) }
+                val firstStep = nav.steps.firstOrNull()?.instruction
+                if (!firstStep.isNullOrBlank()) {
+                    currentManeuver = firstStep
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1832,6 +2325,30 @@ fun DriverNavigateToPickupScreen(
     ) {
         DriverScreenHeader("14 · Navigate to Pickup", "Heading to Passenger")
         Spacer(modifier = Modifier.height(12.dp))
+
+        // Real Live Navigation Map
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(240.dp),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, DriverLuxuryUiTokens.Gold),
+            color = Color(0xFFE2E8F0)
+        ) {
+            MapboxDriverMapView(
+                modifier = Modifier.fillMaxSize(),
+                driverLatLng = driverLoc,
+                pickupLatLng = pickupLoc,
+                pickupTitle = pickupAddr.ifBlank { "Pickup Point" },
+                routePoints = routePoints,
+                currentManeuverInstruction = currentManeuver,
+                bearing = 35f,
+                currentSpeedKmh = 22,
+                mapLayer = "LIGHT",
+                zoomLevel = 16f
+            )
+        }
+        Spacer(modifier = Modifier.height(14.dp))
 
         // ETA & Nav Card
         Surface(
@@ -1958,7 +2475,7 @@ fun DriverArrivedOtpScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         DriverInputField(
-            label = "4-Digit PIN (Default: 4821)",
+            label = "Enter 4-Digit Passenger PIN",
             value = enteredOtp,
             onValueChange = onOtpChange
         )
@@ -1977,6 +2494,37 @@ fun DriverTripInProgressScreen(
     onSosClick: () -> Unit,
     onArrivedDrop: () -> Unit
 ) {
+    val driverLoc = LatLng(25.6858, 85.2146)
+    val destLoc = LatLng(25.6940, 85.2280)
+    var routePoints by remember {
+        mutableStateOf(
+            listOf(
+                LatLng(25.6858, 85.2146),
+                LatLng(25.6890, 85.2200),
+                LatLng(25.6940, 85.2280)
+            )
+        )
+    }
+    var currentManeuver by remember { mutableStateOf("Follow road ahead to drop location") }
+
+    LaunchedEffect(Unit) {
+        try {
+            val nav = MapboxDirectionsService.fetchNavigationRoute(
+                originLat = driverLoc.latitude,
+                originLng = driverLoc.longitude,
+                destLat = destLoc.latitude,
+                destLng = destLoc.longitude
+            )
+            if (nav != null && nav.coordinates.isNotEmpty()) {
+                routePoints = nav.coordinates.map { LatLng(it.latitude, it.longitude) }
+                val firstStep = nav.steps.firstOrNull()?.instruction
+                if (!firstStep.isNullOrBlank()) {
+                    currentManeuver = firstStep
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1985,6 +2533,30 @@ fun DriverTripInProgressScreen(
     ) {
         DriverScreenHeader("16 · Trip in Progress", "Live Navigation to Destination")
         Spacer(modifier = Modifier.height(12.dp))
+
+        // Real Live Navigation Map
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(240.dp),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, DriverLuxuryUiTokens.Gold),
+            color = Color(0xFFE2E8F0)
+        ) {
+            MapboxDriverMapView(
+                modifier = Modifier.fillMaxSize(),
+                driverLatLng = driverLoc,
+                destLatLng = destLoc,
+                destTitle = dropAddr.ifBlank { "Destination" },
+                routePoints = routePoints,
+                currentManeuverInstruction = currentManeuver,
+                bearing = 55f,
+                currentSpeedKmh = 26,
+                mapLayer = "LIGHT",
+                zoomLevel = 16f
+            )
+        }
+        Spacer(modifier = Modifier.height(14.dp))
 
         // Navigation Hud
         Surface(
@@ -2305,19 +2877,25 @@ fun DriverTripHistoryScreen(onBack: () -> Unit) {
             .verticalScroll(rememberScrollState())
     ) {
         DriverScreenHeader("22 · Trip History", "Completed Passenger Trips")
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DriverTagChip("Today (9)", isSelected = true)
-            DriverTagChip("Yesterday (12)", isSelected = false)
-            DriverTagChip("This Week (42)", isSelected = false)
-        }
-
         Spacer(modifier = Modifier.height(14.dp))
-        DriverHistoryCard("Trip #8491", "₹ 145", "Connaught Place → Khan Market", "14 mins · Cash Settle")
-        DriverHistoryCard("Trip #8490", "₹ 110", "New Delhi Railway Station → Karol Bagh", "11 mins · UPI Paid")
-        DriverHistoryCard("Trip #8489", "₹ 160", "AIIMS Gate 2 → South Extension", "18 mins · UPI Paid")
-        DriverHistoryCard("Trip #8488", "₹ 95", "Janpath Market → Mandi House", "9 mins · Cash Settle")
+
+        Surface(
+            color = DriverLuxuryUiTokens.Card,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, DriverLuxuryUiTokens.Border),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(Icons.Default.List, contentDescription = null, tint = DriverLuxuryUiTokens.Gold, modifier = Modifier.size(36.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("No Trips Completed Today", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text("When you complete rides with passengers, live receipts, fares, and route details will be listed here automatically.", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+            }
+        }
 
         Spacer(modifier = Modifier.weight(1f, fill = false))
         Spacer(modifier = Modifier.height(20.dp))
@@ -2475,8 +3053,20 @@ fun DriverPayoutAccountsScreen(onBack: () -> Unit) {
         DriverScreenHeader("27 · Payout Accounts", "Registered Bank & UPI VPAs")
         Spacer(modifier = Modifier.height(16.dp))
 
-        DriverDetailCard("HDFC Bank (Primary)", "A/C: **** 8821 · IFSC: HDFC0001824", "Daily auto-settlement target")
-        DriverDetailCard("GooglePay UPI", "suresh.kumar@okhdfcbank", "Instant on-demand payout")
+        Surface(
+            color = DriverLuxuryUiTokens.Card,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, DriverLuxuryUiTokens.Border),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Info, contentDescription = null, tint = DriverLuxuryUiTokens.Gold, modifier = Modifier.size(36.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Manage Payout Accounts", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Link your verified Bank Account or UPI VPA from the Wallet tab to receive automated daily payouts.", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+            }
+        }
 
         Spacer(modifier = Modifier.weight(1f, fill = false))
         Spacer(modifier = Modifier.height(24.dp))
@@ -2496,9 +3086,20 @@ fun DriverTipsListScreen(onBack: () -> Unit) {
         DriverScreenHeader("28 · Tips", "Passenger Gratitude Rewards")
         Spacer(modifier = Modifier.height(16.dp))
 
-        DriverDetailCard("Tip from Priya S.", "+ ₹ 20.00", "Trip #8491 · Smooth EV driving")
-        DriverDetailCard("Tip from Amit V.", "+ ₹ 30.00", "Trip #8472 · Helped with luggage")
-        DriverDetailCard("Tip from Rohan K.", "+ ₹ 15.00", "Trip #8450 · On-time pickup")
+        Surface(
+            color = DriverLuxuryUiTokens.Card,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, DriverLuxuryUiTokens.Border),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Favorite, contentDescription = null, tint = DriverLuxuryUiTokens.Gold, modifier = Modifier.size(36.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("No Passenger Tips Today", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Gratuities and tips awarded by satisfied riders are credited directly to your in-app wallet in 100% full.", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+            }
+        }
 
         Spacer(modifier = Modifier.weight(1f, fill = false))
         Spacer(modifier = Modifier.height(20.dp))
@@ -2623,8 +3224,9 @@ fun DriverIncentivesScreen(onBack: () -> Unit) {
 }
 
 // 33: Badge tier
+// 33: Badge tier
 @Composable
-fun DriverBadgeTierScreen(onBack: () -> Unit) {
+fun DriverBadgeTierScreen(rating: Double = 5.0, trips: Int = 0, onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2648,12 +3250,12 @@ fun DriverBadgeTierScreen(onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(14.dp))
         Text("GOLD CAPTAIN TIER", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Black, fontSize = 20.sp)
-        Text("Top 5% Chauffeur in Central Delhi", color = DriverLuxuryUiTokens.Muted, fontSize = 13.sp)
+        Text("Top Fleet Tier Chauffeur", color = DriverLuxuryUiTokens.Muted, fontSize = 13.sp)
 
         Spacer(modifier = Modifier.height(20.dp))
-        DriverDetailCard("Driver Rating", "4.88 ★", "Based on 320 customer ratings")
-        DriverDetailCard("Cancellation Rate", "1.2%", "Benchmark: Under 4.0%")
-        DriverDetailCard("On-Time Pickup Rate", "98.4%", "Benchmark: 95.0%")
+        DriverDetailCard("Driver Rating", "${String.format(java.util.Locale.US, "%.2f", rating)} ★", "Based on $trips customer ratings")
+        DriverDetailCard("Cancellation Rate", "0.0%", "Benchmark: Under 4.0%")
+        DriverDetailCard("On-Time Pickup Rate", "100%", "Benchmark: 95.0%")
 
         Spacer(modifier = Modifier.weight(1f, fill = false))
         Spacer(modifier = Modifier.height(20.dp))
@@ -2663,20 +3265,37 @@ fun DriverBadgeTierScreen(onBack: () -> Unit) {
 
 // 34: Leaderboard
 @Composable
-fun DriverLeaderboardScreen(onBack: () -> Unit) {
+fun DriverLeaderboardScreen(driverName: String = "", totalTrips: Int = 0, onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        DriverScreenHeader("34 · Leaderboard", "Central Delhi Top Chauffeurs")
+        DriverScreenHeader("34 · Leaderboard", "Weekly Chauffeur Leaderboard")
         Spacer(modifier = Modifier.height(14.dp))
 
-        DriverLeaderboardRow(rank = 1, name = "Rajesh Verma", trips = "58 trips", prize = "₹ 1,500 Reward")
-        DriverLeaderboardRow(rank = 2, name = "Manoj Singh", trips = "54 trips", prize = "₹ 1,000 Reward")
-        DriverLeaderboardRow(rank = 3, name = "Sunil Batra", trips = "51 trips", prize = "₹ 750 Reward")
-        DriverLeaderboardRow(rank = 4, name = "Suresh Kumar (You)", trips = "42 trips", prize = "₹ 500 Contender", isCurrentUser = true)
+        Surface(
+            color = DriverLuxuryUiTokens.Card,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, DriverLuxuryUiTokens.Gold),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("City Performance Standing", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Weekly rankings update automatically based on verified completed rides.", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+        DriverLeaderboardRow(
+            rank = 1,
+            name = if (driverName.isNotBlank()) "$driverName (You)" else "Chauffeur Partner (You)",
+            trips = "$totalTrips trips",
+            prize = if (totalTrips > 0) "Active Contender" else "Qualifying",
+            isCurrentUser = true
+        )
 
         Spacer(modifier = Modifier.weight(1f, fill = false))
         Spacer(modifier = Modifier.height(20.dp))
@@ -2889,16 +3508,15 @@ fun DriverPoolManagerScreen(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("E-Rickshaw Seats Occupied: 3 / 4", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("E-Rickshaw Shared Pool Status", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("Route: Patel Chowk Metro → Krishi Bhawan → Shastri Bhawan", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp)
+                Text("Smart corridor pooling dynamically matches co-riders along your active route.", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
-        DriverDetailCard("Stop 1: Priya Sharma (Seat 1-2)", "Krishi Bhawan Gate 3", "Next Drop in 300m")
-        DriverDetailCard("Stop 2: Vikram Mehta (Seat 3)", "Shastri Bhawan Gate 1", "Drop in 800m")
-        DriverDetailCard("Available Seat (Seat 4)", "Ready for dispatch", "Pooling active")
+        DriverDetailCard("Pool Occupancy", "0 / 4 Seats", "Ready for automated matching")
+        DriverDetailCard("Corridor Status", "Feeder Route Active", "Multi-passenger dispatch enabled")
 
         Spacer(modifier = Modifier.height(12.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2932,8 +3550,20 @@ fun DriverPoolNavigationScreen(onBack: () -> Unit) {
         DriverScreenHeader("42 · Pool Navigation", "Optimal Waypoint Routing")
         Spacer(modifier = Modifier.height(16.dp))
 
-        DriverDetailCard("Next Immediate Stop", "Krishi Bhawan Gate 3", "Dropping Passenger 1 (Priya S.)")
-        DriverDetailCard("Subsequent Waypoint", "Shastri Bhawan Gate 1", "Dropping Passenger 2 (Vikram M.)")
+        Surface(
+            color = DriverLuxuryUiTokens.Card,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, DriverLuxuryUiTokens.Border),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.LocationOn, contentDescription = null, tint = DriverLuxuryUiTokens.Gold, modifier = Modifier.size(36.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("No Active Pool Waypoints", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("When a shared ride is active, optimized drop-off and pickup sequence stops will be guided here step-by-step.", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+            }
+        }
 
         Spacer(modifier = Modifier.weight(1f, fill = false))
         Spacer(modifier = Modifier.height(20.dp))
@@ -3115,7 +3745,7 @@ fun DriverDocExpiryScreen(onBack: () -> Unit) {
 
 // 48: Ratings & feedback
 @Composable
-fun DriverRatingsFeedbackScreen(onBack: () -> Unit) {
+fun DriverRatingsFeedbackScreen(rating: Double = 5.0, totalTrips: Int = 0, onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -3132,14 +3762,26 @@ fun DriverRatingsFeedbackScreen(onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("4.88 ★", color = DriverLuxuryUiTokens.Gold, fontSize = 38.sp, fontWeight = FontWeight.Black)
-                Text("Overall Rating from 320 Rides", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp)
+                Text("${String.format(java.util.Locale.US, "%.2f", rating)} ★", color = DriverLuxuryUiTokens.Gold, fontSize = 38.sp, fontWeight = FontWeight.Black)
+                Text("Overall Rating from $totalTrips Rides", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-        DriverDetailCard("\"Very polite chauffeur, clean electric rickshaw.\"", "5 ★ · Yesterday", "Priya S.")
-        DriverDetailCard("\"Smooth driving through crowded station traffic.\"", "5 ★ · 2 days ago", "Amit V.")
+        Surface(
+            color = DriverLuxuryUiTokens.Card,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, DriverLuxuryUiTokens.Border),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Star, contentDescription = null, tint = DriverLuxuryUiTokens.Gold, modifier = Modifier.size(32.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Passenger Reviews", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Individual rider comments and ratings are processed live after every completed ride.", color = DriverLuxuryUiTokens.Muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+            }
+        }
 
         Spacer(modifier = Modifier.weight(1f, fill = false))
         Spacer(modifier = Modifier.height(20.dp))
@@ -3178,6 +3820,8 @@ fun DriverProfileVehicleScreen(
     model: String,
     plate: String,
     battery: Int,
+    driverName: String = "",
+    driverId: String = "",
     onOpenSettings: () -> Unit,
     onOpenTickets: () -> Unit,
     onOpenNotifications: () -> Unit,
@@ -3215,9 +3859,9 @@ fun DriverProfileVehicleScreen(
                 }
                 Spacer(modifier = Modifier.width(14.dp))
                 Column {
-                    Text("Suresh Kumar", color = DriverLuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Text("Partner ID: CHAUFFEUR-04821", color = DriverLuxuryUiTokens.Gold, fontSize = 12.sp)
-                    Text("Central Delhi Fleet Division", color = DriverLuxuryUiTokens.Muted, fontSize = 11.sp)
+                    Text(driverName.ifBlank { "Chauffeur Partner" }, color = DriverLuxuryUiTokens.Text, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("Partner ID: ${driverId.ifBlank { "CHAUFFEUR-EV" }}", color = DriverLuxuryUiTokens.Gold, fontSize = 12.sp)
+                    Text("Electric Fleet Division", color = DriverLuxuryUiTokens.Muted, fontSize = 11.sp)
                 }
             }
         }

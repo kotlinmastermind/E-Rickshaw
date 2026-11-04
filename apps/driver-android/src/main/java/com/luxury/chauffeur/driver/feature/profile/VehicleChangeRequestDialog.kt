@@ -112,7 +112,7 @@ fun VehicleChangeRequestDialog(
                         value = plateNumber,
                         onValueChange = { plateNumber = it.uppercase() },
                         label = { Text("Registration Plate", color = DriverColors.TextMuted) },
-                        placeholder = { Text("e.g. DL-01-ER-8899") },
+                        placeholder = { Text("Enter registration plate number") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

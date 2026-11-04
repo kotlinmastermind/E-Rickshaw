@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Application Brand & Identity -->
-    <string name="app_name">E-Rickshaw</string>
+    <string name="app_name">RideGo</string>
     <string name="app_tagline">Smart, Clean &amp; Affordable Electric Commute</string>
 
     <!-- Authentication & Onboarding -->
-    <string name="auth_welcome_title">Welcome to E-Rickshaw</string>
+    <string name="auth_welcome_title">Welcome to RideGo</string>
     <string name="auth_welcome_subtitle">Fast, eco-friendly electric rides starting at just ₹10</string>
     <string name="auth_phone_label">Mobile Number</string>
     <string name="auth_phone_placeholder">+91 98765 43210</string>
@@ -27,16 +27,16 @@
     <string name="booking_destination_title">Destination</string>
     <string name="booking_locating">Locating your current station…</string>
     <string name="booking_search_destination">Search station, market, or landmark</string>
-    <string name="booking_select_vehicle">Select E-Rickshaw Ride</string>
-    <string name="booking_confirm_ride">Confirm E-Rickshaw Booking</string>
+    <string name="booking_select_vehicle">Select RideGo Ride</string>
+    <string name="booking_confirm_ride">Confirm RideGo Booking</string>
     <string name="booking_finding_pilot">Locating nearby available pilots…</string>
     <string name="booking_fare_estimate">Estimated Fare</string>
     <string name="booking_multi_stop">Add Via Station</string>
 
     <!-- Vehicle Categories & Tariffs -->
-    <string name="cat_standard_name">Standard E-Rickshaw</string>
+    <string name="cat_standard_name">Standard RideGo</string>
     <string name="cat_standard_desc">Electric 3-wheeler for quick city commutes and local transit</string>
-    <string name="cat_shared_name">Shared E-Rickshaw (Eco-Pool)</string>
+    <string name="cat_shared_name">Shared RideGo (Eco-Pool)</string>
     <string name="cat_shared_desc">Per-seat shared ride on metro &amp; station feeder routes</string>
     <string name="cat_auto_name">High-Speed Electric Auto</string>
     <string name="cat_auto_desc">Enclosed L5M electric auto for fast, weather-shielded travel</string>
@@ -74,4 +74,7 @@
     <string name="governance_biometric">Biometric Unlock</string>
     <string name="support_helpdesk">Customer Support &amp; Help</string>
     <string name="support_call_help">Helpline: support@erickshaw.in</string>
+
+    <!-- Mapbox SDK Access Token -->
+    <string name="mapbox_access_token" translatable="false"></string>
 </resources>

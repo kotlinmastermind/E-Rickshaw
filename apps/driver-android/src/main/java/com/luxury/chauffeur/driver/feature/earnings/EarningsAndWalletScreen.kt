@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.luxury.chauffeur.driver.core.designsystem.*
@@ -1503,14 +1504,34 @@ private fun WalletAndPayoutsTabContent(
             }
         }
 
-        val accounts = payoutAccounts.ifEmpty {
-            listOf(
-                PayoutAccountDto("a1", "BANK_ACCOUNT", "Chauffeur Arjun Rathore", "HDFC Bank", "•••• 4821", "HDFC0000492", null, isPrimary = true, isVerified = true, verificationStatus = "VERIFIED", pennyDropRef = "PENNY-9912"),
-                PayoutAccountDto("a2", "UPI", "Arjun Rathore", null, null, null, "arjun@okhdfcbank", isPrimary = false, isVerified = true, verificationStatus = "VERIFIED", pennyDropRef = "PENNY-9913")
-            )
+        if (payoutAccounts.isEmpty()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = DriverColors.CockpitDark,
+                    border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            "No payout accounts linked",
+                            style = DriverTypography.Body.copy(color = DriverColors.ChauffeurGold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Tap '+ ADD ACCOUNT' above to link your Bank Account or UPI VPA for daily automated payouts.",
+                            style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 11.sp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
         }
 
-        items(accounts) { acc ->
+        items(payoutAccounts) { acc ->
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = DriverColors.CockpitDark,

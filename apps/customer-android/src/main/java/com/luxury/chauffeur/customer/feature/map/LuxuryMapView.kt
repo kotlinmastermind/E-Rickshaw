@@ -461,6 +461,9 @@ fun LuxuryMapView(
     routeDurationMinutes: Double? = null,
     zoomLevel: Float = 16f,
     recenterTrigger: Int = 0,
+    cameraTargetLatLng: LatLng? = null,
+    cameraAnimTrigger: Int = 0,
+    cameraAnimType: String = "flyTo",
     isLightMode: Boolean = true,
     onVehicleClick: ((NearbyVehicleDto) -> Unit)? = null,
     onMapClick: ((LatLng) -> Unit)? = null,
@@ -472,7 +475,7 @@ fun LuxuryMapView(
     var googleMapInstance by remember { mutableStateOf<GoogleMap?>(null) }
     var selectedVehiclePopup by remember { mutableStateOf<NearbyVehicleDto?>(null) }
     var useGoogleMapsEngine by remember { mutableStateOf(false) }
-    var currentMapLayer by remember { mutableStateOf("STREETS") } // "STREETS", "SATELLITE", "DARK"
+    var currentMapLayer by remember { mutableStateOf("STREETS") } // "STREETS", "DARK", "SATELLITE"
 
     // Map Controls State
     val scope = rememberCoroutineScope()
@@ -508,80 +511,8 @@ fun LuxuryMapView(
     var panOffsetY by remember { mutableFloatStateOf(0f) }
     var zoomScale by remember { mutableFloatStateOf(1.0f) }
 
-    // Default vehicle fleet fallback
-    val displayVehicles = remember(nearbyVehicles, pickupLatLng) {
-        if (nearbyVehicles.isNotEmpty()) nearbyVehicles
-        else listOf(
-            NearbyVehicleDto(
-                id = "veh-01",
-                driverName = "Ramesh Kumar",
-                rating = 4.88,
-                categoryCode = "STANDARD_E_RICKSHAW",
-                vehicleTypeName = "Standard E-Rickshaw",
-                modelName = "Mayuri Deluxe Eco 1000W",
-                licensePlate = "BR-01-ER-4821",
-                iconType = "e_rickshaw",
-                capacity = 4,
-                latitude = pickupLatLng.latitude + 0.0028,
-                longitude = pickupLatLng.longitude + 0.0021,
-                bearing = 42.0f,
-                batteryLevel = 92,
-                distanceKm = 0.38,
-                etaMinutes = 2
-            ),
-            NearbyVehicleDto(
-                id = "veh-02",
-                driverName = "Sunil Verma",
-                rating = 4.92,
-                categoryCode = "ELECTRIC_AUTO",
-                vehicleTypeName = "High-Speed Electric Auto",
-                modelName = "Mahindra Treo High-Speed",
-                licensePlate = "BR-01-EA-8812",
-                iconType = "electric_auto",
-                capacity = 3,
-                latitude = pickupLatLng.latitude - 0.0035,
-                longitude = pickupLatLng.longitude + 0.0039,
-                bearing = 135.0f,
-                batteryLevel = 86,
-                distanceKm = 0.52,
-                etaMinutes = 3
-            ),
-            NearbyVehicleDto(
-                id = "veh-03",
-                driverName = "Manoj Yadav",
-                rating = 4.75,
-                categoryCode = "SHARED_E_RICKSHAW",
-                vehicleTypeName = "Shared E-Rickshaw (Eco-Pool)",
-                modelName = "Saarthi Shaktiman Eco-Pool",
-                licensePlate = "BR-01-ER-2914",
-                iconType = "shared_e_rickshaw",
-                capacity = 4,
-                latitude = pickupLatLng.latitude + 0.0042,
-                longitude = pickupLatLng.longitude - 0.0031,
-                bearing = 305.0f,
-                batteryLevel = 78,
-                distanceKm = 0.65,
-                etaMinutes = 4
-            ),
-            NearbyVehicleDto(
-                id = "veh-04",
-                driverName = "Dashrath Mahto",
-                rating = 4.95,
-                categoryCode = "STANDARD_E_RICKSHAW",
-                vehicleTypeName = "Standard E-Rickshaw",
-                modelName = "Yatri Super Deluxe Eco",
-                licensePlate = "BR-01-ER-1093",
-                iconType = "e_rickshaw",
-                capacity = 4,
-                latitude = pickupLatLng.latitude - 0.0022,
-                longitude = pickupLatLng.longitude - 0.0028,
-                bearing = 220.0f,
-                batteryLevel = 95,
-                distanceKm = 0.45,
-                etaMinutes = 2
-            )
-        )
-    }
+    // Dynamic vehicle fleet from real backend API (empty when no online drivers in area)
+    val displayVehicles = nearbyVehicles
 
     // Google Map Lifecycle & Marker sync
     LaunchedEffect(mapView) {
@@ -837,33 +768,29 @@ fun LuxuryMapView(
             return Offset(px, py)
         }
 
-        if (useGoogleMapsEngine) {
-            // 1. Google Maps Platform Native View
-            AndroidView(
-                factory = { mapView },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            // 2. Real World Live Interactive Map (OpenStreetMap / Carto / ESRI Satellite)
-            RealWorldLeafletMapView(
-                modifier = Modifier.fillMaxSize(),
-                pickupLatLng = pickupLatLng,
-                pickupTitle = pickupTitle,
-                destLatLng = destLatLng,
-                destTitle = destTitle,
-                driverLatLng = driverLatLng,
-                nearbyVehicles = displayVehicles,
-                routePoints = routePoints,
-                mapLayer = currentMapLayer,
-                recenterTrigger = recenterTrigger,
-                zoomLevel = zoomLevel,
-                onMapClick = onMapClick,
-                onCameraMoved = onCameraIdle,
-                onVehicleClick = onVehicleClick
-            )
-        }
+        // Primary Mapbox Customer Interactive Map View (Mapbox Vector & Directions)
+        MapboxCustomerMapView(
+            modifier = Modifier.fillMaxSize(),
+            pickupLatLng = pickupLatLng,
+            pickupTitle = pickupTitle,
+            destLatLng = destLatLng,
+            destTitle = destTitle,
+            driverLatLng = driverLatLng,
+            nearbyVehicles = displayVehicles,
+            routePoints = routePoints,
+            mapLayer = currentMapLayer,
+            recenterTrigger = recenterTrigger,
+            cameraTargetLatLng = cameraTargetLatLng ?: destLatLng,
+            cameraAnimTrigger = cameraAnimTrigger,
+            cameraAnimType = cameraAnimType,
+            zoomLevel = zoomLevel,
+            onMapClick = onMapClick,
+            onCameraMoved = onCameraIdle,
+            onVehicleClick = onVehicleClick
+        )
 
         // 3. Top Status HUD Bar
+        val layerDisplayName = currentMapLayer.removePrefix("MAPBOX_")
         Surface(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -880,7 +807,7 @@ fun LuxuryMapView(
             ) {
                 Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF10B981)))
                 Text(
-                    text = if (useGoogleMapsEngine) "⚡ GOOGLE MAPS ACTIVE" else "🗺️ REAL LIVE MAP (${currentMapLayer})",
+                    text = "🗺️ REAL WORLD MAP ENGINE • $layerDisplayName",
                     color = Color.White,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
@@ -889,10 +816,16 @@ fun LuxuryMapView(
                     shape = RoundedCornerShape(8.dp),
                     color = Color(0xFF1E293B),
                     border = BorderStroke(0.5.dp, Color(0xFFEAB308)),
-                    modifier = Modifier.clickable { useGoogleMapsEngine = !useGoogleMapsEngine }
+                    modifier = Modifier.clickable {
+                        currentMapLayer = when (currentMapLayer) {
+                            "STREETS" -> "SATELLITE"
+                            "SATELLITE" -> "DARK"
+                            else -> "STREETS"
+                        }
+                    }
                 ) {
                     Text(
-                        text = if (useGoogleMapsEngine) "Switch to Real Map" else "Switch to Google Map",
+                        text = "Layer: $layerDisplayName",
                         color = Color(0xFFEAB308),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,

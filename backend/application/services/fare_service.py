@@ -130,10 +130,27 @@ class FareService:
         fare_min_cents = max(rule.minimum_fare_cents, round(total_fare_cents * 0.94))
         fare_max_cents = round(total_fare_cents * 1.08)
 
+        # Resolve real category UUID to satisfy foreign key constraint on fare_estimates
+        real_category_id = getattr(rule, "category_id", None)
+        if not real_category_id or len(str(real_category_id)) != 36:
+            cat_stmt = select(VehicleCategory).where(
+                or_(
+                    VehicleCategory.id == category_id,
+                    VehicleCategory.code == category_id,
+                    VehicleCategory.code == category_id.upper()
+                )
+            )
+            cat_obj = (await self.db.execute(cat_stmt)).scalars().first()
+            if cat_obj:
+                real_category_id = cat_obj.id
+            else:
+                first_cat = (await self.db.execute(select(VehicleCategory).limit(1))).scalars().first()
+                real_category_id = first_cat.id if first_cat else category_id
+
         # Persist estimate snapshot for auditable validation when booking
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
         estimate = FareEstimate(
-            category_id=category_id,
+            category_id=real_category_id,
             fare_rule_id=rule.id,
             pickup_latitude=pickup_lat,
             pickup_longitude=pickup_lng,

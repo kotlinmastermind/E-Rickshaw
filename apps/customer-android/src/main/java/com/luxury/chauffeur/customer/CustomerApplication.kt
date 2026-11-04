@@ -5,25 +5,29 @@ import android.app.Application
 import android.os.Build
 import android.util.Log
 import android.webkit.WebView
-import com.google.android.gms.maps.MapsInitializer
+import com.mapbox.common.MapboxOptions
 import com.luxury.chauffeur.customer.core.network.ApiClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class CustomerApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
 
-        try {
-            ApiClient.initialize(this)
-        } catch (_: Throwable) {}
-
         setupUncaughtExceptionHandler()
 
-        if (isMainProcess()) {
-            java.util.concurrent.Executors.newSingleThreadExecutor().execute {
-                initializeMapsSdk()
-            }
-        } else {
+        // Asynchronously initialize Mapbox & network client in background IO pool
+        // This ensures Application.onCreate() finishes in <5ms, preventing any ANR
+        CoroutineScope(Dispatchers.IO).launch {
+            initializeMapboxSdk()
+            try {
+                ApiClient.initialize(this@CustomerApplication)
+            } catch (_: Throwable) {}
+        }
+
+        if (!isMainProcess()) {
             setupSecondaryProcessWebView()
         }
     }
@@ -128,24 +132,13 @@ class CustomerApplication : Application() {
         return nonFatalKeywords.any { fullTrace.contains(it, ignoreCase = true) }
     }
 
-    private fun initializeMapsSdk() {
+    private fun initializeMapboxSdk() {
         try {
-            MapsInitializer.initialize(applicationContext, MapsInitializer.Renderer.LATEST) { renderer ->
-                Log.d("CustomerApplication", "Google Maps initialized with renderer: $renderer")
-            }
+            val token = getString(R.string.mapbox_access_token)
+            MapboxOptions.accessToken = token
+            Log.d("CustomerApplication", "Mapbox SDK initialized with public access token")
         } catch (t: Throwable) {
-            Log.w("CustomerApplication", "LATEST maps renderer unavailable (${t.message}), falling back to LEGACY (pre-Chimera)")
-            try {
-                MapsInitializer.initialize(applicationContext, MapsInitializer.Renderer.LEGACY) { renderer ->
-                    Log.d("CustomerApplication", "Google Maps initialized with LEGACY renderer: $renderer")
-                }
-            } catch (_: Throwable) {
-                try {
-                    MapsInitializer.initialize(applicationContext)
-                } catch (t3: Throwable) {
-                    Log.e("CustomerApplication", "Failed to initialize Google Maps SDK", t3)
-                }
-            }
+            Log.e("CustomerApplication", "Failed to initialize Mapbox token", t)
         }
     }
 }
