@@ -47,3 +47,4 @@ def test_terminal_state_immutability():
             assert RideStateMachine.can_transition(terminal, target, "DRIVER") is False
             assert RideStateMachine.can_transition(terminal, target, "CUSTOMER") is False
             assert RideStateMachine.can_transition(terminal, target, "ADMIN") is False
+

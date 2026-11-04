@@ -523,21 +523,6 @@ fun CustomerMasterCatalogFlow(
                             color = if (currentScreenId == 25) BlueprintTokens.Amber else BlueprintTokens.Slate400
                         )
                     }
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { showCatalogSheet = true }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("📑", fontSize = 16.sp)
-                        Text(
-                            "Catalog",
-                            fontSize = 9.sp,
-                            fontWeight = if (showCatalogSheet) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (showCatalogSheet) BlueprintTokens.Amber else BlueprintTokens.Slate400
-                        )
-                    }
                 }
             }
         

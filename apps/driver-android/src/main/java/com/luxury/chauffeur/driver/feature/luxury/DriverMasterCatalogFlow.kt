@@ -503,21 +503,6 @@ fun DriverMasterCatalogFlow(
                             color = if (currentScreenId == 25) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Slate400
                         )
                     }
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { showCatalogSheet = true }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("📑", fontSize = 16.sp)
-                        Text(
-                            "All (25)",
-                            fontSize = 9.sp,
-                            fontWeight = if (showCatalogSheet) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (showCatalogSheet) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Slate400
-                        )
-                    }
                 }
             }
         }
