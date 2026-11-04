@@ -599,6 +599,81 @@ async def rate_driver(
         feedback=payload.feedback
     )
 
+@router.get("/active/current")
+async def get_current_active_ride(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Retrieve the current active ride for the authenticated customer or driver."""
+    from sqlalchemy import and_, desc
+
+    active_statuses = ["REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS"]
+
+    if user.role == "driver":
+        driver_res = await db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
+        driver = driver_res.scalar_one_or_none()
+        if not driver:
+            return {"active_ride": None}
+        stmt = select(Ride).where(
+            and_(
+                Ride.assigned_driver_id == driver.id,
+                Ride.status.in_(active_statuses)
+            )
+        ).order_by(desc(Ride.created_at)).limit(1)
+    else:
+        cust_res = await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
+        customer = cust_res.scalar_one_or_none()
+        if not customer:
+            return {"active_ride": None}
+        stmt = select(Ride).where(
+            and_(
+                Ride.customer_id == customer.id,
+                Ride.status.in_(active_statuses)
+            )
+        ).order_by(desc(Ride.created_at)).limit(1)
+
+    result = await db.execute(stmt)
+    ride = result.scalar_one_or_none()
+    if not ride:
+        return {"active_ride": None}
+
+    driver_info = None
+    if ride.assigned_driver_id:
+        drv_res = await db.execute(select(DriverProfile).where(DriverProfile.id == ride.assigned_driver_id))
+        drv = drv_res.scalar_one_or_none()
+        if drv:
+            u_res = await db.execute(select(User).where(User.id == drv.user_id))
+            u = u_res.scalar_one_or_none()
+            driver_info = {
+                "driver_id": drv.id,
+                "name": u.full_name if u else "Executive Chauffeur",
+                "phone": u.phone_number if u else "",
+                "license_number": drv.license_number,
+                "rating": drv.rating_average,
+                "total_trips": drv.total_trips
+            }
+
+    return {
+        "active_ride": {
+            "id": ride.id,
+            "status": ride.status,
+            "pickup_address": ride.pickup_address,
+            "pickup_latitude": ride.pickup_latitude,
+            "pickup_longitude": ride.pickup_longitude,
+            "destination_address": ride.destination_address,
+            "destination_latitude": ride.destination_latitude,
+            "destination_longitude": ride.destination_longitude,
+            "start_otp": ride.start_otp,
+            "otp_verified": ride.otp_verified,
+            "estimated_fare_cents": ride.estimated_fare_cents,
+            "final_fare_cents": ride.final_fare_cents,
+            "payment_method": ride.payment_method,
+            "assigned_driver_id": ride.assigned_driver_id,
+            "driver": driver_info,
+            "created_at": ride.created_at.isoformat() if ride.created_at else None
+        }
+    }
+
 @router.get("/{ride_id}")
 async def get_ride_details(
     ride_id: str,

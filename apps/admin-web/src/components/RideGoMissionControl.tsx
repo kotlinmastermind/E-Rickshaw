@@ -12,6 +12,25 @@ import {
 import { AdminRealMap } from './AdminRealMap';
 import { requestApi } from '../services/api';
 
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string;
+  actor: string;
+  action: string;
+  target: string;
+  justification: string;
+  status: 'SUCCESS' | 'BLOCKED';
+}
+
+export interface ConfirmModalState {
+  open: boolean;
+  title: string;
+  message: string;
+  actionLabel: string;
+  isDestructive?: boolean;
+  onConfirm: () => void;
+}
+
 export interface ToastItem {
   id: string;
   title: string;
@@ -23,6 +42,13 @@ export const RideGoMissionControl: React.FC = () => {
   // Navigation State
   const [activeCategory, setActiveCategory] = useState<string>('overview');
   const [activeDeskId, setActiveDeskId] = useState<string>('dashboard');
+  const [deepLinkParams, setDeepLinkParams] = useState<Record<string, string>>({});
+  const [confirmModal, setConfirmModal] = useState<ConfirmModalState | null>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([
+    { id: 'AUD-001', timestamp: '15:20:12', actor: 'Executive Ops Commander', action: 'SURGE_OVERRIDE_SET', target: 'Central Delhi Core (+1.4x)', justification: 'Evening rain commute demand surge', status: 'SUCCESS' },
+    { id: 'AUD-002', timestamp: '14:45:00', actor: 'Fleet Safety Agent', action: 'DRIVER_KYC_VERIFIED', target: 'Pilot DL-042019007741', justification: 'Commercial DL and Sarathi OCR check valid', status: 'SUCCESS' },
+    { id: 'AUD-003', timestamp: '14:10:30', actor: 'Finance Admin', action: 'PAYOUT_BATCH_SETTLED', target: 'IMPS Batch #8801', justification: 'Weekly settlement window', status: 'SUCCESS' }
+  ]);
   const [deskSearch, setDeskSearch] = useState<string>('');
 
   // Simulator State
@@ -72,6 +98,82 @@ export const RideGoMissionControl: React.FC = () => {
   };
 
   // Fetch real categories from FastAPI backend on mount
+  
+  // URL Hash Navigation & Deep Link Parsers
+  const parseRouteString = (str: string) => {
+    const raw = str.replace(/^#\/?/, '');
+    const [pathPart, queryPart] = raw.split('?');
+    const segments = pathPart.split('/').filter(Boolean);
+    const params: Record<string, string> = {};
+    if (queryPart) {
+      new URLSearchParams(queryPart).forEach((v, k) => { params[k] = v; });
+    }
+    if (segments.length >= 2) {
+      return { category: segments[0], deskId: segments[1], params };
+    } else if (segments.length === 1) {
+      const desk = BLUEPRINT_DESKS.find(d => d.id === segments[0]);
+      if (desk) return { category: desk.category, deskId: desk.id, params };
+      return { category: segments[0], deskId: BLUEPRINT_DESKS.find(d => d.category === segments[0])?.id || 'dashboard', params };
+    }
+    return { category: 'overview', deskId: 'dashboard', params };
+  };
+
+  const navigateToDesk = (deskId: string, categoryId?: string, queryParams?: Record<string, string>) => {
+    const desk = BLUEPRINT_DESKS.find(d => d.id === deskId);
+    const cat = categoryId || desk?.category || 'overview';
+    setActiveCategory(cat);
+    setActiveDeskId(deskId);
+    let hash = `#/${cat}/${deskId}`;
+    if (queryParams && Object.keys(queryParams).length > 0) {
+      hash += '?' + new URLSearchParams(queryParams).toString();
+      setDeepLinkParams(queryParams);
+    } else {
+      setDeepLinkParams({});
+    }
+    window.location.hash = hash;
+    localStorage.setItem('ridego_admin_route', hash);
+  };
+
+  const recordAudit = (action: string, target: string, justification: string) => {
+    const entry: AuditLogEntry = {
+      id: `AUD-${(auditLogs.length + 1).toString().padStart(3, '0')}`,
+      timestamp: new Date().toLocaleTimeString(),
+      actor: 'Executive Ops Commander',
+      action,
+      target,
+      justification,
+      status: 'SUCCESS'
+    };
+    setAuditLogs(prev => [entry, ...prev]);
+  };
+
+  // Synchronize browser URL hash and handle Back/Forward
+  useEffect(() => {
+    const handleHashChange = () => {
+      const route = parseRouteString(window.location.hash);
+      setActiveCategory(route.category);
+      setActiveDeskId(route.deskId);
+      setDeepLinkParams(route.params);
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    
+    // Initial mount restore
+    if (window.location.hash) {
+      const initial = parseRouteString(window.location.hash);
+      setActiveCategory(initial.category);
+      setActiveDeskId(initial.deskId);
+      setDeepLinkParams(initial.params);
+    } else {
+      const saved = localStorage.getItem('ridego_admin_route');
+      if (saved) {
+        window.location.hash = saved;
+      } else {
+        window.location.hash = '#/overview/dashboard';
+      }
+    }
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
   useEffect(() => {
     setIsLoadingCategories(true);
     requestApi<any[]>('/vehicles/categories')
@@ -304,6 +406,26 @@ export const RideGoMissionControl: React.FC = () => {
         <main className="flex-1 bg-[#07090e] p-6 overflow-y-auto">
           
           {/* DESK 1: EXECUTIVE KPI DASHBOARD */}
+          {/* DEEP LINK FILTER BANNER */}
+          {Object.keys(deepLinkParams).length > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 flex items-center justify-between text-xs text-amber-300">
+              <div className="flex items-center gap-2">
+                <span className="font-bold">🔗 Deep Link Route Active:</span>
+                {Object.entries(deepLinkParams).map(([k, v]) => (
+                  <span key={k} className="bg-amber-500/20 px-2.5 py-0.5 rounded font-mono font-bold text-amber-200">
+                    {k} = {v}
+                  </span>
+                ))}
+              </div>
+              <button 
+                onClick={() => navigateToDesk(activeDeskId, activeCategory)}
+                className="text-slate-400 hover:text-white underline text-xs font-semibold"
+              >
+                Clear Deep Link Filter ✕
+              </button>
+            </div>
+          )}
+
           {activeDeskId === 'dashboard' && (
             <div className="space-y-6">
               <div className="flex justify-between items-center border-b border-slate-800 pb-4">
@@ -888,6 +1010,63 @@ export const RideGoMissionControl: React.FC = () => {
           )}
 
           {/* DESK 33: DUAL APP REMOTE SIMULATOR (BOTH APPS) */}
+                    {/* DESK 29: AUDIT LOGS & GOVERNANCE VAULT */}
+          {activeDeskId === 'audit_logs' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🔐</span>
+                    <span>Audit Vault &amp; Sensitive Operation Logs</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Immutable security log of administrative overrides, tariff updates, and driver account mutations.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      recordAudit('MANUAL_AUDIT_EXPORT', 'All System Logs', 'Admin regulatory compliance audit');
+                      addToast('Exported', 'Audit ledger downloaded as CSV');
+                    }}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl border border-slate-700"
+                  >
+                    Export CSV
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800">
+                    <tr>
+                      <th className="p-3">Log ID</th>
+                      <th className="p-3">Timestamp</th>
+                      <th className="p-3">Actor / Admin</th>
+                      <th className="p-3">Action</th>
+                      <th className="p-3">Target Entity</th>
+                      <th className="p-3">Justification</th>
+                      <th className="p-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                    {auditLogs.map(log => (
+                      <tr key={log.id} className="hover:bg-slate-800/40">
+                        <td className="p-3 text-amber-400 font-bold">{log.id}</td>
+                        <td className="p-3 text-slate-400">{log.timestamp}</td>
+                        <td className="p-3 text-white font-sans">{log.actor}</td>
+                        <td className="p-3"><span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded font-bold">{log.action}</span></td>
+                        <td className="p-3 text-slate-300">{log.target}</td>
+                        <td className="p-3 text-slate-400 font-sans italic">{log.justification}</td>
+                        <td className="p-3"><span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded font-bold">{log.status}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {activeDeskId === 'simulator' && (
             <div className="space-y-6">
               <div className="flex justify-between items-center border-b border-slate-800 pb-4">
@@ -1075,7 +1254,7 @@ export const RideGoMissionControl: React.FC = () => {
           )}
 
           {/* FALLBACK FOR REMAINING DESKS (3 to 32) */}
-          {['dashboard', 'gps_map', 'customer_dir', 'customer_wallets', 'driver_kyc', 'driver_payouts', 'fare_matrix', 'surge_rules', 'broadcast', 'emergency_sos', 'simulator'].indexOf(activeDeskId) === -1 && (
+          {['dashboard', 'gps_map', 'customer_dir', 'customer_wallets', 'driver_kyc', 'driver_payouts', 'fare_matrix', 'surge_rules', 'broadcast', 'emergency_sos', 'audit_logs', 'simulator'].indexOf(activeDeskId) === -1 && (
             <div className="space-y-6">
               <div className="flex justify-between items-center border-b border-slate-800 pb-4">
                 <div>
@@ -1159,6 +1338,41 @@ export const RideGoMissionControl: React.FC = () => {
           </div>
         ))}
       </div>
+    
+      {/* CRITICAL ACTION CONFIRMATION MODAL */}
+      {confirmModal && confirmModal.open && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in duration-200">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">{confirmModal.isDestructive ? '⚠️' : '🛡️'}</span>
+              <h3 className="text-base font-bold text-white">{confirmModal.title}</h3>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">{confirmModal.message}</p>
+            <div className="flex justify-end gap-3 pt-3">
+              <button
+                onClick={() => setConfirmModal(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const cb = confirmModal.onConfirm;
+                  recordAudit(confirmModal.title, 'Admin Console Action', 'Executed via Ops Confirmation');
+                  setConfirmModal(null);
+                  cb();
+                }}
+                className={`px-4 py-2 text-white text-xs font-bold rounded-xl shadow-lg ${
+                  confirmModal.isDestructive ? 'bg-red-600 hover:bg-red-500 shadow-red-600/30' : 'bg-amber-500 hover:bg-amber-400 text-black shadow-amber-500/30'
+                }`}
+              >
+                {confirmModal.actionLabel || 'Confirm Execution'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

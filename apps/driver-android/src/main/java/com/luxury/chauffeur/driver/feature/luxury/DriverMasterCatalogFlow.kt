@@ -190,6 +190,83 @@ fun DriverMasterCatalogFlow(
     var completedTripsToday by remember { mutableIntStateOf(14) }
     var dailyTargetCount by remember { mutableIntStateOf(15) }
     var activeDriverRideId by remember { mutableStateOf("RIDE-PILOT-8821") }
+    var isAcceptingOffer by remember { mutableStateOf(false) }
+    var showDutyRestrictionDialog by remember { mutableStateOf(false) }
+    var dutyRestrictionMessage by remember { mutableStateOf("") }
+
+    // Active Ride Restoration on Driver Launch
+    LaunchedEffect(Unit) {
+        if (tokenManager.isLoggedIn()) {
+            val savedRide = tokenManager.getActiveRideId()
+            if (!savedRide.isNullOrBlank()) {
+                try {
+                    val res = DriverApiClient.getService().getRideDetails(savedRide)
+                    if (res.isSuccessful && res.body() != null) {
+                        val ride = res.body()!!
+                        val status = (ride["status"] as? String) ?: ""
+                        activeDriverRideId = savedRide
+                        (ride["destination_address"] as? String)?.let { offerDestination = it }
+                        (ride["pickup_address"] as? String)?.let { offerPickupStation = it }
+                        when (status) {
+                            "ASSIGNED" -> currentScreenId = 11
+                            "ARRIVED" -> currentScreenId = 12
+                            "IN_PROGRESS" -> currentScreenId = 14
+                        }
+                        return@LaunchedEffect
+                    }
+                } catch (_: Exception) {}
+            }
+            try {
+                val res = DriverApiClient.getService().getCurrentActiveRide()
+                if (res.isSuccessful && res.body() != null) {
+                    val active = res.body()!!["active_ride"] as? Map<String, Any>
+                    if (active != null) {
+                        val rId = (active["id"] as? String) ?: ""
+                        val st = (active["status"] as? String) ?: ""
+                        if (rId.isNotBlank()) {
+                            activeDriverRideId = rId
+                            tokenManager.saveActiveRideId(rId)
+                            (active["destination_address"] as? String)?.let { offerDestination = it }
+                            (active["pickup_address"] as? String)?.let { offerPickupStation = it }
+                            when (st) {
+                                "ASSIGNED" -> currentScreenId = 11
+                                "ARRIVED" -> currentScreenId = 12
+                                "IN_PROGRESS" -> currentScreenId = 14
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Live Dispatch Offers Polling for Driver Cockpit (Screen 8)
+    LaunchedEffect(isDutyOnline, currentScreenId) {
+        if (isDutyOnline && currentScreenId == 8) {
+            while (isDutyOnline && currentScreenId == 8) {
+                kotlinx.coroutines.delay(4000)
+                try {
+                    val res = DriverApiClient.getService().getDispatchOffers()
+                    if (res.isSuccessful && res.body() != null) {
+                        val list = res.body() as? List<Map<String, Any>>
+                        if (!list.isNullOrEmpty()) {
+                            val off = list[0]
+                            val rId = (off["ride_id"] as? String) ?: (off["id"] as? String) ?: ""
+                            if (rId.isNotBlank()) {
+                                activeDriverRideId = rId
+                                (off["pickup_address"] as? String)?.let { offerPickupStation = it }
+                                (off["destination_address"] as? String)?.let { offerDestination = it }
+                                val fareCents = (off["estimated_fare_cents"] as? Number)?.toInt() ?: 3500
+                                offerEstimatedEarnings = "₹ " + String.format("%.2f", (fareCents / 100.0) * 0.9)
+                                currentScreenId = 10
+                                break
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
 
     // Real Supabase PostgreSQL Data Fetching for Pilot via FastAPI
     LaunchedEffect(currentScreenId) {
@@ -228,15 +305,20 @@ fun DriverMasterCatalogFlow(
             5 -> currentScreenId = 4
             6 -> currentScreenId = 5
             7 -> currentScreenId = 6
-            8 -> currentScreenId = 25
-            9, 10, 18, 19, 20, 21, 23, 24 -> currentScreenId = 8
-            11 -> currentScreenId = 10
+            8 -> { /* Primary Cockpit tab: do not jump to Screen 25 */ }
+            9 -> currentScreenId = 8
+            10 -> currentScreenId = 8
+            11 -> {
+                Toast.makeText(context, "Navigating to commuter pickup. Tap 'Arrived' when at location.", Toast.LENGTH_SHORT).show()
+            }
             12 -> currentScreenId = 11
             13 -> currentScreenId = 12
-            14 -> currentScreenId = 13
+            14 -> {
+                Toast.makeText(context, "Trip in progress to destination. Tap 'Complete Trip' when arrived.", Toast.LENGTH_SHORT).show()
+            }
             15, 16 -> currentScreenId = 14
-            17 -> currentScreenId = 14
-            22 -> currentScreenId = 19
+            17 -> currentScreenId = 8
+            18, 19, 20, 21, 22, 23, 24 -> currentScreenId = 8
             25 -> currentScreenId = 8
             else -> currentScreenId = 8
         }
@@ -524,6 +606,11 @@ fun DriverMasterCatalogFlow(
                 8 -> Screen8PilotCockpitDutyToggle(
                     isOnline = isDutyOnline,
                     onToggleDuty = {
+                        if (!isDutyOnline && (!isDlUploaded || !isAadhaarUploaded)) {
+                            dutyRestrictionMessage = "KYC documents must be uploaded and verified before going Online. Please visit Screen 4 (Documents)."
+                            showDutyRestrictionDialog = true
+                            return@Screen8PilotCockpitDutyToggle
+                        }
                         val newDuty = !isDutyOnline
                         isDutyOnline = newDuty
                         scope.launch {
@@ -560,6 +647,7 @@ fun DriverMasterCatalogFlow(
                         scope.launch {
                             try {
                                 DriverApiClient.getService().acceptRide(activeDriverRideId)
+tokenManager.saveActiveRideId(activeDriverRideId)
                                 Toast.makeText(context, "Ride accepted in Supabase ride_assignments!", Toast.LENGTH_SHORT).show()
                             } catch (e: Exception) {
                                 Toast.makeText(context, "Ride accepted", Toast.LENGTH_SHORT).show()
@@ -634,6 +722,7 @@ fun DriverMasterCatalogFlow(
                                     activeDriverRideId,
                                     FinishTripPayload(actualDistanceKm = 1.9, actualDurationMinutes = 7.5)
                                 )
+                                tokenManager.clearActiveRideId()
                                 Toast.makeText(context, "Trip finalized! Fare credited in Supabase driver_ledger!", Toast.LENGTH_SHORT).show()
                             } catch (e: Exception) {
                                 Toast.makeText(context, "Payment Collected", Toast.LENGTH_SHORT).show()

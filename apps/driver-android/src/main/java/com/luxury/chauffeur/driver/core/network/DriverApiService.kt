@@ -110,6 +110,9 @@ interface DriverApiService {
     suspend fun acceptRide(@Path("id") rideId: String): Response<Map<String, Any>>
 
     @GET("api/v1/drivers/dispatch/offers") suspend fun getDispatchOffers(): Response<List<Map<String, Any>>>
+    @GET("api/v1/rides/active/current")
+    suspend fun getCurrentActiveRide(): retrofit2.Response<Map<String, Any>>
+
     @GET("api/v1/rides/{id}") suspend fun getRideDetails(@Path("id") rideId: String): Response<Map<String, Any>>
     @GET("api/v1/rides/{id}/stops") suspend fun getRideStops(@Path("id") rideId: String): Response<List<Map<String, Any>>>
     @GET("api/v1/drivers/dispatch/preferences") suspend fun getDispatchPreferences(): Response<Map<String, Any>>

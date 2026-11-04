@@ -23,6 +23,7 @@ class TokenManager(context: Context) {
         private const val KEY_CURRENCY = "currency_code"
         private const val KEY_FCM_TOKEN = "customer_fcm_device_token"
         private const val KEY_FCM_TOKEN_SYNCED = "customer_fcm_device_token_synced"
+        private const val KEY_ACTIVE_RIDE_ID = "active_ride_id"
 
         @Volatile
         private var instance: TokenManager? = null
@@ -103,6 +104,21 @@ class TokenManager(context: Context) {
 
     fun setFcmTokenSynced(synced: Boolean) {
         prefs.edit().putBoolean(KEY_FCM_TOKEN_SYNCED, synced).apply()
+    }
+
+    
+    fun saveActiveRideId(rideId: String?) {
+        if (rideId.isNullOrBlank()) {
+            prefs.edit().remove(KEY_ACTIVE_RIDE_ID).apply()
+        } else {
+            prefs.edit().putString(KEY_ACTIVE_RIDE_ID, rideId).apply()
+        }
+    }
+
+    fun getActiveRideId(): String? = prefs.getString(KEY_ACTIVE_RIDE_ID, null)
+
+    fun clearActiveRideId() {
+        prefs.edit().remove(KEY_ACTIVE_RIDE_ID).apply()
     }
 
     fun clear() {

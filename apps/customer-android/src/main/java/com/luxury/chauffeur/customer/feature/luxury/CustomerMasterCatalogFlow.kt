@@ -173,9 +173,108 @@ fun CustomerMasterCatalogFlow(
     // In-Ride State
     var activeRideId by remember { mutableStateOf("RIDE-" + System.currentTimeMillis().toString().takeLast(6)) }
     var activeStartOtp by remember { mutableStateOf("8821") }
+    var activeRideStatus by remember { mutableStateOf("REQUESTED") }
+    var isBookingInProgress by remember { mutableStateOf(false) }
+    var showCancelRideDialog by remember { mutableStateOf(false) }
+    var pilotPhone by remember { mutableStateOf("+91 98111 22334") }
+    var pilotRating by remember { mutableDoubleStateOf(4.9) }
     val pilotName = "Ramesh Kumar"
     val pilotPlate = "DL-1ER-9912"
     val pilotVehicle = "Bajaj RE Electric"
+
+    // Active Ride Restoration on App Launch
+    LaunchedEffect(Unit) {
+        if (tokenManager.isLoggedIn()) {
+            val savedRideId = tokenManager.getActiveRideId()
+            if (!savedRideId.isNullOrBlank()) {
+                try {
+                    val res = ApiClient.getService().getRideDetails(savedRideId)
+                    if (res.isSuccessful && res.body() != null) {
+                        val ride = res.body()!!
+                        val st = ride.status
+                        ride.startOtp?.let { activeStartOtp = it }
+                        activeRideId = savedRideId
+                        activeRideStatus = st
+                        if (st == "REQUESTED") {
+                            currentScreenId = 14
+                            return@LaunchedEffect
+                        } else if (st in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS")) {
+                            currentScreenId = 15
+                            return@LaunchedEffect
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            try {
+                val res = ApiClient.getService().getCurrentActiveRide()
+                if (res.isSuccessful && res.body() != null) {
+                    val activeObj = res.body()!!["active_ride"] as? Map<String, Any>
+                    if (activeObj != null) {
+                        val rId = (activeObj["id"] as? String) ?: ""
+                        val st = (activeObj["status"] as? String) ?: ""
+                        if (rId.isNotBlank()) {
+                            activeRideId = rId
+                            activeRideStatus = st
+                            tokenManager.saveActiveRideId(rId)
+                            (activeObj["start_otp"] as? String)?.let { activeStartOtp = it }
+                            if (st == "REQUESTED") {
+                                currentScreenId = 14
+                            } else if (st in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS")) {
+                                currentScreenId = 15
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Live Authoritative Polling for Screen 14 (Radar) and Screen 15 (Active Ride)
+    LaunchedEffect(currentScreenId, activeRideId) {
+        if (currentScreenId == 14 && activeRideId.isNotBlank()) {
+            while (currentScreenId == 14) {
+                kotlinx.coroutines.delay(3000)
+                try {
+                    val res = ApiClient.getService().getRideDetails(activeRideId)
+                    if (res.isSuccessful && res.body() != null) {
+                        val ride = res.body()!!
+                        val st = ride.status
+                        val otp = ride.startOtp ?: ""
+                        if (otp.isNotBlank()) activeStartOtp = otp
+                        if (st in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS")) {
+                            activeRideStatus = st
+                            currentScreenId = 15
+                            break
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        } else if (currentScreenId == 15 && activeRideId.isNotBlank()) {
+            while (currentScreenId == 15) {
+                kotlinx.coroutines.delay(3500)
+                try {
+                    val res = ApiClient.getService().getRideDetails(activeRideId)
+                    if (res.isSuccessful && res.body() != null) {
+                        val ride = res.body()!!
+                        val st = ride.status
+                        val otp = ride.startOtp ?: ""
+                        if (otp.isNotBlank()) activeStartOtp = otp
+                        activeRideStatus = st
+                        if (st == "COMPLETED") {
+                            tokenManager.clearActiveRideId()
+                            currentScreenId = 20
+                            break
+                        } else if (st == "CANCELLED") {
+                            tokenManager.clearActiveRideId()
+                            Toast.makeText(context, "Ride cancelled", Toast.LENGTH_SHORT).show()
+                            currentScreenId = 7
+                            break
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
 
     // Real Supabase PostgreSQL Data Fetching via FastAPI
     LaunchedEffect(currentScreenId) {
@@ -219,19 +318,26 @@ fun CustomerMasterCatalogFlow(
     // Back handling
     BackHandler(enabled = true) {
         when (currentScreenId) {
-            1 -> { /* Exit app or stay on welcome */ }
+            1 -> { /* Exit app */ }
             2, 3, 4, 5 -> currentScreenId = 1
             6 -> currentScreenId = 5
-            7 -> currentScreenId = 25
-            8, 9 -> currentScreenId = 7
+            7 -> { /* Primary Home: preserve tab state */ }
+            8 -> currentScreenId = 7
+            9 -> currentScreenId = 8
             10 -> currentScreenId = 8
             11, 12, 13 -> currentScreenId = 10
-            14 -> currentScreenId = 10
-            15 -> currentScreenId = 7
-            16, 17, 18, 19 -> currentScreenId = 15
-            20 -> currentScreenId = 15
+            14 -> {
+                showCancelRideDialog = true
+            }
+            15 -> {
+                Toast.makeText(context, "Ride is active. Use Emergency SOS or Cancel button.", Toast.LENGTH_SHORT).show()
+            }
+            16, 17, 18, 19 -> {
+                currentScreenId = if (activeRideId.isNotBlank() && activeRideStatus != "COMPLETED") 15 else 7
+            }
+            20 -> currentScreenId = 7
             21 -> currentScreenId = 20
-            22, 23, 24 -> currentScreenId = 25
+            22, 23, 24 -> currentScreenId = 7
             25 -> currentScreenId = 7
             else -> currentScreenId = 7
         }
@@ -326,7 +432,9 @@ fun CustomerMasterCatalogFlow(
             }
         },
         bottomBar = {
-            Surface(
+            val isBottomNavVisible = listOf(7, 10, 16, 22, 25).contains(currentScreenId)
+            if (isBottomNavVisible) {
+                Surface(
                 color = Color(0xFF0F0F16),
                 border = BorderStroke(1.dp, BlueprintTokens.Slate800),
                 modifier = Modifier
@@ -432,6 +540,8 @@ fun CustomerMasterCatalogFlow(
                     }
                 }
             }
+        
+            }
         }
     ) { innerPadding ->
         Box(
@@ -439,6 +549,39 @@ fun CustomerMasterCatalogFlow(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            if (showCancelRideDialog) {
+                AlertDialog(
+                    onDismissRequest = { showCancelRideDialog = false },
+                    title = { Text("Cancel Ride Request?", fontWeight = FontWeight.Bold, color = Color.White) },
+                    text = { Text("Are you sure you want to cancel? If a pilot is already en route, cancellation policies apply.", color = BlueprintTokens.Slate400, fontSize = 13.sp) },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showCancelRideDialog = false
+                                scope.launch {
+                                    try {
+                                        ApiClient.getService().cancelRide(activeRideId, mapOf("reason" to "Customer cancelled"))
+                                    } catch (_: Exception) {}
+                                    tokenManager.clearActiveRideId()
+                                    activeRideId = ""
+                                    activeRideStatus = "CANCELLED"
+                                    Toast.makeText(context, "Ride cancelled successfully", Toast.LENGTH_SHORT).show()
+                                    currentScreenId = 7
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = BlueprintTokens.Red)
+                        ) {
+                            Text("Yes, Cancel", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showCancelRideDialog = false }) {
+                            Text("Keep Ride", color = BlueprintTokens.Slate400)
+                        }
+                    },
+                    containerColor = BlueprintTokens.Slate900
+                )
+            }
             // Render active screen 1:1 matching latest ui blueprint.html
             when (currentScreenId) {
                 1 -> Screen01WelcomeLanguage(
@@ -590,29 +733,37 @@ fun CustomerMasterCatalogFlow(
                     onApplyPromo = { currentScreenId = 12 },
                     onSelectPayment = { currentScreenId = 13 },
                     onBookNow = {
-                        scope.launch {
-                            try {
-                                val cleanPhone = userPhone.replace(" ", "").replace("-", "")
-                                val res = ApiClient.getService().requestRide(
-                                    RideRequestPayload(
-                                        estimateId = "est_live_" + System.currentTimeMillis().toString().takeLast(6),
-                                        pickupAddress = "Patel Chowk Metro Station",
-                                        destinationAddress = destinationAddress,
-                                        paymentMethod = if (selectedPaymentMethod.contains("Wallet")) "WALLET" else "UPI"
+                        if (!isBookingInProgress) {
+                            isBookingInProgress = true
+                            scope.launch {
+                                try {
+                                    val cleanPhone = userPhone.replace(" ", "").replace("-", "")
+                                    val res = ApiClient.getService().requestRide(
+                                        RideRequestPayload(
+                                            estimateId = "est_live_" + System.currentTimeMillis().toString().takeLast(6),
+                                            pickupAddress = "Patel Chowk Metro Station",
+                                            destinationAddress = destinationAddress,
+                                            paymentMethod = if (selectedPaymentMethod.contains("Wallet")) "WALLET" else "UPI"
+                                        )
                                     )
-                                )
-                                if (res.isSuccessful && res.body() != null) {
-                                    val data = res.body()!!
-                                    (data["id"] as? String)?.let { activeRideId = it }
-                                    (data["start_otp"] as? String)?.let { activeStartOtp = it }
-                                    Toast.makeText(context, "Ride created on Supabase: $activeRideId", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Toast.makeText(context, "Dispatching Pilot via Supabase...", Toast.LENGTH_SHORT).show()
+                                    if (res.isSuccessful && res.body() != null) {
+                                        val data = res.body()!!
+                                        (data["id"] as? String)?.let {
+                                            activeRideId = it
+                                            TokenManager.getInstance(context).saveActiveRideId(it)
+                                        }
+                                        (data["start_otp"] as? String)?.let { activeStartOtp = it }
+                                        Toast.makeText(context, "Ride created on Supabase: $activeRideId", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Dispatching Pilot via Supabase...", Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Dispatch request queued", Toast.LENGTH_SHORT).show()
+                                } finally {
+                                    isBookingInProgress = false
                                 }
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Dispatch request queued", Toast.LENGTH_SHORT).show()
+                                currentScreenId = 14
                             }
-                            currentScreenId = 14
                         }
                     },
                     appliedPromo = appliedPromoCode,
@@ -645,8 +796,11 @@ fun CustomerMasterCatalogFlow(
                     onBack = { currentScreenId = 10 }
                 )
                 14 -> Screen14PilotDispatchRadar(
-                    onSimulateAccepted = { currentScreenId = 15 },
-                    onCancel = { currentScreenId = 7 }
+                    onSimulateAccepted = { 
+                        activeRideStatus = "ASSIGNED"
+                        currentScreenId = 15 
+                    },
+                    onCancel = { showCancelRideDialog = true }
                 )
                 15 -> Screen15ActiveRideLive(
                     startOtp = activeStartOtp,

@@ -1136,6 +1136,9 @@ interface CustomerApiService {
     @POST("api/v1/pools/book")
     suspend fun bookSharedRide(@Body payload: BookSharedRideRequest): Response<Map<String, Any>>
 
+    @GET("api/v1/rides/active/current")
+    suspend fun getCurrentActiveRide(): retrofit2.Response<Map<String, Any>>
+
     @GET("api/v1/rides/{id}")
     suspend fun getRideDetails(@Path("id") rideId: String): Response<RideResponseDto>
 

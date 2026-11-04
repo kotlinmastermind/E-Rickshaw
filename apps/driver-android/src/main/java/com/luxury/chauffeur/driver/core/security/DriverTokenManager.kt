@@ -14,6 +14,7 @@ class DriverTokenManager(context: Context) {
         private const val KEY_ROLE = "driver_role"
         private const val KEY_FCM_TOKEN = "driver_fcm_device_token"
         private const val KEY_FCM_TOKEN_SYNCED = "driver_fcm_device_token_synced"
+        private const val KEY_ACTIVE_RIDE_ID = "driver_active_ride_id"
 
         @Volatile
         private var instance: DriverTokenManager? = null
@@ -60,6 +61,21 @@ class DriverTokenManager(context: Context) {
 
     fun setFcmTokenSynced(synced: Boolean) {
         prefs.edit().putBoolean(KEY_FCM_TOKEN_SYNCED, synced).apply()
+    }
+
+    // Active Ride persistence across app restarts / process death
+    fun saveActiveRideId(rideId: String?) {
+        if (rideId.isNullOrBlank()) {
+            prefs.edit().remove(KEY_ACTIVE_RIDE_ID).apply()
+        } else {
+            prefs.edit().putString(KEY_ACTIVE_RIDE_ID, rideId).apply()
+        }
+    }
+
+    fun getActiveRideId(): String? = prefs.getString(KEY_ACTIVE_RIDE_ID, null)
+
+    fun clearActiveRideId() {
+        prefs.edit().remove(KEY_ACTIVE_RIDE_ID).apply()
     }
 
     fun clear() {
