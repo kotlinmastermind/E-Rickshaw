@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.database.session import get_db
@@ -14,15 +14,27 @@ router = APIRouter(prefix="/loyalty-feedback", tags=["Part 7: Loyalty, Feedback 
 # ----------------- Request / Response Models -----------------
 
 class DriverRatingRequest(BaseModel):
-    overall_rating: int = Field(..., ge=1, le=5)
+    overall_rating: Optional[int] = Field(None, ge=1, le=5)
+    overall_score: Optional[float] = None
     cleanliness_score: int = Field(5, ge=1, le=5)
     comfort_score: int = Field(5, ge=1, le=5)
     service_quality_score: int = Field(5, ge=1, le=5)
     navigation_score: int = Field(5, ge=1, le=5)
     feedback: Optional[str] = None
+    public_comment: Optional[str] = None
     private_feedback: Optional[str] = None
     feedback_tags: Optional[List[str]] = Field(default_factory=list)
     tip_cents: int = Field(0, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_fields(cls, values):
+        if isinstance(values, dict):
+            if values.get("overall_rating") is None and values.get("overall_score") is not None:
+                values["overall_rating"] = int(round(float(values["overall_score"])))
+            if not values.get("feedback") and values.get("public_comment"):
+                values["feedback"] = values["public_comment"]
+        return values
 
 class TipDriverRequest(BaseModel):
     tip_cents: int = Field(..., gt=0)
@@ -35,14 +47,35 @@ class CelebrationDatesRequest(BaseModel):
     anniversary_date: Optional[str] = None  # YYYY-MM-DD
 
 class OfferFrequencyRequest(BaseModel):
-    frequency: str = Field(..., json_schema_extra={"example": "WEEKLY"})  # DAILY, WEEKLY, EXCLUSIVE_ONLY, MUTED
+    frequency: str = Field("WEEKLY", json_schema_extra={"example": "WEEKLY"})  # DAILY, WEEKLY, EXCLUSIVE_ONLY, MUTED
+    birthday_date: Optional[str] = None
+    anniversary_date: Optional[str] = None
 
 class SurveySubmitRequest(BaseModel):
     ride_id: Optional[str] = None
     survey_type: str = "POST_TRIP_CSAT"
-    score: int = Field(..., ge=1, le=10)
+    score: Optional[int] = Field(None, ge=1, le=10)
+    csat_score: Optional[int] = None
+    nps_score: Optional[int] = None
+    survey_category: Optional[str] = "OVERALL_SATISFACTION"
     dimensions: Optional[Dict[str, int]] = None
     comments: Optional[str] = None
+    feedback_text: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_survey_fields(cls, values):
+        if isinstance(values, dict):
+            if values.get("score") is None:
+                if values.get("csat_score") is not None:
+                    values["score"] = min(10, max(1, int(values["csat_score"]) * 2))
+                elif values.get("nps_score") is not None:
+                    values["score"] = min(10, max(1, int(values["nps_score"])))
+                else:
+                    values["score"] = 10
+            if not values.get("comments") and values.get("feedback_text"):
+                values["comments"] = values["feedback_text"]
+        return values
 
 class ReferralReviewRequest(BaseModel):
     decision: str = Field(..., json_schema_extra={"example": "APPROVE"})  # APPROVE, REJECT
@@ -60,6 +93,7 @@ class ServiceRecoveryRequest(BaseModel):
 
 # Features 151 - 155: Driver Rating & Categorical Feedback
 @router.post("/rides/{ride_id}/rate")
+@router.post("/rides/{ride_id}/rating")
 async def submit_driver_rating(
     ride_id: str,
     payload: DriverRatingRequest,
@@ -67,17 +101,18 @@ async def submit_driver_rating(
     db: AsyncSession = Depends(get_db)
 ):
     service = LoyaltyFeedbackService(db)
+    rating = payload.overall_rating if payload.overall_rating is not None else 5
     return await service.submit_driver_rating(
         customer_user_id=user.id,
         ride_id=ride_id,
-        overall_rating=payload.overall_rating,
+        overall_rating=rating,
         cleanliness_score=payload.cleanliness_score,
         comfort_score=payload.comfort_score,
         service_quality_score=payload.service_quality_score,
         navigation_score=payload.navigation_score,
         feedback=payload.feedback,
         private_feedback=payload.private_feedback,
-        feedback_tags=payload.feedback_tags,
+        feedback_tags=payload.feedback_tags or [],
         tip_cents=payload.tip_cents
     )
 
@@ -190,21 +225,30 @@ async def update_celebration_dates(
         anniversary_date=payload.anniversary_date
     )
 
-# Feature 170: Offer Notification Frequency Control
+# Feature 170: Offer Notification Frequency Control & Preferences
 @router.post("/profile/offer-preferences")
+@router.post("/offers/preferences")
 async def update_offer_notification_frequency(
     payload: OfferFrequencyRequest,
     user: User = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db)
 ):
     service = LoyaltyFeedbackService(db)
-    return await service.update_offer_notification_frequency(
+    res = await service.update_offer_notification_frequency(
         customer_user_id=user.id,
         frequency=payload.frequency
     )
+    if payload.birthday_date or payload.anniversary_date:
+        await service.update_celebration_dates(
+            customer_user_id=user.id,
+            birthday_date=payload.birthday_date,
+            anniversary_date=payload.anniversary_date
+        )
+    return res
 
 # Feature 171: Ride History Filters
 @router.get("/rides/history")
+@router.get("/rides/history/filtered")
 async def get_filtered_ride_history(
     status: Optional[str] = None,
     date_from: Optional[datetime] = None,
@@ -234,6 +278,7 @@ async def repeat_past_trip(
 
 # Feature 173: Download Monthly Ride Statement
 @router.get("/statements/monthly")
+@router.get("/reports/monthly-statement")
 async def get_monthly_statement(
     year: int = Query(..., ge=2024, le=2030),
     month: int = Query(..., ge=1, le=12),
@@ -245,17 +290,19 @@ async def get_monthly_statement(
 
 # Feature 174: Customer Satisfaction Survey
 @router.post("/surveys")
+@router.post("/surveys/submit")
 async def submit_survey(
     payload: SurveySubmitRequest,
     user: User = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db)
 ):
     service = LoyaltyFeedbackService(db)
+    score_val = payload.score if payload.score is not None else 10
     return await service.submit_survey(
         customer_user_id=user.id,
         ride_id=payload.ride_id,
         survey_type=payload.survey_type,
-        score=payload.score,
+        score=score_val,
         dimensions=payload.dimensions,
         comments=payload.comments
     )

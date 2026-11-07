@@ -240,7 +240,7 @@ class DriverFinancialService:
     async def get_ride_earnings_breakdown(self, user_id_or_driver_id: str, ride_id: str) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
         ride = await self.db.get(Ride, ride_id)
-        if not ride or (ride.assigned_driver_id != driver.id and ride.driver_id != driver.id):
+        if not ride or (ride.assigned_driver_id != driver.id and getattr(ride, "driver_id", None) != driver.id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found or access denied.")
 
         fare_cents = ride.final_fare_cents or ride.estimated_fare_cents or 150000
@@ -493,20 +493,35 @@ class DriverFinancialService:
         goal = res.scalars().first()
 
         if not goal:
+            # Query actual completed rides for this driver for the current week
+            week_start_dt = datetime.strptime(monday_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            rides_stmt = select(
+                func.coalesce(func.sum(Ride.final_fare_cents), 0),
+                func.count(Ride.id)
+            ).where(
+                Ride.assigned_driver_id == driver.id,
+                Ride.status == "COMPLETED",
+                Ride.completed_at >= week_start_dt
+            )
+            rides_res = await self.db.execute(rides_stmt)
+            row = rides_res.first()
+            actual_cents = int(row[0]) if row and row[0] is not None else 0
+            actual_trips = int(row[1]) if row and row[1] is not None else 0
+
             goal = DriverWeeklyGoal(
                 driver_id=driver.id,
                 week_start_date=monday_str,
-                target_earnings_cents=2500000,  # ₹25,000
-                current_earnings_cents=1680000, # ₹16,800
-                target_trips=30,
-                current_trips=21,
+                target_earnings_cents=0,  # 0 until explicitly set by driver
+                current_earnings_cents=actual_cents,
+                target_trips=None,
+                current_trips=actual_trips,
                 is_achieved=False
             )
             self.db.add(goal)
             await self.db.commit()
             await self.db.refresh(goal)
 
-        pct = min(100.0, round((goal.current_earnings_cents / max(1, goal.target_earnings_cents)) * 100.0, 1))
+        pct = min(100.0, round((goal.current_earnings_cents / max(1, goal.target_earnings_cents)) * 100.0, 1)) if goal.target_earnings_cents > 0 else 0.0
         remaining_cents = max(0, goal.target_earnings_cents - goal.current_earnings_cents)
         days_left = max(1, 7 - now.weekday())
 
@@ -514,15 +529,21 @@ class DriverFinancialService:
             "id": goal.id,
             "week_start_date": goal.week_start_date,
             "target_earnings_rupees": round(goal.target_earnings_cents / 100, 2),
+            "target_net_rupees": round(goal.target_earnings_cents / 100, 2),
+            "target_net_cents": goal.target_earnings_cents,
             "current_earnings_rupees": round(goal.current_earnings_cents / 100, 2),
+            "current_net_rupees": round(goal.current_earnings_cents / 100, 2),
+            "current_net_cents": goal.current_earnings_cents,
             "remaining_rupees": round(remaining_cents / 100, 2),
             "progress_percentage": pct,
             "target_trips": goal.target_trips,
             "current_trips": goal.current_trips,
             "is_achieved": goal.is_achieved,
             "days_left_in_week": days_left,
-            "daily_target_needed_rupees": round((remaining_cents / 100) / days_left, 2),
-            "pace_status": "AHEAD_OF_PACE" if pct >= ((now.weekday() + 1) / 7.0 * 100) else "ON_PACE"
+            "days_remaining": days_left,
+            "daily_target_needed_rupees": round((remaining_cents / 100) / days_left, 2) if days_left > 0 and goal.target_earnings_cents > 0 else 0.0,
+            "pace_status": "AHEAD_OF_PACE" if pct >= ((now.weekday() + 1) / 7.0 * 100) and goal.target_earnings_cents > 0 else ("ON_PACE" if goal.target_earnings_cents > 0 else "NO_GOAL"),
+            "pace_message": "Pacing steadily towards your goal." if goal.target_earnings_cents > 0 else "Set a weekly goal to begin pace tracking."
         }
 
     async def update_weekly_goal(self, user_id_or_driver_id: str, target_earnings_rupees: float, target_trips: Optional[int] = None) -> Dict[str, Any]:
@@ -580,7 +601,7 @@ class DriverFinancialService:
                 program_name="Weekend Sovereign Velocity Quest",
                 tier_name="BRONZE",
                 target_trips=15,
-                current_trips=11,
+                current_trips=0,
                 reward_cents=200000,  # ₹2,000
                 is_unlocked=False,
                 expires_at=exp,
@@ -593,7 +614,7 @@ class DriverFinancialService:
                 program_name="Weekend Sovereign Velocity Quest (Silver)",
                 tier_name="SILVER",
                 target_trips=30,
-                current_trips=11,
+                current_trips=0,
                 reward_cents=500000,  # ₹5,000
                 is_unlocked=False,
                 expires_at=exp,
@@ -606,7 +627,7 @@ class DriverFinancialService:
                 program_name="Airport Private Aviation Ride Streak",
                 tier_name="SOVEREIGN_GOLD",
                 target_trips=10,
-                current_trips=8,
+                current_trips=0,
                 reward_cents=350000,  # ₹3,500
                 is_unlocked=False,
                 expires_at=exp,
@@ -861,91 +882,74 @@ class DriverFinancialService:
 
     async def get_payout_schedule(self, user_id_or_driver_id: str) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        stmt = select(DriverPayoutSchedule).where(DriverPayoutSchedule.driver_id == driver.id)
-        res = await self.db.execute(stmt)
-        sched = res.scalars().first()
+        schedule_type = "WEEKLY"
+        min_threshold_rupees = 500.0
+        is_active = True
 
-        if not sched:
-            sched = DriverPayoutSchedule(
-                driver_id=driver.id,
-                schedule_type="WEEKLY",
-                min_threshold_cents=50000,
-                is_active=True
-            )
-            self.db.add(sched)
-            await self.db.commit()
-            await self.db.refresh(sched)
+        if hasattr(DriverPayoutSchedule, "__tablename__"):
+            stmt = select(DriverPayoutSchedule).where(DriverPayoutSchedule.driver_id == driver.id)
+            res = await self.db.execute(stmt)
+            sched = res.scalars().first()
+
+            if not sched:
+                sched = DriverPayoutSchedule(
+                    driver_id=driver.id,
+                    schedule_type="WEEKLY",
+                    min_threshold_cents=50000,
+                    is_active=True
+                )
+                self.db.add(sched)
+                await self.db.commit()
+                await self.db.refresh(sched)
+
+            schedule_type = sched.schedule_type
+            min_threshold_rupees = round(sched.min_threshold_cents / 100, 2)
+            is_active = sched.is_active
 
         return {
-            "schedule_type": sched.schedule_type,
-            "min_threshold_rupees": round(sched.min_threshold_cents / 100, 2),
-            "is_active": sched.is_active,
+            "schedule_type": schedule_type,
+            "min_threshold_rupees": min_threshold_rupees,
+            "is_active": is_active,
             "payout_timing_disclosure": "Weekly automated settlements are processed every Monday at 06:00 AM IST via RBI NEFT/RTGS.",
             "next_settlement_date": (datetime.now(timezone.utc) + timedelta(days=(7 - datetime.now(timezone.utc).weekday()))).strftime("%Y-%m-%d 06:00 AM IST")
         }
 
     async def update_payout_schedule(self, user_id_or_driver_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        stmt = select(DriverPayoutSchedule).where(DriverPayoutSchedule.driver_id == driver.id)
-        res = await self.db.execute(stmt)
-        sched = res.scalars().first()
-
         stype = data.get("schedule_type", "WEEKLY").upper()
         thresh_rupees = data.get("min_threshold_rupees", 500.0)
+        is_active = data.get("is_active", True)
 
-        if not sched:
-            sched = DriverPayoutSchedule(
-                driver_id=driver.id,
-                schedule_type=stype,
-                min_threshold_cents=int(thresh_rupees * 100),
-                is_active=data.get("is_active", True)
-            )
-            self.db.add(sched)
-        else:
-            sched.schedule_type = stype
-            sched.min_threshold_cents = int(thresh_rupees * 100)
-            sched.is_active = data.get("is_active", True)
+        if hasattr(DriverPayoutSchedule, "__tablename__"):
+            stmt = select(DriverPayoutSchedule).where(DriverPayoutSchedule.driver_id == driver.id)
+            res = await self.db.execute(stmt)
+            sched = res.scalars().first()
 
-        await self.db.commit()
-        return {"success": True, "schedule_type": sched.schedule_type, "message": "Automated payout schedule updated."}
+            if not sched:
+                sched = DriverPayoutSchedule(
+                    driver_id=driver.id,
+                    schedule_type=stype,
+                    min_threshold_cents=int(thresh_rupees * 100),
+                    is_active=is_active
+                )
+                self.db.add(sched)
+            else:
+                sched.schedule_type = stype
+                sched.min_threshold_cents = int(thresh_rupees * 100)
+                sched.is_active = is_active
+
+            await self.db.commit()
+
+        return {"success": True, "schedule_type": stype, "message": "Automated payout schedule updated."}
 
     async def get_payout_reconciliation(self, user_id_or_driver_id: str, period: Optional[str] = None) -> List[Dict[str, Any]]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        now = datetime.now(timezone.utc)
-        current_period = period or f"{now.year}-W{now.isocalendar()[1]}"
+        if not hasattr(DriverPayoutReconciliation, "__tablename__"):
+            return []
 
         stmt = select(DriverPayoutReconciliation).where(DriverPayoutReconciliation.driver_id == driver.id).order_by(DriverPayoutReconciliation.generated_at.desc())
         res = await self.db.execute(stmt)
         records = res.scalars().all()
-
-        if not records:
-            r1 = DriverPayoutReconciliation(
-                driver_id=driver.id,
-                settlement_period=f"{now.year}-W{now.isocalendar()[1] - 1}",
-                gross_earnings_cents=3200000,
-                platform_commission_cents=640000,
-                tax_withheld_tds_cents=32000,  # 1% TDS under Sec 194C
-                net_transferred_cents=2528000,
-                bank_utr=f"HDFC{secrets.token_hex(6).upper()}",
-                status="SETTLED",
-                generated_at=now - timedelta(days=7)
-            )
-            # Simulated failed record for Feature 265 explanation
-            r2 = DriverPayoutReconciliation(
-                driver_id=driver.id,
-                settlement_period=f"{now.year}-W{now.isocalendar()[1] - 2}",
-                gross_earnings_cents=2800000,
-                platform_commission_cents=560000,
-                tax_withheld_tds_cents=28000,
-                net_transferred_cents=2212000,
-                status="FAILED",
-                failure_code="IFSC_BRANCH_MERGER",
-                failure_explanation="Beneficiary branch IFSC code HDFC0009988 was merged into HDFC Central Hub. Immediate re-routing available.",
-                generated_at=now - timedelta(days=14)
-            )
-            self.db.add_all([r1, r2])
-            await self.db.commit()
-            records = [r1, r2]
 
         return [
             {
@@ -959,7 +963,7 @@ class DriverFinancialService:
                 "status": r.status,
                 "failure_code": r.failure_code,
                 "failure_explanation": r.failure_explanation,
-                "generated_at": r.generated_at.isoformat(),
+                "generated_at": r.generated_at.isoformat() if r.generated_at else None,
                 "actionable_resolution": "Update your IFSC in Saved Accounts and trigger instant retry." if r.status == "FAILED" else None
             }
             for r in records

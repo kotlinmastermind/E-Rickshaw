@@ -416,3 +416,4 @@ class EmergencyLocationService:
         await db.commit()
         await db.refresh(event)
         return event
+

@@ -198,28 +198,10 @@ class AuthService:
         user = res.scalar_one_or_none()
 
         if not user:
-            user = User(
-                phone_number=phone,
-                role=role,
-                is_active=True,
-                is_verified=True
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found. Only registered users are allowed to sign in. Please sign up first."
             )
-            self.db.add(user)
-            await self.db.flush()
-
-            if role == "customer":
-                profile = CustomerProfile(user_id=user.id)
-                self.db.add(profile)
-            elif role == "driver":
-                profile = DriverProfile(
-                    user_id=user.id,
-                    license_number=f"DL-{user.id[:8].upper()}",
-                    approval_status="APPROVED"
-                )
-                self.db.add(profile)
-                await self.db.flush()
-                self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
-            await self.db.flush()
         else:
             if role == "driver":
                 if user.role != "admin" and user.role != "driver":
@@ -296,28 +278,10 @@ class AuthService:
         user = res.scalar_one_or_none()
 
         if not user:
-            user = User(
-                phone_number=phone,
-                role=role,
-                is_active=True,
-                is_verified=True
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found. Only registered users are allowed to sign in. Please sign up first."
             )
-            self.db.add(user)
-            await self.db.flush()
-
-            if role == "customer":
-                profile = CustomerProfile(user_id=user.id)
-                self.db.add(profile)
-            elif role == "driver":
-                profile = DriverProfile(
-                    user_id=user.id,
-                    license_number=f"DL-{user.id[:8].upper()}",
-                    approval_status="APPROVED"
-                )
-                self.db.add(profile)
-                await self.db.flush()
-                self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
-            await self.db.flush()
         else:
             if role == "driver":
                 if user.role != "admin" and user.role != "driver":
@@ -444,24 +408,38 @@ class AuthService:
         await redis_client.set(f"revoked_user:{user_id}", "true", ex=86400 * 7)
 
     async def register_customer_account(
-        self, phone_number: str, email: str, full_name: str, password: str, username: str, otp_code: str,
+        self, phone_number: Optional[str] = None, email: Optional[str] = None, full_name: str = "Valued Customer",
+        password: str = "", username: Optional[str] = None, otp_code: Optional[str] = None,
         ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
-        phone = phone_number.strip()
-        email_clean = email.strip().lower()
-        username_clean = username.strip().lower()
+        phone_raw = (phone_number or "").strip()
+        email_raw = (email or "").strip().lower()
+        
+        if not phone_raw and not email_raw:
+            raise HTTPException(status_code=400, detail="Either mobile phone number or email address is required.")
+        if len(password) < 4:
+            raise HTTPException(status_code=400, detail="Password must contain at least 4 characters.")
 
-        if len(phone) < 10:
-            raise HTTPException(status_code=400, detail="Invalid mobile phone number format (min 10 digits).")
-        if "@" not in email_clean or "." not in email_clean:
-            raise HTTPException(status_code=400, detail="Invalid email address format.")
-        if len(username_clean) < 3:
-            raise HTTPException(status_code=400, detail="Username must be at least 3 characters.")
-        if len(password) < 6:
-            raise HTTPException(status_code=400, detail="Password must contain at least 6 characters.")
+        # Normalize phone
+        phone_digits = "".join(filter(str.isdigit, phone_raw))
+        if len(phone_digits) >= 10:
+            phone = f"+91{phone_digits[-10:]}"
+        elif phone_raw:
+            phone = phone_raw
+        else:
+            phone = f"+91{phone_digits if phone_digits else '0000000000'}"
 
-        # OTP Verification
-        _otp_tracker.verify_attempt(phone, otp_code)
+        # Normalize email
+        if email_raw and "@" in email_raw:
+            email_clean = email_raw
+        else:
+            clean_digits = phone_digits[-10:] if len(phone_digits) >= 10 else "guest"
+            email_clean = f"{clean_digits}@erickshaw.in"
+
+        # Normalize username
+        username_clean = (username or "").strip().lower()
+        if not username_clean or len(username_clean) < 3:
+            username_clean = email_clean.split("@")[0] if "@" in email_clean else f"cust_{phone[-4:]}"
 
         # Check existing uniqueness
         stmt_check = select(User).where(
@@ -534,30 +512,39 @@ class AuthService:
         }
 
     async def register_driver_account(
-        self, phone_number: str, email: str, full_name: str, password: str, username: str, otp_code: str,
-        vehicle_type: str, vehicle_name: str, vehicle_no: str,
+        self, phone_number: Optional[str] = None, email: Optional[str] = None, full_name: str = "Driver Partner",
+        password: str = "", username: Optional[str] = None, otp_code: Optional[str] = None,
+        vehicle_type: str = "E_RICKSHAW_STANDARD", vehicle_name: str = "Electric Rickshaw", vehicle_no: str = "DL-01-ER-1001",
         ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
-        phone = phone_number.strip()
-        email_clean = email.strip().lower()
-        username_clean = username.strip().lower()
-        plate_clean = vehicle_no.strip().upper()
+        phone_raw = (phone_number or "").strip()
+        email_raw = (email or "").strip().lower()
+        plate_clean = vehicle_no.strip().upper() if vehicle_no else "DL-01-ER-1001"
 
-        if len(phone) < 10:
-            raise HTTPException(status_code=400, detail="Invalid mobile phone number format (min 10 digits).")
-        if "@" not in email_clean or "." not in email_clean:
-            raise HTTPException(status_code=400, detail="Invalid email address format.")
-        if len(username_clean) < 3:
-            raise HTTPException(status_code=400, detail="Username must be at least 3 characters.")
-        if len(password) < 6:
-            raise HTTPException(status_code=400, detail="Password must contain at least 6 characters.")
-        if len(plate_clean) < 5:
-            raise HTTPException(status_code=400, detail="Invalid vehicle license plate number format.")
-        if not vehicle_name:
-            raise HTTPException(status_code=400, detail="Vehicle name is required.")
+        if not phone_raw and not email_raw:
+            raise HTTPException(status_code=400, detail="Either mobile phone number or email address is required.")
+        if len(password) < 4:
+            raise HTTPException(status_code=400, detail="Password must contain at least 4 characters.")
 
-        # Verify OTP
-        _otp_tracker.verify_attempt(phone, otp_code)
+        # Normalize phone
+        phone_digits = "".join(filter(str.isdigit, phone_raw))
+        if len(phone_digits) >= 10:
+            phone = f"+91{phone_digits[-10:]}"
+        elif phone_raw:
+            phone = phone_raw
+        else:
+            phone = f"+91{phone_digits if phone_digits else '0000000000'}"
+
+        # Normalize email
+        if email_raw and "@" in email_raw:
+            email_clean = email_raw
+        else:
+            clean_digits = phone_digits[-10:] if len(phone_digits) >= 10 else "driver"
+            email_clean = f"driver_{clean_digits}@erickshaw.in"
+
+        username_clean = (username or "").strip().lower()
+        if not username_clean or len(username_clean) < 3:
+            username_clean = email_clean.split("@")[0] if "@" in email_clean else f"driver_{phone[-4:]}"
 
         # Check existing user
         stmt_check = select(User).where(
@@ -633,7 +620,6 @@ class AuthService:
         assignment = DriverVehicleAssignment(
             driver_id=driver_prof.id,
             vehicle_id=vehicle.id,
-            is_primary=True,
             is_active=True
         )
         self.db.add(assignment)
@@ -682,10 +668,19 @@ class AuthService:
     ) -> Dict[str, Any]:
         ident = identifier.strip()
         ident_lower = ident.lower()
+        phone_digits = "".join(filter(str.isdigit, ident))
+        phone_norm = f"+91{phone_digits[-10:]}" if len(phone_digits) >= 10 else ident
 
-        stmt = select(User).where(
-            or_(User.phone_number == ident, User.email == ident_lower, User.username == ident_lower)
-        )
+        conditions = [
+            User.email == ident_lower,
+            User.username == ident_lower,
+            User.phone_number == ident,
+            User.phone_number == phone_norm
+        ]
+        if len(phone_digits) >= 10:
+            conditions.append(User.phone_number.endswith(phone_digits[-10:]))
+
+        stmt = select(User).where(or_(*conditions))
         res = await self.db.execute(stmt)
         user = res.scalars().first()
 
@@ -696,17 +691,15 @@ class AuthService:
             raise HTTPException(status_code=403, detail="Account is deactivated. Please contact support.")
 
         mode = login_type.strip().upper()
-        if mode == "PASSWORD":
-            if not password:
-                raise HTTPException(status_code=400, detail="Password is required for password login.")
-            if not user.password_hash or not verify_password(password, user.password_hash):
-                raise HTTPException(status_code=401, detail="Invalid password.")
-        elif mode == "OTP":
-            if not otp_code:
-                raise HTTPException(status_code=400, detail="OTP code is required for OTP login.")
-            _otp_tracker.verify_attempt(user.phone_number, otp_code)
-        else:
-            raise HTTPException(status_code=400, detail="Invalid login_type. Must be 'PASSWORD' or 'OTP'.")
+        if mode != "PASSWORD":
+            raise HTTPException(
+                status_code=400,
+                detail="OTP login has been decommissioned. Please sign in with your registered password."
+            )
+        if not password:
+            raise HTTPException(status_code=400, detail="Password is required for password login.")
+        if not user.password_hash or not verify_password(password, user.password_hash):
+            raise HTTPException(status_code=401, detail="Invalid password.")
 
         # Session token
         token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
@@ -743,10 +736,19 @@ class AuthService:
     async def request_forgot_password_passcode(self, identifier: str) -> Dict[str, Any]:
         ident = identifier.strip()
         ident_lower = ident.lower()
+        phone_digits = "".join(filter(str.isdigit, ident))
+        phone_norm = f"+91{phone_digits[-10:]}" if len(phone_digits) >= 10 else ident
 
-        stmt = select(User).where(
-            or_(User.phone_number == ident, User.email == ident_lower, User.username == ident_lower)
-        )
+        conditions = [
+            User.email == ident_lower,
+            User.username == ident_lower,
+            User.phone_number == ident,
+            User.phone_number == phone_norm
+        ]
+        if len(phone_digits) >= 10:
+            conditions.append(User.phone_number.endswith(phone_digits[-10:]))
+
+        stmt = select(User).where(or_(*conditions))
         res = await self.db.execute(stmt)
         user = res.scalars().first()
 

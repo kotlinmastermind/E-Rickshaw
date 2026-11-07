@@ -28,7 +28,6 @@ from backend.api.schemas.auth import (
     UnifiedLoginPayload,
     ForgotPasswordOtpPayload,
     ForgotPasswordResetPayload,
-    FirebaseVerifyPayload,
     UserDto,
     AuthResponse
 )
@@ -54,20 +53,6 @@ async def verify_otp(payload: OtpVerifyPayload, request: Request, db: AsyncSessi
         phone_number=payload.phone_number,
         otp_code=payload.otp_code,
         role=payload.role,
-        ip_address=ip,
-        user_agent=ua
-    )
-
-@router.post("/firebase/verify", dependencies=[Depends(auth_rate_limiter)])
-async def verify_firebase(payload: FirebaseVerifyPayload, request: Request, db: AsyncSession = Depends(get_db)):
-    service = AuthService(db)
-    ip = request.client.host if request.client else None
-    ua = request.headers.get("user-agent")
-    return await service.verify_firebase_auth(
-        phone_number=payload.phone_number,
-        role=payload.role,
-        firebase_uid=payload.firebase_uid,
-        id_token=payload.id_token,
         ip_address=ip,
         user_agent=ua
     )
@@ -356,6 +341,7 @@ async def driver_signup(payload: DriverSignupPayload, request: Request, db: Asyn
         user_agent=ua
     )
 
+@router.post("/login", dependencies=[Depends(auth_rate_limiter)])
 @router.post("/login/unified", dependencies=[Depends(auth_rate_limiter)])
 async def unified_login(payload: UnifiedLoginPayload, request: Request, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)

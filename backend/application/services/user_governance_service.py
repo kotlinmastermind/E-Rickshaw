@@ -4,7 +4,7 @@ import os
 import json
 import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, or_, and_
 from fastapi import HTTPException, status, UploadFile
 from backend.domain.models import (
     User, CustomerProfile, Session, TrustedDevice, UserSavedPhone,
@@ -108,8 +108,21 @@ class UserGovernanceService:
         ip_address: Optional[str] = None, user_agent: Optional[str] = None,
         require_admin: bool = False,
     ) -> Dict[str, Any]:
-        email = email.strip().lower()
-        stmt = select(User).where(User.email == email)
+        ident = email.strip()
+        ident_lower = ident.lower()
+        phone_digits = "".join(filter(str.isdigit, ident))
+        phone_norm = f"+91{phone_digits[-10:]}" if len(phone_digits) >= 10 else ident
+
+        conditions = [
+            User.email == ident_lower,
+            User.username == ident_lower,
+            User.phone_number == ident,
+            User.phone_number == phone_norm
+        ]
+        if len(phone_digits) >= 10:
+            conditions.append(User.phone_number.endswith(phone_digits[-10:]))
+
+        stmt = select(User).where(or_(*conditions))
         res = await self.db.execute(stmt)
         user = res.scalar_one_or_none()
 

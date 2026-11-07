@@ -51,3 +51,4 @@ def test_geofence_point_in_polygon():
     assert point_in_polygon(28.6328, 77.2197, polygon) is True
     # Outside point (India Gate)
     assert point_in_polygon(28.6129, 77.2295, polygon) is False
+

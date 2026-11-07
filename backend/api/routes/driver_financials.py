@@ -4,7 +4,7 @@ Part 11 (Features 251 to 275)
 """
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.database.session import get_db
@@ -27,8 +27,19 @@ class RecordBreakPayload(BaseModel):
     duration_minutes: int = Field(15, ge=5, le=120)
 
 class WeeklyGoalPayload(BaseModel):
-    target_earnings_rupees: float = Field(..., gt=0)
+    target_earnings_rupees: Optional[float] = None
+    target_net_cents: Optional[int] = None
     target_trips: Optional[int] = Field(None, gt=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_goal_fields(cls, values):
+        if isinstance(values, dict):
+            if values.get("target_earnings_rupees") is None and values.get("target_net_cents") is not None:
+                values["target_earnings_rupees"] = float(values["target_net_cents"]) / 100.0
+            elif values.get("target_earnings_rupees") is not None and values.get("target_net_cents") is None:
+                values["target_net_cents"] = int(round(float(values["target_earnings_rupees"]) * 100))
+        return values
 
 class AddPayoutAccountPayload(BaseModel):
     account_type: str = Field("BANK_ACCOUNT", pattern="^(BANK_ACCOUNT|UPI)$")
@@ -90,6 +101,7 @@ async def get_ride_earnings_breakdown(
 
 
 @router.get("/shifts/current")
+@router.get("/shift/status")
 async def get_current_shift(
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
@@ -99,6 +111,7 @@ async def get_current_shift(
 
 
 @router.post("/shifts/start")
+@router.post("/shift/start")
 async def start_shift(
     payload: StartShiftPayload,
     user: User = Depends(get_current_driver),
@@ -113,6 +126,7 @@ async def start_shift(
 
 
 @router.post("/shifts/end")
+@router.post("/shift/end")
 async def end_shift(
     payload: EndShiftPayload,
     user: User = Depends(get_current_driver),
@@ -126,6 +140,7 @@ async def end_shift(
 
 
 @router.post("/shifts/break")
+@router.post("/shift/break")
 async def record_break(
     payload: RecordBreakPayload,
     user: User = Depends(get_current_driver),
@@ -149,6 +164,7 @@ async def get_utilization_report(
 
 
 @router.get("/goals/weekly")
+@router.get("/weekly-goal")
 async def get_weekly_goal(
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
@@ -158,20 +174,25 @@ async def get_weekly_goal(
 
 
 @router.post("/goals/weekly")
+@router.post("/weekly-goal")
+@router.put("/goals/weekly")
+@router.put("/weekly-goal")
 async def update_weekly_goal(
     payload: WeeklyGoalPayload,
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
 ):
     """Feature 257: Set or update weekly earnings goal."""
+    target_val = payload.target_earnings_rupees if payload.target_earnings_rupees is not None else 0.0
     return await DriverFinancialService(db).update_weekly_goal(
         user_id_or_driver_id=user.id,
-        target_earnings_rupees=payload.target_earnings_rupees,
+        target_earnings_rupees=target_val,
         target_trips=payload.target_trips
     )
 
 
 @router.get("/incentives")
+@router.get("/bonuses")
 async def get_incentives(
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
@@ -220,6 +241,7 @@ async def set_primary_payout_account(
 
 
 @router.get("/payout-schedule")
+@router.get("/payout-schedules")
 async def get_payout_schedule(
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
@@ -229,6 +251,7 @@ async def get_payout_schedule(
 
 
 @router.put("/payout-schedule")
+@router.put("/payout-schedules")
 async def update_payout_schedule(
     payload: UpdatePayoutSchedulePayload,
     user: User = Depends(get_current_driver),
@@ -239,6 +262,7 @@ async def update_payout_schedule(
 
 
 @router.get("/reconciliation")
+@router.get("/payouts/reconciliation")
 async def get_payout_reconciliation(
     period: Optional[str] = Query(None, description="e.g. 2026-W43"),
     user: User = Depends(get_current_driver),
@@ -278,6 +302,7 @@ async def log_expense(
 
 
 @router.get("/export/csv")
+@router.get("/export-csv")
 async def export_earnings_csv(
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)

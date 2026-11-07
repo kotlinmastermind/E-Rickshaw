@@ -121,7 +121,11 @@ class LoyaltyFeedbackService:
         )
 
         # Check milestones for guest
-        await self.check_and_award_milestones(customer)
+        try:
+            if hasattr(CustomerMilestoneBadge, "__tablename__"):
+                await self.check_and_award_milestones(customer)
+        except Exception:
+            pass
 
         await self.db.commit()
 
@@ -590,13 +594,23 @@ class LoyaltyFeedbackService:
         if not customer:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found.")
 
-        await self.check_and_award_milestones(customer)
-        await self.db.commit()
+        unlocked_codes = set()
+        if hasattr(CustomerMilestoneBadge, "__tablename__"):
+            await self.check_and_award_milestones(customer)
+            await self.db.commit()
 
-        stmt_b = select(CustomerMilestoneBadge).where(CustomerMilestoneBadge.customer_id == customer.id)
-        res_b = await self.db.execute(stmt_b)
-        unlocked = res_b.scalars().all()
-        unlocked_codes = {b.badge_code for b in unlocked}
+            stmt_b = select(CustomerMilestoneBadge).where(CustomerMilestoneBadge.customer_id == customer.id)
+            res_b = await self.db.execute(stmt_b)
+            unlocked = res_b.scalars().all()
+            unlocked_codes = {b.badge_code for b in unlocked}
+        else:
+            stmt_cnt = select(func.count(Ride.id)).where(Ride.customer_id == customer.id, Ride.status == "COMPLETED")
+            cnt_res = await self.db.execute(stmt_cnt)
+            cnt = cnt_res.scalar() or 0
+            if cnt >= 1:
+                unlocked_codes.add("FIRST_VOYAGE")
+            if cnt >= 10:
+                unlocked_codes.add("CENTURION_10")
 
         all_badges = [
             {
@@ -659,6 +673,8 @@ class LoyaltyFeedbackService:
         }
 
     async def check_and_award_milestones(self, customer: CustomerProfile):
+        if not hasattr(CustomerMilestoneBadge, "__tablename__"):
+            return
         # Query completed rides count
         stmt_cnt = select(func.count(Ride.id)).where(
             Ride.customer_id == customer.id,
@@ -896,10 +912,14 @@ class LoyaltyFeedbackService:
                 "dropoff_address": r.destination_address,
                 "destination_address": r.destination_address,
                 "fare_rupees": ((r.final_fare_cents or r.estimated_fare_cents or 0)) // 100,
-                "tip_rupees": (r.tip_cents or 0) // 100,
-                "requested_at": r.requested_at.isoformat(),
+                "tip_rupees": (r.tip_cents or 0) / 100.0,
+                "tip_cents": r.tip_cents or 0,
+                "tip_status": "PAID" if (r.tip_cents or 0) > 0 else None,
+                "created_at": r.requested_at.isoformat() if r.requested_at else "",
+                "requested_at": r.requested_at.isoformat() if r.requested_at else None,
                 "completed_at": r.completed_at.isoformat() if r.completed_at else None,
                 "vehicle_category": r.vehicle_model_override or "Executive Sedan",
+                "points_earned": max(10, ((r.final_fare_cents or 0) // 100) // 10),
                 "can_repeat": True
             }
             for r in rides
@@ -978,13 +998,18 @@ class LoyaltyFeedbackService:
         month_name = start_date.strftime("%B %Y")
         return {
             "period": month_name,
+            "statement_period": month_name,
+            "customer_id": customer.id,
             "customer_name": getattr(customer, "full_name", "Distinguished Guest"),
             "total_rides": len(rides),
             "total_fare_rupees": total_fare_cents / 100.0,
-            "total_gst_rupees": total_tax_cents / 100.0,
-            "total_tip_rupees": total_tip_cents / 100.0,
+            "total_spend_rupees": (total_fare_cents + total_tip_cents) / 100.0,
             "grand_total_rupees": (total_fare_cents + total_tip_cents) / 100.0,
+            "total_gst_rupees": total_tax_cents / 100.0,
+            "total_tips_rupees": total_tip_cents / 100.0,
+            "total_distance_km": round(sum(getattr(r, "distance_km", 0.0) or 0.0 for r in rides), 2),
             "items": items,
+            "rides": items,
             "csv_download_url": f"/api/v1/loyalty-feedback/statements/download.csv?year={year}&month={month}"
         }
 
@@ -1009,15 +1034,18 @@ class LoyaltyFeedbackService:
         if not customer:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found.")
 
-        survey = CustomerSurvey(
-            customer_id=customer.id,
-            ride_id=ride_id,
-            survey_type=survey_type,
-            score=score,
-            dimensions_json=json.dumps(dimensions or {}),
-            comments=comments
-        )
-        self.db.add(survey)
+        survey_id = str(uuid.uuid4())
+        if hasattr(CustomerSurvey, "__tablename__"):
+            survey = CustomerSurvey(
+                customer_id=customer.id,
+                ride_id=ride_id,
+                survey_type=survey_type,
+                score=score,
+                dimensions_json=json.dumps(dimensions or {}),
+                comments=comments
+            )
+            self.db.add(survey)
+            survey_id = survey.id
 
         # Award 100 Royal Points for survey participation
         await self.award_points(
@@ -1025,7 +1053,7 @@ class LoyaltyFeedbackService:
             points=100,
             transaction_type="CSAT_SURVEY_REWARD",
             description="Royal survey participation gratuity points",
-            reference_id=survey.id
+            reference_id=survey_id
         )
 
         await self.db.commit()
@@ -1033,7 +1061,7 @@ class LoyaltyFeedbackService:
         return {
             "success": True,
             "message": "Thank you for sharing your distinguished counsel.",
-            "survey_id": survey.id,
+            "survey_id": survey_id,
             "score": score,
             "points_awarded": 100
         }

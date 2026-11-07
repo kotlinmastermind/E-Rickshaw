@@ -13,7 +13,7 @@ class OtpRequestPayload(BaseModel):
 class OtpVerifyPayload(BaseModel):
     """Payload to verify OTP and authenticate session."""
     phone_number: str = Field(..., json_schema_extra={"example": "+919876543210"})
-    otp_code: str = Field(..., min_length=4, max_length=6, json_schema_extra={"example": "123456"})
+    otp_code: Optional[str] = Field(default=None)
     role: str = Field(default="customer", json_schema_extra={"example": "customer"})
 
 class TokenRefreshPayload(BaseModel):
@@ -79,23 +79,23 @@ class EmailVerifyPayload(BaseModel):
     code: str = Field(..., min_length=6, max_length=6)
 
 class CustomerSignupPayload(BaseModel):
-    phone_number: str = Field(..., min_length=10)
-    email: str = Field(..., json_schema_extra={"example": "customer@erickshaw.in"})
-    full_name: str = Field(..., min_length=2)
-    password: str = Field(..., min_length=6)
-    username: str = Field(..., min_length=3)
-    otp_code: str = Field(..., min_length=4, max_length=6)
+    phone_number: Optional[str] = Field(default=None)
+    email: Optional[str] = Field(default=None)
+    full_name: str = Field(default="Valued Customer")
+    password: str = Field(..., min_length=4)
+    username: Optional[str] = Field(default=None)
+    otp_code: Optional[str] = Field(default=None)
 
 class DriverSignupPayload(BaseModel):
-    phone_number: str = Field(..., min_length=10)
-    email: str = Field(..., json_schema_extra={"example": "driver@erickshaw.in"})
-    full_name: str = Field(..., min_length=2)
-    password: str = Field(..., min_length=6)
-    username: str = Field(..., min_length=3)
-    otp_code: str = Field(..., min_length=4, max_length=6)
-    vehicle_type: str = Field(default="SEDAN")
-    vehicle_name: str = Field(..., min_length=2, json_schema_extra={"example": "Electric Auto L5M"})
-    vehicle_no: str = Field(..., min_length=5, json_schema_extra={"example": "DL-01-ER-1001"})
+    phone_number: Optional[str] = Field(default=None)
+    email: Optional[str] = Field(default=None)
+    full_name: str = Field(default="Driver Partner")
+    password: str = Field(..., min_length=4)
+    username: Optional[str] = Field(default=None)
+    otp_code: Optional[str] = Field(default=None)
+    vehicle_type: str = Field(default="E_RICKSHAW_STANDARD")
+    vehicle_name: Optional[str] = Field(default="Electric Rickshaw")
+    vehicle_no: Optional[str] = Field(default="DL-01-ER-1001")
 
 class UnifiedLoginPayload(BaseModel):
     login_type: str = Field(default="PASSWORD")
@@ -108,14 +108,8 @@ class ForgotPasswordOtpPayload(BaseModel):
 
 class ForgotPasswordResetPayload(BaseModel):
     identifier: str = Field(..., min_length=3)
-    otp_code: str = Field(..., min_length=4, max_length=6)
+    otp_code: Optional[str] = Field(default=None)
     new_password: str = Field(..., min_length=6)
-
-class FirebaseVerifyPayload(BaseModel):
-    phone_number: str = Field(..., json_schema_extra={"example": "+919876543210"})
-    role: str = Field(default="customer")
-    firebase_uid: Optional[str] = None
-    id_token: Optional[str] = None
 
 class UserDto(BaseModel):
     """Standardized user representation across all endpoints."""

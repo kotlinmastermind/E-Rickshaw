@@ -990,6 +990,9 @@ def sync_missing_columns(connection):
         logger.warning(f"Error syncing columns: {e}")
 
 async def init_db():
+    if getattr(settings, "ENVIRONMENT", "") == "production":
+        logger.info("Production mode detected: Skipping automatic DDL schema creation and table modification to protect existing Supabase schema.")
+        return
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     try:

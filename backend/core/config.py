@@ -1,25 +1,25 @@
 import os
+from typing import Optional, List
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "E-Rickshaw Ride-Hailing Platform"
     API_V1_STR: str = "/api/v1"
-    ENVIRONMENT: str = "development"
-    DEBUG: bool = True
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    DEBUG: bool = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
 
     # Database (Supabase PostgreSQL Production Pooler)
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://postgres.lmrvubzinkziexaqozlw:sunil%40%2375620@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres?ssl=require"
-    )
-    DATABASE_URL_SYNC: str = os.getenv(
-        "DATABASE_URL_SYNC",
-        "postgresql+psycopg2://postgres.lmrvubzinkziexaqozlw:sunil%40%2375620@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres?sslmode=require"
-    )
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+    DATABASE_URL_SYNC: str = os.getenv("DATABASE_URL_SYNC", "")
 
-    # Security
-    SECRET_KEY: str = "e-rickshaw-mobility-secret-key-prod-2026-auth-token-secured"
+    # Supabase Credentials
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+    SUPABASE_PUBLISHABLE_KEY: str = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+
+    # Security (JWT Authentication)
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     OTP_EXPIRE_SECONDS: int = 300  # 5 minutes
@@ -27,34 +27,32 @@ class Settings(BaseSettings):
     OTP_RESEND_COOLDOWN_SECONDS: int = 60
 
     # Upstash Cloud Redis (In-Memory Cache & Pub/Sub)
-    REDIS_URL: Optional[str] = os.getenv(
-        "REDIS_URL",
-        "rediss://default:gQAAAAAAA6FxAAIgcDFlMDE2ZjlkMDZlZTQ0ODIwYjg5NzdiODFkMmU1YzM4OQ@optimum-aphid-237937.upstash.io:6379"
-    )
+    REDIS_URL: Optional[str] = os.getenv("REDIS_URL", None)
+    UPSTASH_REDIS_REST_URL: Optional[str] = os.getenv("UPSTASH_REDIS_REST_URL", None)
+    UPSTASH_REDIS_REST_TOKEN: Optional[str] = os.getenv("UPSTASH_REDIS_REST_TOKEN", None)
 
     # Mapbox Web Services Integration (Directions, Geocoding, Matrix & Isochrone)
-    MAPBOX_SECRET_TOKEN: Optional[str] = os.getenv("MAPBOX_SECRET_TOKEN", "")
+    MAPBOX_SECRET_TOKEN: Optional[str] = os.getenv("MAPBOX_SECRET_TOKEN", None)
     MAPBOX_PUBLIC_TOKEN: Optional[str] = os.getenv("MAPBOX_PUBLIC_TOKEN", "")
     GOOGLE_MAPS_API_KEY: Optional[str] = None
 
     # Payments Integration (Razorpay / UPI)
-    RAZORPAY_KEY_ID: Optional[str] = os.getenv("RAZORPAY_KEY_ID", "rzp_live_TunGmzfpWlcatO")
-    RAZORPAY_KEY_SECRET: Optional[str] = os.getenv("RAZORPAY_KEY_SECRET", "CSIhchRsNTdHx270VZthHSUE")
-    RAZORPAY_WEBHOOK_SECRET: Optional[str] = os.getenv("RAZORPAY_WEBHOOK_SECRET", "CSIhchRsNTdHx270VZthHSUE")
+    RAZORPAY_KEY_ID: Optional[str] = os.getenv("RAZORPAY_KEY_ID", None)
+    RAZORPAY_KEY_SECRET: Optional[str] = os.getenv("RAZORPAY_KEY_SECRET", None)
+    RAZORPAY_WEBHOOK_SECRET: Optional[str] = os.getenv("RAZORPAY_WEBHOOK_SECRET", None)
 
-    # Primary SMS Gateway: Google Firebase Authentication (Free 10,000 Telecom SMS/month)
-    SMS_PROVIDER: str = "firebase"
+    # Primary SMS Gateway
+    SMS_PROVIDER: str = os.getenv("SMS_PROVIDER", "console")
 
-    # FCM Notifications
-    FCM_CREDENTIALS_PATH: Optional[str] = "backend/firebase-service-account.json"
-    FIREBASE_SERVICE_ACCOUNT_JSON: Optional[str] = None
+    # Push Notifications
+    PUSH_PROVIDER: str = os.getenv("PUSH_PROVIDER", "websocket")
 
     # Storage
     STORAGE_LOCAL_DIR: str = "./uploads/documents"
     STORAGE_MAX_FILE_SIZE_BYTES: int = 5 * 1024 * 1024  # 5 MB
 
     # CORS
-    BACKEND_CORS_ORIGINS: list[str] = [
+    BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -62,17 +60,55 @@ class Settings(BaseSettings):
         "http://10.0.2.2:8000",  # Android Emulator Host
         "https://e-rickshaw-admin.onrender.com",
         "https://e-rickshaw-api.onrender.com",
-        "https://e-rickshaw-z32z.onrender.com"
+        "https://e-rickshaw-z32z.onrender.com",
+        "https://vaisentra.github.io"
     ]
 
     model_config = SettingsConfigDict(
-        env_file=None if os.getenv("TESTING") == "1" else ".env",
+        env_file=None if os.getenv("TESTING") == "1" else [".env", "backend/.env"],
         case_sensitive=True,
         extra="allow"
     )
 
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        # Testing mode overrides
+        if os.getenv("TESTING") == "1":
+            if not self.DATABASE_URL or not self.DATABASE_URL.startswith("sqlite"):
+                self.DATABASE_URL = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=shared&uri=true"
+            if not self.DATABASE_URL_SYNC or not self.DATABASE_URL_SYNC.startswith("sqlite"):
+                self.DATABASE_URL_SYNC = "sqlite:///file:testdb?mode=memory&cache=shared&uri=true"
+            if not self.SECRET_KEY:
+                self.SECRET_KEY = "test-secret-key-for-unit-testing-purposes"
+            return self
+
+        # Strict production validation
+        if self.ENVIRONMENT == "production":
+            if not self.DATABASE_URL:
+                raise ValueError("CRITICAL CONFIGURATION ERROR: DATABASE_URL must be provided via environment variables in production.")
+            if not self.DATABASE_URL_SYNC:
+                raise ValueError("CRITICAL CONFIGURATION ERROR: DATABASE_URL_SYNC must be provided via environment variables in production.")
+            if not self.SECRET_KEY or self.SECRET_KEY in (
+                "dev-insecure-secret-key-change-in-production",
+                "change-me",
+                "secret",
+                "default"
+            ):
+                raise ValueError("CRITICAL CONFIGURATION ERROR: A secure SECRET_KEY must be provided via environment variables in production.")
+        else:
+            # Safe development defaults when .env is absent
+            if not self.DATABASE_URL:
+                self.DATABASE_URL = "sqlite+aiosqlite:///./dev.db"
+            if not self.DATABASE_URL_SYNC:
+                self.DATABASE_URL_SYNC = "sqlite:///./dev.db"
+            if not self.SECRET_KEY:
+                self.SECRET_KEY = "dev-insecure-secret-key-change-in-production"
+
+        return self
+
 settings = Settings()
 if os.getenv("TESTING") == "1":
-    settings.DATABASE_URL = "sqlite+aiosqlite:///./luxury_ride.db"
-    settings.DATABASE_URL_SYNC = "sqlite:///./luxury_ride.db"
+    settings.DATABASE_URL = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=shared&uri=true"
+    settings.DATABASE_URL_SYNC = "sqlite:///file:testdb?mode=memory&cache=shared&uri=true"
     settings.REDIS_URL = None
+

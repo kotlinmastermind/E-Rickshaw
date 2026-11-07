@@ -51,6 +51,14 @@ async def get_current_user(
 
     return user
 
+async def get_current_active_user(user: User = Depends(get_current_user)) -> User:
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account is inactive."
+        )
+    return user
+
 def require_role(required_role: str):
     async def role_checker(user: User = Depends(get_current_user)) -> User:
         if user.role != required_role and user.role != "admin":

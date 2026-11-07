@@ -1,3 +1,4 @@
+import os
 import math
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
@@ -114,15 +115,16 @@ class MapsProvider(ABC):
         }
 
     async def validate_address(self, address_line: str, locality: Optional[str] = None, postal_code: Optional[str] = None) -> Dict[str, Any]:
+        formatted = f"{address_line}, {locality}" if locality else address_line
         return {
             "valid": True,
             "verdict": "CONFIRMED",
-            "formatted_address": f"{address_line}, {locality or 'Delhi NCR'}, India",
+            "formatted_address": formatted,
             "components": {
                 "street": address_line,
-                "locality": locality or "Central",
-                "postal_code": postal_code or "110001",
-                "country": "IN"
+                "locality": locality or "Metropolitan Area",
+                "postal_code": postal_code or "10001",
+                "country": "GLOBAL"
             },
             "confidence": "HIGH",
             "provider_mode": "APPROXIMATE_VALIDATOR"

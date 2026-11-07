@@ -23,9 +23,13 @@ class IntermediateStopInput(BaseModel):
     entrance_landmark: Optional[str] = None
 
 class RideRequestPayload(BaseModel):
-    estimate_id: str
+    estimate_id: Optional[str] = None
     pickup_address: str
     destination_address: str
+    pickup_latitude: Optional[float] = None
+    pickup_longitude: Optional[float] = None
+    destination_latitude: Optional[float] = None
+    destination_longitude: Optional[float] = None
     payment_method: str = "UPI"
     is_scheduled: bool = False
     scheduled_pickup_time: Optional[datetime] = None
@@ -213,6 +217,10 @@ async def create_ride_request(
         estimate_id=payload.estimate_id,
         pickup_address=payload.pickup_address,
         destination_address=payload.destination_address,
+        pickup_latitude=payload.pickup_latitude,
+        pickup_longitude=payload.pickup_longitude,
+        destination_latitude=payload.destination_latitude,
+        destination_longitude=payload.destination_longitude,
         payment_method=payload.payment_method,
         is_scheduled=payload.is_scheduled,
         scheduled_pickup_time=payload.scheduled_pickup_time,

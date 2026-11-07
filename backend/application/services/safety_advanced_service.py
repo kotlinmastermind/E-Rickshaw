@@ -69,6 +69,46 @@ CURATED_SAFE_ZONES = [
         "zone_type": "AIRPORT_VIP_LANE",
         "amenities": ["CISF Monitored Area", "Dedicated Luxury Lane", "Flight Information Boards"],
         "safety_rating": 5.0
+    },
+    {
+        "id": "sz-jfk-t4",
+        "name": "JFK International Terminal 4 - Executive Chauffeur Bay",
+        "address": "Terminal 4 Departures Level, JFK Airport, New York, NY",
+        "latitude": 40.6413,
+        "longitude": -73.7781,
+        "zone_type": "AIRPORT_VIP_LANE",
+        "amenities": ["Port Authority Monitored", "Dedicated Chauffeur Staging", "24/7 Security Patrol"],
+        "safety_rating": 5.0
+    },
+    {
+        "id": "sz-lhr-t5",
+        "name": "London Heathrow Terminal 5 - VIP Chauffeur Concourse",
+        "address": "Terminal 5 Inner Ring Way, Hounslow, London, UK",
+        "latitude": 51.4700,
+        "longitude": -0.4543,
+        "zone_type": "AIRPORT_VIP_LANE",
+        "amenities": ["Met Police Perimeter", "Dedicated Private Valet Bay", "EV Fast Charging"],
+        "safety_rating": 5.0
+    },
+    {
+        "id": "sz-dxb-t3",
+        "name": "Dubai International Terminal 3 - Chauffeur Portico",
+        "address": "Airport Road, Terminal 3 Arrivals, Dubai, UAE",
+        "latitude": 25.2532,
+        "longitude": 55.3657,
+        "zone_type": "AIRPORT_VIP_LANE",
+        "amenities": ["Dubai Police Security", "Air Conditioned Executive Lounge", "Priority Dispatch Lane"],
+        "safety_rating": 5.0
+    },
+    {
+        "id": "sz-hnd-t3",
+        "name": "Tokyo Haneda Airport Terminal 3 - Premier Portico",
+        "address": "2-6-5 Hanedakuko, Ota City, Tokyo, Japan",
+        "latitude": 35.5494,
+        "longitude": 139.7798,
+        "zone_type": "AIRPORT_VIP_LANE",
+        "amenities": ["Airport Security Marshals", "Executive Limousine Staging", "Undercover Valet"],
+        "safety_rating": 5.0
     }
 ]
 
@@ -530,7 +570,7 @@ class SafetyAdvancedService:
             "photo_url": driver_user.avatar_url if driver_user and driver_user.avatar_url else "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d",
             "security_badge_id": driver_profile.security_badge_id or "GC-SEC-8821",
             "background_check_status": driver_profile.background_check_status or "VERIFIED",
-            "background_check_authority": "Delhi Police Special Branch & MHA Security Audit",
+            "background_check_authority": "Global Law Enforcement & Security Verification Bureau",
             "background_check_date": driver_profile.background_check_date.strftime("%B %Y") if driver_profile.background_check_date else "January 2026",
             "academy_certified": driver_profile.academy_certified,
             "academy_level": driver_profile.academy_level or "MASTER_CHAUFFEUR",
