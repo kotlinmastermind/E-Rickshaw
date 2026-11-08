@@ -12,19 +12,26 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
-    url = settings.DATABASE_URL_SYNC
+    url = config.get_main_option("sqlalchemy.url") or settings.DATABASE_URL_SYNC
+    is_sqlite = url.startswith("sqlite")
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        render_as_batch=is_sqlite,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL_SYNC
+    if not configuration.get("sqlalchemy.url"):
+        configuration["sqlalchemy.url"] = settings.DATABASE_URL_SYNC
+    
+    db_url = configuration["sqlalchemy.url"]
+    is_sqlite = db_url.startswith("sqlite")
+
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
@@ -33,7 +40,9 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            render_as_batch=is_sqlite,
         )
 
         with context.begin_transaction():

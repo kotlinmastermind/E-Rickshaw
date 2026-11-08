@@ -1,4 +1,5 @@
 import pytest
+import uuid
 from datetime import datetime, timezone, timedelta
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
@@ -18,7 +19,7 @@ from backend.api.deps import get_current_admin
 @pytest.mark.asyncio
 async def test_admin_document_review_positive_and_audit(db_session):
     """Test that an authorized MFA admin can verify and reject driver documents, recording audit logs."""
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
 
     # 1. Setup driver and driver profile
     driver_user = User(
@@ -153,7 +154,7 @@ async def test_admin_document_review_positive_and_audit(db_session):
 @pytest.mark.asyncio
 async def test_admin_document_review_security_boundaries_and_rejections(db_session):
     """Test all negative boundaries: unauth, cross-driver mismatch, invalid status, missing reason."""
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
 
     # Create two drivers
     driver_user1 = User(phone_number=f"+9191{str(unique_suffix)[-8:]}", email=f"d1_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
@@ -289,7 +290,7 @@ async def test_admin_document_review_security_boundaries_and_rejections(db_sessi
 @pytest.mark.asyncio
 async def test_driver_approval_workflow_gated_by_documents(db_session):
     """Test full onboarding workflow: doc review is required, but verification alone does NOT approve driver."""
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
 
     driver_user = User(
         phone_number=f"+9195{str(unique_suffix)[-8:]}",
@@ -391,7 +392,7 @@ async def test_driver_approval_workflow_gated_by_documents(db_session):
 @pytest.mark.asyncio
 async def test_support_recovery_endpoint_truthful_message(db_session):
     """Verify that support self-service recovery returns honest instructions without claiming SMS dispatch."""
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
 
     user = User(
         phone_number=f"+9190{str(unique_suffix)[-8:]}",

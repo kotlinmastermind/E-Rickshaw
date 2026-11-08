@@ -476,11 +476,19 @@ async def accept_ride(
 @router.post("/{ride_id}/arrive")
 async def driver_arrived(
     ride_id: str,
+    payload: Optional[Dict[str, Any]] = None,
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
 ):
     service = RideService(db)
-    return await service.driver_arrived(driver_user_id=user.id, ride_id=ride_id)
+    lat = payload.get("latitude") if payload else None
+    lng = payload.get("longitude") if payload else None
+    return await service.driver_arrived(
+        driver_user_id=user.id,
+        ride_id=ride_id,
+        driver_latitude=lat,
+        driver_longitude=lng
+    )
 
 @router.post("/{ride_id}/start")
 async def start_trip(

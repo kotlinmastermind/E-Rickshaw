@@ -32,7 +32,11 @@ def upgrade() -> None:
     ]:
         op.add_column("notifications", column)
     op.create_index("ix_notifications_next_attempt_at", "notifications", ["next_attempt_at"])
-    op.create_unique_constraint("uq_notifications_dedupe_key", "notifications", ["dedupe_key"])
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        op.create_index("uq_notifications_dedupe_key", "notifications", ["dedupe_key"], unique=True)
+    else:
+        op.create_unique_constraint("uq_notifications_dedupe_key", "notifications", ["dedupe_key"])
 
     op.create_table(
         "user_notification_settings",
@@ -107,7 +111,11 @@ def downgrade() -> None:
     op.drop_index("ix_notification_consent_audits_user_id", table_name="notification_consent_audits")
     op.drop_table("notification_consent_audits")
     op.drop_table("user_notification_settings")
-    op.drop_constraint("uq_notifications_dedupe_key", "notifications", type_="unique")
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        op.drop_index("uq_notifications_dedupe_key", table_name="notifications")
+    else:
+        op.drop_constraint("uq_notifications_dedupe_key", "notifications", type_="unique")
     op.drop_index("ix_notifications_next_attempt_at", table_name="notifications")
     for column in ["last_error", "last_attempt_at", "attempt_count", "next_attempt_at", "scheduled_at", "action_url", "dedupe_key", "critical", "channel"]:
         op.drop_column("notifications", column)

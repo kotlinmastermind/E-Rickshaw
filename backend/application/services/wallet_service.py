@@ -1,7 +1,7 @@
 """
 Wallet Service - Production Ledger & Financial Invariants
 Handles immutable double-entry credit and debit transactions, balance queries,
-compensating transactions, and idempotency protection.
+compensating transactions, row locking, and idempotency protection.
 """
 import uuid
 from typing import Optional, List, Dict, Any
@@ -13,8 +13,22 @@ from backend.domain.models import Wallet, WalletTransaction
 
 class WalletService:
     @staticmethod
-    async def get_or_create_wallet(session: AsyncSession, user_id: str, currency: str = "INR") -> Wallet:
+    async def get_or_create_wallet(
+        session: AsyncSession,
+        user_id: str,
+        currency: str = "INR",
+        for_update: bool = False
+    ) -> Wallet:
+        """
+        Retrieves or creates a wallet for the given user.
+        Supports pessimistic row locking (Task 037) to prevent concurrent race conditions.
+        """
         stmt = select(Wallet).where(Wallet.user_id == user_id)
+        if for_update:
+            bind = session.bind
+            if bind and getattr(bind.dialect, "name", "") != "sqlite":
+                stmt = stmt.with_for_update()
+
         res = await session.execute(stmt)
         wallet = res.scalars().first()
         if not wallet:
@@ -52,9 +66,9 @@ class WalletService:
         if amount_cents <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Credit amount must be positive integer cents")
 
-        wallet = await WalletService.get_or_create_wallet(session, user_id)
+        wallet = await WalletService.get_or_create_wallet(session, user_id, for_update=True)
 
-        # Idempotency check
+        # Idempotency check (Task 034, 038)
         key = idempotency_key or f"tx_cred_{uuid.uuid4()}"
         if idempotency_key:
             idem_stmt = select(WalletTransaction).where(WalletTransaction.idempotency_key == idempotency_key)
@@ -95,7 +109,7 @@ class WalletService:
         if amount_cents <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Debit amount must be positive integer cents")
 
-        wallet = await WalletService.get_or_create_wallet(session, user_id)
+        wallet = await WalletService.get_or_create_wallet(session, user_id, for_update=True)
 
         if not allow_negative and wallet.balance_cents < amount_cents:
             raise HTTPException(
@@ -127,6 +141,67 @@ class WalletService:
         session.add(tx)
         await session.flush()
         return tx
+
+    @staticmethod
+    async def reconcile_wallet_balance(
+        session: AsyncSession,
+        user_id: str,
+        auto_correct: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Task 039: Reconciles the cached wallet balance against the authoritative ledger.
+        Computes SUM(CREDIT) - SUM(DEBIT) from immutable WalletTransaction records.
+        """
+        wallet = await WalletService.get_or_create_wallet(session, user_id, for_update=True)
+
+        stmt = select(WalletTransaction).where(WalletTransaction.wallet_id == wallet.id)
+        res = await session.execute(stmt)
+        txs = res.scalars().all()
+
+        ledger_balance = 0
+        for tx in txs:
+            if "CREDIT" in tx.transaction_type:
+                ledger_balance += tx.amount_cents
+            elif "DEBIT" in tx.transaction_type:
+                ledger_balance -= tx.amount_cents
+
+        cached_balance = wallet.balance_cents
+        discrepancy = cached_balance - ledger_balance
+
+        if discrepancy != 0 and auto_correct:
+            wallet.balance_cents = ledger_balance
+
+        return {
+            "wallet_id": wallet.id,
+            "user_id": user_id,
+            "cached_balance_cents": cached_balance,
+            "ledger_balance_cents": ledger_balance,
+            "discrepancy_cents": discrepancy,
+            "reconciled": True if (discrepancy == 0 or auto_correct) else False,
+            "transaction_count": len(txs)
+        }
+
+    @staticmethod
+    async def process_wallet_refund(
+        session: AsyncSession,
+        user_id: str,
+        amount_cents: int,
+        payment_id: str,
+        reason: str
+    ) -> WalletTransaction:
+        """
+        Task 040: Refunds a payment amount back to the user's wallet with immutable ledger entry.
+        """
+        return await WalletService.credit_wallet(
+            session=session,
+            user_id=user_id,
+            amount_cents=amount_cents,
+            transaction_type="CREDIT",
+            source="REFUND",
+            reference_id=payment_id,
+            description=f"Refund for payment {payment_id}: {reason}",
+            idempotency_key=f"refund_{payment_id}_{amount_cents}"
+        )
 
     @staticmethod
     async def create_compensating_entry(

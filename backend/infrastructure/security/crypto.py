@@ -61,8 +61,10 @@ def decode_jwt_token(token: str) -> Dict[str, Any]:
 
 def verify_hmac_signature(payload_bytes: bytes, signature: str, secret: str) -> bool:
     """Verify HMAC SHA-256 webhook signature in constant time."""
+    if not (signature and secret):
+        return False
     expected = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    return hmac.compare_digest(expected.lower(), signature.lower())
 
 def verify_otp_constant_time(provided_otp: str, actual_otp: str) -> bool:
     """Compare two OTP strings in constant time to prevent timing attacks."""

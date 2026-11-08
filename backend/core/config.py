@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # Security (JWT Authentication)
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))  # 15 minutes short-lived access token
     REFRESH_TOKEN_GRACE_PERIOD_SECONDS: int = int(os.getenv("REFRESH_TOKEN_GRACE_PERIOD_SECONDS", "10"))
     WEBAUTHN_ENABLED: bool = os.getenv("WEBAUTHN_ENABLED", "false").lower() in ("true", "1", "t")
     OTP_EXPIRE_SECONDS: int = 300  # 5 minutes

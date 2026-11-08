@@ -552,6 +552,21 @@ async def driver_dispatch_websocket(
         logger.info(f"Driver {driver_id} disconnected from /ws/driver/dispatch.")
     finally:
         ws_manager.disconnect_driver_with_pubsub(driver_id, user_id)
+        # Task 073: Clean up active state and notify admin on driver disconnection
+        try:
+            await redis_client.delete(f"active_driver:{driver_id}")
+            await redis_client.delete(f"driver_loc:{user_id}")
+            await ws_manager.broadcast_admin({
+                "event_type": "DRIVER_OFFLINE",
+                "payload": {
+                    "id": user_id,
+                    "driver_id": driver_id,
+                    "status": "OFFLINE",
+                    "disconnected_at": datetime.now(timezone.utc).isoformat()
+                }
+            })
+        except Exception as clean_err:
+            logger.debug(f"Driver offline cleanup error: {clean_err}")
 
 
 # ---------------------------------------------------------------------------
@@ -629,11 +644,19 @@ async def location_telemetry_websocket(
         return
 
     await websocket.accept()
+    last_update_ts = 0.0
+    MIN_UPDATE_INTERVAL = 0.5  # 500ms throttling to avoid event bus saturation
+
     try:
         while True:
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
+                continue
+
+            # Task 072: Throttle location updates to at most once per 500ms
+            now_ts = time.time()
+            if (now_ts - last_update_ts) < MIN_UPDATE_INTERVAL:
                 continue
 
             try:
@@ -648,6 +671,7 @@ async def location_telemetry_websocket(
                 now_iso = datetime.now(timezone.utc).isoformat()
 
                 if -90 <= lat <= 90 and -180 <= lng <= 180:
+                    last_update_ts = now_ts
                     cache_key = f"driver_loc:{user_id}" if role == "driver" else f"customer_loc:{user_id}"
                     loc_data = {
                         "latitude": lat,
@@ -697,6 +721,22 @@ async def location_telemetry_websocket(
                 pass
     except WebSocketDisconnect:
         pass
+    finally:
+        # Task 073: Clean up driver location cache on disconnect
+        if role == "driver":
+            try:
+                await redis_client.delete(f"driver_loc:{user_id}")
+                await ws_manager.broadcast_admin({
+                    "event_type": "DRIVER_OFFLINE",
+                    "payload": {
+                        "id": user_id,
+                        "driver_id": user_id,
+                        "status": "OFFLINE",
+                        "disconnected_at": datetime.now(timezone.utc).isoformat()
+                    }
+                })
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

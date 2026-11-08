@@ -147,6 +147,29 @@ class AdminService:
             changes_json=json.dumps({"approval_status": status, "reason": rejection_reason})
         )
         self.db.add(audit)
+
+        # Task 080: Notify driver on verification outcome
+        driver = await self.db.get(DriverProfile, driver_id)
+        if driver and driver.user_id:
+            from backend.application.services.notification_service import NotificationService
+            notif_service = NotificationService(self.db)
+            title = f"Chauffeur Accreditation {status.title()}"
+            body = (
+                "Your driver partner application has been approved. You may now go online."
+                if status == "APPROVED"
+                else f"Your driver application status has been updated to {status}: {rejection_reason or 'Contact support for details.'}"
+            )
+            try:
+                await notif_service.create_notification(
+                    user_id=driver.user_id,
+                    event_type="DRIVER_APPROVAL_UPDATE",
+                    title=title,
+                    body=body,
+                    critical=True
+                )
+            except Exception:
+                pass
+
         await self.db.commit()
         return {"driver_id": driver_id, "approval_status": status}
 
@@ -291,27 +314,52 @@ class AdminService:
     async def get_analytics_reports(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
         """
         Calculates operational, financial, and shared-ride utilization metrics matching
-        the authoritative ledger without double-counting.
+        the authoritative ledger without double-counting, filtered by arbitrary date ranges.
         """
         from backend.domain.models import PooledTrip, PooledBooking, Payment, PaymentEvent
 
+        # Build date range filter conditions
+        ride_date_filters = []
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+                ride_date_filters.append(Ride.requested_at >= start_dt)
+            except Exception:
+                pass
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                ride_date_filters.append(Ride.requested_at <= end_dt)
+            except Exception:
+                pass
+
         # 1. Ride volume metrics
-        total_res = await self.db.execute(select(func.count(Ride.id)))
+        total_stmt = select(func.count(Ride.id))
+        if ride_date_filters:
+            total_stmt = total_stmt.where(*ride_date_filters)
+        total_res = await self.db.execute(total_stmt)
         total_rides = total_res.scalar_one()
 
-        completed_res = await self.db.execute(select(func.count(Ride.id)).where(Ride.status == "COMPLETED"))
+        completed_stmt = select(func.count(Ride.id)).where(Ride.status == "COMPLETED")
+        if ride_date_filters:
+            completed_stmt = completed_stmt.where(*ride_date_filters)
+        completed_res = await self.db.execute(completed_stmt)
         completed_rides = completed_res.scalar_one()
 
-        cancelled_res = await self.db.execute(select(func.count(Ride.id)).where(Ride.status == "CANCELLED"))
+        cancelled_stmt = select(func.count(Ride.id)).where(Ride.status == "CANCELLED")
+        if ride_date_filters:
+            cancelled_stmt = cancelled_stmt.where(*ride_date_filters)
+        cancelled_res = await self.db.execute(cancelled_stmt)
         cancelled_rides = cancelled_res.scalar_one()
 
         completion_rate = round((completed_rides / total_rides * 100), 2) if total_rides > 0 else 0.0
         cancellation_rate = round((cancelled_rides / total_rides * 100), 2) if total_rides > 0 else 0.0
 
         # 2. Financial totals
-        gbv_res = await self.db.execute(
-            select(func.sum(Ride.final_fare_cents)).where(Ride.status == "COMPLETED")
-        )
+        gbv_stmt = select(func.sum(Ride.final_fare_cents)).where(Ride.status == "COMPLETED")
+        if ride_date_filters:
+            gbv_stmt = gbv_stmt.where(*ride_date_filters)
+        gbv_res = await self.db.execute(gbv_stmt)
         gross_booking_cents = gbv_res.scalar_one() or 0
 
         # Collected payments via Payment records

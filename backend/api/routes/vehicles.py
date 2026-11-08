@@ -259,6 +259,16 @@ class CategoryCreatePayload(BaseModel):
     icon_url: Optional[str] = "https://images.unsplash.com/photo-1558981806-ec527fa84c39"
 
 
+class CategoryUpdatePayload(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=64)
+    description: Optional[str] = Field(None, max_length=512)
+    capacity: Optional[int] = Field(None, ge=1, le=10)
+    sort_order: Optional[int] = Field(None, ge=1)
+    is_active: Optional[bool] = None
+    is_electric: Optional[bool] = None
+    icon_url: Optional[str] = None
+
+
 @router.post("/categories")
 async def create_vehicle_category(
     payload: CategoryCreatePayload,
@@ -278,6 +288,43 @@ async def create_vehicle_category(
     await db.commit()
     await db.refresh(cat)
     return {"status": "CREATED", "id": cat.id, "name": cat.name, "code": cat.code}
+
+
+@router.put("/categories/{category_id}")
+async def update_vehicle_category(
+    category_id: str,
+    payload: CategoryUpdatePayload,
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(VehicleCategory).where(VehicleCategory.id == category_id)
+    cat = (await db.execute(stmt)).scalar_one_or_none()
+    if not cat:
+        raise HTTPException(404, "Vehicle category not found")
+
+    if payload.name is not None:
+        cat.name = payload.name.strip()
+    if payload.description is not None:
+        cat.description = payload.description.strip()
+    if payload.capacity is not None:
+        cat.capacity = payload.capacity
+    if payload.sort_order is not None:
+        cat.sort_order = payload.sort_order
+    if payload.is_active is not None:
+        cat.is_active = payload.is_active
+    if payload.is_electric is not None:
+        cat.is_electric = payload.is_electric
+    if payload.icon_url is not None:
+        cat.icon_url = payload.icon_url
+
+    await db.commit()
+    await db.refresh(cat)
+    return {
+        "status": "UPDATED",
+        "id": cat.id,
+        "name": cat.name,
+        "code": cat.code,
+        "is_active": cat.is_active
+    }
 
 
 @router.delete("/categories/{category_id}")

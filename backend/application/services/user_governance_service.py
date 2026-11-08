@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, or_, and_
 from fastapi import HTTPException, status, UploadFile
 from backend.domain.models import (
-    User, CustomerProfile, Session, TrustedDevice, UserSavedPhone,
+    User, CustomerProfile, DriverProfile, Session, TrustedDevice, UserSavedPhone,
     UserPreferences, AccountDeletionRequest, DataExportArchive,
     Ride, Payment, AdministrativeAuditLog
 )
@@ -769,6 +769,56 @@ class UserGovernanceService:
         req.cancelled_at = datetime.now(timezone.utc)
         await self.db.commit()
         return {"status": "CANCELLED", "message": "Account deletion request successfully cancelled. Your VIP membership remains active."}
+
+    async def execute_scheduled_account_purges(self) -> Dict[str, Any]:
+        """
+        Task 046: Executes actual scheduled account deletion and PII anonymization
+        for all deletion requests that have completed their grace period cooldown.
+        """
+        now = datetime.now(timezone.utc)
+        stmt = select(AccountDeletionRequest).where(
+            AccountDeletionRequest.status == "PENDING_GRACE_PERIOD",
+            AccountDeletionRequest.scheduled_purge_at <= now
+        )
+        res = await self.db.execute(stmt)
+        expired_requests = res.scalars().all()
+
+        purged_count = 0
+        for req in expired_requests:
+            user = (await self.db.execute(select(User).where(User.id == req.user_id))).scalar_one_or_none()
+            if user:
+                # 1. Invalidate and revoke all active sessions
+                from sqlalchemy import update
+                await self.db.execute(
+                    update(Session).where(Session.user_id == user.id).values(is_revoked=True)
+                )
+
+                # 2. Anonymize personal identification credentials
+                anon_id = user.id[:8]
+                user.phone_number = f"+9199000{anon_id}"
+                user.email = f"purged_{anon_id}@anonymized.internal"
+                user.full_name = "Deactivated Account"
+                user.is_active = False
+
+                # 3. Soft-delete or update associated profile
+                cust = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))).scalar_one_or_none()
+                if cust:
+                    cust.tier = "PURGED"
+
+                driver = (await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))).scalar_one_or_none()
+                if driver:
+                    driver.approval_status = "DELETED"
+                    driver.account_deletion_requested = True
+
+            req.status = "PURGED"
+            purged_count += 1
+
+        await self.db.commit()
+        return {
+            "status": "SUCCESS",
+            "purged_accounts_count": purged_count,
+            "executed_at": now.isoformat()
+        }
 
     # 21. Download Personal Data Archive
     async def request_data_export(self, user_id: str) -> Dict[str, Any]:

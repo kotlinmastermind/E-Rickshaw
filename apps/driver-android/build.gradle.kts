@@ -71,49 +71,33 @@ android {
 
 
     signingConfigs {
-
         create("release") {
+            val storePath = System.getenv("RELEASE_STORE_FILE") ?: System.getenv("KEYSTORE_PATH") ?: "${rootDir}/keystore/release-upload-key.jks"
+            val storePass = System.getenv("RELEASE_STORE_PASSWORD") ?: System.getenv("KEYSTORE_PASSWORD") ?: "LuxuryApp2026!#"
+            val alias = System.getenv("RELEASE_KEY_ALIAS") ?: System.getenv("KEY_ALIAS") ?: "luxury-upload-key"
+            val keyPass = System.getenv("RELEASE_KEY_PASSWORD") ?: System.getenv("KEY_PASSWORD") ?: "LuxuryApp2026!#"
 
-            storeFile = file("${rootDir}/keystore/release-upload-key.jks")
-
-            storePassword = "LuxuryApp2026!#"
-
-            keyAlias = "luxury-upload-key"
-
-            keyPassword = "LuxuryApp2026!#"
-
+            storeFile = file(storePath)
+            storePassword = storePass
+            keyAlias = alias
+            keyPassword = keyPass
         }
-
     }
 
-
-
     buildTypes {
-
         debug {
-
-            signingConfig = signingConfigs.getByName("release")
-
+            // Task 090: Debug builds use default Android debug keystore
+            isMinifyEnabled = false
         }
-
         release {
-
             isMinifyEnabled = true
-
             isShrinkResources = true
-
             signingConfig = signingConfigs.getByName("release")
-
             proguardFiles(
-
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-
                 "proguard-rules.pro"
-
             )
-
         }
-
     }
 
     compileOptions {

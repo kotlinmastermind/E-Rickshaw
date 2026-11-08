@@ -18,9 +18,13 @@ RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 COPY backend /app/backend
 COPY database /app/database
 COPY alembic.ini /app/alembic.ini
-COPY .env /app/.env
 
-RUN mkdir -p /app/uploads/documents
+# Task 094: Create unprivileged user and assign ownership
+RUN useradd -u 1001 -m luxuryuser && \
+    mkdir -p /app/uploads/documents && \
+    chown -R luxuryuser:luxuryuser /app
+
+USER luxuryuser
 
 EXPOSE 8000
 

@@ -142,29 +142,49 @@ async def create_razorpay_order(
     import time
     from backend.core.config import settings
     from backend.integrations.payments.provider import get_payment_provider
-    from backend.domain.models import Ride, Payment
+    from backend.domain.models import Ride, Payment, CustomerProfile
     from sqlalchemy import select
 
     provider = get_payment_provider()
-    
-    # Calculate amount in paise (1 INR = 100 paise)
-    if payload.amount_cents:
+
+    # Task 027: Resolve customer profile without hardcoded GUIDs
+    prof_stmt = select(CustomerProfile).where(CustomerProfile.user_id == user.id)
+    prof = (await db.execute(prof_stmt)).scalar_one_or_none()
+    if not prof:
+        prof = CustomerProfile(
+            user_id=user.id,
+            preferred_payment_method="RAZORPAY",
+            rating_average=5.0,
+            rating_count=0
+        )
+        db.add(prof)
+        await db.flush()
+    customer_profile_id = prof.id
+
+    # Task 028 & 029: Server-side fare calculation and ride ownership verification
+    if payload.ride_id:
+        ride_res = await db.execute(select(Ride).where(Ride.id == payload.ride_id))
+        ride = ride_res.scalar_one_or_none()
+        if not ride:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ride {payload.ride_id} not found.")
+
+        if ride.customer_id != customer_profile_id and user.role != "admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not own this ride.")
+
+        amount_paise = int(ride.final_fare_cents or ride.estimated_fare_cents or 0)
+        if amount_paise <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Journey fare calculation has not finalized.")
+    elif payload.amount_cents:
         amount_paise = int(payload.amount_cents)
     elif payload.amount_rupees:
         amount_paise = int(round(payload.amount_rupees * 100))
-    elif payload.ride_id:
-        ride_res = await db.execute(select(Ride).where(Ride.id == payload.ride_id))
-        ride = ride_res.scalar_one_or_none()
-        if ride:
-            amount_paise = int(ride.final_fare_cents or ride.estimated_fare_cents or 10000)
-        else:
-            amount_paise = 10000
     else:
-        amount_paise = 10000 # default ₹100
+        amount_paise = 10000  # Default ₹100 for topups
 
     receipt = payload.receipt or f"rcpt_{payload.ride_id or user.id[:8]}_{int(time.time())}"
     notes = payload.notes or {}
     notes["user_id"] = user.id
+    notes["customer_id"] = customer_profile_id
     if payload.ride_id:
         notes["ride_id"] = payload.ride_id
 
@@ -175,16 +195,12 @@ async def create_razorpay_order(
         notes=notes
     )
 
-    # If ride_id is given, synchronize Payment in database
+    # Task 026: Synchronize Payment in database with valid idempotency_key and customer_id
     if payload.ride_id:
         stmt = select(Payment).where(Payment.ride_id == payload.ride_id)
         res = await db.execute(stmt)
         payment = res.scalar_one_or_none()
         if not payment:
-            from backend.domain.models import CustomerProfile
-            prof = (await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))).scalar_one_or_none()
-            customer_profile_id = prof.id if prof else "5216e677-a59b-4b93-a9b6-c5c60f0e5881"
-
             payment = Payment(
                 ride_id=payload.ride_id,
                 customer_id=customer_profile_id,
@@ -193,13 +209,16 @@ async def create_razorpay_order(
                 status="CREATED",
                 payment_method="RAZORPAY",
                 provider_name="RAZORPAY",
-                provider_order_id=order.get("id")
+                provider_order_id=order.get("id"),
+                idempotency_key=f"pay_{payload.ride_id}_{order.get('id')}"
             )
             db.add(payment)
         else:
             payment.provider_order_id = order.get("id")
             payment.amount_cents = amount_paise
             payment.provider_name = "RAZORPAY"
+            if not payment.idempotency_key:
+                payment.idempotency_key = f"pay_{payload.ride_id}_{order.get('id')}"
         await db.commit()
 
     return {
@@ -220,10 +239,12 @@ async def verify_razorpay_payment(
     db: AsyncSession = Depends(get_db)
 ):
     from backend.integrations.payments.provider import get_payment_provider
-    from backend.domain.models import Payment, Ride
+    from backend.domain.models import Payment, Ride, CustomerProfile
     from sqlalchemy import select
 
     provider = get_payment_provider()
+
+    # Task 031: Cryptographic HMAC-SHA256 signature verification
     is_valid = provider.verify_payment_signature(
         razorpay_order_id=payload.razorpay_order_id,
         razorpay_payment_id=payload.razorpay_payment_id,
@@ -236,26 +257,43 @@ async def verify_razorpay_payment(
             detail="Razorpay payment verification failed: Invalid HMAC-SHA256 signature."
         )
 
-    # Find and update Payment in DB
-    payment = None
-    if payload.ride_id:
-        p_res = await db.execute(select(Payment).where(Payment.ride_id == payload.ride_id))
-        payment = p_res.scalar_one_or_none()
-    
-    if not payment and payload.razorpay_order_id:
-        p_res = await db.execute(select(Payment).where(Payment.provider_order_id == payload.razorpay_order_id))
-        payment = p_res.scalar_one_or_none()
+    # Task 030: Exact Razorpay order association
+    stmt = select(Payment).where(Payment.provider_order_id == payload.razorpay_order_id)
+    payment = (await db.execute(stmt)).scalar_one_or_none()
+    if not payment and payload.ride_id:
+        payment = (await db.execute(select(Payment).where(Payment.ride_id == payload.ride_id))).scalar_one_or_none()
 
-    if payment:
-        payment.status = "CAPTURED"
-        payment.provider_payment_id = payload.razorpay_payment_id
-        payment.provider_signature = payload.razorpay_signature
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No payment record matches order {payload.razorpay_order_id}."
+        )
 
+    if payload.ride_id and payment.ride_id and payment.ride_id != payload.ride_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Specified ride_id does not match the payment order association."
+        )
 
-    if payload.ride_id:
-        r_res = await db.execute(select(Ride).where(Ride.id == payload.ride_id))
+    # Task 029: Payment ownership verification
+    prof = (await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))).scalar_one_or_none()
+    if prof and payment.customer_id != prof.id and user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to verify payment for this journey."
+        )
+
+    # Update Payment state to CAPTURED
+    payment.status = "CAPTURED"
+    payment.provider_payment_id = payload.razorpay_payment_id
+    payment.provider_signature = payload.razorpay_signature
+    payment.provider_order_id = payload.razorpay_order_id
+
+    target_ride_id = payment.ride_id or payload.ride_id
+    if target_ride_id:
+        r_res = await db.execute(select(Ride).where(Ride.id == target_ride_id))
         ride = r_res.scalar_one_or_none()
-        if ride:
+        if ride and ride.status in ["IN_PROGRESS", "ACCEPTED", "ARRIVED", "STARTED"]:
             ride.status = "COMPLETED"
 
     await db.commit()
@@ -265,7 +303,7 @@ async def verify_razorpay_payment(
         "message": "Payment verified and recorded successfully.",
         "payment_id": payload.razorpay_payment_id,
         "order_id": payload.razorpay_order_id,
-        "ride_id": payload.ride_id,
+        "ride_id": target_ride_id,
         "status": "CAPTURED"
     }
 

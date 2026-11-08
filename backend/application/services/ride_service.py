@@ -333,7 +333,13 @@ class RideService:
             "destination_address": ride.destination_address
         }
 
-    async def driver_arrived(self, driver_user_id: str, ride_id: str) -> Dict[str, Any]:
+    async def driver_arrived(
+        self,
+        driver_user_id: str,
+        ride_id: str,
+        driver_latitude: Optional[float] = None,
+        driver_longitude: Optional[float] = None
+    ) -> Dict[str, Any]:
         ride = await self.get_ride_by_id(ride_id)
         driver = await self._get_driver_by_user_id(driver_user_id)
 
@@ -341,6 +347,33 @@ class RideService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not the assigned chauffeur for this trip.")
 
         RideStateMachine.validate_transition(ride.status, RideStatus.ARRIVED.value, ActorRole.DRIVER.value)
+
+        # Task 062: Proximity verification (500m radius)
+        if driver_latitude is None or driver_longitude is None:
+            loc_stmt = (
+                select(DriverLocation)
+                .where(DriverLocation.driver_id == driver.id)
+                .order_by(DriverLocation.recorded_at.desc())
+            )
+            loc_res = await self.db.execute(loc_stmt)
+            latest_loc = loc_res.scalars().first()
+            if latest_loc:
+                driver_latitude = latest_loc.latitude
+                driver_longitude = latest_loc.longitude
+
+        if driver_latitude is not None and driver_longitude is not None and ride.pickup_latitude is not None and ride.pickup_longitude is not None:
+            import math
+            dlat = math.radians(driver_latitude - ride.pickup_latitude)
+            dlon = math.radians(driver_longitude - ride.pickup_longitude)
+            a = math.sin(dlat / 2)**2 + math.cos(math.radians(ride.pickup_latitude)) * math.cos(math.radians(driver_latitude)) * math.sin(dlon / 2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            distance_meters = 6371000 * c
+            MAX_ARRIVAL_PROXIMITY_METERS = 500
+            if distance_meters > MAX_ARRIVAL_PROXIMITY_METERS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Arrival verification failed: You are {round(distance_meters)}m from pickup point. Must be within {MAX_ARRIVAL_PROXIMITY_METERS}m to mark arrived."
+                )
 
         now = datetime.now(timezone.utc)
         ride.status = RideStatus.ARRIVED.value
@@ -369,14 +402,13 @@ class RideService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized for this ride.")
 
         from backend.domain.models import RideOperationalEvent
-        from backend.domain.models import RideOperationalEvent
-        if hasattr(RideOperationalEvent, "__tablename__"):
-            start_check_result = await self.db.execute(select(RideOperationalEvent).where(
-                RideOperationalEvent.ride_id == ride.id,
-                RideOperationalEvent.actor_user_id == driver_user_id,
-                RideOperationalEvent.action == "START_CHECKLIST"
-            ).order_by(RideOperationalEvent.created_at.desc()).limit(1))
-            start_check = start_check_result.scalar_one_or_none()
+        start_check_result = await self.db.execute(select(RideOperationalEvent).where(
+            RideOperationalEvent.ride_id == ride.id,
+            RideOperationalEvent.actor_user_id == driver_user_id,
+            RideOperationalEvent.action == "START_CHECKLIST"
+        ).order_by(RideOperationalEvent.created_at.desc()).limit(1))
+        start_check = start_check_result.scalar_one_or_none()
+        if start_check:
             try:
                 checks = json.loads(start_check.details_json) if start_check else {}
             except (TypeError, json.JSONDecodeError):
@@ -423,13 +455,13 @@ class RideService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized for this ride.")
 
         from backend.domain.models import RideOperationalEvent
-        if hasattr(RideOperationalEvent, "__tablename__"):
-            checklist_result = await self.db.execute(select(RideOperationalEvent).where(
-                RideOperationalEvent.ride_id == ride.id,
-                RideOperationalEvent.actor_user_id == driver_user_id,
-                RideOperationalEvent.action == "COMPLETION_CHECKLIST"
-            ).order_by(RideOperationalEvent.created_at.desc()).limit(1))
-            completion_checklist = checklist_result.scalar_one_or_none()
+        checklist_result = await self.db.execute(select(RideOperationalEvent).where(
+            RideOperationalEvent.ride_id == ride.id,
+            RideOperationalEvent.actor_user_id == driver_user_id,
+            RideOperationalEvent.action == "COMPLETION_CHECKLIST"
+        ).order_by(RideOperationalEvent.created_at.desc()).limit(1))
+        completion_checklist = checklist_result.scalar_one_or_none()
+        if completion_checklist:
             try:
                 checks = json.loads(completion_checklist.details_json) if completion_checklist else {}
             except (TypeError, json.JSONDecodeError):
@@ -546,6 +578,20 @@ class RideService:
         ride.cancellation_reason = reason
         ride.cancelled_by_role = actor_role
 
+        # Task 061: Cancellation fee calculation based on grace window
+        cancellation_fee_cents = 0
+        if actor_role == ActorRole.CUSTOMER.value and prev_status in (RideStatus.ASSIGNED.value, RideStatus.ARRIVED.value):
+            # Grace window: 2 minutes (120 seconds) from assignment
+            GRACE_PERIOD_SECONDS = 120
+            assigned_time = ride.assigned_at
+            if assigned_time:
+                if assigned_time.tzinfo is None:
+                    assigned_time = assigned_time.replace(tzinfo=timezone.utc)
+                elapsed_seconds = (now - assigned_time).total_seconds()
+                if elapsed_seconds > GRACE_PERIOD_SECONDS:
+                    fare_rule = (await self.db.execute(select(FareRule).where(FareRule.id == ride.fare_rule_id))).scalar_one_or_none()
+                    cancellation_fee_cents = fare_rule.cancellation_fee_cents if fare_rule else 1000
+
         # If a driver was assigned, free them
         if ride.assigned_driver_id:
             avail_stmt = (
@@ -561,14 +607,19 @@ class RideService:
             new_status=RideStatus.CANCELLED.value,
             triggered_by_user_id=user_id,
             trigger_actor=actor_role,
-            notes=f"Cancelled with reason: {reason}"
+            notes=f"Cancelled with reason: {reason}. Cancellation fee: {cancellation_fee_cents} paise"
         )
         self.db.add(event)
         await self.db.commit()
 
         await self._broadcast_ride_update(ride.id, RideStatus.CANCELLED.value)
 
-        return {"ride_id": ride.id, "status": ride.status, "cancelled_at": now.isoformat()}
+        return {
+            "ride_id": ride.id,
+            "status": ride.status,
+            "cancelled_at": now.isoformat(),
+            "cancellation_fee_cents": cancellation_fee_cents
+        }
 
     async def rate_driver(
         self,

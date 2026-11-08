@@ -1,12 +1,17 @@
+import os
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from backend.infrastructure.database.session import get_db
-from backend.api.deps import get_current_driver, get_current_admin
-from backend.domain.models import User
+from backend.api.deps import get_current_driver, get_current_admin, get_current_user
+from backend.domain.models import User, DriverProfile, DriverDocument
 from backend.application.services.driver_onboarding_service import DriverOnboardingService
+from backend.integrations.storage.provider import get_storage_provider, verify_signed_url_token
+from backend.core.config import settings
 
 router = APIRouter(prefix="/driver-onboarding", tags=["Driver Onboarding & Fleet Compliance"])
 
@@ -105,6 +110,62 @@ async def get_document_expiry_reminders(
 @router.get("/documents")
 async def get_onboarding_documents(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
     return await DriverOnboardingService(db).get_onboarding_documents(user.id)
+
+# Task 043: Generate short-lived signed URL for document download
+@router.get("/documents/{document_id}/signed-url")
+async def get_document_signed_url(
+    document_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(DriverDocument).where(DriverDocument.id == document_id)
+    res = await db.execute(stmt)
+    doc = res.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver document not found.")
+
+    # Task 045: Enforce ownership - only the owning driver or admin can access
+    if user.role != "admin":
+        drv_stmt = select(DriverProfile).where(DriverProfile.user_id == user.id)
+        drv_res = await db.execute(drv_stmt)
+        driver_prof = drv_res.scalar_one_or_none()
+        if not driver_prof or doc.driver_id != driver_prof.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: You do not own this document.")
+
+    storage = get_storage_provider()
+    signed_url = await storage.generate_signed_url(doc.storage_path, expires_in_seconds=300)
+    return {
+        "document_id": doc.id,
+        "signed_url": signed_url,
+        "expires_in_seconds": 300
+    }
+
+# Task 043: Authorized secure document download via HMAC-signed token
+@router.get("/documents/download")
+async def download_private_document(
+    file: str = Query(...),
+    expires: int = Query(...),
+    sig: str = Query(...)
+):
+    if not verify_signed_url_token(file, expires, sig):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Signature invalid or document download link expired.")
+
+    base_dir = os.path.abspath(settings.STORAGE_LOCAL_DIR)
+    target_path = os.path.abspath(os.path.join(base_dir, file))
+    if not target_path.startswith(base_dir):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Directory traversal detected.")
+
+    if not os.path.isfile(target_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requested document not found on storage node.")
+
+    return FileResponse(
+        target_path,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename={os.path.basename(target_path)}",
+            "X-Content-Type-Options": "nosniff"
+        }
+    )
 
 # 204, 205, 206: Document Resubmission with rejection reason, guided capture, automated quality checks
 @router.post("/documents/resubmit")

@@ -53,4 +53,10 @@
 -keep class com.google.android.gms.tasks.** { *; }
 -keep class com.google.android.gms.location.** { *; }
 
+# Common Android Core Library & Security
+-keep class com.vaisentra.mobility.core.security.** { *; }
+-keep class com.vaisentra.mobility.core.network.** { *; }
+-keep class com.vaisentra.mobility.core.model.** { *; }
+
+
 

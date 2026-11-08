@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.core.map
+package com.vaisentra.mobility.core.map
 
 import android.Manifest
 import android.annotation.SuppressLint

@@ -1,4 +1,5 @@
 import pytest
+import uuid
 from httpx import AsyncClient, ASGITransport
 from backend.main import app
 
@@ -7,7 +8,8 @@ async def test_customer_signup_and_login_with_email_and_mobile(db_session):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # 1. Customer Sign Up with Email and Password
-        cust_email = f"test_commuter_{id(object())}@erickshaw.in"
+        uid = uuid.uuid4().hex[:8]
+        cust_email = f"test_commuter_{uid}@erickshaw.in"
         cust_phone = "+919876599999"
         signup_res = await ac.post("/api/v1/auth/signup/customer", json={
             "full_name": "Rohan Verma",
@@ -48,7 +50,8 @@ async def test_driver_signup_and_login_with_mobile(db_session):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         driver_phone = "+919999888877"
-        driver_email = f"driver_{id(object())}@erickshaw.in"
+        uid = uuid.uuid4().hex[:8]
+        driver_email = f"driver_{uid}@erickshaw.in"
         
         signup_res = await ac.post("/api/v1/auth/signup/driver", json={
             "full_name": "Sunil Pilot",

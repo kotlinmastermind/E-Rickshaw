@@ -1,4 +1,5 @@
 import pytest
+import uuid
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
 from backend.main import app
@@ -16,7 +17,7 @@ from fastapi import HTTPException
 async def test_driver_signup_defaults_to_pending_and_unverified(db_session):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        unique_suffix = id(object())
+        unique_suffix = uuid.uuid4().int % 100000000
         driver_phone = f"+9198{str(unique_suffix)[-8:]}"
         driver_email = f"pending_driver_{unique_suffix}@erickshaw.in"
 
@@ -51,7 +52,7 @@ async def test_driver_signup_defaults_to_pending_and_unverified(db_session):
 async def test_customer_signup_defaults_to_unverified(db_session):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        unique_suffix = id(object())
+        unique_suffix = uuid.uuid4().int % 100000000
         cust_phone = f"+9197{str(unique_suffix)[-8:]}"
         cust_email = f"new_customer_{unique_suffix}@erickshaw.in"
 
@@ -74,7 +75,7 @@ async def test_customer_signup_defaults_to_unverified(db_session):
 
 @pytest.mark.asyncio
 async def test_pending_driver_cannot_toggle_online(db_session):
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
     user = User(
         phone_number=f"+9196{str(unique_suffix)[-8:]}",
         email=f"pending_online_{unique_suffix}@erickshaw.in",
@@ -102,7 +103,7 @@ async def test_pending_driver_cannot_toggle_online(db_session):
 
 @pytest.mark.asyncio
 async def test_pending_driver_cannot_accept_ride_or_get_offers(db_session):
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
     user = User(
         phone_number=f"+9195{str(unique_suffix)[-8:]}",
         email=f"pending_ops_{unique_suffix}@erickshaw.in",
@@ -133,7 +134,7 @@ async def test_pending_driver_cannot_accept_ride_or_get_offers(db_session):
 
 @pytest.mark.asyncio
 async def test_admin_approval_lifecycle_and_non_admin_rejection(db_session):
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
     # Create driver
     driver_user = User(
         phone_number=f"+9194{str(unique_suffix)[-8:]}",
@@ -224,7 +225,7 @@ async def test_admin_approval_lifecycle_and_non_admin_rejection(db_session):
 
 @pytest.mark.asyncio
 async def test_existing_approved_driver_retains_status_and_goes_online(db_session):
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
     user = User(
         phone_number=f"+9192{str(unique_suffix)[-8:]}",
         email=f"approved_driver_{unique_suffix}@erickshaw.in",
@@ -254,7 +255,7 @@ async def test_existing_approved_driver_retains_status_and_goes_online(db_sessio
 async def test_password_policy_minimum_12_characters(db_session):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        unique_suffix = id(object())
+        unique_suffix = uuid.uuid4().int % 100000000
 
         # Customer signup with short password (< 12 chars) rejected
         res_short = await ac.post("/api/v1/auth/signup/customer", json={
@@ -286,7 +287,7 @@ async def test_password_policy_minimum_12_characters(db_session):
 
 @pytest.mark.asyncio
 async def test_existing_account_with_legacy_hash_can_still_authenticate(db_session):
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
     legacy_password = "old4"  # 4 characters legacy password
     user = User(
         phone_number=f"+9188{str(unique_suffix)[-8:]}",

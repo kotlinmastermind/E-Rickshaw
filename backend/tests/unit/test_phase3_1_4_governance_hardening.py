@@ -1,4 +1,5 @@
 import pytest
+import uuid
 from datetime import datetime, timezone, timedelta
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select
@@ -27,7 +28,7 @@ async def _get_or_create_permission(db_session, key: str, description: str = "Te
 @pytest.mark.asyncio
 async def test_ordinary_admin_cannot_revoke_verified_document(db_session):
     """An authorized admin with 'admin.drivers.documents' but without supervisor permissions cannot revoke a VERIFIED document."""
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
 
     # 1. Driver and verified document
     driver_user = User(phone_number=f"+9191{str(unique_suffix)[-8:]}", email=f"ord_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
@@ -112,7 +113,7 @@ async def test_ordinary_admin_cannot_revoke_verified_document(db_session):
 @pytest.mark.asyncio
 async def test_supervisor_revocation_success_and_audit(db_session):
     """An authorized supervisor (with 'admin.drivers.approve' or superuser) can revoke a VERIFIED document with valid justification."""
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
 
     driver_user = User(phone_number=f"+9193{str(unique_suffix)[-8:]}", email=f"sup_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
     db_session.add(driver_user)
@@ -208,7 +209,7 @@ async def test_supervisor_revocation_success_and_audit(db_session):
 @pytest.mark.asyncio
 async def test_revocation_validation_and_ownership_boundaries(db_session):
     """Test short justification (< 8 chars), cross-driver ownership mismatch, and commit failure rollback."""
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
 
     # Two drivers
     d1 = User(phone_number=f"+9195{str(unique_suffix)[-8:]}", email=f"d1_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
@@ -308,7 +309,7 @@ async def test_revocation_validation_and_ownership_boundaries(db_session):
 @pytest.mark.asyncio
 async def test_driver_approval_payload_hardening(db_session):
     """Test approval payload validation: legacy status, modern approval_status, conflicts (422), extra fields (422)."""
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
 
     driver_user = User(phone_number=f"+9198{str(unique_suffix)[-8:]}", email=f"appr_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
     db_session.add(driver_user)
@@ -418,7 +419,7 @@ async def test_driver_approval_payload_hardening(db_session):
 @pytest.mark.asyncio
 async def test_audit_insertion_failure_rolls_back_document_status(db_session):
     """If audit log generation or commit fails during revocation, document status changes must be rolled back."""
-    unique_suffix = id(object())
+    unique_suffix = uuid.uuid4().int % 100000000
 
     driver_user = User(phone_number=f"+9188{str(unique_suffix)[-8:]}", email=f"rb_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
     db_session.add(driver_user)

@@ -32,6 +32,7 @@ from backend.domain.models import (
 )
 from backend.application.services.ride_service import RideService
 from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
+from backend.infrastructure.security.crypto import generate_secure_otp
 
 class BookingAdvancedService:
     def __init__(self, db: AsyncSession):
@@ -222,7 +223,7 @@ class BookingAdvancedService:
                 destination_address=pickup_address,
                 destination_latitude=ride.pickup_latitude,
                 destination_longitude=ride.pickup_longitude,
-                start_otp=DispatchAdvancedService.generate_secure_otp(6) if hasattr(DispatchAdvancedService, 'generate_secure_otp') else "739104",
+                start_otp=generate_secure_otp(6),
                 is_scheduled=True,
                 scheduled_pickup_time=ret_time,
                 estimated_distance_km=ride.estimated_distance_km,

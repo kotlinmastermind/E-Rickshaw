@@ -34,8 +34,9 @@ open class BaseTokenManager(
         email: String? = null,
         fullName: String? = null
     ) {
+        val encryptedToken = KeystoreTokenEncryptor.encrypt(token) ?: token
         prefs.edit()
-            .putString(KEY_TOKEN, token)
+            .putString(KEY_TOKEN, encryptedToken)
             .putString(KEY_USER_ID, userId)
             .putString(KEY_PHONE, phone)
             .putString(KEY_ROLE, role)
@@ -46,7 +47,10 @@ open class BaseTokenManager(
             .apply()
     }
 
-    fun getToken(): String? = prefs.getString(KEY_TOKEN, null)
+    fun getToken(): String? {
+        val raw = prefs.getString(KEY_TOKEN, null) ?: return null
+        return KeystoreTokenEncryptor.decrypt(raw)
+    }
     fun getUserId(): String? = prefs.getString(KEY_USER_ID, null)
     fun getPhone(): String? = prefs.getString(KEY_PHONE, null)
     fun getRole(): String? = prefs.getString(KEY_ROLE, null)
@@ -56,9 +60,13 @@ open class BaseTokenManager(
     fun isLoggedIn(): Boolean = !getToken().isNullOrBlank()
 
     fun isAppLockEnabled(): Boolean = !prefs.getString(KEY_APP_LOCK_PIN, null).isNullOrBlank()
-    fun getAppLockPin(): String? = prefs.getString(KEY_APP_LOCK_PIN, null)
+    fun getAppLockPin(): String? {
+        val raw = prefs.getString(KEY_APP_LOCK_PIN, null) ?: return null
+        return KeystoreTokenEncryptor.decrypt(raw)
+    }
     fun setAppLockPin(pin: String?) {
-        prefs.edit().putString(KEY_APP_LOCK_PIN, pin).apply()
+        val encryptedPin = KeystoreTokenEncryptor.encrypt(pin)
+        prefs.edit().putString(KEY_APP_LOCK_PIN, encryptedPin).apply()
     }
 
     fun isBiometricEnabled(): Boolean = prefs.getBoolean(KEY_BIOMETRIC_ENABLED, false)

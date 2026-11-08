@@ -37,9 +37,13 @@ PERMISSIONS = [
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    is_sqlite = bind.dialect.name == "sqlite"
+    user_fk = [] if is_sqlite else [sa.ForeignKey("users.id")]
+
     op.add_column("sessions", sa.Column("mfa_verified", sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column("fare_rules", sa.Column("workflow_status", sa.String(20), nullable=False, server_default="ACTIVE"))
-    op.add_column("fare_rules", sa.Column("approved_by", sa.String(36), sa.ForeignKey("users.id"), nullable=True))
+    op.add_column("fare_rules", sa.Column("approved_by", sa.String(36), *user_fk, nullable=True))
     op.add_column("fare_rules", sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("fare_rules", sa.Column("approval_reason", sa.Text(), nullable=True))
 

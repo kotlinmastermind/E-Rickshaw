@@ -582,8 +582,12 @@ class DriverOnboardingService:
             if i < len(selected_answers) and selected_answers[i] == q["correct_index"]:
                 correct_count += 1
 
-        score_percent = round((correct_count / max(1, total_questions)) * 100)
-        passed = score_percent >= 75
+        if total_questions == 0:
+            score_percent = 100
+            passed = True
+        else:
+            score_percent = round((correct_count / total_questions) * 100)
+            passed = score_percent >= 75
 
         # Record progress
         prog_res = await self.db.execute(

@@ -292,6 +292,17 @@ async def cancel_deletion(
     service = UserGovernanceService(db)
     return await service.cancel_deletion_request(current_user.id)
 
+# Task 046: Trigger scheduled account deletion purge for expired grace periods
+@router.post("/deletion/purge-expired")
+async def purge_expired_accounts(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator privileges required.")
+    service = UserGovernanceService(db)
+    return await service.execute_scheduled_account_purges()
+
 # 21. Download Personal Data Archive
 @router.post("/data-export")
 async def request_data_export(
@@ -309,21 +320,35 @@ async def get_latest_data_export(
     service = UserGovernanceService(db)
     return await service.get_latest_data_archive(current_user.id)
 
+# Task 047: Enforce authentication, ownership, and expiration verification on data export downloads
 @router.get("/data-export/download/{archive_id}")
 async def download_archive(
     archive_id: str,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     stmt = select(DataExportArchive).where(DataExportArchive.download_url.like(f"%{archive_id}%"))
     res = await db.execute(stmt)
     archive = res.scalars().first()
     if not archive or not archive.payload_json:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data export archive not found or expired.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Data export archive not found.")
+
+    if current_user.role != "admin" and archive.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: You do not own this data export archive.")
+
+    from datetime import datetime, timezone
+    if archive.expires_at:
+        exp = archive.expires_at if archive.expires_at.tzinfo else archive.expires_at.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Data export archive has expired.")
 
     return Response(
         content=archive.payload_json,
         media_type="application/json",
-        headers={"Content-Disposition": f"attachment; filename=grand_chauffeur_data_archive_{archive.id[:8]}.json"}
+        headers={
+            "Content-Disposition": f"attachment; filename=grand_chauffeur_data_archive_{archive.id[:8]}.json",
+            "X-Content-Type-Options": "nosniff"
+        }
     )
 
 # 25. Customer Membership Profile and Preferences

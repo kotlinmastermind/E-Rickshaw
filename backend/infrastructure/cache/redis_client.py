@@ -198,7 +198,8 @@ class InMemoryPubSub:
 class RedisManager:
     """
     Production-grade Redis Client Manager with connection pooling, automatic failover
-    to an in-memory TTL store, distributed locks, and observability statistics.
+    to an in-memory TTL store, exponential reconnect backoff with jitter, distributed locks,
+    and observability statistics.
     """
     def __init__(self):
         self.redis_url = getattr(settings, "REDIS_URL", None)
@@ -206,15 +207,28 @@ class RedisManager:
         self._fallback = InMemoryCacheFallback()
         self.is_connected = False
         self.stats = CacheStats()
-        self._init_attempted = False
+        self._last_reconnect_attempt = 0.0
+        self._reconnect_backoff = 1.0
+        self._max_reconnect_backoff = 60.0
 
     async def _get_redis(self):
         if not self.redis_url:
             return None
-        if self._redis is None and not self._init_attempted:
-            self._init_attempted = True
-            try:
-                import redis.asyncio as aioredis
+
+        now = time.time()
+        if self.is_connected and self._redis:
+            return self._redis
+
+        # If disconnected, apply exponential backoff with jitter before retrying
+        if (now - self._last_reconnect_attempt) < self._reconnect_backoff:
+            return None
+
+        self._last_reconnect_attempt = now
+        try:
+            import redis.asyncio as aioredis
+            import random
+
+            if self._redis is None:
                 self._redis = aioredis.from_url(
                     self.redis_url,
                     encoding="utf-8",
@@ -222,13 +236,21 @@ class RedisManager:
                     socket_connect_timeout=5.0,
                     socket_timeout=5.0
                 )
-                await self._redis.ping()
-                self.is_connected = True
-                logger.info(f"Connected to Redis cluster at {self.redis_url}")
-            except Exception as e:
-                self.is_connected = False
-                logger.warning(f"Redis unavailable ({e}). Gracefully falling back to in-memory TTL cache.")
-        return self._redis if self.is_connected else None
+            await self._redis.ping()
+            self.is_connected = True
+            self._reconnect_backoff = 1.0
+            logger.info(f"Connected/reconnected to Redis cluster at {self.redis_url}")
+            return self._redis
+        except Exception as e:
+            self.is_connected = False
+            import random
+            jitter = random.uniform(0.1, 0.5)
+            self._reconnect_backoff = min(self._max_reconnect_backoff, self._reconnect_backoff * 2) + jitter
+            logger.warning(
+                f"Redis unavailable ({e}). Reconnecting in {round(self._reconnect_backoff, 2)}s. "
+                "Gracefully falling back to in-memory TTL cache."
+            )
+            return None
 
     async def get(self, key: str) -> Optional[str]:
         client = await self._get_redis()
