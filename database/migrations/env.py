@@ -3,6 +3,7 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 from backend.domain.models.models import Base
 from backend.core.config import settings
+from database.migrations.idempotency import apply_idempotent_operations
 
 config = context.config
 
@@ -10,6 +11,9 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+# Apply safe idempotent operation handling for partial or pre-existing schemas
+apply_idempotent_operations()
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url") or settings.DATABASE_URL_SYNC

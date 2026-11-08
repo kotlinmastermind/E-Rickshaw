@@ -17,6 +17,7 @@ from alembic.script import ScriptDirectory
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import create_engine
 from backend.core.config import settings
+from database.migrations.idempotency import apply_idempotent_operations
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("migration_runner")
@@ -27,6 +28,7 @@ def get_current_revision(connection) -> str:
 
 def run_migrations(target_revision: str = "head", check_only: bool = False) -> bool:
     logger.info("Initializing migration execution...")
+    apply_idempotent_operations()
     sync_url = settings.DATABASE_URL_SYNC
     if not sync_url:
         logger.error("DATABASE_URL_SYNC is not configured.")

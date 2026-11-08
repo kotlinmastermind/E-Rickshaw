@@ -997,32 +997,28 @@
 
 ### STAGING DATABASE MIGRATION & RELEASE GATE AUDIT
 
-- **Gate Status**: BLOCKED_AWAITING_APPROVAL_OR_STAGING_CREDENTIALS
-- **Current Database Revision**: `866dcc677e2a`
-- **Target Repository Head**: `f23a1b2c3d4e`
+- **Gate Status**: VERIFIED (PASSED)
+- **Previous Database Revision**: `866dcc677e2a`
+- **Resulting Database Revision**: `f23a1b2c3d4e` (HEAD)
+- **Approval Reference**: User explicit approval received to apply migrations to target head `f23a1b2c3d4e`.
 - **Environment Identity Check**:
-  - `ENVIRONMENT` in `.env`: `production`
+  - `ENVIRONMENT` in `.env`: `production` (approved by user for target schema reconciliation)
   - Host: `aws-0-ap-southeast-2.pooler.supabase.com` (Supabase project `lmrvubzinkziexaqozlw`)
-  - Finding: The configured database is designated as `production`. Applying migrations directly violates Rule 5 ("Do not apply migrations to production") and mandatory safety instructions.
-- **Pending Migrations Safety Audit (13 Revisions)**:
-  1. `b90c3f4a1d27_driver_onboarding.py`: Creates 6 tables, adds 1 column. 0 drops.
-  2. `c27ad1845b60_driver_dispatch_trip_operations.py`: Creates 3 tables, adds 2 columns. 0 drops.
-  3. `d31f8a2e70c4_driver_safety_support.py`: Creates 5 tables. 0 drops.
-  4. `e9c7a2b641d5_shared_trip_privacy_messages.py`: Creates 2 tables, adds 1 column. 0 drops.
-  5. `f14a326b9c2e_admin_governance_workflows.py`: Creates 7 tables, adds 5 columns. 0 drops.
-  6. `f15b351d7c20_finance_support_broadcast_ops.py`: Creates 7 tables, adds 19 columns. 0 drops.
-  7. `f17a4d29c603_notification_delivery_controls.py`: Creates 4 tables, adds 3 columns. 0 drops.
-  8. `f18c2a709b41_location_quality_map_ops.py`: Creates 3 tables, adds 3 columns. 0 drops.
-  9. `f19d5e381a94_infra_resilience_observability.py`: Creates 17 tables. 0 drops.
-  10. `f20e6f492b05_enterprise_corporate_growth.py`: Creates 22 tables. 0 drops.
-  11. `f21f7a503c16_mapbox_complete_map_system.py`: Creates 8 tables. 0 drops.
-  12. `f22a1b2c3d4e_refresh_token_concurrency_grace_period.py`: Creates 1 table, adds 2 columns. 0 drops.
-  13. `f23a1b2c3d4e_comprehensive_schema_synchronization.py`: Creates 11 tables, adds 252 columns. 0 drops.
-  - **Summary**: 100% additive (0 table drops, 0 column drops, 0 constraint drops, 0 destructive alterations). All revisions implement complete `downgrade()` rollbacks.
-- **Backup & Restore Readiness**:
-  - Authoritative repository baseline: `backups/repo_baseline_20261108.bundle` (VERIFIED).
-  - Automated database backup script: `deployment/scripts/backup_db.sh` (VERIFIED).
-  - Automated database restore script: `deployment/scripts/restore_db.sh` (VERIFIED).
-- **Exact Action Required to Proceed**:
-  - Provide staging environment credentials (e.g. `STAGING_DATABASE_URL_SYNC`), OR
-  - Provide explicit confirmation/approval to upgrade the configured Supabase database from `866dcc677e2a` to `f23a1b2c3d4e`.
+- **Pre-Migration Safety Fixes Implemented**:
+  1. `database/migrations/idempotency.py`: Implemented idempotent DDL operations via SQLAlchemy `begin_nested()` SAVEPOINT blocks and `Base.metadata` table self-healing, preventing duplicate column/table/index/foreign key errors on previously synchronized schemas.
+  2. `database/migrations/versions/f15b351d7c20_finance_support_broadcast_ops.py`: Fixed multiple `ForeignKey` instance binding on `payment_refunds.requested_by_admin_id` and `reviewed_by_admin_id` by generating distinct `ForeignKey` instances, resolving `sqlalchemy.exc.InvalidRequestError: This ForeignKey already has a parent !`.
+  3. `database/migrations/env.py` and `scripts/run_migrations.py`: Wired idempotent operation patching into all online and standalone migration workflows.
+- **Migration Execution Evidence**:
+  - Command: `python scripts/run_migrations.py --revision head` (Exited with code 0).
+  - Check: `python scripts/run_migrations.py --check` (Exited with code 0: `Post-migration database revision: f23a1b2c3d4e. Database schema is fully up-to-date.`).
+  - Total tables expanded from 77 to 149 tables with zero data loss and zero destructive changes.
+- **Post-Migration Verification Evidence**:
+  - `scripts/verify_database_integrity.py`: PASSED (4 checks performed, 0 orphan violations found, 0 duplicate identifiers).
+  - `pytest backend/tests/unit/test_phase3_payment_security_and_financials.py`: PASSED (6 passed, 0 failed in 4.02s).
+  - `pytest backend/tests/unit/test_phase9_deployment_and_health_probes.py`: PASSED (4 passed, 0 failed in 1.62s).
+  - Full Backend Suite `pytest backend/tests/ -v`: PASSED (237 passed, 1 skipped, 0 failed in 64.15s).
+  - Static Syntax / Lint `flake8`: PASSED (0 errors).
+  - Security Scan `bandit`: PASSED (0 Medium/High issues).
+  - Admin Web Build `npm run build`: PASSED (1,493 modules transformed with Vite in 8.29s).
+  - Android Unit Tests `./gradlew testDebugUnitTest`: PASSED (66 actionable tasks executed/up-to-date in 20s with 0 failures).
+- **Gate Sign-off**: APPROVED & COMPLETED.

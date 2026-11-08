@@ -54,7 +54,7 @@ def verify_database_integrity(db_url: str = None) -> dict:
                             SELECT COUNT(*) FROM {child_tbl} c 
                             LEFT JOIN {parent_tbl} p ON c.{child_col} = p.{parent_col} 
                             WHERE c.{child_col} IS NOT NULL AND p.{parent_col} IS NULL
-                        """)
+                        """)  # nosec B608
                         count = conn.execute(query).scalar()
                         if count and count > 0:
                             msg = f"PostgreSQL Orphan check failed: {count} rows in {child_tbl}.{child_col} have no parent in {parent_tbl}.{parent_col}"

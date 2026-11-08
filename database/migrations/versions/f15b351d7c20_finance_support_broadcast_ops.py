@@ -58,15 +58,17 @@ def upgrade() -> None:
 
     bind = op.get_bind()
     is_sqlite = bind.dialect.name == "sqlite"
-    user_fk = [] if is_sqlite else [sa.ForeignKey("users.id")]
+
+    def make_user_fk():
+        return [sa.ForeignKey("users.id")] if not is_sqlite else []
 
     op.add_column("driver_payout_requests", sa.Column("exception_notes", sa.Text(), nullable=True))
     op.add_column("driver_payout_requests", sa.Column("settlement_reference", sa.String(128), nullable=True))
     op.add_column("commission_rules", sa.Column("approval_status", sa.String(20), nullable=False, server_default="ACTIVE"))
     op.add_column("commission_rules", sa.Column("approval_reason", sa.Text(), nullable=True))
     op.add_column("payment_refunds", sa.Column("approval_status", sa.String(24), nullable=False, server_default="APPROVED"))
-    op.add_column("payment_refunds", sa.Column("requested_by_admin_id", sa.String(36), *user_fk, nullable=True))
-    op.add_column("payment_refunds", sa.Column("reviewed_by_admin_id", sa.String(36), *user_fk, nullable=True))
+    op.add_column("payment_refunds", sa.Column("requested_by_admin_id", sa.String(36), *make_user_fk(), nullable=True))
+    op.add_column("payment_refunds", sa.Column("reviewed_by_admin_id", sa.String(36), *make_user_fk(), nullable=True))
     op.add_column("payment_refunds", sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("payment_refunds", sa.Column("review_reason", sa.Text(), nullable=True))
     op.add_column("support_tickets", sa.Column("sla_due_at", sa.DateTime(timezone=True), nullable=True))

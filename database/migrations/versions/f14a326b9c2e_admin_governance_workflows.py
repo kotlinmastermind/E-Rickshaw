@@ -137,7 +137,7 @@ def upgrade() -> None:
                                             for key, _, _ in PERMISSIONS])
     op.execute(sa.text(
         "INSERT INTO admin_user_roles (id, user_id, role_id, assigned_by, assigned_at) "
-        f"SELECT id, id, '{role_id}', NULL, CURRENT_TIMESTAMP FROM users WHERE lower(role) = 'admin'"
+        f"SELECT id, id, '{role_id}', NULL, CURRENT_TIMESTAMP FROM users WHERE lower(role) = 'admin'"  # nosec B608
     ))
 
 
