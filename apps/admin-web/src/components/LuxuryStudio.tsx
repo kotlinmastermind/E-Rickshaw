@@ -837,7 +837,7 @@ export const LuxuryStudio: React.FC<LuxuryStudioProps> = ({ adminUser, onSignOut
             <ul>
               <li>Every screen has loading, empty and error states.</li>
               <li>Money is stored in cents and shown in ₹.</li>
-              <li>Auth only via Firebase; Supabase is for data only.</li>
+              <li>Auth via FastAPI backend JWT & password hashing; Supabase is for data persistence.</li>
             </ul>
           </div>
         )}

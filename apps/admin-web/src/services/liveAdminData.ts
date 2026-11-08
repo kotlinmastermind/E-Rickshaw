@@ -50,12 +50,52 @@ export interface LiveDriver {
   phone_number: string;
   plate_number: string;
   vehicle_model: string;
+  license_number?: string;
   rating: number;
   total_trips: number;
   wallet_balance_rupees: number;
   approval_status: 'APPROVED' | 'PENDING' | 'REJECTED' | 'SUSPENDED';
+  documents_count?: number;
+  pending_documents?: number;
   is_online: boolean;
   battery_soc?: number;
+}
+
+export interface LivePayout {
+  id: string;
+  driver_id: string;
+  driver_name?: string;
+  amount_cents: number;
+  amount_rupees: number;
+  bank_account_masked?: string;
+  ifsc?: string;
+  status: string;
+  requested_at?: string;
+  processed_at?: string;
+}
+
+export interface LiveAuditLog {
+  id: string;
+  actor_id?: string | null;
+  actor_role?: string;
+  action: string;
+  target_resource?: string;
+  target_id?: string | null;
+  status: string;
+  created_at?: string;
+  details?: string;
+  ip_address?: string | null;
+}
+
+export interface LiveDashboardMetrics {
+  total_rides: number;
+  active_rides: number;
+  completed_rides: number;
+  gross_booking_cents: number;
+  currency: string;
+  online_drivers: number;
+  total_users: number;
+  platform_status: string;
 }
 
 export interface LiveRide {
@@ -124,14 +164,9 @@ export async function fetchLiveCategories(): Promise<LiveCategory[]> {
       }));
     }
   } catch (err) {
-    console.warn('Live categories fetch fallback:', err);
+    console.error('Live categories fetch error:', err);
   }
-  return [
-    { id: 'cat-1', code: 'E_RICKSHAW_STANDARD', name: 'Standard E-Rickshaw', description: 'Eco-friendly electric 3-wheeler for quick city transit.', capacity: 4, quietness_db: 45, emissions_g_per_km: 0, legroom_inches: 36, is_electric: true, wheelchair_accessible: false, pet_friendly: true, is_active: true },
-    { id: 'cat-2', code: 'E_RICKSHAW_SHARE', name: 'Shared E-Rickshaw (Eco-Pool)', description: 'Ultra-affordable per-seat shared electric rickshaw.', capacity: 4, quietness_db: 45, emissions_g_per_km: 0, legroom_inches: 35, is_electric: true, wheelchair_accessible: false, pet_friendly: false, is_active: true },
-    { id: 'cat-3', code: 'E_AUTO', name: 'High-Speed Electric Auto', description: 'Modern enclosed L5M electric auto rickshaw.', capacity: 3, quietness_db: 44, emissions_g_per_km: 0, legroom_inches: 38, is_electric: true, wheelchair_accessible: true, pet_friendly: true, is_active: true },
-    { id: 'cat-4', code: 'E_CARGO_LOADER', name: 'E-Loader Cargo', description: 'Commercial cargo loader 3-wheeler for goods & luggage.', capacity: 1, quietness_db: 46, emissions_g_per_km: 0, legroom_inches: 34, is_electric: true, wheelchair_accessible: false, pet_friendly: false, is_active: true }
-  ];
+  return [];
 }
 
 export async function createLiveCategory(payload: Partial<LiveCategory>): Promise<boolean> {
@@ -168,14 +203,9 @@ export async function fetchLiveFareRules(): Promise<LiveFareRule[]> {
       }));
     }
   } catch (err) {
-    console.warn('Live fare rules fetch fallback:', err);
+    console.error('Live fare rules fetch error:', err);
   }
-  return [
-    { id: 'fare-1', category_id: 'cat-1', category_name: 'Standard E-Rickshaw', version: 1, base_fare_rupees: 20, per_km_rupees: 10, per_minute_rupees: 1, minimum_fare_rupees: 20, cancellation_fee_rupees: 10, surge_multiplier: 1.0, shared_discount_percentage: 25, tax_percentage: 5, is_active: true },
-    { id: 'fare-2', category_id: 'cat-2', category_name: 'Shared Eco-Pool', version: 1, base_fare_rupees: 10, per_km_rupees: 6, per_minute_rupees: 0.5, minimum_fare_rupees: 15, cancellation_fee_rupees: 5, surge_multiplier: 1.0, shared_discount_percentage: 40, tax_percentage: 5, is_active: true },
-    { id: 'fare-3', category_id: 'cat-3', category_name: 'Electric Auto', version: 1, base_fare_rupees: 30, per_km_rupees: 12, per_minute_rupees: 1.5, minimum_fare_rupees: 30, cancellation_fee_rupees: 15, surge_multiplier: 1.0, shared_discount_percentage: 20, tax_percentage: 5, is_active: true },
-    { id: 'fare-4', category_id: 'cat-4', category_name: 'E-Loader Cargo', version: 1, base_fare_rupees: 50, per_km_rupees: 15, per_minute_rupees: 2, minimum_fare_rupees: 60, cancellation_fee_rupees: 20, surge_multiplier: 1.0, shared_discount_percentage: 0, tax_percentage: 5, is_active: true }
-  ];
+  return [];
 }
 
 export async function fetchLiveSystemMetrics(): Promise<LiveSystemMetrics> {
@@ -211,25 +241,25 @@ export async function fetchLiveSystemMetrics(): Promise<LiveSystemMetrics> {
   }
 }
 
-export async function fetchLiveDashboardMetrics(): Promise<any> {
+export async function fetchLiveDashboardMetrics(): Promise<LiveDashboardMetrics | null> {
   try {
     const res = await requestApi<any>('/admin/dashboard/stats', {}, true);
     if (res && res.total_rides !== undefined) {
-      return res;
+      return {
+        total_rides: Number(res.total_rides) || 0,
+        active_rides: Number(res.active_rides) || 0,
+        completed_rides: Number(res.completed_rides) || 0,
+        gross_booking_cents: Number(res.gross_booking_cents) || 0,
+        currency: res.currency || 'INR',
+        online_drivers: Number(res.online_drivers) || 0,
+        total_users: Number(res.total_users) || 0,
+        platform_status: res.platform_status || 'OPERATIONAL'
+      };
     }
   } catch (err) {
-    console.warn('Dashboard stats API fallback:', err);
+    console.error('Dashboard stats API error:', err);
   }
-  return {
-    total_rides: 0,
-    active_rides: 0,
-    completed_rides: 0,
-    gross_booking_cents: 0,
-    currency: 'INR',
-    online_drivers: 0,
-    total_users: 1,
-    platform_status: 'OPERATIONAL'
-  };
+  return null;
 }
 
 export async function fetchLivePromos(): Promise<LivePromo[]> {
@@ -248,14 +278,9 @@ export async function fetchLivePromos(): Promise<LivePromo[]> {
       }));
     }
   } catch (err) {
-    console.warn('Promos API fallback:', err);
+    console.error('Promos API error:', err);
   }
-  return [
-    { id: 'promo-1', code: 'LUXURY50', discount_percentage: 50, max_discount_rupees: 50, min_order_rupees: 80, valid_until: '2026-12-31', redemption_count: 320, is_active: true },
-    { id: 'promo-2', code: 'ECOMETRO', discount_percentage: 25, max_discount_rupees: 30, min_order_rupees: 40, valid_until: '2026-11-30', redemption_count: 812, is_active: true },
-    { id: 'promo-3', code: 'FIRSTFREE', discount_percentage: 100, max_discount_rupees: 100, min_order_rupees: 0, valid_until: '2026-12-31', redemption_count: 1240, is_active: true },
-    { id: 'promo-4', code: 'DIWALISURGE', discount_percentage: 15, max_discount_rupees: 25, min_order_rupees: 50, valid_until: '2026-11-15', redemption_count: 450, is_active: true }
-  ];
+  return [];
 }
 
 export async function createLivePromo(promo: { code: string; discount_percentage: number; max_discount_rupees: number }): Promise<boolean> {
@@ -274,5 +299,192 @@ export async function createLivePromo(promo: { code: string; discount_percentage
     console.warn('Create promo failed:', err);
     return false;
   }
+}
+
+export async function fetchLiveUsers(role?: string): Promise<LiveUser[]> {
+  try {
+    const data = await requestApi<any>(`/admin/users${role ? `?role=${role}` : ''}`, {}, true);
+    const usersList: any[] = Array.isArray(data)
+      ? data
+      : (data && Array.isArray(data.users) ? data.users : []);
+
+    if (Array.isArray(usersList)) {
+      return usersList.map((u: any) => ({
+        id: u.id,
+        phone_number: u.phone_number || '',
+        email: u.email || '',
+        full_name: u.full_name || 'Passenger',
+        role: u.role || 'customer',
+        is_active: u.is_active ?? true,
+        created_at: u.created_at,
+        loyalty_tier: u.loyalty_tier || 'STANDARD',
+        total_rides: u.total_rides || 0
+      }));
+    }
+  } catch (err) {
+    console.error('Fetch live users error:', err);
+  }
+  return [];
+}
+
+export async function fetchLiveDrivers(): Promise<LiveDriver[]> {
+  try {
+    const data = await requestApi<any>('/admin/drivers', {}, true);
+    const driversList: any[] = Array.isArray(data)
+      ? data
+      : (data && Array.isArray(data.drivers) ? data.drivers : (data && Array.isArray(data.items) ? data.items : []));
+
+    if (Array.isArray(driversList)) {
+      return driversList.map((d: any) => ({
+        id: d.id || d.driver_id,
+        user_id: d.user_id,
+        full_name: d.full_name || d.name || 'Driver Partner',
+        phone_number: d.phone_number || d.mobile || '',
+        plate_number: d.plate_number || d.vehicle || 'DL-1ER-0000',
+        vehicle_model: d.vehicle_model || 'E-Rickshaw Fleet',
+        license_number: d.license_number || 'N/A',
+        rating: d.rating_average ?? d.rating ?? 5.0,
+        total_trips: d.total_trips || 0,
+        wallet_balance_rupees: d.wallet_balance_rupees || 0,
+        approval_status: (d.approval_status || (d.status === 'VERIFIED' ? 'APPROVED' : 'PENDING')) as any,
+        documents_count: d.documents_count ?? (Array.isArray(d.documents) ? d.documents.length : 0),
+        pending_documents: d.pending_documents ?? (Array.isArray(d.documents) ? d.documents.filter((doc: any) => doc.verification_status === 'PENDING').length : 0),
+        is_online: d.is_online ?? false,
+        battery_soc: d.battery_soc || 80
+      }));
+    }
+  } catch (err) {
+    console.error('Fetch live drivers error:', err);
+  }
+  return [];
+}
+
+export async function fetchLivePayouts(): Promise<LivePayout[]> {
+  try {
+    const data = await requestApi<any>('/admin/payouts', {}, true);
+    const payoutsList: any[] = Array.isArray(data)
+      ? data
+      : (data && Array.isArray(data.payouts) ? data.payouts : (data && Array.isArray(data.items) ? data.items : []));
+
+    if (Array.isArray(payoutsList)) {
+      return payoutsList.map((p: any) => ({
+        id: p.id || `PAY-${p.payout_id}`,
+        driver_id: p.driver_id || '',
+        driver_name: p.driver_name || p.driver || `Pilot (${(p.driver_id || '').slice(0, 8)})`,
+        amount_cents: p.amount_cents ?? (p.amount ? Math.round(p.amount * 100) : 0),
+        amount_rupees: p.amount_cents ? p.amount_cents / 100 : (p.amount || 0),
+        bank_account_masked: p.bank_account_masked || p.bank_account || p.bank || 'Bank Account (••••)',
+        ifsc: p.ifsc || 'SBIN0001234',
+        status: p.status || 'PENDING',
+        requested_at: p.requested_at || p.created_at,
+        processed_at: p.processed_at
+      }));
+    }
+  } catch (err) {
+    console.error('Fetch live payouts error:', err);
+  }
+  return [];
+}
+
+export async function approveLivePayout(payoutId: string): Promise<boolean> {
+  try {
+    await requestApi(`/admin/payouts/${payoutId}/approve`, { method: 'POST' }, true);
+    return true;
+  } catch (err) {
+    console.error('Approve payout error:', err);
+    return false;
+  }
+}
+
+export async function updateDriverApproval(driverId: string, status: string, rejectionReason?: string): Promise<boolean> {
+  try {
+    await requestApi(`/admin/drivers/${driverId}/approval`, {
+      method: 'PUT',
+      body: JSON.stringify({ approval_status: status, status, rejection_reason: rejectionReason || null })
+    }, true);
+    return true;
+  } catch (err) {
+    console.error('Update driver approval error:', err);
+    return false;
+  }
+}
+
+export async function fetchDriverDocuments(driverId: string): Promise<any[]> {
+  try {
+    const data = await requestApi<any[]>(`/admin/drivers/${driverId}/documents`, {}, true);
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.error('Fetch driver documents error:', err);
+    return [];
+  }
+}
+
+export async function reviewDriverDocument(
+  driverId: string,
+  documentId: string,
+  status: 'VERIFIED' | 'REJECTED',
+  notes?: string,
+  revocationJustification?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload: any = {
+      verification_status: status,
+      review_notes: notes || null,
+      reason: notes || null,
+    };
+    if (revocationJustification) {
+      payload.revocation_justification = revocationJustification;
+    }
+    await requestApi(`/admin/drivers/${driverId}/documents/${documentId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }, true);
+    return { success: true };
+  } catch (err: any) {
+    console.error('Review driver document error:', err);
+    return { success: false, error: err?.message || 'Failed to review document' };
+  }
+}
+
+export async function fetchLiveAuditLogs(): Promise<LiveAuditLog[]> {
+  try {
+    const data = await requestApi<any>('/admin/audit-logs', {}, true);
+    const logsList: any[] = Array.isArray(data)
+      ? data
+      : (data && Array.isArray(data.logs) ? data.logs : []);
+
+    if (Array.isArray(logsList)) {
+      return logsList.map((l: any, i: number) => ({
+        id: l.id || `AUD-${i + 1}`,
+        actor_id: l.actor_id || null,
+        actor_role: l.actor_role || l.actor || 'Administrator',
+        action: l.action || 'OPERATION_LOGGED',
+        target_resource: l.target_resource || l.target || 'System',
+        target_id: l.target_id || null,
+        status: l.status || 'SUCCESS',
+        created_at: l.created_at || l.timestamp || new Date().toISOString(),
+        details: l.justification || l.details || (l.metadata ? JSON.stringify(l.metadata) : 'Production operation'),
+        ip_address: l.ip_address || null
+      }));
+    }
+  } catch (err) {
+    console.error('Fetch audit logs error:', err);
+  }
+  return [];
+}
+
+export async function fetchLiveSafetyCases(): Promise<{ incident_cases: any[]; emergency_sos_alerts: any[] }> {
+  try {
+    const data = await requestApi<any>('/safety/admin/cases', {}, true);
+    if (data && typeof data === 'object') {
+      return {
+        incident_cases: Array.isArray(data.incident_cases) ? data.incident_cases : [],
+        emergency_sos_alerts: Array.isArray(data.emergency_sos_alerts) ? data.emergency_sos_alerts : []
+      };
+    }
+  } catch (err) {
+    console.error('Fetch safety cases error:', err);
+  }
+  return { incident_cases: [], emergency_sos_alerts: [] };
 }
 

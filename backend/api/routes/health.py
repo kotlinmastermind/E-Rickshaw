@@ -23,7 +23,7 @@ async def liveness():
     """
     return {
         "status": "LIVE",
-        "service": "e-rickshaw-api",
+        "service": "vaisentra-mobility-backend",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -94,7 +94,7 @@ async def operational_metrics(db: AsyncSession = Depends(get_db)) -> Dict[str, A
     recent_crashes = crash_reporter.get_recent_crashes(limit=5)
 
     return {
-        "service": "luxury-ride-backend",
+        "service": "vaisentra-mobility-backend",
         "environment": getattr(crash_reporter, "environment", "development"),
         "release": getattr(crash_reporter, "release_version", "v3.0.0"),
         "uptime_seconds": uptime_seconds,

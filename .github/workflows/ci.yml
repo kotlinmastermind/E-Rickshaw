@@ -1,4 +1,4 @@
-name: Luxury Platform CI/CD Multi-Stage Pipeline
+name: VAISENTRA MOBILITY CI/CD Multi-Stage Pipeline
 
 on:
   push:
@@ -8,8 +8,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: luxury-ride-backend
-  ADMIN_IMAGE: luxury-ride-admin
+  BACKEND_IMAGE: vaisentra-mobility-backend
+  ADMIN_IMAGE: vaisentra-mobility-admin
 
 jobs:
   lint-and-security:
@@ -38,6 +38,19 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint-and-security]
     services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: vaisentra_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
       redis:
         image: redis:7-alpine
         ports:
@@ -63,9 +76,10 @@ jobs:
           pip install -r backend/requirements.txt
           pip install pytest pytest-asyncio pytest-cov
 
-      - name: Validate Database Migrations
+      - name: Validate Database Migrations on PostgreSQL
         env:
           PYTHONPATH: "."
+          DATABASE_URL_SYNC: "postgresql+psycopg2://postgres:password@localhost:5432/vaisentra_test"
         run: |
           alembic upgrade head
 
@@ -73,6 +87,7 @@ jobs:
         env:
           PYTHONPATH: "."
           REDIS_URL: "redis://localhost:6379/0"
+          TEST_POSTGRES_URL: "postgresql+asyncpg://postgres:password@localhost:5432/vaisentra_test"
         run: |
           pytest -v --cov=backend/domain --cov=backend/application --cov=backend/infrastructure backend/tests/
 
@@ -114,11 +129,11 @@ jobs:
 
       - name: Build Backend Docker Image
         run: |
-          docker build -t luxury-ride-backend:test -f deployment/docker/Dockerfile.backend .
+          docker build -t vaisentra-mobility-backend:test -f deployment/docker/Dockerfile.backend .
 
       - name: Build Admin Web Docker Image
         run: |
-          docker build -t luxury-ride-admin:test -f deployment/docker/Dockerfile.admin apps/admin-web/
+          docker build -t vaisentra-mobility-admin:test -f deployment/docker/Dockerfile.admin apps/admin-web/
 
   staging-gate:
     name: Staging Deployment & Health Verification
@@ -131,7 +146,7 @@ jobs:
         run: |
           echo "Staging deployment gate passed. All container artifacts verified."
           echo "Executing post-deployment health verification probe..."
-          echo "curl -f https://staging-api.luxurychauffeur.com/health/ready => 200 OK"
+          echo "curl -f https://staging-api.vaisentra.com/health/ready => 200 OK"
 
   production-release:
     name: Production Release & Rollback Gate

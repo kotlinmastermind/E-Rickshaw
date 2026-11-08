@@ -1,7 +1,7 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_admin
@@ -25,8 +25,43 @@ class UserStatusUpdate(BaseModel):
     reason: str = Field(min_length=10, max_length=1000)
 
 class DriverApprovalUpdate(BaseModel):
-    approval_status: str = Field(..., json_schema_extra={"example": "APPROVED"})  # APPROVED, REJECTED, SUSPENDED
+    model_config = ConfigDict(extra="forbid")
+
+    approval_status: Optional[str] = Field(None, json_schema_extra={"example": "APPROVED"})  # APPROVED, REJECTED, SUSPENDED
+    status: Optional[str] = None
     rejection_reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_statuses(self) -> "DriverApprovalUpdate":
+        norm_approval = self.approval_status.strip().upper() if self.approval_status and self.approval_status.strip() else None
+        norm_status = self.status.strip().upper() if self.status and self.status.strip() else None
+
+        if norm_approval and norm_status and norm_approval != norm_status:
+            raise ValueError("Conflicting approval status values provided in payload.")
+
+        effective = norm_approval or norm_status
+        if not effective:
+            raise ValueError("Approval status is required.")
+
+        VALID_STATUSES = {"APPROVED", "REJECTED", "SUSPENDED"}
+        if effective not in VALID_STATUSES:
+            raise ValueError(f"Invalid approval status. Must be one of: {', '.join(sorted(VALID_STATUSES))}")
+
+        return self
+
+    @property
+    def target_status(self) -> str:
+        norm_approval = self.approval_status.strip().upper() if self.approval_status and self.approval_status.strip() else None
+        norm_status = self.status.strip().upper() if self.status and self.status.strip() else None
+        return norm_approval or norm_status or ""
+
+class DriverDocumentReviewPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verification_status: str = Field(..., json_schema_extra={"example": "VERIFIED"})
+    review_notes: Optional[str] = None
+    reason: Optional[str] = None
+    revocation_justification: Optional[str] = None
 
 class CreateFareRulePayload(BaseModel):
     category_id: str
@@ -79,9 +114,18 @@ async def review_driver(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    if payload.approval_status.upper() == "APPROVED":
-        from sqlalchemy import select
-        from backend.domain.models import DriverDocument
+    target_status = payload.target_status
+    if not target_status:
+        raise HTTPException(status_code=422, detail="Approval status is required.")
+
+    from backend.domain.models import DriverProfile, DriverDocument
+    from sqlalchemy import select
+
+    driver = await db.get(DriverProfile, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver record not found.")
+
+    if target_status == "APPROVED":
         documents = (await db.execute(select(DriverDocument).where(DriverDocument.driver_id == driver_id))).scalars().all()
         if not documents or any(doc.verification_status != "VERIFIED" for doc in documents):
             raise HTTPException(status_code=409, detail="Every required driver document must be verified before approval.")
@@ -89,8 +133,60 @@ async def review_driver(
     return await service.review_driver_approval(
         admin_id=admin.id,
         driver_id=driver_id,
-        status=payload.approval_status,
+        status=target_status,
         rejection_reason=payload.rejection_reason
+    )
+
+@router.get("/drivers/{driver_id}/documents")
+async def list_driver_documents(
+    driver_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    return await AdminGovernanceService(db).list_driver_documents(driver_id)
+
+@router.put("/drivers/{driver_id}/documents/{document_id}")
+async def review_driver_document(
+    driver_id: str,
+    document_id: str,
+    payload: DriverDocumentReviewPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    notes = (payload.review_notes or payload.reason or "").strip()
+    return await AdminGovernanceService(db).review_document(
+        admin_id=admin.id,
+        document_id=document_id,
+        status=payload.verification_status,
+        reason=notes,
+        driver_id=driver_id,
+        revocation_justification=payload.revocation_justification,
+    )
+
+@router.get("/driver-documents/{document_id}/content")
+async def download_driver_document(
+    document_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from fastapi.responses import FileResponse
+    path, mime_type, filename = await AdminGovernanceService(db).driver_document_path(document_id)
+    return FileResponse(path=path, media_type=mime_type, filename=filename)
+
+@router.put("/driver-documents/{document_id}/review")
+async def review_driver_document_legacy(
+    document_id: str,
+    payload: DriverDocumentReviewPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    notes = (payload.review_notes or payload.reason or "").strip()
+    return await AdminGovernanceService(db).review_document(
+        admin_id=admin.id,
+        document_id=document_id,
+        status=payload.verification_status,
+        reason=notes,
+        revocation_justification=payload.revocation_justification,
     )
 
 @router.get("/rides")

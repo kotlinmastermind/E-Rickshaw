@@ -4,7 +4,7 @@ import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from typing import Optional, Any, Dict, Tuple
+from typing import Optional, Any, Dict, Tuple, Set
 from backend.core.config import settings
 
 logger = logging.getLogger("cache.redis")
@@ -44,7 +44,31 @@ class InMemoryCacheFallback:
     """In-memory TTL cache fallback when Redis is unreachable."""
     def __init__(self):
         self._store: Dict[str, Tuple[Any, float]] = {}
+        self._subscribers: Dict[str, Set[asyncio.Queue]] = {}
         self._lock = asyncio.Lock()
+
+    async def register_subscriber(self, channel: str, queue: asyncio.Queue):
+        async with self._lock:
+            if channel not in self._subscribers:
+                self._subscribers[channel] = set()
+            self._subscribers[channel].add(queue)
+
+    async def unregister_subscriber(self, channel: str, queue: asyncio.Queue):
+        async with self._lock:
+            if channel in self._subscribers:
+                self._subscribers[channel].discard(queue)
+                if not self._subscribers[channel]:
+                    del self._subscribers[channel]
+
+    async def publish(self, channel: str, message: str) -> int:
+        async with self._lock:
+            queues = list(self._subscribers.get(channel, set()))
+        for q in queues:
+            try:
+                q.put_nowait({"type": "message", "channel": channel, "data": message})
+            except Exception:
+                pass
+        return len(queues)
 
     async def get(self, key: str) -> Optional[str]:
         async with self._lock:
@@ -86,6 +110,16 @@ class InMemoryCacheFallback:
                 return True
         return False
 
+    async def ttl(self, key: str) -> int:
+        async with self._lock:
+            if key in self._store:
+                val, expires_at = self._store[key]
+                remaining = int(expires_at - time.time())
+                if remaining > 0:
+                    return remaining
+                del self._store[key]
+        return -2
+
     async def exists(self, key: str) -> bool:
         return (await self.get(key)) is not None
 
@@ -107,6 +141,59 @@ class InMemoryCacheFallback:
                     del self._store[key]
                     return True
             return False
+
+_PUBSUB_SENTINEL = object()
+
+class InMemoryPubSub:
+    """In-memory PubSub fallback matching redis.asyncio PubSub interface."""
+    def __init__(self, fallback: InMemoryCacheFallback):
+        self.fallback = fallback
+        self.channels: Set[str] = set()
+        self.queue: asyncio.Queue = asyncio.Queue()
+        self._closed = False
+
+    async def subscribe(self, *channels: str):
+        if self._closed:
+            return
+        for ch in channels:
+            self.channels.add(ch)
+            await self.fallback.register_subscriber(ch, self.queue)
+
+    async def unsubscribe(self, *channels: str):
+        for ch in channels:
+            self.channels.discard(ch)
+            await self.fallback.unregister_subscriber(ch, self.queue)
+
+    async def get_message(self, ignore_subscribe_messages: bool = True, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        if self._closed:
+            return None
+        try:
+            if timeout is not None:
+                msg = await asyncio.wait_for(self.queue.get(), timeout=timeout)
+            else:
+                msg = await self.queue.get()
+            if msg is _PUBSUB_SENTINEL:
+                return None
+            return msg
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            return None
+
+    async def listen(self):
+        while not self._closed:
+            msg = await self.queue.get()
+            if msg is _PUBSUB_SENTINEL:
+                break
+            yield msg
+
+    async def close(self):
+        self._closed = True
+        for ch in list(self.channels):
+            await self.fallback.unregister_subscriber(ch, self.queue)
+        self.channels.clear()
+        try:
+            self.queue.put_nowait(_PUBSUB_SENTINEL)
+        except Exception:
+            pass
 
 class RedisManager:
     """
@@ -229,6 +316,15 @@ class RedisManager:
             self.is_connected = False
         return await self._fallback.expire(key, seconds)
 
+    async def ttl(self, key: str) -> int:
+        client = await self._get_redis()
+        try:
+            if client:
+                return await client.ttl(key)
+        except Exception:
+            self.is_connected = False
+        return await self._fallback.ttl(key)
+
     async def exists(self, key: str) -> bool:
         client = await self._get_redis()
         try:
@@ -237,6 +333,33 @@ class RedisManager:
         except Exception:
             self.is_connected = False
         return await self._fallback.exists(key)
+
+    async def publish(self, channel: str, message: Any) -> int:
+        self.stats.record_set()
+        client = await self._get_redis()
+        msg_str = json.dumps(message) if isinstance(message, (dict, list)) else str(message)
+        try:
+            if client:
+                return await client.publish(channel, msg_str)
+        except Exception as e:
+            self.stats.record_error()
+            self.is_connected = False
+            logger.warning(f"Redis publish failed: {e}. Falling back to in-memory topic.")
+
+        return await self._fallback.publish(channel, msg_str)
+
+    async def get_pubsub(self):
+        """Returns a connected PubSub object (Redis PubSub or InMemoryPubSub fallback)."""
+        client = await self._get_redis()
+        if client and self.is_connected:
+            return client.pubsub()
+        return InMemoryPubSub(self._fallback)
+
+    def pubsub(self):
+        """Returns an InMemoryPubSub fallback or Redis pubsub if already connected."""
+        if self.is_connected and self._redis:
+            return self._redis.pubsub()
+        return InMemoryPubSub(self._fallback)
 
     RELEASE_LOCK_LUA = """
     if redis.call("get", KEYS[1]) == ARGV[1] then

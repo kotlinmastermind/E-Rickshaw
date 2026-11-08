@@ -21,7 +21,17 @@ def upgrade() -> None:
     op.create_table('users',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('phone_number', sa.String(length=20), nullable=False),
+    sa.Column('username', sa.String(length=64), nullable=True),
     sa.Column('email', sa.String(length=255), nullable=True),
+    sa.Column('password_hash', sa.String(length=255), nullable=True),
+    sa.Column('email_verified', sa.Boolean(), nullable=False, server_default=sa.false()),
+    sa.Column('avatar_url', sa.String(length=512), nullable=True),
+    sa.Column('mfa_enabled', sa.Boolean(), nullable=False, server_default=sa.false()),
+    sa.Column('mfa_secret', sa.String(length=64), nullable=True),
+    sa.Column('app_lock_pin_hash', sa.String(length=128), nullable=True),
+    sa.Column('biometric_enabled', sa.Boolean(), nullable=False, server_default=sa.false()),
+    sa.Column('passkey_credential_id', sa.String(length=255), nullable=True),
+    sa.Column('passkey_public_key', sa.Text(), nullable=True),
     sa.Column('full_name', sa.String(length=128), nullable=False),
     sa.Column('role', sa.String(length=20), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
@@ -32,6 +42,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_index(op.f('ix_users_phone_number'), 'users', ['phone_number'], unique=True)
+    op.create_index(op.f('ix_users_username'), 'users', ['username'], unique=True)
     op.create_table('vehicle_categories',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('code', sa.String(length=30), nullable=False),

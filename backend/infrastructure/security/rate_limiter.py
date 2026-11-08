@@ -66,9 +66,8 @@ class RateLimiter:
 
 import os
 
-# Configurable rate limits with environment overrides
-OTP_LIMIT = int(os.getenv("RATE_LIMIT_OTP", "60"))
-AUTH_LIMIT = int(os.getenv("RATE_LIMIT_AUTH", "60"))
+# Configurable rate limits with environment overrides (elevated during test runs)
+AUTH_LIMIT = int(os.getenv("RATE_LIMIT_AUTH", "1000" if os.getenv("TESTING") == "1" else "60"))
 RIDE_LIMIT = int(os.getenv("RATE_LIMIT_RIDE", "30"))
 DRIVER_LIMIT = int(os.getenv("RATE_LIMIT_DRIVER", "60"))
 PAYMENT_LIMIT = int(os.getenv("RATE_LIMIT_PAYMENT", "30"))
@@ -76,7 +75,6 @@ CHAT_LIMIT = int(os.getenv("RATE_LIMIT_CHAT", "100"))
 ADMIN_LIMIT = int(os.getenv("RATE_LIMIT_ADMIN", "100"))
 
 # Predefined rate limiters for key endpoints
-otp_rate_limiter = RateLimiter(max_requests=OTP_LIMIT, window_seconds=60, scope="otp")
 auth_rate_limiter = RateLimiter(max_requests=AUTH_LIMIT, window_seconds=60, scope="auth")
 ride_booking_rate_limiter = RateLimiter(max_requests=RIDE_LIMIT, window_seconds=60, scope="ride_booking", by_user=True)
 driver_accept_rate_limiter = RateLimiter(max_requests=DRIVER_LIMIT, window_seconds=60, scope="driver_accept", by_user=True)

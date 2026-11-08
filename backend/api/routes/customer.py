@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_customer
-from backend.domain.models import User, CustomerProfile, DeviceToken, Notification
+from backend.domain.models import User, CustomerProfile, Notification
 
 router = APIRouter(prefix="/customers", tags=["Customer Profiles"])
 
@@ -16,10 +16,6 @@ class CustomerProfileUpdate(BaseModel):
     avatar_url: Optional[str] = Field(None, json_schema_extra={"example": "https://example.com/avatar.jpg"})
     emergency_contact_phone: Optional[str] = Field(None, json_schema_extra={"example": "+919811122233"})
     preferred_payment_method: Optional[str] = Field(None, json_schema_extra={"example": "UPI"})
-
-class DeviceTokenPayload(BaseModel):
-    fcm_token: str
-    device_os: str = "ANDROID"
 
 @router.get("/profile")
 async def get_profile(user: User = Depends(get_current_customer), db: AsyncSession = Depends(get_db)):
@@ -223,30 +219,6 @@ async def get_prebooking_preference_summary(
         "accessibility_compliance": accessibility_items if accessibility_items else ["Standard White-Glove VIP Boarding"],
         "ready_for_dispatch": True
     }
-
-@router.post("/device-token")
-async def register_device_token(
-    payload: DeviceTokenPayload,
-    user: User = Depends(get_current_customer),
-    db: AsyncSession = Depends(get_db)
-):
-    stmt = select(DeviceToken).where(DeviceToken.fcm_token == payload.fcm_token)
-    res = await db.execute(stmt)
-    token_obj = res.scalar_one_or_none()
-    if not token_obj:
-        token_obj = DeviceToken(
-            user_id=user.id,
-            fcm_token=payload.fcm_token,
-            device_os=payload.device_os
-        )
-        db.add(token_obj)
-    else:
-        token_obj.user_id = user.id
-        token_obj.device_os = payload.device_os
-        token_obj.is_active = True
-        token_obj.last_error_at = None
-    await db.commit()
-    return {"message": "Device token registered."}
 
 @router.get("/notifications")
 async def get_notifications(

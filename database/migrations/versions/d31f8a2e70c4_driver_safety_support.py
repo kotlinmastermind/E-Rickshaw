@@ -35,6 +35,25 @@ def upgrade() -> None:
     op.create_index("ix_driver_rating_appeals_rating_id", "driver_rating_appeals", ["rating_id"])
     op.create_index("ix_driver_rating_appeals_driver_id", "driver_rating_appeals", ["driver_id"])
     op.create_index("ix_driver_rating_appeals_status", "driver_rating_appeals", ["status"])
+    op.create_table("incident_reports",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("ticket_number", sa.String(32), unique=True, nullable=False),
+        sa.Column("ride_id", sa.String(36), sa.ForeignKey("rides.id"), nullable=True),
+        sa.Column("reporter_user_id", sa.String(36), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("reporter_role", sa.String(20), server_default="CUSTOMER", nullable=False),
+        sa.Column("category", sa.String(64), nullable=False),
+        sa.Column("severity", sa.String(20), server_default="MEDIUM", nullable=False),
+        sa.Column("description", sa.Text(), nullable=False),
+        sa.Column("photo_url", sa.String(512), nullable=True),
+        sa.Column("status", sa.String(30), server_default="OPEN", nullable=False),
+        sa.Column("assigned_agent_id", sa.String(36), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column("resolution_notes", sa.Text(), nullable=True),
+        sa.Column("follow_up_action", sa.String(128), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True))
+    op.create_index("ix_incident_reports_ticket_number", "incident_reports", ["ticket_number"])
+    op.create_index("ix_incident_reports_ride_id", "incident_reports", ["ride_id"])
+    op.create_index("ix_incident_reports_reporter_user_id", "incident_reports", ["reporter_user_id"])
     op.create_table("incident_evidence",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("incident_report_id", sa.String(36), sa.ForeignKey("incident_reports.id"), nullable=False),
@@ -48,6 +67,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("incident_evidence")
+    op.drop_table("incident_reports")
     op.drop_table("driver_rating_appeals")
     op.drop_table("driver_fatigue_checks")
     op.drop_table("driver_safety_preferences")

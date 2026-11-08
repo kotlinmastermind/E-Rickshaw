@@ -300,9 +300,11 @@ class RideService:
             offer.is_accepted = True
             offer.responded_at = now
 
-            # Clear Redis offer safety key
+            # Clear Redis offer safety key & active-offer index
             try:
                 await redis_client.delete(f"dispatch:offer:{ride_id}:{driver.id}")
+                await redis_client.delete(f"driver:active_offer:{driver.id}")
+                await redis_client.delete(f"driver:active_offer:{driver_user_id}")
             except Exception:
                 pass
 

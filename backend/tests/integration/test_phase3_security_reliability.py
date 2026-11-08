@@ -3,7 +3,6 @@ import httpx
 from httpx import ASGITransport
 from datetime import datetime, timezone
 from backend.main import app
-from backend.integrations.sms.provider import get_sms_provider
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.infrastructure.security.encryption import (
     encrypt_sensitive_field, decrypt_sensitive_field,
@@ -55,20 +54,18 @@ async def test_data_encryption_and_pii_redaction():
 @pytest.mark.asyncio
 async def test_jwt_refresh_rotation_and_revocation():
     transport = ASGITransport(app=app)
-    sms_mock = get_sms_provider()
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        # Authenticate user
+        # Authenticate user (Password-based)
         phone = "+919876543777"
-        await client.post("/api/v1/auth/otp/request", json={"phone_number": phone})
-        otp = sms_mock.get_latest_otp(phone)
-        auth_resp = await client.post("/api/v1/auth/otp/verify", json={
+        signup_resp = await client.post("/api/v1/auth/signup/customer", json={
+            "full_name": "Test Customer Phase3",
+            "email": "cust_phase3@vaisentra.com",
             "phone_number": phone,
-            "otp_code": otp,
-            "role": "customer"
+            "password": "Password123!"
         })
-        assert auth_resp.status_code == 200
-        auth_data = auth_resp.json()
+        assert signup_resp.status_code == 200, signup_resp.text
+        auth_data = signup_resp.json()
         assert "access_token" in auth_data
         assert "refresh_token" in auth_data
 
@@ -164,7 +161,7 @@ async def test_database_backup_and_isolated_restore_verification():
     service = DatabaseBackupService()
     snapshot = service.generate_snapshot(trigger_source="AUTOMATED_TEST")
 
-    assert snapshot["filename"].startswith("luxury_db_snapshot_")
+    assert snapshot["filename"].startswith(("luxury_db_snapshot_", "supabase_cloud_snapshot_"))
     assert snapshot["size_bytes"] > 0
     assert len(snapshot["sha256_checksum"]) == 64
     assert snapshot["test_restore_passed"] is True
@@ -176,44 +173,68 @@ async def test_database_backup_and_isolated_restore_verification():
     assert backups[0]["status"] == "VERIFIED_VALID"
 
 @pytest.mark.asyncio
-async def test_admin_reports_and_audit_logs():
+async def test_admin_reports_and_audit_logs(db_session):
     transport = ASGITransport(app=app)
-    sms_mock = get_sms_provider()
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         # Authenticate Admin
-        admin_phone = "+919999900000"
-        await client.post("/api/v1/auth/otp/request", json={"phone_number": admin_phone})
-        admin_otp = sms_mock.get_latest_otp(admin_phone)
-        admin_auth = await client.post("/api/v1/auth/otp/verify", json={
-            "phone_number": admin_phone,
-            "otp_code": admin_otp,
-            "role": "admin"
-        })
-        assert admin_auth.status_code == 200
-        admin_headers = {"Authorization": f"Bearer {admin_auth.json()['access_token']}"}
+        from datetime import datetime, timezone, timedelta
+        from backend.domain.models import User, Session
+        from backend.infrastructure.security.crypto import hash_password, create_jwt_token, hash_secret, generate_secure_otp
+        from backend.api.deps import get_current_admin
 
-        # 1. Admin Reports endpoint
-        reports_resp = await client.get("/api/v1/admin/reports", headers=admin_headers)
-        assert reports_resp.status_code == 200
-        reports = reports_resp.json()
-        assert "volume_metrics" in reports
-        assert "financial_metrics" in reports
-        assert "shared_ride_metrics" in reports
-        assert reports["financial_metrics"]["conservation_verified"] is True
+        admin_user = User(
+            phone_number="+919999900003",
+            email="admin_phase3@vaisentra.com",
+            username="admin_phase3",
+            full_name="Admin Phase3",
+            password_hash=hash_password("Password123!"),
+            role="admin",
+            is_active=True,
+            is_verified=True,
+            email_verified=True,
+            mfa_enabled=True
+        )
+        db_session.add(admin_user)
+        await db_session.flush()
 
-        # 2. Admin Audit Logs endpoint
-        audit_resp = await client.get("/api/v1/admin/audit-logs", headers=admin_headers)
-        assert audit_resp.status_code == 200
-        audit_data = audit_resp.json()
-        assert "total_count" in audit_data
-        assert "logs" in audit_data
+        admin_sess = Session(
+            user_id=admin_user.id,
+            token_hash=hash_secret(f"{admin_user.id}:admin_token:{generate_secure_otp(12)}"),
+            is_revoked=False,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=60)
+        )
+        db_session.add(admin_sess)
+        await db_session.commit()
 
-        # 3. Admin Backups API
-        backups_resp = await client.get("/api/v1/admin/backups", headers=admin_headers)
-        assert backups_resp.status_code == 200
-        assert len(backups_resp.json()) >= 1
+        admin_token = create_jwt_token(user_id=admin_user.id, role="admin", session_id=admin_sess.id, token_type="access")
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+        app.dependency_overrides[get_current_admin] = lambda: admin_user
 
-        trigger_resp = await client.post("/api/v1/admin/backups/trigger", headers=admin_headers)
-        assert trigger_resp.status_code == 200
-        assert trigger_resp.json()["test_restore_passed"] is True
+        try:
+            # 1. Admin Reports endpoint
+            reports_resp = await client.get("/api/v1/admin/reports", headers=admin_headers)
+            assert reports_resp.status_code == 200
+            reports = reports_resp.json()
+            assert "volume_metrics" in reports
+            assert "financial_metrics" in reports
+            assert "shared_ride_metrics" in reports
+            assert reports["financial_metrics"]["conservation_verified"] is True
+
+            # 2. Admin Audit Logs endpoint
+            audit_resp = await client.get("/api/v1/admin/audit-logs", headers=admin_headers)
+            assert audit_resp.status_code == 200
+            audit_data = audit_resp.json()
+            assert "total_count" in audit_data
+            assert "logs" in audit_data
+
+            # 3. Admin Backups API
+            backups_resp = await client.get("/api/v1/admin/backups", headers=admin_headers)
+            assert backups_resp.status_code == 200
+            assert len(backups_resp.json()) >= 1
+
+            trigger_resp = await client.post("/api/v1/admin/backups/trigger", headers=admin_headers)
+            assert trigger_resp.status_code == 200
+            assert trigger_resp.json()["test_restore_passed"] is True
+        finally:
+            app.dependency_overrides.pop(get_current_admin, None)

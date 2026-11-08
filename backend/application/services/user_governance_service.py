@@ -14,7 +14,8 @@ from backend.domain.models import (
 from backend.infrastructure.security.crypto import (
     hash_password, verify_password, hash_pin, verify_pin,
     create_jwt_token, decode_jwt_token, hash_secret,
-    generate_secure_otp, verify_otp_constant_time, generate_mfa_secret, verify_totp
+    generate_secure_otp, verify_otp_constant_time, generate_mfa_secret, verify_totp,
+    validate_password_strength, DUMMY_PASSWORD_HASH
 )
 from backend.core.config import settings
 
@@ -29,8 +30,10 @@ class UserGovernanceService:
     ) -> Dict[str, Any]:
         email = email.strip().lower()
         phone = phone_number.strip()
-        if len(password) < 8:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password must contain at least 8 characters.")
+        try:
+            validate_password_strength(password)
+        except ValueError as err:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
 
         # Check existing email
         stmt_email = select(User).where(User.email == email)
@@ -56,7 +59,7 @@ class UserGovernanceService:
                 full_name=full_name,
                 role=role,
                 is_active=True,
-                is_verified=True,
+                is_verified=False,
                 email_verified=False
             )
             self.db.add(user)
@@ -108,6 +111,13 @@ class UserGovernanceService:
         ip_address: Optional[str] = None, user_agent: Optional[str] = None,
         require_admin: bool = False,
     ) -> Dict[str, Any]:
+        from backend.infrastructure.security.lockout import (
+            check_account_lockout,
+            record_failed_login,
+            reset_account_lockout
+        )
+        await check_account_lockout(email, db=self.db)
+
         ident = email.strip()
         ident_lower = ident.lower()
         phone_digits = "".join(filter(str.isdigit, ident))
@@ -126,11 +136,20 @@ class UserGovernanceService:
         res = await self.db.execute(stmt)
         user = res.scalar_one_or_none()
 
-        if not user or not user.password_hash or not verify_password(password, user.password_hash):
+        if not user:
+            verify_password(password or "dummy", DUMMY_PASSWORD_HASH)
+            await record_failed_login(email, db=self.db)
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid executive credentials.")
+
+        if not user.password_hash or not verify_password(password, user.password_hash):
+            await record_failed_login(email, db=self.db)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid executive credentials.")
 
         if require_admin and user.role.lower() != "admin":
+            await record_failed_login(email, db=self.db)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid executive credentials.")
+
+        await reset_account_lockout(email, db=self.db)
 
         if not user.is_active:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been deactivated.")
@@ -295,68 +314,30 @@ class UserGovernanceService:
             }
         }
 
-    # 4. Passkey sign-in & registration
+    # 4. Passkey sign-in & registration (SECURITY CONTAINMENT: Fail-Closed until cryptographic verification is upgraded)
     async def create_passkey_challenge(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        challenge = secrets.token_urlsafe(32)
-        return {
-            "challenge": challenge,
-            "rp": {"name": "Grand Chauffeur Luxury Ride", "id": "grandchauffeur.luxury"},
-            "user": {"id": user_id or "anonymous", "name": "Distinguished Member"},
-            "timeout": 60000
-        }
+        """Passkey challenge endpoint fails closed to prevent unverified credential authentication."""
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Passkey authentication is temporarily disabled pending production cryptographic verification."
+        )
 
     async def register_passkey(self, user_id: str, credential_id: str, public_key: str) -> Dict[str, Any]:
-        stmt = select(User).where(User.id == user_id)
-        res = await self.db.execute(stmt)
-        user = res.scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-
-        user.passkey_credential_id = credential_id
-        user.passkey_public_key = public_key
-        await self.db.commit()
-        return {"message": "FIDO2 / WebAuthn Passkey registered successfully."}
+        """Passkey registration fails closed to prevent persisting unverified public keys or credential IDs."""
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Passkey registration is temporarily disabled pending production cryptographic verification."
+        )
 
     async def verify_passkey_login(
         self, credential_id: str, signature: str,
         ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
-        stmt = select(User).where(User.passkey_credential_id == credential_id)
-        res = await self.db.execute(stmt)
-        user = res.scalar_one_or_none()
-
-        if not user or not user.is_active:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Passkey credential verification failed.")
-
-        token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
-        session = Session(
-            user_id=user.id,
-            token_hash=token_hash,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            is_revoked=False,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        """Passkey verification fails closed to prevent unauthenticated access via credential ID alone."""
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Passkey verification is temporarily disabled pending production cryptographic verification."
         )
-        self.db.add(session)
-        await self.db.commit()
-
-        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
-
-        return {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "phone_number": user.phone_number,
-                "full_name": user.full_name,
-                "role": user.role,
-                "mfa_enabled": user.mfa_enabled
-            }
-        }
 
     # 5. Biometric app unlock & PIN Lock
     async def toggle_biometric(self, user_id: str, enabled: bool) -> Dict[str, Any]:
@@ -892,43 +873,30 @@ class UserGovernanceService:
 
     # 24. Account Recovery Workflow
     async def request_account_recovery(self, identifier: str) -> Dict[str, Any]:
-        ident = identifier.strip().lower()
-        stmt = select(User).where((User.email == ident) | (User.phone_number == ident))
-        res = await self.db.execute(stmt)
-        user = res.scalar_one_or_none()
-        if not user:
-            # Safe boundary - don't leak user enumeration
-            return {"message": "If an account exists with this credential, a recovery token has been dispatched."}
-
-        recovery_code = generate_secure_otp(6)
-        from backend.infrastructure.cache.redis_client import redis_client
-        await redis_client.set(f"pwd_reset:{user.id}", recovery_code, ex=900)  # 15 minutes
-
-        return {
-            "message": "If an account exists with this credential, a recovery token has been dispatched.",
-            "user_id": user.id,
-            "debug_token": recovery_code if settings.DEBUG else None
-        }
+        """
+        Self-service automated password recovery is disabled because external SMS/email delivery
+        infrastructure is decommissioned. Fails safely and directs users to manual support recovery.
+        """
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Automated self-service password recovery is temporarily unavailable. "
+                "Please contact administrative support at support@vaisentra.com for identity-verified credential assistance."
+            )
+        )
 
     async def reset_password_with_token(self, user_id: str, recovery_code: str, new_password: str) -> Dict[str, Any]:
-        if len(new_password) < 8:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be at least 8 characters.")
-
-        from backend.infrastructure.cache.redis_client import redis_client
-        stored_code = await redis_client.get(f"pwd_reset:{user_id}")
-        if not stored_code or not verify_otp_constant_time(recovery_code.strip(), stored_code):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired recovery code.")
-
-        stmt = select(User).where(User.id == user_id)
-        res = await self.db.execute(stmt)
-        user = res.scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-
-        user.password_hash = hash_password(new_password)
-        await self.db.commit()
-        await redis_client.delete(f"pwd_reset:{user_id}")
-        return {"message": "Password reset successfully. You may now sign in with your new password."}
+        """
+        Self-service password reset with token is disabled because external delivery
+        infrastructure is decommissioned. Directs users to administrative support.
+        """
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Automated password reset is temporarily unavailable. "
+                "Please contact administrative support at support@vaisentra.com for identity-verified credential assistance."
+            )
+        )
 
     # 25. Customer Membership Profile and Preferences
     async def get_membership_details(self, user_id: str) -> Dict[str, Any]:

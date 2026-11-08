@@ -2,25 +2,22 @@ import pytest
 import httpx
 from httpx import ASGITransport
 from backend.main import app
-from backend.integrations.sms.provider import get_sms_provider
 
 @pytest.mark.asyncio
-async def test_phase2_customer_and_admin_workflows():
+async def test_phase2_customer_and_admin_workflows(db_session):
     transport = ASGITransport(app=app)
-    sms_mock = get_sms_provider()
 
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        # 1. Authenticate Customer
+        # 1. Authenticate Customer (Password-based)
         cust_phone = "+919876543999"
-        await client.post("/api/v1/auth/otp/request", json={"phone_number": cust_phone})
-        cust_otp = sms_mock.get_latest_otp(cust_phone)
-        cust_auth = await client.post("/api/v1/auth/otp/verify", json={
+        cust_signup = await client.post("/api/v1/auth/signup/customer", json={
+            "full_name": "VIP Customer Phase2",
+            "email": "cust_phase2@vaisentra.com",
             "phone_number": cust_phone,
-            "otp_code": cust_otp,
-            "role": "customer"
+            "password": "Password123!"
         })
-        assert cust_auth.status_code == 200
-        cust_token = cust_auth.json()["access_token"]
+        assert cust_signup.status_code == 200, cust_signup.text
+        cust_token = cust_signup.json()["access_token"]
         cust_headers = {"Authorization": f"Bearer {cust_token}"}
 
         # 2. Customer Favorites CRUD
@@ -61,60 +58,86 @@ async def test_phase2_customer_and_admin_workflows():
         assert passes_resp.status_code == 200
 
         # 5. Authenticate Admin
-        admin_phone = "+919999900000"
-        await client.post("/api/v1/auth/otp/request", json={"phone_number": admin_phone})
-        admin_otp = sms_mock.get_latest_otp(admin_phone)
-        admin_auth = await client.post("/api/v1/auth/otp/verify", json={
-            "phone_number": admin_phone,
-            "otp_code": admin_otp,
-            "role": "admin"
-        })
-        assert admin_auth.status_code == 200
-        admin_headers = {"Authorization": f"Bearer {admin_auth.json()['access_token']}"}
+        from datetime import datetime, timezone, timedelta
+        from backend.domain.models import User, Session
+        from backend.infrastructure.security.crypto import hash_password, create_jwt_token, hash_secret, generate_secure_otp
+        from backend.api.deps import get_current_admin
 
-        # 6. Admin Geofence CRUD & Point Verification
-        geo_resp = await client.post("/api/v1/admin/geofences", json={
-            "name": "South Mumbai VIP Corridor",
-            "zone_type": "SERVICE_AREA",
-            "coordinates": [
-                {"lat": 18.90, "lng": 72.80},
-                {"lat": 19.00, "lng": 72.80},
-                {"lat": 19.00, "lng": 72.90},
-                {"lat": 18.90, "lng": 72.90}
-            ],
-            "surge_multiplier": 1.25
-        }, headers=admin_headers)
-        assert geo_resp.status_code == 200
-        assert geo_resp.json()["status"] == "CREATED"
+        admin_user = User(
+            phone_number="+919999900002",
+            email="admin_phase2@vaisentra.com",
+            username="admin_phase2",
+            full_name="Admin Phase2",
+            password_hash=hash_password("Password123!"),
+            role="admin",
+            is_active=True,
+            is_verified=True,
+            email_verified=True,
+            mfa_enabled=True
+        )
+        db_session.add(admin_user)
+        await db_session.flush()
 
-        verify_pt = await client.post("/api/v1/admin/geofences/verify-point", json={
-            "latitude": 18.95,
-            "longitude": 72.85
-        }, headers=admin_headers)
-        assert verify_pt.status_code == 200
-        assert verify_pt.json()["is_serviceable"] is True
-        assert verify_pt.json()["surge_multiplier"] >= 1.25
+        admin_sess = Session(
+            user_id=admin_user.id,
+            token_hash=hash_secret(f"{admin_user.id}:admin_token:{generate_secure_otp(12)}"),
+            is_revoked=False,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=60)
+        )
+        db_session.add(admin_sess)
+        await db_session.commit()
 
-        # 7. Admin Surge Rules & Commission Rules
-        surge_resp = await client.post("/api/v1/admin/surge/rules", json={
-            "zone_name": "South Mumbai VIP Corridor",
-            "multiplier": 1.4,
-            "reason": "Late night high-demand gala"
-        }, headers=admin_headers)
-        assert surge_resp.status_code == 200
+        admin_token = create_jwt_token(user_id=admin_user.id, role="admin", session_id=admin_sess.id, token_type="access")
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+        app.dependency_overrides[get_current_admin] = lambda: admin_user
 
-        comm_resp = await client.post("/api/v1/admin/commissions", json={
-            "rule_name": "Standard Fleet Take-Rate",
-            "commission_percentage": 20.0,
-            "fixed_cut_cents": 0
-        }, headers=admin_headers)
-        assert comm_resp.status_code == 200
+        try:
+            # 6. Admin Geofence CRUD & Point Verification
+            geo_resp = await client.post("/api/v1/admin/geofences", json={
+                "name": "South Mumbai VIP Corridor",
+                "zone_type": "SERVICE_AREA",
+                "coordinates": [
+                    {"lat": 18.90, "lng": 72.80},
+                    {"lat": 19.00, "lng": 72.80},
+                    {"lat": 19.00, "lng": 72.90},
+                    {"lat": 18.90, "lng": 72.90}
+                ],
+                "surge_multiplier": 1.25
+            }, headers=admin_headers)
+            assert geo_resp.status_code == 200
+            assert geo_resp.json()["status"] == "CREATED"
 
-        # 8. Admin Broadcast Announcement
-        bc_resp = await client.post("/api/v1/admin/broadcasts", json={
-            "title": "VIP Fleet Priority Alert",
-            "message": "All chauffeurs prepare for high volume at Jio World Convention Centre",
-            "target_role": "DRIVER"
-        }, headers=admin_headers)
-        assert bc_resp.status_code == 200
-        assert bc_resp.json()["status"] == "SENT"
+            verify_pt = await client.post("/api/v1/admin/geofences/verify-point", json={
+                "latitude": 18.95,
+                "longitude": 72.85
+            }, headers=admin_headers)
+            assert verify_pt.status_code == 200
+            assert verify_pt.json()["is_serviceable"] is True
+            assert verify_pt.json()["surge_multiplier"] >= 1.25
+
+            # 7. Admin Surge Rules & Commission Rules
+            surge_resp = await client.post("/api/v1/admin/surge/rules", json={
+                "zone_name": "South Mumbai VIP Corridor",
+                "multiplier": 1.4,
+                "reason": "Late night high-demand gala"
+            }, headers=admin_headers)
+            assert surge_resp.status_code == 200
+
+            comm_resp = await client.post("/api/v1/admin/commissions", json={
+                "rule_name": "Standard Fleet Take-Rate",
+                "commission_percentage": 20.0,
+                "fixed_cut_cents": 0,
+                "reason": "Standard fleet commission update for city operation"
+            }, headers=admin_headers)
+            assert comm_resp.status_code == 200
+
+            # 8. Admin Broadcast Announcement
+            bc_resp = await client.post("/api/v1/admin/broadcasts", json={
+                "title": "VIP Fleet Priority Alert",
+                "message": "All chauffeurs prepare for high volume at Jio World Convention Centre",
+                "target_role": "DRIVER"
+            }, headers=admin_headers)
+            assert bc_resp.status_code == 200
+            assert bc_resp.json()["status"] == "SENT"
+        finally:
+            app.dependency_overrides.pop(get_current_admin, None)

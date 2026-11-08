@@ -6,16 +6,6 @@ class IdentityLookupPayload(BaseModel):
     identifier: str = Field(..., description="Mobile number (e.g. +919876543210) or Email address", json_schema_extra={"example": "+919876543210"})
     role: str = Field(default="customer", description="customer or driver", json_schema_extra={"example": "customer"})
 
-class OtpRequestPayload(BaseModel):
-    """Payload to request one-time passcode for phone auth."""
-    phone_number: str = Field(..., description="Full international phone number with country code", json_schema_extra={"example": "+919876543210"})
-
-class OtpVerifyPayload(BaseModel):
-    """Payload to verify OTP and authenticate session."""
-    phone_number: str = Field(..., json_schema_extra={"example": "+919876543210"})
-    otp_code: Optional[str] = Field(default=None)
-    role: str = Field(default="customer", json_schema_extra={"example": "customer"})
-
 class TokenRefreshPayload(BaseModel):
     """Payload to exchange active refresh token for a fresh access token."""
     refresh_token: str = Field(..., description="Cryptographically signed refresh token")
@@ -23,7 +13,7 @@ class TokenRefreshPayload(BaseModel):
 class PasswordRegisterPayload(BaseModel):
     """Payload to register a new user with email and secure password."""
     email: str = Field(..., json_schema_extra={"example": "guest@erickshaw.in"})
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=12, description="Password must contain at least 12 characters.")
     full_name: str = Field(..., min_length=2)
     phone_number: str = Field(..., min_length=10)
     role: str = Field(default="customer")
@@ -73,7 +63,7 @@ class PasswordResetPayload(BaseModel):
     user_id: Optional[str] = None
     recovery_code: Optional[str] = None
     recovery_token: Optional[str] = None
-    new_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=12, description="New password must contain at least 12 characters.")
 
 class EmailVerifyPayload(BaseModel):
     code: str = Field(..., min_length=6, max_length=6)
@@ -82,17 +72,15 @@ class CustomerSignupPayload(BaseModel):
     phone_number: Optional[str] = Field(default=None)
     email: Optional[str] = Field(default=None)
     full_name: str = Field(default="Valued Customer")
-    password: str = Field(..., min_length=4)
+    password: str = Field(..., min_length=12, description="Password must contain at least 12 characters.")
     username: Optional[str] = Field(default=None)
-    otp_code: Optional[str] = Field(default=None)
 
 class DriverSignupPayload(BaseModel):
     phone_number: Optional[str] = Field(default=None)
     email: Optional[str] = Field(default=None)
     full_name: str = Field(default="Driver Partner")
-    password: str = Field(..., min_length=4)
+    password: str = Field(..., min_length=12, description="Password must contain at least 12 characters.")
     username: Optional[str] = Field(default=None)
-    otp_code: Optional[str] = Field(default=None)
     vehicle_type: str = Field(default="E_RICKSHAW_STANDARD")
     vehicle_name: Optional[str] = Field(default="Electric Rickshaw")
     vehicle_no: Optional[str] = Field(default="DL-01-ER-1001")
@@ -101,15 +89,6 @@ class UnifiedLoginPayload(BaseModel):
     login_type: str = Field(default="PASSWORD")
     identifier: str = Field(..., min_length=3)
     password: Optional[str] = None
-    otp_code: Optional[str] = None
-
-class ForgotPasswordOtpPayload(BaseModel):
-    identifier: str = Field(..., min_length=3)
-
-class ForgotPasswordResetPayload(BaseModel):
-    identifier: str = Field(..., min_length=3)
-    otp_code: Optional[str] = Field(default=None)
-    new_password: str = Field(..., min_length=6)
 
 class UserDto(BaseModel):
     """Standardized user representation across all endpoints."""

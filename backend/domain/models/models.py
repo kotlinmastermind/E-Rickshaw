@@ -1022,6 +1022,8 @@ class Session(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    previous_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    rotated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_revoked: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -1030,6 +1032,19 @@ class Session(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     user: Mapped["User"] = relationship(back_populates="sessions")
+
+
+class AccountLockout(Base):
+    __tablename__ = "account_lockouts"
+
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    lockout_tier: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_failed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
 
 
 class AdminRole(Base):

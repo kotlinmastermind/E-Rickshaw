@@ -10,8 +10,11 @@ depends_on = None
 
 def upgrade() -> None:
     conn = op.get_bind()
-    inspector = Inspector.from_engine(conn)
-    existing_tables = set(inspector.get_table_names())
+    if getattr(op.get_context(), "as_sql", False):
+        existing_tables = set()
+    else:
+        inspector = Inspector.from_engine(conn)
+        existing_tables = set(inspector.get_table_names())
 
     # 476. Corporate Accounts
     if "corporate_accounts" not in existing_tables:

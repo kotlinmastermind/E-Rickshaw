@@ -86,104 +86,63 @@ class DriverTripOperationsService:
         return None
 
     async def get_offers(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Lightweight, non-mutating query returning only active, persisted dispatch offers
+        assigned to the authenticated driver. Eliminates dynamic matching and DB writes on GET.
+        """
         driver = await self._driver(user_id)
         if driver.approval_status != "APPROVED":
             raise HTTPException(403, "Driver approval is required before receiving ride offers.")
-        availability_result = await self.db.execute(select(DriverAvailability).where(DriverAvailability.driver_id == driver.id))
+
+        availability_result = await self.db.execute(
+            select(DriverAvailability).where(DriverAvailability.driver_id == driver.id)
+        )
         availability = availability_result.scalar_one_or_none()
         if not availability or not availability.is_online or availability.is_busy:
             return []
-        pref = await self._preferences(driver.id)
+
         now = utc_now()
-        expired_result = await self.db.execute(select(RideAssignment).where(RideAssignment.driver_id == driver.id, RideAssignment.status == "OFFERED", RideAssignment.expires_at <= now))
-        expired = expired_result.scalars().all()
-        for item in expired:
-            item.status = "EXPIRED"
-            item.responded_at = now
         location = await self._latest_location(driver.id)
-        if location is None:
-            await self.db.commit()
-            return []
-        offered_ids_result = await self.db.execute(select(RideAssignment.ride_id).where(RideAssignment.driver_id == driver.id))
-        previously_offered = set(offered_ids_result.scalars().all())
-        rides_result = await self.db.execute(select(Ride).where(Ride.status == "REQUESTED", Ride.assigned_driver_id.is_(None), Ride.is_scheduled.is_(False)).order_by(Ride.requested_at.asc()).limit(50))
-        category_ids = set(json.loads(pref.vehicle_categories_json or "[]"))
-        candidates = []
-        for ride in rides_result.scalars().all():
-            fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents
-            if fare_cents < pref.minimum_fare_cents:
-                continue
-            if category_ids and ride.vehicle_category_id not in category_ids:
-                cat_result = await self.db.execute(select(VehicleCategory.code).where(VehicleCategory.id == ride.vehicle_category_id))
-                cat_code = cat_result.scalar_one_or_none()
-                if not cat_code or cat_code not in category_ids:
-                    continue
-            pickup_distance = distance_km(location.latitude, location.longitude, ride.pickup_latitude, ride.pickup_longitude) if location else None
-            if pickup_distance is None or pickup_distance > pref.maximum_pickup_distance_km:
-                continue
-            candidates.append((ride, pickup_distance))
 
-        # Offer to a small nearest-first wave. The next wave opens after current
-        # offers are declined or expire, with a larger wave at each escalation.
-        for ride, pickup_distance in candidates:
-            active_result = await self.db.execute(select(RideAssignment.id).where(RideAssignment.ride_id == ride.id, RideAssignment.status == "OFFERED", RideAssignment.expires_at > now).limit(1))
-            if active_result.scalar_one_or_none():
-                continue
-            attempts_result = await self.db.execute(select(RideAssignment).where(RideAssignment.ride_id == ride.id))
-            attempts = attempts_result.scalars().all()
-            prior_driver_ids = {a.driver_id for a in attempts}
-            level = len(attempts) // 3
-            wave_size = min(8, 2 + level * 2)
-            fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents
-            available_result = await self.db.execute(
-                select(DriverProfile, DriverAvailability)
-                .join(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
-                .where(DriverProfile.approval_status == "APPROVED", DriverAvailability.is_online.is_(True), DriverAvailability.is_busy.is_(False))
+        # Pure read query: returns only live, unexpired offers assigned to this driver
+        offer_stmt = (
+            select(RideAssignment, Ride)
+            .join(Ride, Ride.id == RideAssignment.ride_id)
+            .where(
+                RideAssignment.driver_id == driver.id,
+                RideAssignment.status == "OFFERED",
+                RideAssignment.expires_at > now,
+                Ride.status == "REQUESTED",
+                Ride.assigned_driver_id.is_(None)
             )
-            ranked = []
-            for candidate_driver, candidate_availability in available_result.all():
-                if candidate_driver.id in prior_driver_ids:
-                    continue
-                candidate_pref = await self._preferences(candidate_driver.id)
-                if fare_cents < candidate_pref.minimum_fare_cents:
-                    continue
-                candidate_categories = json.loads(candidate_pref.vehicle_categories_json or "[]")
-                if candidate_categories and ride.vehicle_category_id not in candidate_categories:
-                    category_code_result = await self.db.execute(select(VehicleCategory.code).where(VehicleCategory.id == ride.vehicle_category_id))
-                    if category_code_result.scalar_one_or_none() not in candidate_categories:
-                        continue
-                candidate_loc = await self._latest_location(candidate_driver.id)
-                candidate_distance = distance_km(candidate_loc.latitude, candidate_loc.longitude, ride.pickup_latitude, ride.pickup_longitude) if candidate_loc else None
-                if candidate_distance is not None and candidate_distance > candidate_pref.maximum_pickup_distance_km:
-                    continue
-                if candidate_distance is None and candidate_driver.id != driver.id:
-                    continue
-                ranked.append((candidate_driver, candidate_distance))
-            ranked.sort(key=lambda row: row[1] if row[1] is not None else 1e9)
-            for candidate_driver, _distance in ranked[:wave_size]:
-                self.db.add(RideAssignment(ride_id=ride.id, driver_id=candidate_driver.id, status="OFFERED", offered_at=now, expires_at=now + timedelta(seconds=OFFER_SECONDS), escalation_level=level))
-            if ranked:
-                await self.db.flush()
+            .order_by(RideAssignment.offered_at.asc())
+        )
+        offer_result = await self.db.execute(offer_stmt)
 
-        await self.db.flush()
-        # Return only persisted active offers addressed to this authenticated driver.
-        offer_result = await self.db.execute(select(RideAssignment, Ride).join(Ride, Ride.id == RideAssignment.ride_id).where(RideAssignment.driver_id == driver.id, RideAssignment.status == "OFFERED", RideAssignment.expires_at > now, Ride.status == "REQUESTED").order_by(RideAssignment.offered_at.asc()))
         category_cache: Dict[str, str] = {}
         response = []
         for assignment, ride in offer_result.all():
             if ride.vehicle_category_id not in category_cache:
                 result = await self.db.execute(select(VehicleCategory.name).where(VehicleCategory.id == ride.vehicle_category_id))
                 category_cache[ride.vehicle_category_id] = result.scalar_one_or_none() or "Vehicle category"
-            this_distance = distance_km(location.latitude, location.longitude, ride.pickup_latitude, ride.pickup_longitude) if location else None
-            dest_parts = [part.strip() for part in ride.destination_address.split(",") if part.strip()]
-            response.append({"ride_id": ride.id, "pickup_address": ride.pickup_address,
-                             "destination_area": ", ".join(dest_parts[-2:]) if dest_parts else "Area unavailable",
-                             "vehicle_category": category_cache[ride.vehicle_category_id],
-                             "estimated_fare_cents": ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents,
-                             "estimated_driver_earnings_cents": round((ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents) * 0.8),
-                             "pickup_distance_km": round(this_distance, 1) if this_distance is not None else None,
-                             "estimated_trip_distance_km": ride.estimated_distance_km,
-                             "expires_at": assignment.expires_at.isoformat(), "escalation_level": assignment.escalation_level})
+
+            this_distance = distance_km(location.latitude, location.longitude, ride.pickup_latitude, ride.pickup_longitude) if (location and ride.pickup_latitude and ride.pickup_longitude) else None
+            dest_parts = [part.strip() for part in (ride.destination_address or "").split(",") if part.strip()]
+            fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents
+            earnings_cents = round(fare_cents * 0.8) if fare_cents is not None else 0
+
+            response.append({
+                "ride_id": ride.id,
+                "pickup_address": ride.pickup_address,
+                "destination_area": ", ".join(dest_parts[-2:]) if dest_parts else "Area unavailable",
+                "vehicle_category": category_cache[ride.vehicle_category_id],
+                "estimated_fare_cents": fare_cents,
+                "estimated_driver_earnings_cents": earnings_cents,
+                "pickup_distance_km": round(this_distance, 1) if this_distance is not None else None,
+                "estimated_trip_distance_km": ride.estimated_distance_km,
+                "expires_at": assignment.expires_at.isoformat() if assignment.expires_at else None,
+                "escalation_level": assignment.escalation_level
+            })
         return response
 
     async def reject_offer(self, user_id: str, ride_id: str, reason: str) -> Dict[str, Any]:

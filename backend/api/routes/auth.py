@@ -7,12 +7,10 @@ from backend.application.services.auth_service import AuthService
 from backend.application.services.user_governance_service import UserGovernanceService
 from backend.api.deps import get_current_user
 from backend.domain.models import User
-from backend.infrastructure.security.rate_limiter import otp_rate_limiter, auth_rate_limiter
+from backend.infrastructure.security.rate_limiter import auth_rate_limiter
 from backend.infrastructure.security.crypto import decode_jwt_token
 from backend.api.schemas.auth import (
     IdentityLookupPayload,
-    OtpRequestPayload,
-    OtpVerifyPayload,
     TokenRefreshPayload,
     PasswordRegisterPayload,
     PasswordLoginPayload,
@@ -26,8 +24,6 @@ from backend.api.schemas.auth import (
     CustomerSignupPayload,
     DriverSignupPayload,
     UnifiedLoginPayload,
-    ForgotPasswordOtpPayload,
-    ForgotPasswordResetPayload,
     UserDto,
     AuthResponse
 )
@@ -38,24 +34,6 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 async def lookup_user_identity(payload: IdentityLookupPayload, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)
     return await service.lookup_user_identity(payload.identifier, payload.role)
-
-@router.post("/otp/request", dependencies=[Depends(otp_rate_limiter)])
-async def request_otp(payload: OtpRequestPayload, db: AsyncSession = Depends(get_db)):
-    service = AuthService(db)
-    return await service.request_otp(payload.phone_number)
-
-@router.post("/otp/verify", dependencies=[Depends(auth_rate_limiter)])
-async def verify_otp(payload: OtpVerifyPayload, request: Request, db: AsyncSession = Depends(get_db)):
-    service = AuthService(db)
-    ip = request.client.host if request.client else None
-    ua = request.headers.get("user-agent")
-    return await service.verify_otp(
-        phone_number=payload.phone_number,
-        otp_code=payload.otp_code,
-        role=payload.role,
-        ip_address=ip,
-        user_agent=ua
-    )
 
 # 1. Sign in & Register with Email and Password
 @router.post("/password/register", dependencies=[Depends(auth_rate_limiter)])
@@ -217,7 +195,7 @@ async def oauth_apple(payload: OAuthPayload, request: Request, db: AsyncSession 
         user_agent=ua
     )
 
-# 4. Passkey Sign-In
+# 4. Passkey Sign-In (SECURITY CONTAINMENT: Fail-Closed)
 @router.get("/passkey/login-challenge")
 async def passkey_login_challenge(db: AsyncSession = Depends(get_db)):
     service = UserGovernanceService(db)
@@ -228,8 +206,12 @@ async def passkey_login_verify(payload: PasskeyLoginPayload, request: Request, d
     service = UserGovernanceService(db)
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
-    cid = payload.credential_id or payload.credentialId or "default_cred"
-    sig = payload.signature or "default_sig"
+    cid = (payload.credential_id or payload.credentialId or "").strip()
+    sig = (payload.signature or "").strip()
+    if not cid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Credential ID is required.")
+    if not sig:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assertion signature is required.")
     return await service.verify_passkey_login(
         credential_id=cid,
         signature=sig,
@@ -317,7 +299,6 @@ async def customer_signup(payload: CustomerSignupPayload, request: Request, db: 
         full_name=payload.full_name,
         password=payload.password,
         username=payload.username,
-        otp_code=payload.otp_code,
         ip_address=ip,
         user_agent=ua
     )
@@ -333,7 +314,6 @@ async def driver_signup(payload: DriverSignupPayload, request: Request, db: Asyn
         full_name=payload.full_name,
         password=payload.password,
         username=payload.username,
-        otp_code=payload.otp_code,
         vehicle_type=payload.vehicle_type,
         vehicle_name=payload.vehicle_name,
         vehicle_no=payload.vehicle_no,
@@ -351,23 +331,8 @@ async def unified_login(payload: UnifiedLoginPayload, request: Request, db: Asyn
         login_type=payload.login_type,
         identifier=payload.identifier,
         password=payload.password,
-        otp_code=payload.otp_code,
         ip_address=ip,
         user_agent=ua
-    )
-
-@router.post("/forgot-password/request-otp", dependencies=[Depends(auth_rate_limiter)])
-async def request_forgot_password_otp(payload: ForgotPasswordOtpPayload, db: AsyncSession = Depends(get_db)):
-    service = AuthService(db)
-    return await service.request_forgot_password_passcode(payload.identifier)
-
-@router.post("/forgot-password/reset", dependencies=[Depends(auth_rate_limiter)])
-async def reset_forgot_password(payload: ForgotPasswordResetPayload, db: AsyncSession = Depends(get_db)):
-    service = AuthService(db)
-    return await service.reset_forgot_password_passcode(
-        identifier=payload.identifier,
-        otp_code=payload.otp_code,
-        new_password=payload.new_password
     )
 
 @router.post("/logout")

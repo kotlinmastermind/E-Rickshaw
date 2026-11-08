@@ -89,6 +89,7 @@ _ADMIN_PERMISSION_PATHS = {
     ("GET", "/admin/drivers"): "admin.drivers.read",
     ("PUT", "/admin/drivers/{driver_id}/approval"): "admin.drivers.approve",
     ("GET", "/admin/drivers/{driver_id}/documents"): "admin.drivers.documents",
+    ("PUT", "/admin/drivers/{driver_id}/documents/{document_id}"): "admin.drivers.documents",
     ("GET", "/admin/driver-documents/{document_id}/content"): "admin.drivers.documents",
     ("PUT", "/admin/driver-documents/{document_id}/review"): "admin.drivers.documents",
     ("GET", "/admin/rejection-templates"): "admin.drivers.approve",

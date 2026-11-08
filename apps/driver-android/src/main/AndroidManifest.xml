@@ -83,7 +83,7 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:enableOnBackInvokedCallback="true"
-        android:theme="@android:style/Theme.Material.NoActionBar">
+        android:theme="@style/Theme.RideGo">
         
         <!-- Mapbox Maps & Navigation SDK Public Token -->
         <meta-data
@@ -100,26 +100,24 @@
             android:showOnLockScreen="true"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
-            android:theme="@android:style/Theme.Material.NoActionBar">
+            android:theme="@style/Theme.RideGo">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- Driver Real-Time High-Priority Dispatch Push Notification Service -->
-        <service
-            android:name=".core.notification.DriverFirebaseMessagingService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
+        
 
         <service
             android:name=".core.location.DriverLocationForegroundService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="location" />
+
+        <receiver
+            android:name=".core.dispatch.DriverDispatchActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 </manifest>

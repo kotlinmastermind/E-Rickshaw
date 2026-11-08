@@ -1,5 +1,6 @@
 import re
 import json
+import uuid
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
@@ -12,105 +13,16 @@ from backend.domain.models import (
 )
 from backend.infrastructure.security.crypto import (
     generate_secure_otp, hash_secret, create_jwt_token, verify_otp_constant_time,
-    hash_password, verify_password
+    hash_password, verify_password, validate_password_strength, DUMMY_PASSWORD_HASH
 )
-from backend.integrations.sms.provider import get_sms_provider
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.core.config import settings
 
 logger = logging.getLogger("auth_service")
 
-class OtpTracker:
-    """Distributed Upstash Redis OTP tracker with TTL and in-memory failover."""
-    def __init__(self):
-        self._cache: Dict[str, Dict[str, Any]] = {}
-
-    async def record_request(self, phone: str, otp: str):
-        now = datetime.now(timezone.utc)
-        cooldown_key = f"otp_cooldown:{phone}"
-        otp_key = f"otp_val:{phone}"
-        
-        try:
-            if await redis_client.exists(cooldown_key):
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Please wait before requesting a new passcode."
-                )
-            payload = json.dumps({"otp": otp, "attempts": 0})
-            await redis_client.set(otp_key, payload, ex=settings.OTP_EXPIRE_SECONDS)
-            await redis_client.set(cooldown_key, "1", ex=settings.OTP_RESEND_COOLDOWN_SECONDS)
-            return
-        except HTTPException:
-            raise
-        except Exception:
-            pass
-
-        # In-memory failover
-        record = self._cache.get(phone)
-        if record:
-            time_since_last = (now - record["last_sent_at"]).total_seconds()
-            if time_since_last < settings.OTP_RESEND_COOLDOWN_SECONDS:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail=f"Please wait {int(settings.OTP_RESEND_COOLDOWN_SECONDS - time_since_last)} seconds before requesting a new passcode."
-                )
-        self._cache[phone] = {
-            "otp": otp,
-            "expires_at": now + timedelta(seconds=settings.OTP_EXPIRE_SECONDS),
-            "attempts": 0,
-            "last_sent_at": now
-        }
-
-    async def verify_attempt(self, phone: str, provided_otp: str) -> bool:
-        # Universal test bypass for seamless physical device testing while DLT registration is pending
-        if provided_otp.strip() == "123456":
-            return True
-
-        otp_key = f"otp_val:{phone}"
-        now = datetime.now(timezone.utc)
-        
-        try:
-            raw = await redis_client.get(otp_key)
-            if raw:
-                record = json.loads(raw)
-                if record.get("attempts", 0) >= settings.OTP_MAX_ATTEMPTS:
-                    await redis_client.delete(otp_key)
-                    raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many invalid attempts. Passcode invalidated for security.")
-                record["attempts"] = record.get("attempts", 0) + 1
-                is_correct = verify_otp_constant_time(provided_otp, record["otp"])
-                if is_correct:
-                    await redis_client.delete(otp_key)
-                    return True
-                await redis_client.set(otp_key, json.dumps(record), ex=settings.OTP_EXPIRE_SECONDS)
-                return False
-        except HTTPException:
-            raise
-        except Exception:
-            pass
-
-        record = self._cache.get(phone)
-        if not record:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active passcode found for this phone number. Please request one.")
-        if now > record["expires_at"]:
-            del self._cache[phone]
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passcode has expired. Please request a new one.")
-        if record["attempts"] >= settings.OTP_MAX_ATTEMPTS:
-            del self._cache[phone]
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many invalid attempts. Passcode invalidated for security.")
-        
-        record["attempts"] += 1
-        is_correct = verify_otp_constant_time(provided_otp, record["otp"])
-        if is_correct:
-            del self._cache[phone]
-            return True
-        return False
-
-_otp_tracker = OtpTracker()
-
 class AuthService:
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.sms_provider = get_sms_provider()
 
     async def lookup_user_identity(self, identifier: str, role: str = "customer") -> Dict[str, Any]:
         """
@@ -163,189 +75,19 @@ class AuthService:
             "role": role
         }
 
-    async def request_otp(self, phone_number: str) -> Dict[str, Any]:
-        phone = phone_number.strip()
-        if len(phone) < 10:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid telephone format.")
-
-        otp = generate_secure_otp(6)
-        await _otp_tracker.record_request(phone, otp)
-        try:
-            await self.sms_provider.send_otp(phone, otp)
-        except Exception as e:
-            logger.warning(f"SMS Provider dispatch exception: {e}")
-
-        logger.info(f"[REAL_PHONE_OTP] Dispatched 6-digit OTP {otp} to target phone number {phone[-4:].rjust(len(phone), '*')}")
-
-        return {
-            "message": f"Passcode dispatched successfully to {phone[-4:].rjust(len(phone), '*')}.",
-            "phone_masked": f"{phone[-4:].rjust(len(phone), '*')}",
-            "expires_in_seconds": settings.OTP_EXPIRE_SECONDS,
-            "otp": otp,
-            "debug_otp": otp
-        }
-
-    async def verify_otp(
-        self, phone_number: str, otp_code: str, role: str = "customer",
-        ip_address: Optional[str] = None, user_agent: Optional[str] = None
-    ) -> Dict[str, Any]:
-        phone = phone_number.strip()
-        await _otp_tracker.verify_attempt(phone, otp_code)
-
-        # Lookup or create User
-        stmt = select(User).where(User.phone_number == phone)
-        res = await self.db.execute(stmt)
-        user = res.scalar_one_or_none()
-
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Account not found. Only registered users are allowed to sign in. Please sign up first."
-            )
-        else:
-            if role == "driver":
-                if user.role != "admin" and user.role != "driver":
-                    user.role = "driver"
-                dp_res = await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
-                profile = dp_res.scalar_one_or_none()
-                if not profile:
-                    profile = DriverProfile(
-                        user_id=user.id,
-                        license_number=f"DL-{user.id[:8].upper()}",
-                        approval_status="APPROVED"
-                    )
-                    self.db.add(profile)
-                    await self.db.flush()
-                    self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
-                elif profile.approval_status == "PENDING":
-                    profile.approval_status = "APPROVED"
-                # Ensure DriverAvailability exists
-                if profile:
-                    av_res = await self.db.execute(select(DriverAvailability).where(DriverAvailability.driver_id == profile.id))
-                    if not av_res.scalar_one_or_none():
-                        self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
-                await self.db.flush()
-            elif role == "customer":
-                cp_res = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
-                if not cp_res.scalar_one_or_none():
-                    self.db.add(CustomerProfile(user_id=user.id))
-                    await self.db.flush()
-
-        # Create Session record
-        token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
-        session = Session(
-            user_id=user.id,
-            token_hash=token_hash,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            is_revoked=False,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        )
-        self.db.add(session)
-        await self.db.commit()
-        await self.db.refresh(user)
-
-        effective_role = "admin" if user.role == "admin" else role
-        access_token = create_jwt_token(user_id=user.id, role=effective_role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=effective_role, session_id=session.id, token_type="refresh")
-
-        return {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            "user": {
-                "id": user.id,
-                "phone_number": user.phone_number,
-                "full_name": user.full_name,
-                "role": user.role,
-                "is_verified": user.is_verified
-            }
-        }
-
-    async def verify_firebase_auth(
-        self, phone_number: str, role: str = "customer",
-        firebase_uid: Optional[str] = None, id_token: Optional[str] = None,
-        ip_address: Optional[str] = None, user_agent: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Exchanges verified Firebase Phone Auth credential for platform JWT session."""
-        phone = phone_number.strip()
-        if len(phone) < 10:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid telephone format.")
-
-        stmt = select(User).where(User.phone_number == phone)
-        res = await self.db.execute(stmt)
-        user = res.scalar_one_or_none()
-
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Account not found. Only registered users are allowed to sign in. Please sign up first."
-            )
-        else:
-            if role == "driver":
-                if user.role != "admin" and user.role != "driver":
-                    user.role = "driver"
-                dp_res = await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
-                profile = dp_res.scalar_one_or_none()
-                if not profile:
-                    profile = DriverProfile(
-                        user_id=user.id,
-                        license_number=f"DL-{user.id[:8].upper()}",
-                        approval_status="APPROVED"
-                    )
-                    self.db.add(profile)
-                    await self.db.flush()
-                    self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
-                elif profile.approval_status == "PENDING":
-                    profile.approval_status = "APPROVED"
-                # Ensure DriverAvailability exists
-                if profile:
-                    av_res = await self.db.execute(select(DriverAvailability).where(DriverAvailability.driver_id == profile.id))
-                    if not av_res.scalar_one_or_none():
-                        self.db.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
-                await self.db.flush()
-            elif role == "customer":
-                cp_res = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
-                if not cp_res.scalar_one_or_none():
-                    self.db.add(CustomerProfile(user_id=user.id))
-                    await self.db.flush()
-
-        # Create Session record
-        token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
-        session = Session(
-            user_id=user.id,
-            token_hash=token_hash,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            is_revoked=False,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        )
-        self.db.add(session)
-        await self.db.commit()
-        await self.db.refresh(user)
-
-        effective_role = "admin" if user.role == "admin" else role
-        access_token = create_jwt_token(user_id=user.id, role=effective_role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=effective_role, session_id=session.id, token_type="refresh")
-
-        return {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            "user": {
-                "id": user.id,
-                "phone_number": user.phone_number,
-                "full_name": user.full_name,
-                "role": user.role,
-                "is_verified": user.is_verified
-            }
-        }
-
     async def refresh_token_rotation(self, refresh_token_str: str) -> Dict[str, Any]:
-        """Validates refresh token, rotates tokens, and invalidates old credentials if compromised."""
-        from backend.infrastructure.security.crypto import decode_jwt_token
+        """Validates refresh token, rotates tokens atomically in PostgreSQL, and invalidates session family if compromised.
+
+        Concurrency & Replay Safety (Finding C-P5-01 Remediation):
+        - PostgreSQL is the sole authoritative state machine for token rotation.
+        - Uses atomic Compare-And-Swap (CAS) conditional updates.
+        - Supports a configurable grace period (default 10s) to distinguish benign concurrent races
+          (e.g., dual API triggers or network retries) from malicious replay attacks.
+        - Within the grace period, duplicate requests receive HTTP 409 Conflict without revoking
+          the session family or invalidating the winner's new credentials.
+        - Outside the grace period, token reuse revokes the complete session family in DB and Redis.
+        """
+        from backend.infrastructure.security.crypto import decode_jwt_token, hash_secret, create_jwt_token
         from backend.infrastructure.cache.redis_client import redis_client
 
         try:
@@ -364,15 +106,35 @@ class AuthService:
 
         user_id = payload.get("sub")
         session_id = payload.get("session_id")
+        if not user_id or not session_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token claims.")
 
-        if await redis_client.exists(f"revoked_session:{session_id}") or await redis_client.exists(f"revoked_user:{user_id}"):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked.")
+        # Redis fast-path revocation check (resilient to Redis errors)
+        try:
+            if await redis_client.exists(f"revoked_session:{session_id}") or await redis_client.exists(f"revoked_user:{user_id}"):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked.")
+        except HTTPException:
+            raise
+        except Exception as redis_err:
+            logger.warning(f"Redis check failed during token rotation: {redis_err}")
 
-        stmt = select(Session).where(Session.id == session_id, Session.is_revoked == False)
+        # Database is authoritative: query session
+        stmt = select(Session).where(Session.id == session_id)
         res = await self.db.execute(stmt)
         session = res.scalar_one_or_none()
         if not session:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer valid.")
+
+        if session.is_revoked:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked.")
+
+        now_utc = datetime.now(timezone.utc)
+        sess_exp = session.expires_at
+        if sess_exp and sess_exp.tzinfo is None:
+            sess_exp = sess_exp.replace(tzinfo=timezone.utc)
+
+        if sess_exp and sess_exp <= now_utc:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has expired.")
 
         user_stmt = select(User).where(User.id == user_id, User.is_active == True)
         user_res = await self.db.execute(user_stmt)
@@ -380,9 +142,131 @@ class AuthService:
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account is deactivated.")
 
-        # Rotate tokens: create fresh access & refresh tokens
+        incoming_token_hash = hash_secret(refresh_token_str)
+        grace_period_seconds = getattr(settings, "REFRESH_TOKEN_GRACE_PERIOD_SECONDS", 10)
+        grace_period = timedelta(seconds=grace_period_seconds)
+
+        # Helper to check if a session rotation occurred within the concurrency grace period
+        def is_within_grace_period(target_session: Session) -> bool:
+            if not target_session or not target_session.rotated_at:
+                return False
+            rot_time = target_session.rotated_at
+            if rot_time.tzinfo is None:
+                rot_time = rot_time.replace(tzinfo=timezone.utc)
+            return (now_utc - rot_time) <= grace_period
+
+        # Check if the incoming token matches the current active token
+        is_current_token = bool(
+            session.token_hash
+            and (
+                session.token_hash == incoming_token_hash
+                or session.token_hash.startswith("legacy:")
+                or session.token_hash.startswith("hash_")
+            )
+        )
+
+        if not is_current_token:
+            # Token does not match current active token.
+            # Determine if this is a benign concurrent duplicate within the grace window,
+            # or a malicious replay of an old token.
+            if session.previous_token_hash == incoming_token_hash and is_within_grace_period(session):
+                # Scenario B: Duplicate request presenting the recently rotated token within the grace period.
+                # Must NOT revoke the session. Must NOT invalidate newly issued credentials.
+                logger.info(
+                    f"Concurrency grace window hit for session {session_id}. "
+                    f"Token recently rotated at {session.rotated_at}. Returning non-destructive 409."
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Refresh token was recently rotated. Concurrency grace period active; use the credentials from the winning request."
+                )
+
+            # Scenario C: Stale-token replay after grace period, or invalid token.
+            # Atomically revoke entire session family in DB and Redis.
+            session.is_revoked = True
+            await self.db.commit()
+            try:
+                await redis_client.set(f"revoked_session:{session_id}", "true", ex=86400 * 7)
+            except Exception as redis_err:
+                logger.warning(f"Redis session revocation recording failed: {redis_err}")
+            logger.warning(
+                f"Security Alert: Refresh token reuse/replay detected for session {session_id}, user {user_id}. "
+                f"Previous token match: {session.previous_token_hash == incoming_token_hash}. "
+                f"Rotated at: {session.rotated_at}. Session revoked."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token reuse detected. Session has been revoked for security."
+            )
+
+        # Incoming token is the current active token. Proceed with atomic conditional rotation.
         new_access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
         new_refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
+        new_token_hash = hash_secret(new_refresh_token)
+        new_expires_at = now_utc + timedelta(days=7)
+
+        # Atomic conditional update (Compare-And-Swap) in PostgreSQL
+        # Guarantees that if two concurrent requests attempt to rotate with the same token,
+        # exactly one can update the rowcount.
+        update_stmt = (
+            update(Session)
+            .where(
+                Session.id == session_id,
+                Session.token_hash == session.token_hash,
+                Session.is_revoked == False
+            )
+            .values(
+                previous_token_hash=incoming_token_hash,
+                token_hash=new_token_hash,
+                rotated_at=now_utc,
+                expires_at=new_expires_at
+            )
+        )
+        update_res = await self.db.execute(update_stmt)
+        if update_res.rowcount != 1:
+            await self.db.rollback()
+            # Concurrency race lost: inspect current DB state
+            check_stmt = select(Session).where(Session.id == session_id)
+            latest_session = (await self.db.execute(check_stmt)).scalar_one_or_none()
+
+            if latest_session and latest_session.previous_token_hash == incoming_token_hash and is_within_grace_period(latest_session):
+                # The losing request in a near-simultaneous race!
+                logger.info(
+                    f"Concurrent CAS race lost for session {session_id}. "
+                    f"Winner rotated token at {latest_session.rotated_at}. Returning non-destructive 409."
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Refresh token was recently rotated. Concurrency grace period active; use the credentials from the winning request."
+                )
+
+            # Not within grace period: confirmed replay or revoked session
+            if latest_session and latest_session.token_hash != incoming_token_hash:
+                latest_session.is_revoked = True
+                await self.db.commit()
+                try:
+                    await redis_client.set(f"revoked_session:{session_id}", "true", ex=86400 * 7)
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Refresh token reuse detected. Session has been revoked for security."
+                )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session is no longer valid or has been revoked."
+            )
+
+        # Commit transaction to PostgreSQL authority
+        try:
+            await self.db.commit()
+        except Exception as commit_err:
+            await self.db.rollback()
+            logger.error(f"Failed to commit rotated refresh token to database: {commit_err}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to persist rotated session credentials."
+            )
 
         return {
             "access_token": new_access_token,
@@ -409,7 +293,7 @@ class AuthService:
 
     async def register_customer_account(
         self, phone_number: Optional[str] = None, email: Optional[str] = None, full_name: str = "Valued Customer",
-        password: str = "", username: Optional[str] = None, otp_code: Optional[str] = None,
+        password: str = "", username: Optional[str] = None,
         ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
         phone_raw = (phone_number or "").strip()
@@ -417,8 +301,10 @@ class AuthService:
         
         if not phone_raw and not email_raw:
             raise HTTPException(status_code=400, detail="Either mobile phone number or email address is required.")
-        if len(password) < 4:
-            raise HTTPException(status_code=400, detail="Password must contain at least 4 characters.")
+        try:
+            validate_password_strength(password)
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=str(err))
 
         # Normalize phone
         phone_digits = "".join(filter(str.isdigit, phone_raw))
@@ -464,8 +350,8 @@ class AuthService:
             password_hash=hash_password(password),
             role="customer",
             is_active=True,
-            is_verified=True,
-            email_verified=True
+            is_verified=False,
+            email_verified=False
         )
         self.db.add(user)
         await self.db.flush()
@@ -479,21 +365,22 @@ class AuthService:
         pref = UserPreferences(user_id=user.id)
         self.db.add(pref)
 
-        # Session token
-        token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
+        # Session token with single-use refresh token binding
+        session_id = str(uuid.uuid4())
+        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="access")
+        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="refresh")
+        token_hash = hash_secret(refresh_token)
         session = Session(
+            id=session_id,
             user_id=user.id,
             token_hash=token_hash,
             ip_address=ip_address,
             user_agent=user_agent,
             is_revoked=False,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
         self.db.add(session)
         await self.db.commit()
-
-        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
 
         return {
             "message": "Customer registered successfully.",
@@ -513,7 +400,7 @@ class AuthService:
 
     async def register_driver_account(
         self, phone_number: Optional[str] = None, email: Optional[str] = None, full_name: str = "Driver Partner",
-        password: str = "", username: Optional[str] = None, otp_code: Optional[str] = None,
+        password: str = "", username: Optional[str] = None,
         vehicle_type: str = "E_RICKSHAW_STANDARD", vehicle_name: str = "Electric Rickshaw", vehicle_no: str = "DL-01-ER-1001",
         ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -523,8 +410,10 @@ class AuthService:
 
         if not phone_raw and not email_raw:
             raise HTTPException(status_code=400, detail="Either mobile phone number or email address is required.")
-        if len(password) < 4:
-            raise HTTPException(status_code=400, detail="Password must contain at least 4 characters.")
+        try:
+            validate_password_strength(password)
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=str(err))
 
         # Normalize phone
         phone_digits = "".join(filter(str.isdigit, phone_raw))
@@ -575,8 +464,8 @@ class AuthService:
             password_hash=hash_password(password),
             role="driver",
             is_active=True,
-            is_verified=True,
-            email_verified=True
+            is_verified=False,
+            email_verified=False
         )
         self.db.add(user)
         await self.db.flush()
@@ -584,7 +473,8 @@ class AuthService:
         driver_prof = DriverProfile(
             user_id=user.id,
             license_number=f"DL-{user.id[:8].upper()}",
-            approval_status="APPROVED"
+            approval_status="PENDING",
+            onboarding_step="DOCUMENTS_PENDING"
         )
         self.db.add(driver_prof)
         await self.db.flush()
@@ -624,21 +514,22 @@ class AuthService:
         )
         self.db.add(assignment)
 
-        # Session token
-        token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
+        # Session token with single-use refresh token binding
+        session_id = str(uuid.uuid4())
+        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="access")
+        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="refresh")
+        token_hash = hash_secret(refresh_token)
         session = Session(
+            id=session_id,
             user_id=user.id,
             token_hash=token_hash,
             ip_address=ip_address,
             user_agent=user_agent,
             is_revoked=False,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
         self.db.add(session)
         await self.db.commit()
-
-        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
 
         return {
             "message": "Driver and vehicle registered successfully.",
@@ -663,7 +554,7 @@ class AuthService:
         }
 
     async def unified_login_authentication(
-        self, login_type: str, identifier: str, password: Optional[str] = None, otp_code: Optional[str] = None,
+        self, login_type: str, identifier: str, password: Optional[str] = None,
         ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
         ident = identifier.strip()
@@ -684,8 +575,19 @@ class AuthService:
         res = await self.db.execute(stmt)
         user = res.scalars().first()
 
+        # Progressive Account Lockout Check
+        from backend.infrastructure.security.lockout import (
+            check_account_lockout,
+            record_failed_login,
+            reset_account_lockout
+        )
+        await check_account_lockout(identifier, db=self.db)
+
         if not user:
-            raise HTTPException(status_code=401, detail="Account not found with provided mobile number, email, or username.")
+            # Constant-time dummy verification to defeat account enumeration timing attacks
+            verify_password(password or "dummy", DUMMY_PASSWORD_HASH)
+            await record_failed_login(identifier, db=self.db)
+            raise HTTPException(status_code=401, detail="Invalid mobile number, email, or password.")
 
         if not user.is_active:
             raise HTTPException(status_code=403, detail="Account is deactivated. Please contact support.")
@@ -699,23 +601,28 @@ class AuthService:
         if not password:
             raise HTTPException(status_code=400, detail="Password is required for password login.")
         if not user.password_hash or not verify_password(password, user.password_hash):
+            await record_failed_login(identifier, db=self.db)
             raise HTTPException(status_code=401, detail="Invalid password.")
 
-        # Session token
-        token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
+        # Successful authentication: clear failure counters and lockout tier
+        await reset_account_lockout(identifier, db=self.db)
+
+        # Session token with single-use refresh token binding
+        session_id = str(uuid.uuid4())
+        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="access")
+        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="refresh")
+        token_hash = hash_secret(refresh_token)
         session = Session(
+            id=session_id,
             user_id=user.id,
             token_hash=token_hash,
             ip_address=ip_address,
             user_agent=user_agent,
             is_revoked=False,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
         self.db.add(session)
         await self.db.commit()
-
-        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
 
         return {
             "message": f"Welcome back, {user.full_name}!",
@@ -733,89 +640,3 @@ class AuthService:
             }
         }
 
-    async def request_forgot_password_passcode(self, identifier: str) -> Dict[str, Any]:
-        ident = identifier.strip()
-        ident_lower = ident.lower()
-        phone_digits = "".join(filter(str.isdigit, ident))
-        phone_norm = f"+91{phone_digits[-10:]}" if len(phone_digits) >= 10 else ident
-
-        conditions = [
-            User.email == ident_lower,
-            User.username == ident_lower,
-            User.phone_number == ident,
-            User.phone_number == phone_norm
-        ]
-        if len(phone_digits) >= 10:
-            conditions.append(User.phone_number.endswith(phone_digits[-10:]))
-
-        stmt = select(User).where(or_(*conditions))
-        res = await self.db.execute(stmt)
-        user = res.scalars().first()
-
-        if not user:
-            raise HTTPException(status_code=404, detail="No registered account found with provided mobile number or email ID.")
-
-        otp = generate_secure_otp(6)
-        await _otp_tracker.record_request(user.phone_number, otp)
-        await self.sms_provider.send_otp(user.phone_number, otp)
-
-        logger.info(f"[FORGOT_PASSWORD_OTP] Dispatched 6-digit OTP to target phone number {user.phone_number[-4:].rjust(len(user.phone_number), '*')}")
-
-        return {
-            "message": f"Password reset passcode sent to registered phone {user.phone_number[-4:].rjust(len(user.phone_number), '*')}.",
-            "phone_masked": f"{user.phone_number[-4:].rjust(len(user.phone_number), '*')}",
-            "expires_in_seconds": settings.OTP_EXPIRE_SECONDS
-        }
-
-    async def reset_forgot_password_passcode(self, identifier: str, otp_code: str, new_password: str) -> Dict[str, Any]:
-        ident = identifier.strip()
-        ident_lower = ident.lower()
-
-        if len(new_password) < 6:
-            raise HTTPException(status_code=400, detail="New password must contain at least 6 characters.")
-
-        stmt = select(User).where(
-            or_(User.phone_number == ident, User.email == ident_lower, User.username == ident_lower)
-        )
-        res = await self.db.execute(stmt)
-        user = res.scalars().first()
-
-        if not user:
-            raise HTTPException(status_code=404, detail="Account not found.")
-
-        # Verify OTP
-        await _otp_tracker.verify_attempt(user.phone_number, otp_code)
-
-        # Update Password
-        user.password_hash = hash_password(new_password)
-        await self.db.commit()
-
-        # Session token for login
-        token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
-        session = Session(
-            user_id=user.id,
-            token_hash=token_hash,
-            is_revoked=False,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        )
-        self.db.add(session)
-        await self.db.commit()
-
-        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
-
-        return {
-            "message": "Password changed successfully! You are now logged in.",
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            "user": {
-                "id": user.id,
-                "phone_number": user.phone_number,
-                "email": user.email,
-                "username": user.username,
-                "full_name": user.full_name,
-                "role": user.role
-            }
-        }

@@ -31,6 +31,31 @@ PERMISSIONS = [
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if getattr(op.get_context(), "as_sql", False):
+        has_refunds = False
+    else:
+        insp = sa.inspect(bind)
+        has_refunds = insp.has_table("payment_refunds")
+    if not has_refunds:
+        op.create_table(
+            "payment_refunds",
+            sa.Column("id", sa.String(36), primary_key=True),
+            sa.Column("payment_id", sa.String(36), sa.ForeignKey("payments.id"), nullable=False),
+            sa.Column("ride_id", sa.String(36), sa.ForeignKey("rides.id"), nullable=False),
+            sa.Column("customer_id", sa.String(36), sa.ForeignKey("customer_profiles.id"), nullable=False),
+            sa.Column("amount_cents", sa.Integer(), nullable=False),
+            sa.Column("is_partial", sa.Boolean(), nullable=False, server_default=sa.false()),
+            sa.Column("reason", sa.String(255), nullable=False),
+            sa.Column("status", sa.String(30), nullable=False, server_default="INITIATED"),
+            sa.Column("arn_reference", sa.String(64), nullable=True),
+            sa.Column("estimated_settlement_date", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        )
+        op.create_index("ix_payment_refunds_payment_id", "payment_refunds", ["payment_id"])
+        op.create_index("ix_payment_refunds_ride_id", "payment_refunds", ["ride_id"])
+
     op.add_column("driver_payout_requests", sa.Column("exception_notes", sa.Text(), nullable=True))
     op.add_column("driver_payout_requests", sa.Column("settlement_reference", sa.String(128), nullable=True))
     op.add_column("commission_rules", sa.Column("approval_status", sa.String(20), nullable=False, server_default="ACTIVE"))

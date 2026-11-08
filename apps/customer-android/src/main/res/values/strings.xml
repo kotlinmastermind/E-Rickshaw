@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Application Brand & Identity -->
-    <string name="app_name">RideGo</string>
+    <string name="app_name">RiderGo</string>
     <string name="app_tagline">Smart, Clean &amp; Affordable Electric Commute</string>
 
     <!-- Authentication & Onboarding -->

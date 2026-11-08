@@ -10,9 +10,7 @@ plugins {
 
     alias(libs.plugins.kotlin.android)
 
-    alias(libs.plugins.google.services)
-
-}
+    }
 
 
 
@@ -34,7 +32,7 @@ val mapboxPublicToken: String = (localProps.getProperty("MAPBOX_PUBLIC_TOKEN") ?
 
 android {
 
-    namespace = "com.luxury.chauffeur.driver"
+    namespace = "com.vaisentra.mobility.driver"
 
     compileSdk = 34
 
@@ -44,7 +42,7 @@ android {
 
     defaultConfig {
 
-        applicationId = "com.luxury.chauffeur.driver"
+        applicationId = "com.vaisentra.mobility.driver"
 
         minSdk = 24
 
@@ -172,6 +170,7 @@ dependencies {
     implementation(project(":packages:common-android"))
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
 
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
@@ -184,18 +183,6 @@ dependencies {
     implementation(composeBom)
 
     androidTestImplementation(composeBom)
-
-    
-
-    val firebaseBom = platform(libs.firebase.bom)
-
-    implementation(firebaseBom)
-
-    //implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
-
-    implementation(libs.firebase.auth)
-
-    implementation(libs.firebase.messaging)
 
     
 

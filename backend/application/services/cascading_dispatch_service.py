@@ -152,8 +152,13 @@ class CascadingDispatchService:
 
         # Set Redis cooldown (60s)
         await self.place_driver_on_cooldown(driver.id, ride_id, COOLDOWN_TTL_SECONDS)
-        # Clear offer safety key
+        # Clear offer safety key & active-offer index
         await self.clear_offer_safety_key(ride_id, driver.id)
+        try:
+            await redis_client.delete(f"driver:active_offer:{driver.id}")
+            await redis_client.delete(f"driver:active_offer:{driver_user_id}")
+        except Exception:
+            pass
 
         await self.db.commit()
 
@@ -311,8 +316,13 @@ class CascadingDispatchService:
                 await self.db.commit()
                 await self.db.refresh(new_assignment)
 
-                # Set Redis safety fallback key (22s TTL)
+                # Set Redis safety fallback key (22s TTL) and driver active-offer index
                 await self.set_offer_safety_key(ride.id, selected_driver.id, SAFETY_FALLBACK_SECONDS)
+                try:
+                    await redis_client.set(f"driver:active_offer:{selected_driver.id}", ride.id, ex=SAFETY_FALLBACK_SECONDS)
+                    await redis_client.set(f"driver:active_offer:{selected_driver.user_id}", ride.id, ex=SAFETY_FALLBACK_SECONDS)
+                except Exception:
+                    pass
 
                 # Schedule server-authoritative safety fallback
                 try:
@@ -322,7 +332,7 @@ class CascadingDispatchService:
                 except RuntimeError:
                     pass
 
-                # Dispatch instant WebSocket event
+                # Dispatch instant WebSocket event (Redis Pub/Sub multi-worker + local fallback)
                 offer_payload = {
                     "event": "DISPATCH_OFFER",
                     "ride_id": ride.id,
@@ -333,6 +343,12 @@ class CascadingDispatchService:
                     "timeout_seconds": OFFER_TIMEOUT_SECONDS,
                     "expires_at": new_assignment.expires_at.isoformat() if new_assignment.expires_at else None
                 }
+                try:
+                    await redis_client.publish(f"driver:dispatch:{selected_driver.id}", offer_payload)
+                    await redis_client.publish(f"driver:dispatch:{selected_driver.user_id}", offer_payload)
+                except Exception as pub_err:
+                    logger.warning(f"Failed to publish offer to Redis PubSub for driver {selected_driver.id}: {pub_err}")
+
                 await ws_manager.dispatch_to_driver(selected_driver.user_id, offer_payload)
                 await ws_manager.dispatch_to_driver(selected_driver.id, offer_payload)
 
@@ -412,6 +428,10 @@ class CascadingDispatchService:
                     # Place driver on 60s cooldown
                     await cls.place_driver_on_cooldown(driver_id, ride_id, COOLDOWN_TTL_SECONDS)
                     await cls.clear_offer_safety_key(ride_id, driver_id)
+                    try:
+                        await redis_client.delete(f"driver:active_offer:{driver_id}")
+                    except Exception:
+                        pass
                     await session.commit()
 
                     logger.info(

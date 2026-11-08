@@ -23,7 +23,7 @@ class DriverService:
             driver = DriverProfile(
                 user_id=user_id,
                 license_number=f"DL-{user_id[:8].upper()}",
-                approval_status="APPROVED"
+                approval_status="PENDING"
             )
             self.db.add(driver)
             await self.db.flush()
@@ -33,9 +33,6 @@ class DriverService:
             await self.db.commit()
             await self.db.refresh(driver)
         else:
-            if driver.approval_status == "PENDING":
-                driver.approval_status = "APPROVED"
-                await self.db.flush()
             avail_stmt = select(DriverAvailability).where(DriverAvailability.driver_id == driver.id)
             avail_res = await self.db.execute(avail_stmt)
             if not avail_res.scalar_one_or_none():
@@ -94,10 +91,7 @@ class DriverService:
 
     async def toggle_availability(self, user_id: str, is_online: bool) -> Dict[str, Any]:
         driver = await self.get_or_create_profile(user_id)
-        if is_online and driver.approval_status == "PENDING":
-            driver.approval_status = "APPROVED"
-            await self.db.flush()
-        elif is_online and driver.approval_status not in ["APPROVED", "ACTIVE"]:
+        if is_online and driver.approval_status not in ["APPROVED", "ACTIVE"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Driver account is not active. Your documents must be approved before going online."

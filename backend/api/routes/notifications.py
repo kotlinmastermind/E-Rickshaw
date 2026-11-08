@@ -41,10 +41,6 @@ class TemplatePreviewPayload(BaseModel):
     variables: Dict[str, Any] = Field(default_factory=dict)
 
 
-class TokenPayload(BaseModel):
-    fcm_token: str = Field(min_length=20, max_length=512)
-
-
 @router.get("/preferences")
 async def get_notification_preferences(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     service = NotificationService(db)
@@ -87,11 +83,6 @@ async def mark_all_notifications_read(user: User = Depends(get_current_user), db
 @router.get("/inbox/{notification_id}/receipts")
 async def get_notification_receipts(notification_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     return await NotificationService(db).receipts(user.id, notification_id)
-
-
-@router.delete("/device-token")
-async def unregister_device_token(payload: TokenPayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    return await NotificationService(db).unregister_token(user.id, payload.fcm_token)
 
 
 @admin_router.get("/dashboard")

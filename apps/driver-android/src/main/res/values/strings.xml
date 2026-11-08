@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Application Brand & Identity -->
-    <string name="app_name">RideGo Driver</string>
+    <string name="app_name">DriverGo</string>
     <string name="driver_app_tagline">Pilot Cockpit &amp; Dispatch Console</string>
 
     <!-- Pilot Authentication -->

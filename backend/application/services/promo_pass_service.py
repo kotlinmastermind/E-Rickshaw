@@ -123,7 +123,9 @@ class PromoPassService:
 
     # ---------------- RIDE PASSES ----------------
     @staticmethod
-    async def list_pass_catalog(session: AsyncSession) -> List[RidePass]:
+    async def list_pass_catalog(session: AsyncSession) -> List[Any]:
+        if getattr(RidePass, '__table__', None) is None:
+            return []
         stmt = select(RidePass).where(RidePass.is_active == True).order_by(RidePass.price_cents.asc())
         res = await session.execute(stmt)
         return list(res.scalars().all())

@@ -62,7 +62,7 @@ If your transaction or card authorization encounters an issue:
 
 To maintain high security for our distinguished clientele:
 
-- **Locked App PIN**: If you forget your 4-digit PIN, initiate SMS two-factor recovery to generate a temporary single-use unlock token.
+- **Locked App PIN**: If you forget your 4-digit PIN, contact support@vaisentra.com to verify your identity and generate a secure unlock token.
 - **Biometric Passkey Resync**: Re-register your device passkey under `Profile > Security & MFA`.
 - **Phone Number Migration**: Submit an account recovery request; our Senior Concierge desk will verify your identity within 15 minutes.
 """,
@@ -760,17 +760,37 @@ class SupportAdvancedService:
         if recovery_type.upper() not in valid_types:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid recovery type: {recovery_type}")
 
+        complaint_ref = f"CMP-{utc_now().year}-{uuid.uuid4().hex[:6].upper()}"
+        ticket_number = f"TCK-{utc_now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+        ticket = SupportTicket(
+            ticket_number=ticket_number,
+            complaint_reference_number=complaint_ref,
+            user_id=user_id,
+            category="ACCOUNT_RECOVERY",
+            priority="HIGH",
+            subject=f"Account Recovery Request: {recovery_type.upper()}",
+            internal_notes=f"Self-service account recovery request logged for {recovery_type.upper()}. Details: {details or 'None provided'}",
+            status="OPEN",
+            assigned_squad="IDENTITY_SECURITY",
+            language_preference="en"
+        )
+        self.db.add(ticket)
+        await self.db.commit()
+
         challenge_token = f"REC-{uuid.uuid4().hex[:8].upper()}"
 
         return {
-            "status": "RECOVERY_INITIATED",
+            "status": "RECOVERY_RECORDED",
             "user_id": user_id,
             "recovery_type": recovery_type.upper(),
             "challenge_token": challenge_token,
+            "ticket_number": ticket_number,
+            "complaint_reference_number": complaint_ref,
             "expires_in_seconds": 900,
             "instructions": (
-                "An SMS security code has been dispatched to your verified telephone number. "
-                "Enter the OTP in the security prompt to complete credential synchronization."
+                "Your account recovery request has been recorded. "
+                "Please contact support@vaisentra.com with your reference number for identity verification and manual assistance. "
+                "Automated SMS recovery is currently unavailable."
             )
         }
 

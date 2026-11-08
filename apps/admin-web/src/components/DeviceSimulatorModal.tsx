@@ -296,7 +296,7 @@ export const DeviceSimulatorModal: React.FC<DeviceSimulatorModalProps> = ({
                 <div style={{ color: '#fff', fontSize: 16, fontWeight: 700 }}>NEW RIDE REQUEST</div>
                 <div style={{ color: '#d4af37', fontSize: 24, fontWeight: 800, margin: '6px 0' }}>₹ 145.00</div>
                 <div style={{ fontSize: 11, color: '#8d8672', marginBottom: 16, textAlign: 'center' }}>
-                  Pickup: Rajiv Chowk Gate 2 (1.2 km away)<br />Drop: Connaught Place Outer Circle
+                  Pickup: Central Terminal 2 (1.2 km away)<br />Drop: Grand Metropolitan Plaza
                 </div>
                 <div style={{ display: 'flex', gap: 10, width: '100%' }}>
                   <button

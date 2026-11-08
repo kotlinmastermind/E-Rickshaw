@@ -19,13 +19,13 @@
 }
 
 # Retrofit Service Interfaces and Methods
--keep interface com.luxury.chauffeur.driver.core.network.DriverApiService { *; }
+-keep interface com.vaisentra.mobility.driver.core.network.DriverApiService { *; }
 -keepclassmembers interface * {
     @retrofit2.http.* <methods>;
 }
 
 # Foreground Location Service
--keep class com.luxury.chauffeur.driver.core.location.** { *; }
+-keep class com.vaisentra.mobility.driver.core.location.** { *; }
 
 # Gson
 -keepattributes *Annotation*
@@ -35,8 +35,8 @@
 }
 
 # Network DTOs and Data Classes
--keep class com.luxury.chauffeur.driver.core.network.** { *; }
--keepclassmembers class com.luxury.chauffeur.driver.core.network.** { *; }
+-keep class com.vaisentra.mobility.driver.core.network.** { *; }
+-keepclassmembers class com.vaisentra.mobility.driver.core.network.** { *; }
 
 # Jetpack Compose
 -keep class androidx.compose.material3.** { *; }
@@ -49,10 +49,6 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
-
-# Firebase
--dontwarn com.google.firebase.**
--keep class com.google.firebase.** { *; }
 
 # Google Play Services Maps & Location
 -dontwarn com.google.android.gms.**

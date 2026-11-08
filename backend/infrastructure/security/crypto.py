@@ -4,6 +4,7 @@ import hmac
 import base64
 import struct
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import jwt
@@ -40,6 +41,7 @@ def create_jwt_token(
         "role": role,
         "session_id": session_id,
         "token_type": token_type,
+        "jti": str(uuid.uuid4()),
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
         "iss": "luxury-ride-platform",
@@ -65,6 +67,20 @@ def verify_hmac_signature(payload_bytes: bytes, signature: str, secret: str) -> 
 def verify_otp_constant_time(provided_otp: str, actual_otp: str) -> bool:
     """Compare two OTP strings in constant time to prevent timing attacks."""
     return hmac.compare_digest(provided_otp, actual_otp)
+
+MINIMUM_PASSWORD_LENGTH = 12
+
+# Constant-time dummy bcrypt hash (cost 12) used to eliminate user enumeration timing side channels
+DUMMY_PASSWORD_HASH = "$2b$12$ArQd/oLmiMPm5nrSGu1wj.Ux4R0YttQbS4nkw7xmE8ylDdsfrLZaa"
+
+def validate_password_strength(password: str) -> None:
+    """
+    Validate that password meets platform security requirements:
+    - Minimum length of 12 characters.
+    - Non-empty and not composed solely of whitespace.
+    """
+    if not password or len(password.strip()) < MINIMUM_PASSWORD_LENGTH:
+        raise ValueError(f"Password must contain at least {MINIMUM_PASSWORD_LENGTH} characters.")
 
 def hash_password(password: str) -> str:
     """Hash password using bcrypt."""

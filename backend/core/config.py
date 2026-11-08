@@ -4,7 +4,7 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "E-Rickshaw Ride-Hailing Platform"
+    PROJECT_NAME: str = "VAISENTRA MOBILITY"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    REFRESH_TOKEN_GRACE_PERIOD_SECONDS: int = int(os.getenv("REFRESH_TOKEN_GRACE_PERIOD_SECONDS", "10"))
+    WEBAUTHN_ENABLED: bool = os.getenv("WEBAUTHN_ENABLED", "false").lower() in ("true", "1", "t")
     OTP_EXPIRE_SECONDS: int = 300  # 5 minutes
     OTP_MAX_ATTEMPTS: int = 3
     OTP_RESEND_COOLDOWN_SECONDS: int = 60
@@ -44,8 +46,16 @@ class Settings(BaseSettings):
     # Primary SMS Gateway
     SMS_PROVIDER: str = os.getenv("SMS_PROVIDER", "console")
 
-    # Push Notifications
+    # Push Notifications & Real-Time Dispatch Governance (Phase 3.3)
     PUSH_PROVIDER: str = os.getenv("PUSH_PROVIDER", "websocket")
+    DISPATCH_WS_HEARTBEAT_SECONDS: int = int(os.getenv("DISPATCH_WS_HEARTBEAT_SECONDS", "30"))
+    DISPATCH_AUTH_REVALIDATION_SECONDS: int = int(os.getenv("DISPATCH_AUTH_REVALIDATION_SECONDS", "30"))
+    DISPATCH_OFFER_TIMEOUT_SECONDS: int = int(os.getenv("DISPATCH_OFFER_TIMEOUT_SECONDS", "20"))
+    DISPATCH_SAFETY_FALLBACK_SECONDS: int = int(os.getenv("DISPATCH_SAFETY_FALLBACK_SECONDS", "22"))
+    DISPATCH_COOLDOWN_SECONDS: int = int(os.getenv("DISPATCH_COOLDOWN_SECONDS", "60"))
+    DISPATCH_RECONNECT_BACKOFF_BASE_SECONDS: float = float(os.getenv("DISPATCH_RECONNECT_BACKOFF_BASE_SECONDS", "1.0"))
+    DISPATCH_RECONNECT_BACKOFF_MAX_SECONDS: float = float(os.getenv("DISPATCH_RECONNECT_BACKOFF_MAX_SECONDS", "30.0"))
+    DISPATCH_SUBSCRIBER_RETRY_LIMIT: int = int(os.getenv("DISPATCH_SUBSCRIBER_RETRY_LIMIT", "5"))
 
     # Storage
     STORAGE_LOCAL_DIR: str = "./uploads/documents"

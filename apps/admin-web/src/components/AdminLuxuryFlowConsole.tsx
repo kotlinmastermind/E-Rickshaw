@@ -1035,7 +1035,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
               {/* Real Map Integration on Dashboard */}
               <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 16, borderRadius: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <span style={{ color: '#d4af37', fontWeight: 700, fontSize: 13 }}>Live Operational Overview (Delhi NCR)</span>
+                  <span style={{ color: '#d4af37', fontWeight: 700, fontSize: 13 }}>Live Operational Overview (Global Fleet Grid)</span>
                   <button onClick={() => navigateTo(5)} style={{ background: 'transparent', border: '1px solid #333', color: '#8d8672', borderRadius: 6, padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}>
                     Full Map →
                   </button>
@@ -2083,7 +2083,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
                 </div>
                 <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
                   <button onClick={() => window.open('tel:112')} style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
-                    Call Delhi Police 112
+                    Emergency Dispatch (112 / 911)
                   </button>
                   <button onClick={() => navigateTo(5)} style={{ background: '#222', color: '#d4af37', border: '1px solid #333', borderRadius: 6, padding: '6px 14px', fontSize: 11, cursor: 'pointer' }}>
                     Track on Fleet Map (05) →
@@ -2264,13 +2264,13 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             </div>
           )}
 
-          {/* SCREEN 29: Push, SMS & Broadcasts */}
+          {/* SCREEN 29: System Notifications & Broadcasts */}
           {selectedScreenId === 29 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <h2 style={{ color: '#d4af37', margin: 0 }}>29 · Mass Communications & Broadcast Engine</h2>
-                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Dispatch FCM Push Notifications, SMS Gateways, and WhatsApp alerts to selected audience cohorts.</p>
+                  <h2 style={{ color: '#d4af37', margin: 0 }}>29 · In-App Communications & Broadcast Engine</h2>
+                  <p style={{ color: '#8d8672', fontSize: 12, margin: '4px 0 0' }}>Dispatch in-app notifications and WebSocket announcements to active audience cohorts.</p>
                 </div>
                 <button onClick={() => setPopupSendBroadcast(true)} style={{ background: '#d4af37', color: '#000', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
                   Send Broadcast (09)
@@ -2279,17 +2279,17 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
                 <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 18, borderRadius: 12 }}>
-                  <div style={{ fontSize: 11, color: '#8d8672' }}>Push Delivery Rate</div>
-                  <div style={{ fontSize: 26, color: '#22c55e', fontWeight: 900 }}>99.2 %</div>
-                  <div style={{ fontSize: 11, color: '#8d8672', marginTop: 4 }}>Firebase Cloud Messaging</div>
+                  <div style={{ fontSize: 11, color: '#8d8672' }}>Push Delivery (FCM)</div>
+                  <div style={{ fontSize: 18, color: '#eab308', fontWeight: 900 }}>Decommissioned</div>
+                  <div style={{ fontSize: 11, color: '#8d8672', marginTop: 4 }}>In-App & WebSocket Active Only</div>
                 </div>
                 <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 18, borderRadius: 12 }}>
-                  <div style={{ fontSize: 11, color: '#8d8672' }}>SMS Gateway Delivery</div>
-                  <div style={{ fontSize: 26, color: '#f2ead3', fontWeight: 900 }}>98.7 %</div>
-                  <div style={{ fontSize: 11, color: '#8d8672', marginTop: 4 }}>DLT Registered Headers</div>
+                  <div style={{ fontSize: 11, color: '#8d8672' }}>External SMS Gateways</div>
+                  <div style={{ fontSize: 18, color: '#eab308', fontWeight: 900 }}>Decommissioned</div>
+                  <div style={{ fontSize: 11, color: '#8d8672', marginTop: 4 }}>Billing Inactive / Zero OTP Billing</div>
                 </div>
                 <div style={{ background: '#16161a', border: '1px solid #2a2a2e', padding: 18, borderRadius: 12 }}>
-                  <div style={{ fontSize: 11, color: '#8d8672' }}>Emergency Alerts Active</div>
+                  <div style={{ fontSize: 11, color: '#8d8672' }}>In-App Alerts Active</div>
                   <div style={{ fontSize: 26, color: '#ef4444', fontWeight: 900 }}>1 Broadcast</div>
                   <div style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>Connaught Place Rain Surge Notice</div>
                 </div>
@@ -2472,7 +2472,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
           onClose={() => setPopupPublishSurge(false)}
         >
           <div style={{ fontSize: 13, color: '#f2ead3' }}>
-            <p>Target Zone: <b style={{ color: '#d4af37' }}>New Delhi Railway Station Corridor</b></p>
+            <p>Target Zone: <b style={{ color: '#d4af37' }}>High Commute Transit Corridor</b></p>
             <div style={{ marginTop: 8 }}>
               <label style={{ fontSize: 11, color: '#8d8672' }}>Multiplier Value</label>
               <input readOnly value="1.8x Surge Boost" style={{ width: '100%', background: '#0f0f12', border: '1px solid #d4af37', color: '#d4af37', padding: 8, borderRadius: 6, fontWeight: 700, marginTop: 4 }} />
@@ -2509,7 +2509,7 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
           onClose={() => setPopupResolveSos(false)}
         >
           <div style={{ fontSize: 13, color: '#f2ead3' }}>
-            <p>Verification with Delhi Police 112 and Chauffeur Suresh Kumar completed.</p>
+            <p>Verification with Emergency Authorities 112 / 911 and Driver completed.</p>
             <textarea placeholder="Enter Fleet SOC incident resolution notes..." style={{ width: '100%', background: '#0f0f12', border: '1px solid #333', color: '#f2ead3', borderRadius: 8, padding: 8, marginTop: 4, height: 70 }} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button onClick={() => setPopupResolveSos(false)} style={{ background: '#222', color: '#8d8672', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
@@ -2628,9 +2628,16 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
             <div>
               <label style={{ color: '#8d8672' }}>Operation City</label>
               <select style={{ width: '100%', background: '#0f0f12', border: '1px solid #333', color: '#f2ead3', padding: 6, borderRadius: 6, marginTop: 4 }}>
-                <option>Delhi NCR (Central Zone)</option>
-                <option>Noida Metro Feeder Zone</option>
-                <option>Gurugram Cyber Corridor</option>
+                <option>Global Multi-Region Grid (All Hubs)</option>
+                <option>New York Metropolitan Area</option>
+                <option>Greater London Transit Region</option>
+                <option>Tokyo Chiyoda & Shinjuku Hub</option>
+                <option>Dubai Downtown & Marina</option>
+                <option>Paris Centre & Île-de-France</option>
+                <option>Singapore Marina Bay</option>
+                <option>Sydney Central & Harbour</option>
+                <option>Mumbai Metropolitan Core</option>
+                <option>Delhi NCR Core</option>
               </select>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
@@ -2693,8 +2700,8 @@ export const AdminLuxuryFlowConsole: React.FC<AdminLuxuryFlowConsoleProps> = ({
       {popupSendBroadcast && (
         <AdminModal title="Dispatch Fleet Broadcast Announcement" onClose={() => setPopupSendBroadcast(false)}>
           <div style={{ fontSize: 13, color: '#f2ead3' }}>
-            <p>Target Audience: <b style={{ color: '#d4af37' }}>142 Online Chauffeurs (Central Delhi)</b></p>
-            <textarea defaultValue="High demand surge active around NDLS & CP! Move to hotspot for +1.8x fare boost." style={{ width: '100%', background: '#0f0f12', border: '1px solid #333', color: '#f2ead3', borderRadius: 8, padding: 8, marginTop: 4, height: 70 }} />
+            <p>Target Audience: <b style={{ color: '#d4af37' }}>142 Active Chauffeurs (Global Grid)</b></p>
+            <textarea defaultValue="High demand surge active around transit hubs! Move to hotspot for +1.8x fare boost." style={{ width: '100%', background: '#0f0f12', border: '1px solid #333', color: '#f2ead3', borderRadius: 8, padding: 8, marginTop: 4, height: 70 }} />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button onClick={() => setPopupSendBroadcast(false)} style={{ background: '#222', color: '#8d8672', border: 'none', padding: '6px 12px', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
               <button onClick={() => { setPopupSendBroadcast(false); setToastSaved(true); }} style={{ background: '#d4af37', color: '#000', border: 'none', padding: '6px 16px', borderRadius: 6, fontWeight: 700, cursor: 'pointer' }}>Dispatch Broadcast</button>

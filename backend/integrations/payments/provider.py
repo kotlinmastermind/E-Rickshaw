@@ -151,7 +151,7 @@ class RazorpayPaymentProvider(PaymentProvider):
         Cryptographically verify that the payment was captured by Razorpay
         using HMAC-SHA256(order_id + "|" + payment_id, key_secret).
         """
-        if not (razorpay_order_id and razorpay_payment_id and razorpay_signature):
+        if not (razorpay_order_id and razorpay_payment_id and razorpay_signature and self.key_secret):
             return False
 
         # Try official razorpay SDK verification if available
@@ -238,8 +238,8 @@ def get_payment_provider() -> RazorpayPaymentProvider:
     global _payment_provider_instance
     if _payment_provider_instance is None:
         _payment_provider_instance = RazorpayPaymentProvider(
-            key_id=settings.RAZORPAY_KEY_ID or "rzp_live_TunGmzfpWlcatO",
-            key_secret=settings.RAZORPAY_KEY_SECRET or "CSIhchRsNTdHx270VZthHSUE",
-            webhook_secret=settings.RAZORPAY_WEBHOOK_SECRET or "whsec_mock"
+            key_id=settings.RAZORPAY_KEY_ID or "",
+            key_secret=settings.RAZORPAY_KEY_SECRET or "",
+            webhook_secret=settings.RAZORPAY_WEBHOOK_SECRET or ""
         )
     return _payment_provider_instance

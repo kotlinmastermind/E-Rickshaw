@@ -12,8 +12,6 @@ from backend.api.schemas.common import (
 
 from backend.api.schemas.auth import (
     IdentityLookupPayload,
-    OtpRequestPayload,
-    OtpVerifyPayload,
     TokenRefreshPayload,
     PasswordRegisterPayload,
     PasswordLoginPayload,
@@ -39,8 +37,6 @@ __all__ = [
     "PaginatedResponse",
     "ErrorDetail",
     "IdentityLookupPayload",
-    "OtpRequestPayload",
-    "OtpVerifyPayload",
     "TokenRefreshPayload",
     "PasswordRegisterPayload",
     "PasswordLoginPayload",

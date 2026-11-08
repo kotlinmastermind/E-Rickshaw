@@ -17,29 +17,62 @@ function resolveUrl(endpoint: string) {
   return `${API_BASE.replace(/\/$/, "")}/${endpoint.replace(/^\//, "")}`;
 }
 
-export async function requestApi<T = any>(endpoint: string, options: RequestInit = {}, authenticated = true): Promise<T> {
-  let token = localStorage.getItem("admin_token") || "";
+let activeRefreshPromise: Promise<string | null> | null = null;
 
-  // Auto-provision Superadmin session if no token is stored yet
-  if (authenticated && !token && !endpoint.includes("/auth/")) {
+export async function refreshAdminToken(): Promise<string | null> {
+  if (activeRefreshPromise) {
+    return activeRefreshPromise;
+  }
+
+  activeRefreshPromise = (async () => {
+    const refreshToken = localStorage.getItem("admin_refresh_token");
+    if (!refreshToken) return null;
+
     try {
-      const demoRes = await fetch(resolveUrl("/api/v1/auth/admin/demo-session"), {
+      const res = await fetch(resolveUrl("/auth/token/refresh"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" }
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken })
       });
-      if (demoRes.ok) {
-        const demoData = await demoRes.json();
-        if (demoData.access_token) {
-          token = demoData.access_token;
-          localStorage.setItem("admin_token", token);
-          if (demoData.user) {
-            localStorage.setItem("admin_user", JSON.stringify(demoData.user));
-          }
-        }
+
+      if (res.status === 409) {
+        // Concurrency grace window active: a concurrent winning request has already rotated the token.
+        // Use the newly saved token from localStorage.
+        return localStorage.getItem("admin_token");
       }
-    } catch (e) {
-      console.warn("Auto-provision demo session fallback:", e);
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          localStorage.removeItem("admin_token");
+          localStorage.removeItem("admin_refresh_token");
+        }
+        return null;
+      }
+
+      const data = await res.json();
+      if (data && data.access_token) {
+        localStorage.setItem("admin_token", data.access_token);
+        if (data.refresh_token) {
+          localStorage.setItem("admin_refresh_token", data.refresh_token);
+        }
+        return data.access_token as string;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      activeRefreshPromise = null;
     }
+  })();
+
+  return activeRefreshPromise;
+}
+
+export async function requestApi<T = any>(endpoint: string, options: RequestInit = {}, authenticated = true): Promise<T> {
+  const token = localStorage.getItem("admin_token") || "";
+
+  if (authenticated && !token && !endpoint.includes("/auth/")) {
+    throw new ApiError(401, "Admin authentication required. Please sign in.");
   }
 
   const headers = {
@@ -50,6 +83,23 @@ export async function requestApi<T = any>(endpoint: string, options: RequestInit
   const res = await fetch(resolveUrl(endpoint), { ...options, headers });
   const contentType = res.headers.get("content-type") || "";
   const body = contentType.includes("application/json") ? await res.json().catch(() => null) : await res.text().catch(() => "");
+
+  if (res.status === 401 && authenticated && !endpoint.includes("/auth/") && !(options as any)?._isRetry) {
+    const refreshedToken = await refreshAdminToken();
+    if (refreshedToken) {
+      const retryOptions: RequestInit & { _isRetry?: boolean } = {
+        ...options,
+        _isRetry: true,
+        headers: {
+          ...(options.headers || {}),
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${refreshedToken}`
+        }
+      };
+      return requestApi<T>(endpoint, retryOptions, authenticated);
+    }
+  }
+
   if (!res.ok) {
     const message = typeof body === "object" && body ? String(body.detail || body.message || `Request failed (${res.status})`) : `Request failed (${res.status})`;
     throw new ApiError(res.status, message);
@@ -67,4 +117,14 @@ export async function downloadWithAuth(endpoint: string): Promise<Blob> {
   const res = await fetch(resolveUrl(endpoint), { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!res.ok) throw new ApiError(res.status, `Document could not be opened (${res.status}).`);
   return res.blob();
+}
+
+export async function getWebSocketTicket(): Promise<string | null> {
+  try {
+    const res = await requestApi<{ ticket: string; expires_in_seconds: number }>("/ws/ticket", { method: "POST" });
+    return res?.ticket || null;
+  } catch (err) {
+    console.warn("Failed to obtain WebSocket ticket", err);
+    return null;
+  }
 }

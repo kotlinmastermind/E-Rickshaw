@@ -43,7 +43,7 @@ class NotificationService:
                 "quiet_hours_enabled": row.quiet_hours_enabled, "quiet_start": row.quiet_start,
                 "quiet_end": row.quiet_end, "timezone": row.timezone_name, "language": row.language_code,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                "provider_boundary": "In-app inbox is always retained. Push requires configured Firebase credentials; email and SMS providers are not configured."}
+                "provider_boundary": "In-app inbox and WebSocket alerts are retained. Push and SMS OTP providers are decommissioned."}
 
     async def update_settings(self, user_id: str, updates: Dict[str, Any], source: str = "MOBILE_APP") -> Dict[str, Any]:
         allowed = {"push_enabled", "email_enabled", "sms_enabled", "quiet_hours_enabled", "quiet_start", "quiet_end", "timezone", "language"}

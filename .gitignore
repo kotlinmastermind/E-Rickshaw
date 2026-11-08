@@ -32,6 +32,12 @@ keystore.properties
 *firebase-service-account*.json
 *credentials*.json
 backups/
+database/backups/
+.temp_pg_test/
+*.dump
+*.backup
+*.sql
+*.sql.gz
 *.bak
 
 # Cache, Logs & OS

@@ -125,10 +125,10 @@ async def payment_webhook_status():
 async def get_razorpay_config():
     from backend.core.config import settings
     return {
-        "key_id": settings.RAZORPAY_KEY_ID or "rzp_live_TunGmzfpWlcatO",
+        "key_id": settings.RAZORPAY_KEY_ID or "",
         "currency": "INR",
-        "company_name": "Luxury Chauffeur Mobility",
-        "theme_color": "#D4AF37",
+        "company_name": "VAISENTRA MOBILITY",
+        "theme_color": "#0D9488",
         "is_live": not (settings.RAZORPAY_KEY_ID or "").startswith("rzp_test")
     }
 
@@ -207,7 +207,7 @@ async def create_razorpay_order(
         "amount": order.get("amount", amount_paise),
         "amount_rupees": round(amount_paise / 100.0, 2),
         "currency": order.get("currency", "INR"),
-        "key_id": settings.RAZORPAY_KEY_ID or "rzp_live_TunGmzfpWlcatO",
+        "key_id": settings.RAZORPAY_KEY_ID or "",
         "receipt": order.get("receipt", receipt),
         "status": order.get("status", "created")
     }

@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.luxury.chauffeur.core"
+    namespace = "com.vaisentra.mobility.core"
     compileSdk = 34
 
     defaultConfig {
@@ -44,10 +44,6 @@ dependencies {
     implementation(libs.logging.interceptor)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
-
-    val firebaseBom = platform(libs.firebase.bom)
-    implementation(firebaseBom)
-    implementation(libs.firebase.messaging)
 
     testImplementation(libs.junit)
 }

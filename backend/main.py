@@ -165,7 +165,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version="1.0.0",
-    description="Production-grade API for the E-Rickshaw Ride-Hailing Platform.",
+    description="Production-grade API for VAISENTRA MOBILITY.",
     lifespan=lifespan
 )
 
@@ -320,7 +320,7 @@ async def privacy_policy():
             <ul>
                 <li><strong>Personal Identifiers:</strong> Mobile telephone number, full name, email address (for booking confirmations and receipts).</li>
                 <li><strong>Precise Location Data:</strong> Real-time GPS location (latitude, longitude, heading) collected to calculate pickup distance, navigation routes, and accurate affordable fares.</li>
-                <li><strong>Device Information:</strong> Device model, operating system version, and Firebase Cloud Messaging (FCM) tokens for ride arrival notifications.</li>
+                <li><strong>Device Information:</strong> Device model and operating system version for real-time ride tracking and in-app communications.</li>
                 <li><strong>Payment Transaction Data:</strong> Payment transaction IDs and settlement statuses processed securely via certified payment gateways (Razorpay/UPI). We do not store raw card numbers.</li>
             </ul>
 

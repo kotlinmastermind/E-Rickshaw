@@ -10,9 +10,7 @@ plugins {
 
     alias(libs.plugins.kotlin.android)
 
-    alias(libs.plugins.google.services)
-
-}
+    }
 
 
 
@@ -29,12 +27,13 @@ val localProps = Properties().apply {
 }
 
 val mapboxPublicToken: String = (localProps.getProperty("MAPBOX_PUBLIC_TOKEN") ?: System.getenv("MAPBOX_PUBLIC_TOKEN") ?: "").trim()
+val razorpayKeyId: String = (localProps.getProperty("RAZORPAY_KEY_ID") ?: System.getenv("RAZORPAY_KEY_ID") ?: "").trim()
 
 
 
 android {
 
-    namespace = "com.luxury.chauffeur.customer"
+    namespace = "com.vaisentra.mobility.rider"
 
     compileSdk = 34
 
@@ -44,7 +43,7 @@ android {
 
     defaultConfig {
 
-        applicationId = "com.luxury.chauffeur.customer"
+        applicationId = "com.vaisentra.mobility.rider"
 
         minSdk = 24
 
@@ -57,6 +56,8 @@ android {
 
 
         manifestPlaceholders["MAPBOX_PUBLIC_TOKEN"] = mapboxPublicToken
+        manifestPlaceholders["RAZORPAY_KEY_ID"] = razorpayKeyId
+        buildConfigField("String", "RAZORPAY_KEY_ID", "\"${razorpayKeyId}\"")
 
 
 
@@ -136,6 +137,8 @@ android {
 
         compose = true
 
+        buildConfig = true
+
         resValues = false
 
     }
@@ -172,6 +175,7 @@ dependencies {
     implementation(project(":packages:common-android"))
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
 
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
@@ -184,16 +188,6 @@ dependencies {
     implementation(composeBom)
 
     androidTestImplementation(composeBom)
-
-    
-
-    val firebaseBom = platform(libs.firebase.bom)
-
-    implementation(firebaseBom)
-
-    implementation(libs.firebase.auth)
-
-    implementation(libs.firebase.messaging)
 
     
 

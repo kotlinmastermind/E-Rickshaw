@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.config import settings
 from backend.domain.models import (
     AdminCalendarEvent, AdminPermission, AdminRecordNote, AdminReviewTemplate,
-    AdminRole, AdminRolePermission, AdminUserRole, AdministrativeAuditLog,
+    AdminRole, AdminRolePermission, AdminUserRole, AdministrativeAuditLog, AuditLog,
     DriverDocument, DriverProfile, FareRule, GeofenceZone, Ride, RideAssignment,
     RideStatusEvent, Session, User, VehicleCategory, GeofenceZoneAudit,
 )
@@ -22,8 +22,15 @@ class AdminGovernanceService:
         self.db = db
 
     def audit(self, admin_id: str, action: str, resource: str, target_id: Optional[str], data: Dict[str, Any]) -> None:
-        self.db.add(AdministrativeAuditLog(admin_user_id=admin_id, action=action, target_resource=resource,
-                                           target_id=target_id, changes_json=json.dumps(data, ensure_ascii=False)))
+        self.db.add(AuditLog(
+            actor_id=admin_id,
+            actor_role="admin",
+            action=action,
+            target_resource=resource,
+            target_id=target_id,
+            status="SUCCESS",
+            metadata_json=json.dumps(data, ensure_ascii=False)
+        ))
 
     async def list_users(self, search: str = "", role: str = "", active: Optional[bool] = None, page: int = 1, limit: int = 50) -> Dict[str, Any]:
         stmt = select(User)
@@ -108,23 +115,143 @@ class AdminGovernanceService:
             raise HTTPException(404, "Private document content is not available from this storage provider.")
         return path, document.mime_type, Path(document.file_name).name
 
-    async def review_document(self, admin_id: str, document_id: str, status: str, reason: str = "") -> Dict[str, Any]:
+    async def has_supervisor_authority(self, admin_id: str) -> tuple[bool, str]:
+        """
+        Server-side verification of supervisory authority for sensitive operational reversals.
+        Returns (is_authorized, authorization_context).
+        Authorized if admin holds a role with is_superuser=True or the specific
+        domain supervisory permission 'admin.drivers.approve'.
+        """
+        assigned = (
+            await self.db.execute(
+                select(AdminUserRole.role_id).where(AdminUserRole.user_id == admin_id)
+            )
+        ).scalars().all()
+        if not assigned:
+            return False, ""
+
+        roles = (
+            await self.db.execute(
+                select(AdminRole).where(AdminRole.id.in_(assigned))
+            )
+        ).scalars().all()
+        if any(r.is_superuser for r in roles):
+            return True, "superuser"
+
+        supervisor_perm = (
+            await self.db.execute(
+                select(AdminPermission.id)
+                .join(AdminRolePermission, AdminRolePermission.permission_id == AdminPermission.id)
+                .where(
+                    AdminRolePermission.role_id.in_(assigned),
+                    AdminPermission.permission_key == "admin.drivers.approve",
+                )
+                .limit(1)
+            )
+        ).first()
+        if supervisor_perm:
+            return True, "admin.drivers.approve"
+
+        return False, ""
+
+    async def review_document(
+        self,
+        admin_id: str,
+        document_id: str,
+        status: str,
+        reason: str = "",
+        driver_id: Optional[str] = None,
+        revocation_justification: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if driver_id:
+            driver = await self.db.get(DriverProfile, driver_id)
+            if not driver:
+                raise HTTPException(404, "Driver record not found.")
+
         doc = await self.db.get(DriverDocument, document_id)
         if not doc:
             raise HTTPException(404, "Driver document not found.")
-        status = status.upper()
+
+        if driver_id and str(doc.driver_id) != str(driver_id):
+            raise HTTPException(400, "Document does not belong to the specified driver.")
+
+        status = status.strip().upper()
         if status not in {"VERIFIED", "REJECTED"}:
             raise HTTPException(422, "Document status must be VERIFIED or REJECTED.")
-        if status == "REJECTED" and len(reason.strip()) < 8:
-            raise HTTPException(422, "A clear rejection reason of at least 8 characters is required.")
+
+        previous_status = doc.verification_status
+        is_revocation = previous_status == "VERIFIED" and status == "REJECTED"
+
+        if is_revocation:
+            rev_just = (revocation_justification or "").strip()
+            if not rev_just or len(rev_just) < 8:
+                raise HTTPException(
+                    422,
+                    "Revoking an already verified document requires an explicit revocation justification of at least 8 characters.",
+                )
+
+            is_supervisor, auth_context = await self.has_supervisor_authority(admin_id)
+            if not is_supervisor:
+                raise HTTPException(
+                    403,
+                    "Supervisor authorization ('admin.drivers.approve' or superuser) is required to revoke a verified document.",
+                )
+
+            effective_reason = rev_just
+            audit_action = "DRIVER_DOCUMENT_REVOKED"
+            authorization_context = auth_context
+        elif status == "REJECTED":
+            if len(reason.strip()) < 8:
+                raise HTTPException(422, "A clear rejection reason of at least 8 characters is required.")
+            effective_reason = reason.strip()
+            audit_action = "DRIVER_DOCUMENT_REVIEWED"
+            authorization_context = "admin.drivers.documents"
+        else:
+            effective_reason = None
+            audit_action = "DRIVER_DOCUMENT_REVIEWED"
+            authorization_context = "admin.drivers.documents"
+
         doc.verification_status = status
-        doc.rejection_reason = reason.strip() if status == "REJECTED" else None
+        doc.rejection_reason = effective_reason
         doc.reviewed_by = admin_id
         doc.reviewed_at = datetime.now(timezone.utc)
-        self.audit(admin_id, "DRIVER_DOCUMENT_REVIEWED", "driver_documents", doc.id,
-                   {"status": status, "reason": doc.rejection_reason, "driver_id": doc.driver_id})
-        await self.db.commit()
-        return {"document_id": doc.id, "verification_status": doc.verification_status, "rejection_reason": doc.rejection_reason}
+
+        audit_data = {
+            "driver_id": str(doc.driver_id),
+            "document_id": str(doc.id),
+            "document_type": doc.document_type,
+            "previous_status": previous_status,
+            "new_status": status,
+            "reason": doc.rejection_reason,
+            "reviewed_at": doc.reviewed_at.isoformat(),
+            "authorization_context": authorization_context,
+        }
+        if is_revocation:
+            audit_data["revocation_justification"] = effective_reason
+
+        try:
+            self.audit(
+                admin_id,
+                audit_action,
+                "driver_documents",
+                doc.id,
+                audit_data,
+            )
+            await self.db.commit()
+            await self.db.refresh(doc)
+        except Exception:
+            await self.db.rollback()
+            raise
+
+        return {
+            "document_id": doc.id,
+            "driver_id": doc.driver_id,
+            "document_type": doc.document_type,
+            "verification_status": doc.verification_status,
+            "rejection_reason": doc.rejection_reason,
+            "reviewed_by": doc.reviewed_by,
+            "reviewed_at": doc.reviewed_at.isoformat() if doc.reviewed_at else None,
+        }
 
     async def list_rejection_templates(self) -> List[Dict[str, Any]]:
         rows = (await self.db.execute(select(AdminReviewTemplate).where(AdminReviewTemplate.is_active.is_(True)).order_by(AdminReviewTemplate.title.asc()))).scalars().all()
