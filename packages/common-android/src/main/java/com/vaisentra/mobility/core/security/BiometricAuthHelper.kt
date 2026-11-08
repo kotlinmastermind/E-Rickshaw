@@ -44,3 +44,4 @@ object BiometricAuthHelper {
         return canAuthenticate(context) == BiometricStatus.AVAILABLE
     }
 }
+

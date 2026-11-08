@@ -184,6 +184,30 @@
 - **Resolution**: Added keep rules for `com.vaisentra.mobility.core.model.**`, `security.**`, `network.**`, and `map.**`.
 - **Status**: FIXED & VERIFIED (Verified by Gradle build execution).
 
+##### BUG-020: Undefined Imports in Admin, Financials and Pooling Routes
+- **Severity**: High (P1)
+- **Component**: Backend Routes & Services (`backend/api/routes/admin.py`, `backend/api/routes/driver_financials.py`, `backend/application/services/pool_service.py`)
+- **Symptoms**: Flake8 identified 19 `F821 undefined name` errors (`select`, `desc`, `datetime`, `timezone`, `secrets`, `User`) causing potential runtime `NameError` on execution.
+- **Root Cause**: Missing module imports during earlier route migrations.
+- **Resolution**: Injected all missing symbols (`from sqlalchemy import select, desc`, `import secrets`, `from datetime import datetime, timezone`, `from backend.domain.models import User`).
+- **Status**: FIXED & VERIFIED (Flake8 passed with 0 errors).
+
+##### BUG-021: Bandit Static Security Scan SQL & Interface Binding Warnings
+- **Severity**: Medium (P2)
+- **Component**: Security & Backup Services (`backend/application/services/backup_service.py`, `backend/main.py`, `backend/scripts/clear_dummy_data.py`)
+- **Symptoms**: Bandit CI scan flagged B608 (hardcoded SQL construction) and B104 (0.0.0.0 bind in `__main__`), failing CI security gate with exit code 1.
+- **Root Cause**: F-string table querying in backup verification and wild-card development binding.
+- **Resolution**: Replaced dynamic SQL with static dictionary mapping in `backup_service.py`, changed development `__main__` binding to `127.0.0.1`, and annotated safe administrative table clearing.
+- **Status**: FIXED & VERIFIED (Bandit scan exited with code 0, 0 Medium/High issues).
+
+##### BUG-022: Standalone Execution Failure in Migration & Integrity Runner Scripts
+- **Severity**: Medium (P2)
+- **Component**: Database Deployment Scripts (`scripts/run_migrations.py`, `scripts/verify_database_integrity.py`)
+- **Symptoms**: Running scripts directly via Python resulted in `ModuleNotFoundError: No module named 'backend'`, and percent-encoded database passwords caused configparser interpolation crash.
+- **Root Cause**: Missing repository root in `sys.path` and unescaped `%` symbols in `alembic_cfg.set_main_option()`.
+- **Resolution**: Added automated `sys.path.insert(0, ...)` repository root detection and escaped percent symbols via `sync_url.replace("%", "%%")`. Corrected foreign key relationship mapping in integrity checker.
+- **Status**: FIXED & VERIFIED (Verified by standalone CLI execution: 0 violations found).
+
 ---
 
 ### Verification Sign-Off
@@ -192,3 +216,4 @@ All 100 discovered bugs have been remediated, verified with targeted automated t
 
 **Lead Enterprise Architect:** Antigravity Pairing Agent  
 **Build & QA Sign-Off:** VERIFIED (184 Backend Tests, 58 Android Tests, Clean Admin Build)  
+

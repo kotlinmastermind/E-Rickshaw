@@ -76,3 +76,4 @@ def test_pre_migration_check_runner():
     # check_only=True must check current database revision against repository head
     status = run_migrations(check_only=True)
     assert isinstance(status, bool)
+

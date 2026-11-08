@@ -95,9 +95,15 @@ class DatabaseBackupService:
             
             # Count records in core tables
             counts = {}
-            for t in ["users", "rides", "fare_rules", "pooled_trips"]:
+            core_table_queries = {
+                "users": "SELECT COUNT(*) FROM users;",
+                "rides": "SELECT COUNT(*) FROM rides;",
+                "fare_rules": "SELECT COUNT(*) FROM fare_rules;",
+                "pooled_trips": "SELECT COUNT(*) FROM pooled_trips;",
+            }
+            for t, query_str in core_table_queries.items():
                 if t in tables:
-                    cursor.execute(f"SELECT COUNT(*) FROM {t};")
+                    cursor.execute(query_str)
                     counts[t] = cursor.fetchone()[0]
 
             conn.close()

@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.core.network
+package com.vaisentra.mobility.core.network
 
 import com.vaisentra.mobility.core.security.BaseTokenManager
 import okhttp3.CertificatePinner

@@ -4,8 +4,13 @@ Performs connectivity check, records pre-migration revision, executes upgrade,
 and verifies target head.
 """
 import sys
+import os
 import logging
 import argparse
+
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from alembic.config import Config
 from alembic import command
 from alembic.script import ScriptDirectory
@@ -28,7 +33,7 @@ def run_migrations(target_revision: str = "head", check_only: bool = False) -> b
         return False
 
     alembic_cfg = Config("alembic.ini")
-    alembic_cfg.set_main_option("sqlalchemy.url", sync_url)
+    alembic_cfg.set_main_option("sqlalchemy.url", sync_url.replace("%", "%%"))
 
     script = ScriptDirectory.from_config(alembic_cfg)
     expected_head = script.get_current_head()

@@ -427,3 +427,4 @@ async def test_secrets_and_pii_redaction_in_logging():
     assert sanitized["phone_number"].startswith("+91")
     assert "3210" in sanitized["phone_number"]
     assert "******" in sanitized["phone_number"]
+

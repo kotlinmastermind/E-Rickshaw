@@ -92,7 +92,7 @@ async def clear_backend_data():
         # 1. Truncate / delete all transactional dummy records
         for tbl in TRANSACTIONAL_TABLES:
             try:
-                res = await session.execute(text(f"DELETE FROM {tbl}"))
+                res = await session.execute(text(f"DELETE FROM {tbl}"))  # nosec B608
                 logger.info(f"Cleared table: {tbl} (rows removed)")
             except Exception as e:
                 logger.warning(f"Note clearing {tbl}: {e}")

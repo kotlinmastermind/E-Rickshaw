@@ -8,6 +8,7 @@ from sqlalchemy import select, update
 from fastapi import HTTPException, status
 
 from backend.domain.models import (
+    User,
     PooledTrip, PooledBooking, PooledTripStop, PassengerOccupancyEvent, PooledTripMessage, SharedRidePreference,
     Ride, FareRule, FareEstimate, CustomerProfile, DriverProfile, VehicleCategory,
     AuditLog

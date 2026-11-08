@@ -6,6 +6,8 @@
 .pytest_cache
 .venv
 venv
+.env
+.env.*
 apps
 release-apks
 backups

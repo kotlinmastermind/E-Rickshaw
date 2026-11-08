@@ -254,3 +254,4 @@ async def test_emergency_sos_alerting_workflow(db_session):
     assert sos_res["status"] == "SOS_ACTIVE"
     assert sos_res["contacts_notified_count"] >= 1
     assert "track" in sos_res["emergency_share_url"]
+

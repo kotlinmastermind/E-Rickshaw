@@ -2,6 +2,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import BaseModel, Field, ConfigDict, model_validator
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_admin

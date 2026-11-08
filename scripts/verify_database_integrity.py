@@ -3,7 +3,12 @@ Database Integrity Verification Script.
 Validates financial records, relationships, duplicate identifiers, and orphan records.
 """
 import sys
+import os
 import logging
+
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from sqlalchemy import create_engine, text, inspect
 from backend.core.config import settings
 
@@ -40,7 +45,8 @@ def verify_database_integrity(db_url: str = None) -> dict:
                     ("driver_profiles", "user_id", "users", "id"),
                     ("rides", "customer_id", "customer_profiles", "id"),
                     ("payments", "customer_id", "customer_profiles", "id"),
-                    ("wallet_transactions", "driver_id", "driver_profiles", "id"),
+                    ("wallets", "user_id", "users", "id"),
+                    ("wallet_transactions", "wallet_id", "wallets", "id"),
                 ]
                 for child_tbl, child_col, parent_tbl, parent_col in relationships_to_verify:
                     if child_tbl in existing_tables and parent_tbl in existing_tables:
