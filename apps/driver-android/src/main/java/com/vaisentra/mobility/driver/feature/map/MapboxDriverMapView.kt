@@ -234,35 +234,41 @@ fun MapboxDriverMapView(
                         MapboxOptions.accessToken = resolvedToken
                     } catch (_: Throwable) {}
                 }
-                MapView(ctx).apply {
-                    mapViewRef = this
+                try {
+                    MapView(ctx).apply {
+                        mapViewRef = this
 
-                    mapboxMap.loadStyle(targetStyleUri) {
-                        activeLoadedStyleUri = targetStyleUri
-                        val annotationPlugin = annotations
-                        pointAnnotationManager = annotationPlugin.createPointAnnotationManager()
-                        polylineAnnotationManager = annotationPlugin.createPolylineAnnotationManager()
+                        mapboxMap.loadStyle(targetStyleUri) {
+                            activeLoadedStyleUri = targetStyleUri
+                            val annotationPlugin = annotations
+                            pointAnnotationManager = annotationPlugin.createPointAnnotationManager()
+                            polylineAnnotationManager = annotationPlugin.createPolylineAnnotationManager()
 
-                        // Setup initial 3D Cockpit Camera with worldwide perspective so it animates in smoothly
-                        val initialLoc = DeviceLocationProvider.getLastKnownLocation(ctx) ?: driverLatLng
-                        mapboxMap.setCamera(
-                            CameraOptions.Builder()
-                                .center(Point.fromLngLat(initialLoc.longitude, initialLoc.latitude))
-                                .bearing(bearing.toDouble())
-                                .pitch(0.0)
-                                .zoom(2.0)
-                                .build()
-                        )
+                            // Setup initial 3D Cockpit Camera with worldwide perspective so it animates in smoothly
+                            val initialLoc = DeviceLocationProvider.getLastKnownLocation(ctx) ?: driverLatLng
+                            mapboxMap.setCamera(
+                                CameraOptions.Builder()
+                                    .center(Point.fromLngLat(initialLoc.longitude, initialLoc.latitude))
+                                    .bearing(bearing.toDouble())
+                                    .pitch(0.0)
+                                    .zoom(2.0)
+                                    .build()
+                            )
+                        }
+
+                        // Map click listener
+                        gestures.addOnMapClickListener { point ->
+                            onMapClick?.invoke(LatLng(point.latitude(), point.longitude()))
+                            true
+                        }
                     }
-
-                    // Map click listener
-                    gestures.addOnMapClickListener { point ->
-                        onMapClick?.invoke(LatLng(point.latitude(), point.longitude()))
-                        true
-                    }
+                } catch (t: Throwable) {
+                    android.util.Log.e("MapboxDriverMapView", "Failed to inflate MapView: ${t.message}", t)
+                    android.view.View(ctx)
                 }
             },
-            update = { mapView ->
+            update = { view ->
+                val mapView = view as? MapView ?: return@AndroidView
                 // ONLY reload style if user explicitly switched the layer and it is NOT currently loaded
                 if (activeLoadedStyleUri != null && activeLoadedStyleUri != targetStyleUri) {
                     activeLoadedStyleUri = targetStyleUri

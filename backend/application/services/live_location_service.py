@@ -9,10 +9,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Set
 
-from sqlalchemy import select
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.domain.models import DriverLocation
+from backend.domain.models import DriverLocation, DriverProfile, DriverAvailability
 from backend.application.services.h3_geospatial_service import h3_service
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.api.routes.ws import ws_manager
@@ -171,6 +171,7 @@ class LiveLocationService:
             loc = res.scalar_one_or_none()
             if loc:
                 h3_cell = h3_service.get_h3_cell(loc.latitude, loc.longitude)
+                loc_at = (loc.recorded_at if loc.recorded_at.tzinfo else loc.recorded_at.replace(tzinfo=timezone.utc)) if loc.recorded_at else None
                 return {
                     "driver_id": driver_id,
                     "latitude": loc.latitude,
@@ -179,8 +180,8 @@ class LiveLocationService:
                     "speed_mps": loc.speed,
                     "accuracy_m": loc.accuracy,
                     "h3_cell": h3_cell,
-                    "recorded_at": loc.recorded_at.isoformat(),
-                    "epoch_timestamp": loc.recorded_at.timestamp()
+                    "recorded_at": loc_at.isoformat() if loc_at else datetime.now(timezone.utc).isoformat(),
+                    "epoch_timestamp": loc_at.timestamp() if loc_at else time.time()
                 }
         return None
 
@@ -212,3 +213,91 @@ class LiveLocationService:
             if drivers:
                 all_drivers.update(drivers)
         return all_drivers
+
+    async def rebuild_h3_index_from_db(self, max_age_minutes: int = 120) -> int:
+        """
+        Disaster Recovery & Cold-Start Rebuilder:
+        Reconstructs the Redis H3 spatial index and telemetry cache directly
+        from authoritative PostgreSQL tables (DriverProfile, DriverAvailability, DriverLocation).
+        Returns the number of drivers successfully re-indexed.
+        """
+        if not self.db:
+            return 0
+
+        latest_loc_subquery = (
+            select(
+                DriverLocation.driver_id,
+                func.max(DriverLocation.recorded_at).label("max_recorded_at")
+            )
+            .group_by(DriverLocation.driver_id)
+            .subquery()
+        )
+
+        query = (
+            select(
+                DriverProfile.id.label("driver_id"),
+                DriverLocation.latitude,
+                DriverLocation.longitude,
+                DriverLocation.heading,
+                DriverLocation.speed,
+                DriverLocation.accuracy,
+                DriverLocation.recorded_at,
+                DriverAvailability.is_online,
+                DriverAvailability.is_busy
+            )
+            .join(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
+            .join(latest_loc_subquery, latest_loc_subquery.c.driver_id == DriverProfile.id)
+            .join(
+                DriverLocation,
+                and_(
+                    DriverLocation.driver_id == latest_loc_subquery.c.driver_id,
+                    DriverLocation.recorded_at == latest_loc_subquery.c.max_recorded_at
+                )
+            )
+            .where(
+                DriverProfile.approval_status == "APPROVED",
+                DriverAvailability.is_online.is_(True),
+                DriverAvailability.is_busy.is_(False)
+            )
+        )
+
+        res = await self.db.execute(query)
+        rows = res.all()
+        reindexed_count = 0
+        now_dt = datetime.now(timezone.utc)
+
+        for r in rows:
+            r_at = (r.recorded_at if r.recorded_at.tzinfo else r.recorded_at.replace(tzinfo=timezone.utc)) if r.recorded_at else None
+            if r_at and max_age_minutes:
+                if (now_dt - r_at).total_seconds() > (max_age_minutes * 60):
+                    continue
+            driver_id = r.driver_id
+            lat = r.latitude
+            lng = r.longitude
+            if not h3_service.validate_coordinates(lat, lng):
+                continue
+
+            h3_cell = h3_service.get_h3_cell(lat, lng)
+            epoch_time = r_at.timestamp() if r_at else time.time()
+
+            payload = {
+                "driver_id": driver_id,
+                "latitude": round(lat, 6),
+                "longitude": round(lng, 6),
+                "heading": round(r.heading, 1) if r.heading is not None else None,
+                "speed_mps": round(r.speed, 2) if r.speed is not None else None,
+                "accuracy_m": round(r.accuracy, 1) if r.accuracy is not None else None,
+                "h3_cell": h3_cell,
+                "is_online": True,
+                "is_busy": False,
+                "recorded_at": r.recorded_at.isoformat() if r.recorded_at else datetime.now(timezone.utc).isoformat(),
+                "epoch_timestamp": epoch_time
+            }
+
+            await redis_client.set_json(f"driver:location:{driver_id}", payload, ex=LOCATION_TTL_SECONDS)
+            await redis_client.set(f"driver:last_seen:{driver_id}", str(epoch_time), ex=LOCATION_TTL_SECONDS)
+            await self._update_h3_cell_membership(driver_id, h3_cell)
+            reindexed_count += 1
+
+        logger.info(f"Rebuilt Redis H3 spatial index: {reindexed_count} active drivers re-indexed from DB.")
+        return reindexed_count

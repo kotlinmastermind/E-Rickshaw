@@ -71,11 +71,14 @@ class RoadETAService:
             dur_min = round(max((dist_km / 20.0) * 60.0, 2.0), 1)  # 20 km/h average e-rickshaw urban speed
             provider = "LOCAL_CALIBRATED_FALLBACK"
 
+        is_routed = provider in ["MAPBOX_DIRECTIONS_API", "OSRM_ROAD_FALLBACK"]
         result = {
             "distance_km": dist_km,
             "duration_minutes": dur_min,
             "duration_seconds": int(dur_min * 60),
-            "provider": provider
+            "provider": provider,
+            "is_road_network_routed": is_routed,
+            "is_approximate_fallback": not is_routed
         }
 
         # Cache in Redis with short TTL

@@ -60,3 +60,11 @@ async def db_session():
         _db_initialized = True
     async with async_session_maker() as session:
         yield session
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def flush_cache_isolation():
+    from backend.infrastructure.cache.redis_client import redis_client
+    await redis_client.flushdb()
+    yield
+    await redis_client.flushdb()
+

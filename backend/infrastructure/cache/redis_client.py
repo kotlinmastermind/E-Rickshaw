@@ -192,6 +192,10 @@ class InMemoryCacheFallback:
                     return True
             return False
 
+    async def clear(self):
+        async with self._lock:
+            self._store.clear()
+
 _PUBSUB_SENTINEL = object()
 
 class InMemoryPubSub:
@@ -531,6 +535,16 @@ class RedisManager:
             yield token
         finally:
             await self.release_lock(key, token)
+
+    async def flushdb(self):
+        """Flush both real Redis (if connected) and in-memory fallback cache."""
+        client = await self._get_redis()
+        if client:
+            try:
+                await client.flushdb()
+            except Exception:
+                pass
+        await self._fallback.clear()
 
     async def health_check(self) -> Dict[str, Any]:
         """Observability health check reporting latency and backend status."""

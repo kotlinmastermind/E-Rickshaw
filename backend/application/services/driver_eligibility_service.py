@@ -99,6 +99,14 @@ class DriverEligibilityService:
         pickup_cell = h3_service.get_h3_cell(pickup_lat, pickup_lng)
         search_rings = h3_service.get_progressive_search_rings(pickup_cell, max_rings=max_rings)
 
+        # Cold-start & Redis recovery check: if no drivers in cells and DB is present, rebuild index
+        if self.db:
+            all_target_cells: Set[str] = set()
+            for ring in search_rings:
+                all_target_cells.update(ring)
+            if not await self.live_loc.get_drivers_in_cells(all_target_cells):
+                await self.live_loc.rebuild_h3_index_from_db()
+
         all_candidate_drivers: List[CandidateDriver] = []
         already_seen_driver_ids: Set[str] = set()
 

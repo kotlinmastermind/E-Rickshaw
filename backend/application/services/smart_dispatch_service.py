@@ -137,41 +137,70 @@ class SmartDispatchService:
             pickup_lng=ride.pickup_longitude
         )
 
-        # 7. Iterate through ranked candidates and secure atomic lock
-        selected_assignment: Optional[RideAssignment] = None
-        for scored in ranked:
-            candidate = scored.candidate
-            # Acquire atomic lock (prevents race conditions with other rides)
-            lock_acquired = await batch_optimizer.acquire_atomic_driver_lock(
-                driver_id=candidate.driver_id,
-                ride_id=ride_id
+        # 7. Execute Hungarian Bipartite Matching & Secure Atomic Lock
+        from backend.application.services.batch_dispatch_optimizer import (
+            RideRequestItem, DriverCandidateItem
+        )
+        ride_item = RideRequestItem(
+            ride_id=ride.id,
+            pickup_lat=ride.pickup_latitude,
+            pickup_lng=ride.pickup_longitude,
+            required_category_id=ride.vehicle_category_id
+        )
+        driver_items = [
+            DriverCandidateItem(
+                driver_id=s.candidate.driver_id,
+                user_id=s.candidate.user_id,
+                latitude=s.candidate.latitude,
+                longitude=s.candidate.longitude,
+                road_eta_minutes=getattr(s.candidate, "road_eta_minutes", 5.0),
+                total_score=s.total_score,
+                ring_index=s.candidate.ring_index
             )
-            if not lock_acquired:
-                logger.debug(f"Driver {candidate.driver_id} lock contention; trying next candidate.")
+            for s in ranked
+        ]
+        eta_matrix = [[getattr(s.candidate, "road_eta_minutes", 5.0) for s in ranked]]
+
+        optimized_matches = await batch_optimizer.optimize_and_assign(
+            rides=[ride_item],
+            drivers=driver_items,
+            eta_matrix=eta_matrix
+        )
+
+        # 8. Create RideAssignment for optimal matched candidate
+        selected_assignment: Optional[RideAssignment] = None
+        for match in optimized_matches:
+            if not match.lock_acquired:
                 continue
 
-            # Lock acquired! Create RideAssignment record
+            # Find matching scored candidate
+            matching_scored = next(
+                (s for s in ranked if s.candidate.driver_id == match.driver_id),
+                ranked[0]
+            )
+            candidate = matching_scored.candidate
+
             expires_at = now + timedelta(seconds=offer_timeout_sec)
             assignment = RideAssignment(
                 ride_id=ride.id,
-                driver_id=candidate.driver_id,
+                driver_id=match.driver_id,
                 status="OFFERED",
                 offered_at=now,
                 expires_at=expires_at,
-                escalation_level=candidate.ring_index,
+                escalation_level=len(prior_driver_ids),
                 is_accepted=None,
                 metadata_json=json.dumps({
-                    "road_eta_minutes": getattr(candidate, "road_eta_minutes", 5.0),
+                    "road_eta_minutes": match.road_eta_minutes,
                     "road_distance_km": getattr(candidate, "road_distance_km", 1.5),
-                    "match_score": scored.total_score,
-                    "explanation": scored.explanation,
+                    "match_score": match.match_score,
+                    "explanation": matching_scored.explanation,
                     "h3_cell": candidate.h3_cell,
-                    "ring_index": candidate.ring_index
+                    "ring_index": candidate.ring_index,
+                    "optimization_algorithm": "HUNGARIAN_KUHN_MUNKRES"
                 })
             )
             self.db.add(assignment)
 
-            # Set Redis safety key and active offer key
             safety_ttl = offer_timeout_sec + SAFETY_WATCHDOG_OFFSET_SECONDS
             await redis_client.set(f"dispatch:offer:{ride.id}:{candidate.driver_id}", "ACTIVE", ex=safety_ttl)
             if candidate.user_id:
@@ -182,10 +211,10 @@ class SmartDispatchService:
             await self.db.refresh(assignment)
             selected_assignment = assignment
 
-            # 8. Broadcast WebSocket offer events
-            await self._broadcast_offer(ride, candidate, scored, offer_timeout_sec)
+            # Broadcast WebSocket offer events
+            await self._broadcast_offer(ride, candidate, matching_scored, offer_timeout_sec)
 
-            # 9. Schedule background watchdog for automated timeout cascade
+            # Schedule background watchdog for automated timeout cascade
             try:
                 asyncio.create_task(
                     self._schedule_timeout_watchdog(ride.id, candidate.driver_id, safety_ttl)
@@ -195,7 +224,7 @@ class SmartDispatchService:
 
             logger.info(
                 f"Dispatched ride {ride.id} to driver {candidate.driver_id} "
-                f"(ETA: {getattr(candidate, 'road_eta_minutes', 0):.1f}m, Score: {scored.total_score:.3f})"
+                f"(ETA: {match.road_eta_minutes:.1f}m, Score: {match.match_score:.3f}, Algo: Hungarian)"
             )
             break
 

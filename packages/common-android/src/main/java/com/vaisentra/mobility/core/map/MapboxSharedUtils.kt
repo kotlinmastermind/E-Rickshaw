@@ -19,7 +19,7 @@ import kotlin.math.*
  */
 object MapboxSharedConfig {
     // Primary Mapbox Access Tokens
-    const val DEFAULT_PUBLIC_TOKEN = ""
+    const val DEFAULT_PUBLIC_TOKEN = "pk.eyJ1Ijoia290bGlubWFzdGVybWluZCIsImEiOiJjbXZ5c205bWswZnV4MnhzOXNzdm02bDB0In0.XZPhcU3_Et2F5raRUkVtxQ"
     
     // Mapbox Vector Style URLs (v12 / v11)
     const val STYLE_STREETS = "mapbox://styles/mapbox/streets-v12"

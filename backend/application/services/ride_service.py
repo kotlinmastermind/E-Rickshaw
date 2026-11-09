@@ -221,6 +221,14 @@ class RideService:
         except Exception:
             pass
 
+        # Trigger Smart Dispatch Engine immediately for on-demand ride booking
+        if not is_scheduled:
+            try:
+                import asyncio
+                asyncio.create_task(self._background_dispatch(ride.id))
+            except RuntimeError:
+                pass
+
         return {
             "ride_id": ride.id,
             "status": ride.status,
@@ -230,6 +238,18 @@ class RideService:
             "destination_address": ride.destination_address,
             "requested_at": ride.requested_at.isoformat()
         }
+
+    @staticmethod
+    async def _background_dispatch(ride_id: str) -> None:
+        """Invokes SmartDispatchService in an isolated async database session."""
+        try:
+            from backend.infrastructure.database.session import async_session_maker
+            from backend.application.services.smart_dispatch_service import SmartDispatchService
+            async with async_session_maker() as session:
+                svc = SmartDispatchService(session)
+                await svc.search_and_dispatch(ride_id)
+        except Exception:
+            pass
 
     async def accept_ride_atomic(self, driver_user_id: str, ride_id: str) -> Dict[str, Any]:
         """

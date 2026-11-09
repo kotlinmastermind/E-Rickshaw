@@ -18,7 +18,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.domain.models import (
@@ -196,13 +196,18 @@ class CascadingDispatchService:
     ) -> Optional[RideAssignment]:
         """
         Cascading Dispatch Engine:
-        1. Row-level lock on Ride (SELECT ... FOR UPDATE).
-        2. Queries online/unengaged drivers, excluding those on cooldown or prior assignees.
-        3. If found, atomically creates RideAssignment (timeout = now + 20s), sets Redis 22s fallback, sends WebSocket event.
-        4. If none found, progressively expands search radius up to MAX_SEARCH_RADIUS_KM.
-        5. If all exhausted, transitions Ride to EXPIRED and notifies customer.
+        Delegates to the modern H3 SmartDispatchService while preserving backward-compatible signature.
         """
-        # Row-level lock on ride
+        from backend.application.services.smart_dispatch_service import SmartDispatchService
+        max_rings = max(2, min(5, int(current_radius_km / 2.5)))
+        smart_assignment = await SmartDispatchService(self.db).search_and_dispatch(
+            ride_id=ride_id,
+            max_rings=max_rings
+        )
+        if smart_assignment is not None:
+            return smart_assignment
+
+        # Fallback to legacy loop only if smart dispatch returned None and ride remains REQUESTED
         ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
         ride_res = await self.db.execute(ride_stmt)
         ride = ride_res.scalar_one_or_none()
