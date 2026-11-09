@@ -386,7 +386,7 @@ fun CustomerMasterCatalogFlow(
             val token = ApiClient.getToken().orEmpty()
             if (token.isBlank()) return
 
-            val wsUrl = ApiClient.getWebSocketUrl("api/v1/ws/rides/$activeRideId/tracking")
+            val wsUrl = ApiClient.getWebSocketUrl("api/v1/rides/$activeRideId/tracking")
             val req = Request.Builder()
                 .url(wsUrl)
                 .addHeader("Authorization", "Bearer $token")
