@@ -226,6 +226,8 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
   const userLocationMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const userLocationCoordsRef = useRef<[number, number] | null>(null);
   const [liveAdminGps, setLiveAdminGps] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  const hasInitialCenteredRef = useRef(false);
+  const lastModeCameraRef = useRef<string | null>(null);
 
   // Real-Time continuous GPS Watcher for Admin browser/device
   useEffect(() => {

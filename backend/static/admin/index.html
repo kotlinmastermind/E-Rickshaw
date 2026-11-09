@@ -45,6 +45,21 @@
             return origSend.apply(this, arguments);
           };
         }
+
+        // Filter benign Mapbox GL JS internal canvas/sprite notices
+        if (typeof console !== 'undefined' && console.warn) {
+          var origWarn = console.warn;
+          console.warn = function() {
+            var msg = arguments[0];
+            if (typeof msg === 'string' && (
+              msg.indexOf('Terrain and hillshade are disabled') !== -1 ||
+              msg.indexOf('Unable to perform style diff') !== -1
+            )) {
+              return;
+            }
+            return origWarn.apply(console, arguments);
+          };
+        }
       })();
     </script>
     <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
