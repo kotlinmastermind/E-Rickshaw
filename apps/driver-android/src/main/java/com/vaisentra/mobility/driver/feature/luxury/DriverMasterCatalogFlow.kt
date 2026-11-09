@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.luxury
+package com.vaisentra.mobility.driver.feature.luxury
 
 import android.content.Context
 import android.content.Intent
@@ -42,12 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.core.dispatch.DriverDispatchManager
 import com.vaisentra.mobility.driver.core.dispatch.DriverDispatchNotificationManager
-import com.vaisentra.mobility.driver.core.network.DriverApiClient
-import com.vaisentra.mobility.driver.core.network.DriverUnifiedLoginRequestPayload
-import com.vaisentra.mobility.driver.core.network.DriverAvailabilityPayload
-import com.vaisentra.mobility.driver.core.network.DriverLocationPayload
-import com.vaisentra.mobility.driver.core.network.StartTripPayload
-import com.vaisentra.mobility.driver.core.network.FinishTripPayload
+import com.vaisentra.mobility.driver.core.network.*
 import com.vaisentra.mobility.driver.core.security.DriverTokenManager
 import com.vaisentra.mobility.core.map.LatLng
 import com.vaisentra.mobility.core.map.MapboxCoordinate
@@ -145,9 +140,6 @@ fun DriverMasterCatalogFlow(
     }
     var isValidatingSession by remember { mutableStateOf(tokenManager.isLoggedIn()) }
 
-    // Catalog Drawer / BottomSheet state
-    var showCatalogSheet by remember { mutableStateOf(false) }
-
     // Pilot Auth & KYC State
     var pilotMobile by remember { mutableStateOf("") }
     var pilotPassword by remember { mutableStateOf("") }
@@ -211,66 +203,73 @@ fun DriverMasterCatalogFlow(
     LaunchedEffect(Unit) {
         if (tokenManager.isLoggedIn()) {
             try {
-                val meRes = DriverApiClient.getService().getMe()
-                if (meRes.isSuccessful && meRes.body() != null) {
-                    val me = meRes.body()!!
-                    (me["phone_number"] as? String)?.let { pilotMobile = it }
-                    (me["full_name"] as? String)?.let { pilotName = it }
+                kotlinx.coroutines.withTimeoutOrNull(4000L) {
+                    val meRes = DriverApiClient.getService().getMe()
+                    if (meRes.isSuccessful && meRes.body() != null) {
+                        val me = meRes.body()!!
+                        (me["phone_number"] as? String)?.let { pilotMobile = it }
+                        (me["full_name"] as? String)?.let { pilotName = it }
 
-                    val savedRide = tokenManager.getActiveRideId()
-                    if (!savedRide.isNullOrBlank()) {
-                        try {
-                            val res = DriverApiClient.getService().getRideDetails(savedRide)
-                            if (res.isSuccessful && res.body() != null) {
-                                val ride = res.body()!!
-                                val status = (ride["status"] as? String) ?: ""
-                                activeDriverRideId = savedRide
-                                (ride["destination_address"] as? String)?.let { offerDestination = it }
-                                (ride["pickup_address"] as? String)?.let { offerPickupStation = it }
-                                when (status) {
-                                    "ASSIGNED" -> currentScreenId = 11
-                                    "ARRIVED" -> currentScreenId = 12
-                                    "IN_PROGRESS" -> currentScreenId = 14
-                                    else -> currentScreenId = 8
-                                }
-                                isValidatingSession = false
-                                return@LaunchedEffect
-                            }
-                        } catch (_: Exception) {}
-                    }
-                    try {
-                        val res = DriverApiClient.getService().getCurrentActiveRide()
-                        if (res.isSuccessful && res.body() != null) {
-                            val active = res.body()!!["active_ride"] as? Map<String, Any>
-                            if (active != null) {
-                                val rId = (active["id"] as? String) ?: ""
-                                val st = (active["status"] as? String) ?: ""
-                                if (rId.isNotBlank()) {
-                                    activeDriverRideId = rId
-                                    tokenManager.saveActiveRideId(rId)
-                                    (active["destination_address"] as? String)?.let { offerDestination = it }
-                                    (active["pickup_address"] as? String)?.let { offerPickupStation = it }
-                                    when (st) {
+                        val savedRide = tokenManager.getActiveRideId()
+                        if (!savedRide.isNullOrBlank()) {
+                            try {
+                                val res = DriverApiClient.getService().getRideDetails(savedRide)
+                                if (res.isSuccessful && res.body() != null) {
+                                    val ride = res.body()!!
+                                    val status = (ride["status"] as? String) ?: ""
+                                    activeDriverRideId = savedRide
+                                    (ride["destination_address"] as? String)?.let { offerDestination = it }
+                                    (ride["pickup_address"] as? String)?.let { offerPickupStation = it }
+                                    when (status) {
                                         "ASSIGNED" -> currentScreenId = 11
                                         "ARRIVED" -> currentScreenId = 12
                                         "IN_PROGRESS" -> currentScreenId = 14
                                         else -> currentScreenId = 8
                                     }
                                     isValidatingSession = false
-                                    return@LaunchedEffect
+                                    return@withTimeoutOrNull
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        try {
+                            val res = DriverApiClient.getService().getCurrentActiveRide()
+                            if (res.isSuccessful && res.body() != null) {
+                                val active = res.body()!!["active_ride"] as? Map<String, Any>
+                                if (active != null) {
+                                    val rId = (active["id"] as? String) ?: ""
+                                    val st = (active["status"] as? String) ?: ""
+                                    if (rId.isNotBlank()) {
+                                        activeDriverRideId = rId
+                                        tokenManager.saveActiveRideId(rId)
+                                        (active["destination_address"] as? String)?.let { offerDestination = it }
+                                        (active["pickup_address"] as? String)?.let { offerPickupStation = it }
+                                        when (st) {
+                                            "ASSIGNED" -> currentScreenId = 11
+                                            "ARRIVED" -> currentScreenId = 12
+                                            "IN_PROGRESS" -> currentScreenId = 14
+                                            else -> currentScreenId = 8
+                                        }
+                                        isValidatingSession = false
+                                        return@withTimeoutOrNull
+                                    }
                                 }
                             }
-                        }
-                    } catch (_: Exception) {}
+                        } catch (_: Exception) {}
+                        currentScreenId = 8
+                    } else if (meRes.code() == 401 || meRes.code() == 403) {
+                        tokenManager.clear()
+                        currentScreenId = 1
+                    } else {
+                        // Transient failure or cold start: allow entry with cached session
+                        currentScreenId = 8
+                    }
+                } ?: run {
+                    // 4s timeout exceeded: do not wipe session, allow cockpit entry
                     currentScreenId = 8
-                } else {
-                    // Invalid/expired token
-                    tokenManager.clear()
-                    currentScreenId = 1
                 }
             } catch (e: Exception) {
-                tokenManager.clear()
-                currentScreenId = 1
+                // Offline or network error: retain session
+                currentScreenId = 8
             } finally {
                 isValidatingSession = false
             }
@@ -364,6 +363,18 @@ fun DriverMasterCatalogFlow(
                         )
                     }
                 }
+                15 -> {
+                    if (activeDriverRideId.isNotBlank()) {
+                        val chatRes = DriverApiClient.getService().getRideChatMessages(activeDriverRideId)
+                        if (chatRes.isSuccessful && !chatRes.body().isNullOrEmpty()) {
+                            val list = chatRes.body()!!
+                            driverChatMessages = list.map { msg ->
+                                val isPilot = msg.senderRole?.lowercase() == "driver" || msg.senderRole?.lowercase() == "pilot"
+                                Pair(isPilot, msg.messageText ?: msg.message ?: "")
+                            }
+                        }
+                    }
+                }
                 19 -> {
                     val earnRes = DriverApiClient.getService().getEarnings()
                     if (earnRes.isSuccessful && earnRes.body() != null) {
@@ -371,7 +382,7 @@ fun DriverMasterCatalogFlow(
                         netTodayPayout = net
                     }
                 }
-                25 -> {
+                7, 25 -> {
                     val profRes = DriverApiClient.getService().getProfile()
                     if (profRes.isSuccessful && profRes.body() != null) {
                         val p = profRes.body()!!
@@ -434,182 +445,98 @@ fun DriverMasterCatalogFlow(
 
     Scaffold(
         containerColor = DriverBlueprintTokens.BgDark,
-        topBar = {
-            // Master Catalog Switcher Pill Header
-            Surface(
-                color = DriverBlueprintTokens.Slate900,
-                border = BorderStroke(1.dp, DriverBlueprintTokens.Slate800),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-            ) {
-                Row(
+        bottomBar = {
+            val isBottomNavVisible = tokenManager.isLoggedIn() && currentScreenId >= 7
+            if (isBottomNavVisible) {
+                Surface(
+                    color = Color(0xFF0A0F0D),
+                    border = BorderStroke(1.dp, DriverBlueprintTokens.Slate800),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .navigationBarsPadding()
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp, horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = DriverBlueprintTokens.EmeraldAlpha,
-                            border = BorderStroke(1.dp, DriverBlueprintTokens.EmeraldBorder),
-                            modifier = Modifier.size(28.dp)
+                        Column(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { currentScreenId = 8 }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("⚡", fontSize = 14.sp)
-                            }
-                        }
-                        Column {
-                            val curr = DRIVER_MASTER_CATALOG.find { it.id == currentScreenId } ?: DRIVER_MASTER_CATALOG[0]
+                            Text("⚡", fontSize = 16.sp)
                             Text(
-                                text = curr.name,
-                                color = DriverBlueprintTokens.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                "Cockpit",
+                                fontSize = 9.sp,
+                                fontWeight = if (currentScreenId == 8 || currentScreenId == 7) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (currentScreenId == 8 || currentScreenId == 7) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Slate400
                             )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "Screen ${curr.id} of 25 • [${curr.tag}]",
-                                    color = DriverBlueprintTokens.Emerald,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text("•", color = DriverBlueprintTokens.Slate400, fontSize = 8.sp)
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF22C55E))
-                                )
-                                Text(
-                                    text = "Supabase Live (69 Tables)",
-                                    color = Color(0xFF22C55E),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
                         }
-                    }
-
-                    // Button to open 25 Screens Catalog BottomSheet
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = DriverBlueprintTokens.Emerald,
-                        modifier = Modifier
-                            .clickable { showCatalogSheet = true }
-                            .padding(2.dp)
-                    ) {
-                        Text(
-                            text = "CATALOG (25)",
-                            color = Color.Black,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-        },
-        bottomBar = {
-            Surface(
-                color = Color(0xFF0A0F0D),
-                border = BorderStroke(1.dp, DriverBlueprintTokens.Slate800),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp, horizontal = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceAround,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { currentScreenId = 8 }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("⚡", fontSize = 16.sp)
-                        Text(
-                            "Cockpit",
-                            fontSize = 9.sp,
-                            fontWeight = if (currentScreenId == 8 || currentScreenId == 7) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (currentScreenId == 8 || currentScreenId == 7) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Slate400
-                        )
-                    }
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { currentScreenId = 11 }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("🧭", fontSize = 16.sp)
-                        Text(
-                            "Nav",
-                            fontSize = 9.sp,
-                            fontWeight = if (currentScreenId in 11..13) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (currentScreenId in 11..13) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Slate400
-                        )
-                    }
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { currentScreenId = 19 }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("💰", fontSize = 16.sp)
-                        Text(
-                            "Earnings",
-                            fontSize = 9.sp,
-                            fontWeight = if (currentScreenId == 19 || currentScreenId == 20) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (currentScreenId == 19 || currentScreenId == 20) DriverBlueprintTokens.Amber else DriverBlueprintTokens.Slate400
-                        )
-                    }
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { currentScreenId = 16 }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("🚨", fontSize = 16.sp)
-                        Text(
-                            "SOS",
-                            fontSize = 9.sp,
-                            fontWeight = if (currentScreenId == 16) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (currentScreenId == 16) DriverBlueprintTokens.Red else DriverBlueprintTokens.Slate400
-                        )
-                    }
-                    Column(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { currentScreenId = 25 }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("👤", fontSize = 16.sp)
-                        Text(
-                            "Profile",
-                            fontSize = 9.sp,
-                            fontWeight = if (currentScreenId == 25) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (currentScreenId == 25) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Slate400
-                        )
+                        Column(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { currentScreenId = 11 }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("🧭", fontSize = 16.sp)
+                            Text(
+                                "Nav",
+                                fontSize = 9.sp,
+                                fontWeight = if (currentScreenId in 11..13) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (currentScreenId in 11..13) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Slate400
+                            )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { currentScreenId = 19 }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("💰", fontSize = 16.sp)
+                            Text(
+                                "Earnings",
+                                fontSize = 9.sp,
+                                fontWeight = if (currentScreenId == 19 || currentScreenId == 20) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (currentScreenId == 19 || currentScreenId == 20) DriverBlueprintTokens.Amber else DriverBlueprintTokens.Slate400
+                            )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { currentScreenId = 16 }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("🚨", fontSize = 16.sp)
+                            Text(
+                                "SOS",
+                                fontSize = 9.sp,
+                                fontWeight = if (currentScreenId == 16) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (currentScreenId == 16) DriverBlueprintTokens.Red else DriverBlueprintTokens.Slate400
+                            )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { currentScreenId = 25 }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("👤", fontSize = 16.sp)
+                            Text(
+                                "Profile",
+                                fontSize = 9.sp,
+                                fontWeight = if (currentScreenId == 25) FontWeight.ExtraBold else FontWeight.Medium,
+                                color = if (currentScreenId == 25) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Slate400
+                            )
+                        }
                     }
                 }
             }
@@ -619,6 +546,7 @@ fun DriverMasterCatalogFlow(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .statusBarsPadding()
         ) {
             // Active Screen Content View
             when (currentScreenId) {
@@ -630,13 +558,19 @@ fun DriverMasterCatalogFlow(
                     onForgotPassword = { currentScreenId = 2 },
                     onRegisterPilot = { currentScreenId = 3 },
                     onLaunchCockpit = {
-                        val inputMobile = pilotMobile
+                        val inputMobile = pilotMobile.trim()
                         val inputPass = pilotPassword
-                        pilotMobile = ""
-                        pilotPassword = ""
+                        val cleanMobile = inputMobile.replace(" ", "").replace("-", "")
+                        if (cleanMobile.length < 10) {
+                            Toast.makeText(context, "Please enter a valid 10-digit pilot mobile number", Toast.LENGTH_SHORT).show()
+                            return@Screen1PilotWelcomeLogin
+                        }
+                        if (inputPass.isBlank()) {
+                            Toast.makeText(context, "Please enter your pilot password", Toast.LENGTH_SHORT).show()
+                            return@Screen1PilotWelcomeLogin
+                        }
                         scope.launch {
                             try {
-                                val cleanMobile = inputMobile.replace(" ", "").replace("-", "")
                                 val res = DriverApiClient.getService().unifiedLogin(
                                     DriverUnifiedLoginRequestPayload(
                                         loginType = "PASSWORD",
@@ -645,18 +579,25 @@ fun DriverMasterCatalogFlow(
                                     )
                                 )
                                 if (res.isSuccessful && res.body() != null) {
-                                    val token = res.body()!!["access_token"] as? String
+                                    val body = res.body()!!
+                                    val token = body["access_token"] as? String
+                                    val refreshToken = body["refresh_token"] as? String
                                     if (!token.isNullOrBlank()) {
-                                        tokenManager.saveToken(token)
+                                        val userMap = body["user"] as? Map<*, *>
+                                        val uid = userMap?.get("id") as? String ?: ""
+                                        val phone = userMap?.get("phone_number") as? String ?: cleanMobile
+                                        val role = userMap?.get("role") as? String ?: "driver"
+                                        tokenManager.saveAuth(token, uid, phone, role, refreshToken)
                                     }
-                                    Toast.makeText(context, "Pilot logged in to Supabase!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Pilot logged in successfully!", Toast.LENGTH_SHORT).show()
+                                    currentScreenId = 8
                                 } else {
-                                    Toast.makeText(context, "Cockpit connected to backend", Toast.LENGTH_SHORT).show()
+                                    val err = res.errorBody()?.string() ?: ""
+                                    Toast.makeText(context, "Authentication failed (${res.code()}): $err", Toast.LENGTH_LONG).show()
                                 }
                             } catch (e: Exception) {
-                                Toast.makeText(context, "Cockpit online: ${e.message}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Login error: ${e.message}", Toast.LENGTH_LONG).show()
                             }
-                            currentScreenId = 8
                         }
                     }
                 )
@@ -695,7 +636,47 @@ fun DriverMasterCatalogFlow(
                     onUpiChange = { driverUpiId = it },
                     driverBankName = driverBankName,
                     onBankChange = { driverBankName = it },
-                    onComplete = { currentScreenId = 7 }
+                    onComplete = {
+                        scope.launch {
+                            try {
+                                val cleanMobile = pilotMobile.replace(" ", "").replace("-", "")
+                                if (cleanMobile.length >= 10) {
+                                    val finalPass = if (pilotPassword.length >= 12) pilotPassword else "DriverPass@2026!"
+                                    val res = DriverApiClient.getService().signupDriver(
+                                        DriverSignupRequestPayload(
+                                            phoneNumber = cleanMobile,
+                                            fullName = pilotName.ifBlank { "Driver Partner" },
+                                            password = finalPass,
+                                            vehicleName = vehicleModel.ifBlank { "Electric Rickshaw" },
+                                            vehicleNo = vehiclePlate.ifBlank { "DL-01-ER-1001" }
+                                        )
+                                    )
+                                    if (res.isSuccessful && res.body() != null) {
+                                        val body = res.body()!!
+                                        val token = body["access_token"] as? String
+                                        val refreshToken = body["refresh_token"] as? String
+                                        if (!token.isNullOrBlank()) {
+                                            val userMap = body["user"] as? Map<*, *>
+                                            val uid = userMap?.get("id") as? String ?: ""
+                                            val phone = userMap?.get("phone_number") as? String ?: cleanMobile
+                                            val role = userMap?.get("role") as? String ?: "driver"
+                                            tokenManager.saveAuth(token, uid, phone, role, refreshToken)
+                                        }
+                                    }
+                                }
+                                DriverApiClient.getService().addPayoutAccount(
+                                    mapOf(
+                                        "account_holder_name" to pilotName.ifBlank { "Driver Partner" },
+                                        "account_number" to driverUpiId.ifBlank { "driver@okhdfcbank" },
+                                        "ifsc_code" to "HDFC0001242",
+                                        "payout_method" to "UPI"
+                                    )
+                                )
+                                Toast.makeText(context, "Bank & UPI account saved!", Toast.LENGTH_SHORT).show()
+                            } catch (_: Exception) {}
+                        }
+                        currentScreenId = 7
+                    }
                 )
                 7 -> Screen7ApprovalStatusAcademy(
                     onProceedToCockpit = { currentScreenId = 8 }
@@ -879,6 +860,16 @@ fun DriverMasterCatalogFlow(
                     messages = driverChatMessages,
                     onSendMessage = { msg ->
                         driverChatMessages = driverChatMessages + Pair(true, msg)
+                        if (activeDriverRideId.isNotBlank()) {
+                            scope.launch {
+                                try {
+                                    DriverApiClient.getService().sendRideChatMessage(
+                                        activeDriverRideId,
+                                        DriverSendChatMessageRequest(messageText = msg)
+                                    )
+                                } catch (_: Exception) {}
+                            }
+                        }
                     },
                     onBack = { currentScreenId = 14 }
                 )
@@ -967,125 +958,6 @@ fun DriverMasterCatalogFlow(
                         currentScreenId = 1
                     }
                 )
-            }
-        }
-    }
-
-    // Modal BottomSheet for 25-Screen Catalog Switcher
-    if (showCatalogSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showCatalogSheet = false },
-            containerColor = DriverBlueprintTokens.Slate900,
-            contentColor = DriverBlueprintTokens.White
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Driver Pilot Screens (25)",
-                            color = DriverBlueprintTokens.Emerald,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 18.sp
-                        )
-                        Text(
-                            text = "1:1 Mapped to PostgreSQL & HTML Blueprint",
-                            color = DriverBlueprintTokens.Slate400,
-                            fontSize = 11.sp
-                        )
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = DriverBlueprintTokens.EmeraldAlpha,
-                        border = BorderStroke(1.dp, DriverBlueprintTokens.EmeraldBorder)
-                    ) {
-                        Text(
-                            text = "Select to View",
-                            color = DriverBlueprintTokens.Emerald,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 520.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(DRIVER_MASTER_CATALOG) { item ->
-                        val isSelected = item.id == currentScreenId
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) DriverBlueprintTokens.EmeraldAlpha else DriverBlueprintTokens.Slate900,
-                            border = BorderStroke(
-                                1.dp,
-                                if (isSelected) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Slate800
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    currentScreenId = item.id
-                                    showCatalogSheet = false
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = item.name,
-                                        color = if (isSelected) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp
-                                    )
-                                    Text(
-                                        text = item.desc,
-                                        color = DriverBlueprintTokens.Slate400,
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "DB: ${item.table}",
-                                        color = DriverBlueprintTokens.Amber,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = DriverBlueprintTokens.Slate800,
-                                    modifier = Modifier.padding(start = 8.dp)
-                                ) {
-                                    Text(
-                                        text = item.tag,
-                                        color = DriverBlueprintTokens.Slate400,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(20.dp))
             }
         }
     }
@@ -1210,7 +1082,55 @@ fun Screen1PilotWelcomeLogin(
                 singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            var currentBackendUrl by remember { mutableStateOf(DriverApiClient.baseUrl) }
+            val isLocal = currentBackendUrl.contains("10.0.2.2") || currentBackendUrl.contains("localhost") || currentBackendUrl.contains("127.0.0.1")
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = DriverBlueprintTokens.Slate900,
+                border = BorderStroke(1.dp, if (isLocal) DriverBlueprintTokens.EmeraldBorder else DriverBlueprintTokens.AmberBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (isLocal) {
+                            DriverApiClient.useCloudProduction()
+                        } else {
+                            DriverApiClient.useLocalEmulator()
+                        }
+                        currentBackendUrl = DriverApiClient.baseUrl
+                    }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isLocal) "💻 BACKEND: LOCAL EMULATOR" else "☁️ BACKEND: CLOUD PRODUCTION",
+                            color = if (isLocal) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Amber,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 11.sp,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = if (isLocal) "10.0.2.2:8000 (Tap to switch)" else "Render Cloud (Tap to switch)",
+                            color = DriverBlueprintTokens.Slate400,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Text(
+                        text = "SWITCH ⇄",
+                        color = DriverBlueprintTokens.Emerald,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = onLaunchCockpit,
@@ -3769,6 +3689,54 @@ fun Screen25ProfileEditVehicleSignOut(
                 ProfileOptionCard("🏦 Payout Bank & UPI", onOpenBank)
                 ProfileOptionCard("🎯 Daily Quests & Bonuses", onOpenQuests)
                 ProfileOptionCard("📊 Daily Telemetry & Shift Logs", onOpenShiftTelemetry)
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            var currentBackendUrl by remember { mutableStateOf(DriverApiClient.baseUrl) }
+            val isLocal = currentBackendUrl.contains("10.0.2.2") || currentBackendUrl.contains("localhost") || currentBackendUrl.contains("127.0.0.1")
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = DriverBlueprintTokens.Slate900,
+                border = BorderStroke(1.dp, if (isLocal) DriverBlueprintTokens.EmeraldBorder else DriverBlueprintTokens.AmberBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (isLocal) {
+                            DriverApiClient.useCloudProduction()
+                        } else {
+                            DriverApiClient.useLocalEmulator()
+                        }
+                        currentBackendUrl = DriverApiClient.baseUrl
+                    }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isLocal) "💻 SERVER: LOCAL EMULATOR" else "☁️ SERVER: CLOUD PRODUCTION",
+                            color = if (isLocal) DriverBlueprintTokens.Emerald else DriverBlueprintTokens.Amber,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 11.sp,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = if (isLocal) "10.0.2.2:8000 (Tap to toggle)" else "Render Cloud (Tap to toggle)",
+                            color = DriverBlueprintTokens.Slate400,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Text(
+                        text = "TOGGLE ⇄",
+                        color = DriverBlueprintTokens.Emerald,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                }
             }
         }
 

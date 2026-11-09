@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.location
+package com.vaisentra.mobility.driver.core.location
 
 import android.Manifest
 import android.annotation.SuppressLint

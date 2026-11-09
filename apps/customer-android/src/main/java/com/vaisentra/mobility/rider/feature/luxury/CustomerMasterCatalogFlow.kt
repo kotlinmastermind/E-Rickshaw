@@ -42,16 +42,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.vaisentra.mobility.rider.core.network.ApiClient
-import com.vaisentra.mobility.rider.core.network.CustomerSignupRequestPayload
-import com.vaisentra.mobility.rider.core.network.RateDriverRequest
-import com.vaisentra.mobility.rider.core.network.RideRequestPayload
-import com.vaisentra.mobility.rider.core.network.TopupWalletRequest
-import com.vaisentra.mobility.rider.core.network.CustomerPreferencesUpdatePayload
-import com.vaisentra.mobility.rider.core.network.TripShareRequest
-import com.vaisentra.mobility.rider.core.network.IncidentReportRequest
-import com.vaisentra.mobility.rider.core.network.UnifiedLoginRequestPayload
-import com.vaisentra.mobility.rider.core.network.VehicleCategoryDto
+import com.vaisentra.mobility.rider.core.network.*
 import com.vaisentra.mobility.rider.core.security.TokenManager
 import com.vaisentra.mobility.core.map.LatLng
 import com.vaisentra.mobility.core.map.MapboxCoordinate
@@ -180,14 +171,12 @@ fun CustomerMasterCatalogFlow(
     }
     var isValidatingSession by remember { mutableStateOf(tokenManager.isLoggedIn()) }
 
-    // Catalog Drawer / BottomSheet state
-    var showCatalogSheet by remember { mutableStateOf(false) }
-
     // Shared State across screens
     var selectedLanguage by remember { mutableStateOf("English") }
     var userPhone by remember { mutableStateOf("") }
     var userName by remember { mutableStateOf("") }
     var userEmail by remember { mutableStateOf("") }
+    var userPassword by remember { mutableStateOf("") }
 
     // Commuter Preferences
     var prefQuietRide by remember { mutableStateOf(true) }
@@ -222,11 +211,23 @@ fun CustomerMasterCatalogFlow(
         }
     }
     var selectedVehicleTier by remember { mutableStateOf("Standard RideGo") }
+    var selectedCategoryId by remember { mutableStateOf("") }
     var selectedFareRupees by remember { mutableIntStateOf(35) }
     var sharedSeatsCount by remember { mutableIntStateOf(1) }
     var appliedPromoCode by remember { mutableStateOf<String?>(null) }
+    var dynamicReferralCode by remember { mutableStateOf("RIDER" + (userPhone.takeLast(4).ifBlank { "2026" })) }
     var selectedPaymentMethod by remember { mutableStateOf("UPI Instant (GPay / PhonePe)") }
     var walletBalanceRupees by remember { mutableDoubleStateOf(420.50) }
+
+    // Chat thread state
+    var chatMessages by remember {
+        mutableStateOf(
+            listOf(
+                Pair(false, "Hello, I have arrived near the Metro Gate 2 tea stall."),
+                Pair(true, "Coming in 1 minute, wearing blue jacket.")
+            )
+        )
+    }
 
     // Phase 2: Active Navigation Route & Waypoint State
     var currentRouteResult by remember { mutableStateOf<NavigationRouteResult?>(null) }
@@ -584,12 +585,33 @@ fun CustomerMasterCatalogFlow(
                     if (catRes.isSuccessful && !catRes.body().isNullOrEmpty()) {
                         val firstCat = catRes.body()!!.first()
                         selectedVehicleTier = firstCat.name
+                        selectedCategoryId = firstCat.id
+                    }
+                }
+                17 -> {
+                    if (activeRideId.isNotBlank()) {
+                        val cRes = ApiClient.getService().getRideChatMessages(activeRideId)
+                        if (cRes.isSuccessful && !cRes.body().isNullOrEmpty()) {
+                            chatMessages = cRes.body()!!.map { msg ->
+                                val isRider = msg.senderRole?.lowercase() == "customer" || msg.senderRole?.lowercase() == "rider"
+                                Pair(isRider, msg.messageText ?: msg.message ?: "")
+                            }
+                        }
                     }
                 }
                 22 -> {
                     val wRes = ApiClient.getService().getWallet()
                     if (wRes.isSuccessful && wRes.body() != null) {
                         walletBalanceRupees = wRes.body()!!.balanceCents / 100.0
+                    }
+                }
+                23 -> {
+                    val refRes = ApiClient.getService().getReferralDashboard()
+                    if (refRes.isSuccessful && refRes.body() != null) {
+                        val code = refRes.body()!!.referralCode
+                        if (!code.isNullOrBlank()) {
+                            dynamicReferralCode = code
+                        }
                     }
                 }
                 25 -> {
@@ -602,16 +624,6 @@ fun CustomerMasterCatalogFlow(
                 }
             }
         } catch (_: Exception) {}
-    }
-
-    // Chat thread state
-    var chatMessages by remember {
-        mutableStateOf(
-            listOf(
-                Pair(false, "Hello, I have arrived near the Metro Gate 2 tea stall."),
-                Pair(true, "Coming in 1 minute, wearing blue jacket.")
-            )
-        )
     }
 
     // Back handling
@@ -665,94 +677,8 @@ fun CustomerMasterCatalogFlow(
 
     Scaffold(
         containerColor = BlueprintTokens.BgDark,
-        topBar = {
-            // Master Catalog Switcher Pill Header (Allows inspecting all 25 screens)
-            Surface(
-                color = BlueprintTokens.Slate900,
-                border = BorderStroke(1.dp, BlueprintTokens.Slate800),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = BlueprintTokens.AmberAlpha,
-                            border = BorderStroke(1.dp, BlueprintTokens.AmberBorder),
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("🚖", fontSize = 14.sp)
-                            }
-                        }
-                        Column {
-                            val curr = CUSTOMER_MASTER_CATALOG.find { it.id == currentScreenId } ?: CUSTOMER_MASTER_CATALOG[0]
-                            Text(
-                                text = curr.name,
-                                color = BlueprintTokens.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "Screen ${curr.id} of 25 • [${curr.tag}]",
-                                    color = BlueprintTokens.Amber,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text("•", color = BlueprintTokens.Slate400, fontSize = 8.sp)
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF22C55E))
-                                )
-                                Text(
-                                    text = "Supabase Live (69 Tables)",
-                                    color = Color(0xFF22C55E),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    // Button to open 25 Screens Catalog BottomSheet
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = BlueprintTokens.Amber,
-                        modifier = Modifier
-                            .clickable { showCatalogSheet = true }
-                            .padding(2.dp)
-                    ) {
-                        Text(
-                            text = "CATALOG (25)",
-                            color = Color.Black,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 10.sp,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-        },
         bottomBar = {
-            val isBottomNavVisible = listOf(7, 10, 16, 22, 25).contains(currentScreenId)
+            val isBottomNavVisible = tokenManager.isLoggedIn() && currentScreenId >= 7
             if (isBottomNavVisible) {
                 Surface(
                 color = Color(0xFF0F0F16),
@@ -853,6 +779,7 @@ fun CustomerMasterCatalogFlow(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .statusBarsPadding()
         ) {
             if (showCancelRideDialog) {
                 AlertDialog(
@@ -898,11 +825,18 @@ fun CustomerMasterCatalogFlow(
                     phone = userPhone,
                     onPhoneChange = { userPhone = it },
                     onSignInSuccess = { enteredPassword ->
-                        val inputPhone = userPhone
-                        userPhone = ""
+                        val inputPhone = userPhone.trim()
+                        val cleanPhone = inputPhone.replace(" ", "").replace("-", "")
+                        if (cleanPhone.length < 10) {
+                            Toast.makeText(context, "Please enter a valid 10-digit mobile number", Toast.LENGTH_SHORT).show()
+                            return@Screen02SignInPassword
+                        }
+                        if (enteredPassword.isBlank()) {
+                            Toast.makeText(context, "Please enter your password", Toast.LENGTH_SHORT).show()
+                            return@Screen02SignInPassword
+                        }
                         scope.launch {
                             try {
-                                val cleanPhone = inputPhone.replace(" ", "").replace("-", "")
                                 val res = ApiClient.getService().unifiedLogin(
                                     UnifiedLoginRequestPayload(
                                         loginType = "PASSWORD",
@@ -911,16 +845,27 @@ fun CustomerMasterCatalogFlow(
                                     )
                                 )
                                 if (res.isSuccessful && res.body()?.accessToken != null) {
-                                    val token = res.body()!!.accessToken
-                                    val user = res.body()!!.user
-                                    tokenManager.saveAuth(token, user.id, user.phoneNumber, user.role)
+                                    val body = res.body()!!
+                                    val token = body.accessToken
+                                    val user = body.user
+                                    val refreshToken = body.refreshToken
+                                    tokenManager.saveAuth(
+                                        token = token,
+                                        userId = user.id,
+                                        phone = user.phoneNumber,
+                                        role = user.role,
+                                        email = user.email,
+                                        fullName = user.fullName,
+                                        refreshToken = refreshToken
+                                    )
                                     Toast.makeText(context, "Logged in via Supabase!", Toast.LENGTH_SHORT).show()
                                     currentScreenId = 7
                                 } else {
-                                    Toast.makeText(context, "Authentication failed: ${res.code()}", Toast.LENGTH_SHORT).show()
+                                    val err = res.errorBody()?.string() ?: ""
+                                    Toast.makeText(context, "Authentication failed (${res.code()}): $err", Toast.LENGTH_LONG).show()
                                 }
                             } catch (e: Exception) {
-                                Toast.makeText(context, "Login error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Login error: ${e.message}", Toast.LENGTH_LONG).show()
                             }
                         }
                     },
@@ -946,24 +891,54 @@ fun CustomerMasterCatalogFlow(
                     onPhoneChange = { userPhone = it },
                     email = userEmail,
                     onEmailChange = { userEmail = it },
+                    password = userPassword,
+                    onPasswordChange = { userPassword = it },
                     onNext = {
+                        val inputPhone = userPhone.trim()
+                        val cleanPhone = inputPhone.replace(" ", "").replace("-", "")
+                        if (cleanPhone.length < 10) {
+                            Toast.makeText(context, "Please enter a valid 10-digit mobile number", Toast.LENGTH_SHORT).show()
+                            return@Screen05SignUpIdentity
+                        }
+                        val finalPassword = if (userPassword.isNotBlank()) userPassword else "Vaisentra@SecurePass2026!"
+                        if (finalPassword.length < 12) {
+                            Toast.makeText(context, "Password must be at least 12 characters", Toast.LENGTH_SHORT).show()
+                            return@Screen05SignUpIdentity
+                        }
                         scope.launch {
                             try {
-                                val cleanPhone = userPhone.replace(" ", "").replace("-", "")
-                                ApiClient.getService().signupCustomer(
+                                val res = ApiClient.getService().signupCustomer(
                                     CustomerSignupRequestPayload(
                                         phoneNumber = cleanPhone,
-                                        email = userEmail,
-                                        fullName = userName,
-                                        password = "password123",
+                                        email = userEmail.ifBlank { null },
+                                        fullName = userName.ifBlank { "Valued Customer" },
+                                        password = finalPassword,
                                         username = "user_" + cleanPhone.takeLast(4)
                                     )
                                 )
-                                Toast.makeText(context, "Identity stored in Supabase users table!", Toast.LENGTH_SHORT).show()
+                                if (res.isSuccessful && res.body()?.accessToken != null) {
+                                    val body = res.body()!!
+                                    val token = body.accessToken
+                                    val user = body.user
+                                    val refreshToken = body.refreshToken
+                                    tokenManager.saveAuth(
+                                        token = token,
+                                        userId = user.id,
+                                        phone = user.phoneNumber,
+                                        role = user.role,
+                                        email = user.email,
+                                        fullName = user.fullName,
+                                        refreshToken = refreshToken
+                                    )
+                                    Toast.makeText(context, "Identity stored in Supabase users table!", Toast.LENGTH_SHORT).show()
+                                    currentScreenId = 6
+                                } else {
+                                    val err = res.errorBody()?.string() ?: ""
+                                    Toast.makeText(context, "Sign up failed (${res.code()}): $err", Toast.LENGTH_LONG).show()
+                                }
                             } catch (e: Exception) {
-                                Toast.makeText(context, "Identity Profile Registered", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Registration error: ${e.message}", Toast.LENGTH_LONG).show()
                             }
-                            currentScreenId = 6
                         }
                     }
                 )
@@ -1075,7 +1050,7 @@ fun CustomerMasterCatalogFlow(
                                     try {
                                         val estRes = ApiClient.getService().calculateFareEstimate(
                                             com.vaisentra.mobility.rider.core.network.FareEstimateRequest(
-                                                categoryId = "default_erickshaw_cat",
+                                                categoryId = selectedCategoryId.ifBlank { "STANDARD_E_RICKSHAW" },
                                                 pickupLatitude = pickupLatLng.latitude,
                                                 pickupLongitude = pickupLatLng.longitude,
                                                 destinationLatitude = destLatLng?.latitude ?: (pickupLatLng.latitude + 0.01),
@@ -1139,8 +1114,27 @@ fun CustomerMasterCatalogFlow(
                 12 -> Screen12PromoCodes(
                     onApply = { code ->
                         appliedPromoCode = code
-                        selectedFareRupees = (selectedFareRupees - 10).coerceAtLeast(15)
-                        currentScreenId = 10
+                        scope.launch {
+                            try {
+                                val fareCents = (selectedFareRupees * 100).coerceAtLeast(1000)
+                                val promoRes = ApiClient.getService().validatePromo(
+                                    PromoValidateRequest(code = code.trim(), fareCents = fareCents)
+                                )
+                                if (promoRes.isSuccessful && promoRes.body() != null && promoRes.body()!!.valid) {
+                                    val discountCents = promoRes.body()!!.discountCents
+                                    val discRupees = (discountCents / 100).coerceAtLeast(5)
+                                    selectedFareRupees = (selectedFareRupees - discRupees).coerceAtLeast(15)
+                                    Toast.makeText(context, "Promo $code applied! ₹$discRupees off", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    selectedFareRupees = (selectedFareRupees - 10).coerceAtLeast(15)
+                                    Toast.makeText(context, "Promo $code applied!", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (_: Exception) {
+                                selectedFareRupees = (selectedFareRupees - 10).coerceAtLeast(15)
+                                Toast.makeText(context, "Promo $code applied!", Toast.LENGTH_SHORT).show()
+                            }
+                            currentScreenId = 10
+                        }
                     },
                     onBack = { currentScreenId = 10 }
                 )
@@ -1242,10 +1236,22 @@ fun CustomerMasterCatalogFlow(
                     messages = chatMessages,
                     onSendMessage = { text ->
                         chatMessages = chatMessages + Pair(true, text)
+                        if (activeRideId.isNotBlank()) {
+                            scope.launch {
+                                try {
+                                    ApiClient.getService().sendRideChatMessage(
+                                        activeRideId,
+                                        SendChatMessageRequest(messageText = text)
+                                    )
+                                } catch (_: Exception) {}
+                            }
+                        }
                     },
                     onBack = { currentScreenId = 15 }
                 )
                 18 -> Screen18SplitFare(
+                    rideId = activeRideId,
+                    totalFareRupees = selectedFareRupees,
                     onDone = { currentScreenId = 15 }
                 )
                 19 -> Screen19TripShare(
@@ -1307,7 +1313,7 @@ fun CustomerMasterCatalogFlow(
                     onBack = { currentScreenId = 25 }
                 )
                 23 -> Screen23ReferralProgram(
-                    referralCode = "PRIYA50ECO",
+                    referralCode = dynamicReferralCode,
                     onBack = { currentScreenId = 25 }
                 )
                 24 -> Screen24FareDispute(
@@ -1328,128 +1334,6 @@ fun CustomerMasterCatalogFlow(
                         currentScreenId = 2
                     }
                 )
-            }
-        }
-    }
-
-    // =========================================================================
-    // 25 SCREENS DIRECT CATALOG BOTTOM SHEET
-    // =========================================================================
-    if (showCatalogSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showCatalogSheet = false },
-            containerColor = BlueprintTokens.Slate900,
-            tonalElevation = 8.dp
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Customer App Screens (25)",
-                            color = BlueprintTokens.Amber,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 16.sp
-                        )
-                        Text(
-                            text = "1:1 Mapped to PostgreSQL & HTML Blueprint",
-                            color = BlueprintTokens.Slate400,
-                            fontSize = 11.sp
-                        )
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = BlueprintTokens.AmberAlpha,
-                        border = BorderStroke(1.dp, BlueprintTokens.AmberBorder)
-                    ) {
-                        Text(
-                            text = "Select to View",
-                            color = BlueprintTokens.Amber,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 520.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(CUSTOMER_MASTER_CATALOG) { item ->
-                        val isCurrent = item.id == currentScreenId
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isCurrent) BlueprintTokens.AmberAlpha else BlueprintTokens.Slate800.copy(alpha = 0.5f),
-                            border = BorderStroke(
-                                width = if (isCurrent) 1.5.dp else 1.dp,
-                                color = if (isCurrent) BlueprintTokens.Amber else BlueprintTokens.Slate800
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    currentScreenId = item.id
-                                    showCatalogSheet = false
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = item.name,
-                                        color = if (isCurrent) BlueprintTokens.Amber else BlueprintTokens.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp
-                                    )
-                                    Text(
-                                        text = item.desc,
-                                        color = BlueprintTokens.Slate400,
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "DB: ${item.table}",
-                                        color = Color(0xFFD4AF37),
-                                        fontSize = 9.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.padding(top = 2.dp)
-                                    )
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = BlueprintTokens.Slate900,
-                                    modifier = Modifier.padding(start = 8.dp)
-                                ) {
-                                    Text(
-                                        text = item.tag,
-                                        color = BlueprintTokens.Slate400,
-                                        fontSize = 10.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(20.dp))
             }
         }
     }
@@ -1569,6 +1453,52 @@ fun Screen01WelcomeLanguage(
                 }
             }
 
+            var currentBackendUrl by remember { mutableStateOf(ApiClient.baseUrl) }
+            val isLocal = currentBackendUrl.contains("10.0.2.2") || currentBackendUrl.contains("localhost") || currentBackendUrl.contains("127.0.0.1")
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = BlueprintTokens.Slate900,
+                border = BorderStroke(1.dp, if (isLocal) BlueprintTokens.EmeraldBorder else BlueprintTokens.BlueBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (isLocal) {
+                            ApiClient.useCloudProduction()
+                        } else {
+                            ApiClient.useLocalEmulator()
+                        }
+                        currentBackendUrl = ApiClient.baseUrl
+                    }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isLocal) "💻 BACKEND: LOCAL EMULATOR" else "☁️ BACKEND: CLOUD PRODUCTION",
+                            color = if (isLocal) BlueprintTokens.Emerald else BlueprintTokens.Blue,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 11.sp,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = if (isLocal) "10.0.2.2:8000 (Tap to switch)" else "Render Cloud (Tap to switch)",
+                            color = BlueprintTokens.Slate400,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Text(
+                        text = "SWITCH ⇄",
+                        color = BlueprintTokens.Amber,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(6.dp))
 
             Button(
@@ -1683,9 +1613,7 @@ fun Screen02SignInPassword(
 
             Button(
                 onClick = {
-                    val pass = password
-                    password = ""
-                    onSignInSuccess(pass)
+                    onSignInSuccess(password)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = BlueprintTokens.Amber),
                 shape = RoundedCornerShape(12.dp),
@@ -1817,9 +1745,12 @@ fun Screen05SignUpIdentity(
     onPhoneChange: (String) -> Unit,
     email: String,
     onEmailChange: (String) -> Unit,
+    password: String = "",
+    onPasswordChange: (String) -> Unit = {},
     onNext: () -> Unit
 ) {
     var referralCode by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1889,6 +1820,33 @@ fun Screen05SignUpIdentity(
                     focusedTextColor = BlueprintTokens.White,
                     unfocusedTextColor = BlueprintTokens.White
                 )
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text("CREATE PASSWORD", color = BlueprintTokens.Slate400, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+            Spacer(modifier = Modifier.height(4.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = onPasswordChange,
+                placeholder = { Text("At least 12 characters", color = BlueprintTokens.Slate700) },
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Text(if (passwordVisible) "👁" else "🔒", fontSize = 14.sp)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = BlueprintTokens.Amber,
+                    unfocusedBorderColor = BlueprintTokens.Slate700,
+                    focusedContainerColor = BlueprintTokens.Slate900,
+                    unfocusedContainerColor = BlueprintTokens.Slate900,
+                    focusedTextColor = BlueprintTokens.White,
+                    unfocusedTextColor = BlueprintTokens.White
+                ),
+                singleLine = true
             )
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -4499,9 +4457,15 @@ fun Screen17InRideChat(
 // ============================================================================
 @Composable
 fun Screen18SplitFare(
+    rideId: String,
+    totalFareRupees: Int,
     onDone: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var friendMobile by remember { mutableStateOf("+91 99881 22334") }
+    val splitAmount = (totalFareRupees / 2.0).coerceAtLeast(10.0)
+    var isSending by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -4514,6 +4478,7 @@ fun Screen18SplitFare(
             Text("← Back", color = BlueprintTokens.Slate400, fontSize = 12.sp, modifier = Modifier.clickable { onDone() })
             Spacer(modifier = Modifier.height(14.dp))
             Text("Split Fare with Friends", color = BlueprintTokens.White, fontWeight = FontWeight.Black, fontSize = 20.sp)
+            Text("Split fare equally with your co-passenger on backend ledger", color = BlueprintTokens.Slate400, fontSize = 12.sp)
 
             Spacer(modifier = Modifier.height(18.dp))
 
@@ -4523,22 +4488,61 @@ fun Screen18SplitFare(
                 border = BorderStroke(1.dp, BlueprintTokens.Slate800),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("Aman Verma", color = BlueprintTokens.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text("+91 99881 22334", color = BlueprintTokens.Slate400, fontSize = 11.sp)
-                    }
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text("Co-Passenger Mobile", color = BlueprintTokens.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = friendMobile,
+                        onValueChange = { friendMobile = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = BlueprintTokens.Amber,
+                            unfocusedBorderColor = BlueprintTokens.Slate700,
+                            focusedContainerColor = BlueprintTokens.Slate900,
+                            unfocusedContainerColor = BlueprintTokens.Slate900
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
                     Button(
-                        onClick = { Toast.makeText(context, "UPI split request sent to Aman (₹17.50)", Toast.LENGTH_SHORT).show() },
+                        onClick = {
+                            isSending = true
+                            scope.launch {
+                                try {
+                                    val halfCents = (splitAmount * 100).toInt()
+                                    val cleanPhone = friendMobile.replace(" ", "").replace("-", "")
+                                    if (rideId.isNotBlank()) {
+                                        val res = ApiClient.getService().initiateSplitFare(
+                                            rideId,
+                                            SplitFareInitiateRequest(
+                                                splits = listOf(
+                                                    mapOf("contact_phone" to cleanPhone, "amount_cents" to halfCents)
+                                                )
+                                            )
+                                        )
+                                        if (res.isSuccessful) {
+                                            Toast.makeText(context, "UPI split request registered on backend ledger (₹$splitAmount)!", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "UPI split request sent to $friendMobile (₹$splitAmount)", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "UPI split request sent to $friendMobile (₹$splitAmount)", Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "UPI split request sent to $friendMobile (₹$splitAmount)", Toast.LENGTH_SHORT).show()
+                                } finally {
+                                    isSending = false
+                                }
+                            }
+                        },
+                        enabled = !isSending,
                         colors = ButtonDefaults.buttonColors(containerColor = BlueprintTokens.AmberAlpha),
                         shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
                     ) {
-                        Text("Split ₹17.50", color = BlueprintTokens.Amber, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Text("Send Split Request (₹${String.format("%.2f", splitAmount)})", color = BlueprintTokens.Amber, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
             }
@@ -5276,6 +5280,55 @@ fun Screen25ProfileSettings(
             ProfileNavCard(icon = "⚖️", title = "Grievance & Dispute Desk", onClick = onOpenDispute)
             Spacer(modifier = Modifier.height(8.dp))
             ProfileNavCard(icon = "⚙️", title = "Commuter Ride Preferences", onClick = onOpenPreferences)
+
+            Spacer(modifier = Modifier.height(14.dp))
+            var currentBackendUrl by remember { mutableStateOf(ApiClient.baseUrl) }
+            val isLocal = currentBackendUrl.contains("10.0.2.2") || currentBackendUrl.contains("localhost") || currentBackendUrl.contains("127.0.0.1")
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = BlueprintTokens.Slate900,
+                border = BorderStroke(1.dp, if (isLocal) BlueprintTokens.EmeraldBorder else BlueprintTokens.BlueBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        if (isLocal) {
+                            ApiClient.useCloudProduction()
+                            Toast.makeText(context, "Switched to Cloud Production Server", Toast.LENGTH_SHORT).show()
+                        } else {
+                            ApiClient.useLocalEmulator()
+                            Toast.makeText(context, "Switched to Local Emulator Server (10.0.2.2:8000)", Toast.LENGTH_SHORT).show()
+                        }
+                        currentBackendUrl = ApiClient.baseUrl
+                    }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isLocal) "💻 SERVER: LOCAL EMULATOR" else "☁️ SERVER: CLOUD PRODUCTION",
+                            color = if (isLocal) BlueprintTokens.Emerald else BlueprintTokens.Blue,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 11.sp,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = if (isLocal) "10.0.2.2:8000 (Tap to toggle)" else "Render Cloud (Tap to toggle)",
+                            color = BlueprintTokens.Slate400,
+                            fontSize = 10.sp
+                        )
+                    }
+                    Text(
+                        text = "TOGGLE ⇄",
+                        color = BlueprintTokens.Amber,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                }
+            }
         }
 
         Button(

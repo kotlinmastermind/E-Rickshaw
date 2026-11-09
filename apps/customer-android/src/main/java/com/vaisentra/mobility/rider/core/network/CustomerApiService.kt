@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.core.network
+package com.vaisentra.mobility.rider.core.network
 
 import com.google.gson.annotations.SerializedName
 import okhttp3.MultipartBody
@@ -9,6 +9,7 @@ import retrofit2.http.*
 data class TokenResponse(
     @SerializedName("access_token") val accessToken: String,
     @SerializedName("token_type") val tokenType: String,
+    @SerializedName("refresh_token") val refreshToken: String? = null,
     @SerializedName("user") val user: UserDto
 )
 

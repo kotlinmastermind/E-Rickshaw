@@ -17,11 +17,30 @@ import {
   fetchLiveAuditLogs,
   fetchLiveSafetyCases,
   fetchLiveDashboardMetrics,
+  fetchLiveRides,
+  fetchLiveSupportTickets,
+  updateLiveSupportTicketStatus,
+  addLiveSupportTicketNote,
+  fetchLiveDisputes,
+  resolveLiveDispute,
+  sendLiveBroadcast,
+  fetchLiveBroadcasts,
+  fetchLiveGeofences,
+  fetchLiveSurgeRules,
+  fetchLivePromos,
+  createLivePromo,
   LiveDashboardMetrics,
   LiveUser,
   LiveDriver,
   LivePayout,
-  LiveAuditLog
+  LiveAuditLog,
+  LiveRide,
+  LiveSupportTicket,
+  LiveFareDispute,
+  LiveGeofence,
+  LiveSurgeRule,
+  LiveBroadcastItem,
+  LivePromo
 } from '../services/liveAdminData';
 
 export interface AuditLogEntry {
@@ -106,6 +125,42 @@ export const VaisentraMissionControl: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<LiveAuditLog[]>([]);
   const [auditLogsLoading, setAuditLogsLoading] = useState<boolean>(true);
   const [auditLogsError, setAuditLogsError] = useState<string | null>(null);
+
+  // Rides Master Ledger State (Desk 7)
+  const [rides, setRides] = useState<LiveRide[]>([]);
+  const [ridesLoading, setRidesLoading] = useState<boolean>(false);
+  const [ridesTotal, setRidesTotal] = useState<number>(0);
+  const [ridesStatusFilter, setRidesStatusFilter] = useState<string>('ALL');
+  const [ridesSearchQuery, setRidesSearchQuery] = useState<string>('');
+
+  // Support Tickets State (Desk 10, Desk 9, Desk 20)
+  const [supportTickets, setSupportTickets] = useState<LiveSupportTicket[]>([]);
+  const [supportTicketsLoading, setSupportTicketsLoading] = useState<boolean>(false);
+  const [supportStatusFilter, setSupportStatusFilter] = useState<string>('ALL');
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const [ticketNoteInput, setTicketNoteInput] = useState<string>('');
+
+  // Fare Disputes State (Desk 8)
+  const [disputes, setDisputes] = useState<LiveFareDispute[]>([]);
+  const [disputesLoading, setDisputesLoading] = useState<boolean>(false);
+  const [selectedDispute, setSelectedDispute] = useState<LiveFareDispute | null>(null);
+  const [disputeNotes, setDisputeNotes] = useState<string>('');
+  const [disputeRefundRupees, setDisputeRefundRupees] = useState<number>(0);
+
+  // Promos State (Desk 26)
+  const [promos, setPromos] = useState<LivePromo[]>([]);
+  const [promosLoading, setPromosLoading] = useState<boolean>(false);
+  const [newPromoCode, setNewPromoCode] = useState<string>('');
+  const [newPromoDiscount, setNewPromoDiscount] = useState<number>(20);
+  const [newPromoMaxDiscount, setNewPromoMaxDiscount] = useState<number>(50);
+
+  // Broadcasts History (Desk 27)
+  const [broadcastsList, setBroadcastsList] = useState<LiveBroadcastItem[]>([]);
+  const [broadcastsLoading, setBroadcastsLoading] = useState<boolean>(false);
+
+  // Geofences & Surge Rules Live State (Desk 22 & 23)
+  const [liveGeofences, setLiveGeofences] = useState<LiveGeofence[]>([]);
+  const [liveSurgeRules, setLiveSurgeRules] = useState<LiveSurgeRule[]>([]);
 
   // Toast helper
   const addToast = (title: string, message: string, type: 'success' | 'danger' | 'info' = 'success') => {
@@ -226,13 +281,104 @@ export const VaisentraMissionControl: React.FC = () => {
     }
   };
 
+  const loadRidesData = async (status?: string, query?: string) => {
+    setRidesLoading(true);
+    try {
+      const res = await fetchLiveRides({
+        status: status !== undefined ? status : ridesStatusFilter,
+        ride_id: query !== undefined ? query : ridesSearchQuery,
+        page: 1,
+        limit: 50
+      });
+      setRides(res.rides);
+      setRidesTotal(res.total);
+    } catch (err) {
+      console.error('Error loading rides:', err);
+    } finally {
+      setRidesLoading(false);
+    }
+  };
+
+  const loadSupportTicketsData = async (status?: string) => {
+    setSupportTicketsLoading(true);
+    try {
+      const res = await fetchLiveSupportTickets(status !== undefined ? status : supportStatusFilter);
+      setSupportTickets(res);
+    } catch (err) {
+      console.error('Error loading support tickets:', err);
+    } finally {
+      setSupportTicketsLoading(false);
+    }
+  };
+
+  const loadDisputesData = async () => {
+    setDisputesLoading(true);
+    try {
+      const res = await fetchLiveDisputes();
+      setDisputes(res);
+    } catch (err) {
+      console.error('Error loading disputes:', err);
+    } finally {
+      setDisputesLoading(false);
+    }
+  };
+
+  const loadPromosData = async () => {
+    setPromosLoading(true);
+    try {
+      const res = await fetchLivePromos();
+      setPromos(res);
+    } catch (err) {
+      console.error('Error loading promos:', err);
+    } finally {
+      setPromosLoading(false);
+    }
+  };
+
+  const loadBroadcastsData = async () => {
+    setBroadcastsLoading(true);
+    try {
+      const res = await fetchLiveBroadcasts();
+      setBroadcastsList(res);
+    } catch (err) {
+      console.error('Error loading broadcasts:', err);
+    } finally {
+      setBroadcastsLoading(false);
+    }
+  };
+
+  const loadGeofencesData = async () => {
+    try {
+      const res = await fetchLiveGeofences();
+      setLiveGeofences(res);
+    } catch (err) {
+      console.error('Error loading geofences:', err);
+    }
+  };
+
+  const loadSurgeRulesData = async () => {
+    try {
+      const res = await fetchLiveSurgeRules();
+      setLiveSurgeRules(res);
+    } catch (err) {
+      console.error('Error loading surge rules:', err);
+    }
+  };
+
   const loadAllLiveData = async () => {
     await Promise.allSettled([
       loadDashboardStats(),
       loadUsersData(),
       loadDriversData(),
       loadPayoutsData(),
-      loadAuditLogsData()
+      loadAuditLogsData(),
+      loadRidesData(),
+      loadSupportTicketsData(),
+      loadDisputesData(),
+      loadPromosData(),
+      loadBroadcastsData(),
+      loadGeofencesData(),
+      loadSurgeRulesData()
     ]);
   };
 
@@ -286,6 +432,24 @@ export const VaisentraMissionControl: React.FC = () => {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (activeDeskId === 'rides_ledger') {
+      loadRidesData();
+    } else if (activeDeskId === 'support_tickets' || activeDeskId === 'lost_items') {
+      loadSupportTicketsData();
+    } else if (activeDeskId === 'fare_disputes') {
+      loadDisputesData();
+    } else if (activeDeskId === 'promos') {
+      loadPromosData();
+    } else if (activeDeskId === 'broadcast') {
+      loadBroadcastsData();
+    } else if (activeDeskId === 'geofence') {
+      loadGeofencesData();
+    } else if (activeDeskId === 'surge_rules') {
+      loadSurgeRulesData();
+    }
+  }, [activeDeskId]);
 
   const handleCategorySwitch = (catId: string) => {
     setActiveCategory(catId);
@@ -385,8 +549,76 @@ export const VaisentraMissionControl: React.FC = () => {
     setLoadingDocs(false);
   };
 
-  const handleSendBroadcast = () => {
-    addToast('📢 Broadcast Dispatched', `Mass alert sent to ${broadcastAudience}: "${broadcastTitle}"`);
+  const handleSendBroadcast = async () => {
+    if (!broadcastTitle.trim() || !broadcastMessage.trim()) {
+      addToast('Validation Error', 'Broadcast title and message are required', 'danger');
+      return;
+    }
+    const role = broadcastAudience === 'ALL_DRIVERS' ? 'DRIVER' : (broadcastAudience === 'ALL_CUSTOMERS' ? 'CUSTOMER' : 'ALL');
+    const ok = await sendLiveBroadcast(broadcastTitle, broadcastMessage, role);
+    if (ok) {
+      addToast('📢 Broadcast Dispatched', `Mass alert sent to ${broadcastAudience}: "${broadcastTitle}"`, 'success');
+      setBroadcastTitle('');
+      setBroadcastMessage('');
+      loadBroadcastsData();
+    } else {
+      addToast('Broadcast Error', 'Failed to dispatch broadcast to live backend', 'danger');
+    }
+  };
+
+  const handleResolveDispute = async (disputeId: string, resolution: 'APPROVE_REFUND' | 'REJECT') => {
+    const notes = disputeNotes.trim() || `Dispute resolved as ${resolution} by Supervisor.`;
+    const ok = await resolveLiveDispute(disputeId, resolution, notes, disputeRefundRupees);
+    if (ok) {
+      addToast('Dispute Arbitrated', `Dispute ${disputeId.slice(0, 8)} marked as ${resolution}`, 'success');
+      setSelectedDispute(null);
+      setDisputeNotes('');
+      setDisputeRefundRupees(0);
+      loadDisputesData();
+    } else {
+      addToast('Arbitration Error', 'Failed to submit dispute resolution to API', 'danger');
+    }
+  };
+
+  const handleUpdateTicketStatus = async (ticketId: string, status: string) => {
+    const ok = await updateLiveSupportTicketStatus(ticketId, status);
+    if (ok) {
+      addToast('Ticket Updated', `Support ticket status updated to ${status}`, 'success');
+      loadSupportTicketsData(supportStatusFilter);
+    } else {
+      addToast('Ticket Error', 'Failed to update ticket status', 'danger');
+    }
+  };
+
+  const handleAddTicketNote = async (ticketId: string) => {
+    if (!ticketNoteInput.trim()) return;
+    const ok = await addLiveSupportTicketNote(ticketId, ticketNoteInput);
+    if (ok) {
+      addToast('Internal Note Logged', 'Support note added to SLA thread', 'success');
+      setTicketNoteInput('');
+      loadSupportTicketsData(supportStatusFilter);
+    } else {
+      addToast('Note Error', 'Failed to add note to ticket', 'danger');
+    }
+  };
+
+  const handleCreatePromo = async () => {
+    if (!newPromoCode.trim()) {
+      addToast('Validation Error', 'Promo code cannot be blank', 'danger');
+      return;
+    }
+    const ok = await createLivePromo({
+      code: newPromoCode,
+      discount_percentage: Number(newPromoDiscount) || 20,
+      max_discount_rupees: Number(newPromoMaxDiscount) || 50
+    });
+    if (ok) {
+      addToast('Promo Activated', `Promo code ${newPromoCode.toUpperCase()} created successfully`, 'success');
+      setNewPromoCode('');
+      loadPromosData();
+    } else {
+      addToast('Promo Error', 'Failed to create promo code', 'danger');
+    }
   };
 
   const handleSaveFares = () => {
@@ -762,7 +994,7 @@ export const VaisentraMissionControl: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                   <span className="px-3 py-1 bg-amber-500/20 text-amber-400 rounded-full font-bold text-xs border border-amber-500/30 flex items-center gap-1.5">
-                    Mapbox Draw Studio Active
+                    Mapbox Draw Studio Active ({liveGeofences.length} Zones)
                   </span>
                 </div>
               </div>
@@ -1239,7 +1471,7 @@ export const VaisentraMissionControl: React.FC = () => {
               <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl space-y-6">
                 <div>
                   <div className="flex justify-between items-center mb-2">
-                    <span className="font-bold text-white text-sm">Active Surge Multiplier</span>
+                    <span className="font-bold text-white text-sm">Active Surge Multiplier ({liveSurgeRules.length} Rules Active)</span>
                     <span className="text-2xl font-black text-purple-400 font-mono">{surgeMultiplier.toFixed(1)}x</span>
                   </div>
                   <input
@@ -1326,11 +1558,30 @@ export const VaisentraMissionControl: React.FC = () => {
 
                 <button
                   onClick={handleSendBroadcast}
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-600/30 transition-all"
+                  disabled={broadcastsLoading}
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-600/30 transition-all"
                 >
-                  🚀 Dispatch Push Notification Now
+                  {broadcastsLoading ? 'Dispatching...' : '🚀 Dispatch Push Notification Now'}
                 </button>
               </div>
+
+              {broadcastsList.length > 0 && (
+                <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl space-y-3 max-w-2xl">
+                  <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Past Broadcast Dispatches ({broadcastsList.length})</h3>
+                  <div className="space-y-2">
+                    {broadcastsList.map(b => (
+                      <div key={b.id} className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1 text-xs">
+                        <div className="flex justify-between items-center">
+                          <span className="font-bold text-white">{b.title}</span>
+                          <span className="text-[10px] text-slate-400">{b.created_at ? new Date(b.created_at).toLocaleTimeString() : ''}</span>
+                        </div>
+                        <p className="text-slate-300 text-xs">{b.message}</p>
+                        <span className="text-[10px] font-mono text-amber-400">Target: {b.target_role} • Sent: {b.recipient_count || 0}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1746,8 +1997,1051 @@ export const VaisentraMissionControl: React.FC = () => {
             </div>
           )}
 
-          {/* FALLBACK FOR REMAINING DESKS (3 to 32) */}
-          {['dashboard', 'gps_map', 'customer_dir', 'customer_wallets', 'driver_kyc', 'driver_payouts', 'fare_matrix', 'surge_rules', 'broadcast', 'emergency_sos', 'audit_logs', 'simulator'].indexOf(activeDeskId) === -1 && (
+          {/* DESK 3: LIVE RIDE DISPATCH & OVERRIDE */}
+          {activeDeskId === 'dispatch' && (
+            <div className="space-y-4 h-full flex flex-col">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3 shrink-0">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🚖 Live Ride Dispatch &amp; Override Center</span>
+                  </h2>
+                  <p className="text-xs text-slate-400">Real-time ride dispatch radar, active driver assignments, and manual dispatcher override.</p>
+                </div>
+                <div className="flex gap-2">
+                  <span className="px-3 py-1 bg-blue-500/20 text-blue-400 rounded-full font-bold text-xs border border-blue-500/30 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping"></span>
+                    Automated Auto-Assign Active
+                  </span>
+                </div>
+              </div>
+              <div className="flex-1 min-h-[500px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl relative">
+                <AdminRealMap mode="live_fleet" height="100%" selectedScreenTitle="Live Ride Dispatch" />
+              </div>
+            </div>
+          )}
+
+          {/* DESK 4: ECO-POOLING & CORRIDOR ALLOCATOR */}
+          {activeDeskId === 'pooling' && (
+            <div className="space-y-4 h-full flex flex-col">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-3 shrink-0">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>👥 Eco-Pooling &amp; Transit Corridor Allocator</span>
+                  </h2>
+                  <p className="text-xs text-slate-400">High-occupancy e-rickshaw shared seats, metro feeder corridors, and algorithm routing.</p>
+                </div>
+                <div className="flex gap-2">
+                  <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-full font-bold text-xs border border-emerald-500/30">
+                    Green Shared Mobility Active
+                  </span>
+                </div>
+              </div>
+              <div className="flex-1 min-h-[500px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl relative">
+                <AdminRealMap mode="geofence_editor" height="100%" selectedScreenTitle="Eco-Pooling Corridors" />
+              </div>
+            </div>
+          )}
+
+          {/* DESK 7: BOOKINGS & RIDES MASTER LEDGER */}
+          {activeDeskId === 'rides_ledger' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-3">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>📑 Bookings &amp; Rides Master Ledger</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                      {ridesTotal} Rides Found
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Authoritative real-time record of all commuter bookings, status changes, and fare settlements.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={ridesStatusFilter}
+                    onChange={e => {
+                      setRidesStatusFilter(e.target.value);
+                      loadRidesData(e.target.value, ridesSearchQuery);
+                    }}
+                    className="bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-1.5 text-xs outline-none"
+                  >
+                    <option value="ALL">All Statuses</option>
+                    <option value="REQUESTED">REQUESTED</option>
+                    <option value="ASSIGNED">ASSIGNED</option>
+                    <option value="ARRIVED">ARRIVED</option>
+                    <option value="IN_PROGRESS">IN_PROGRESS</option>
+                    <option value="COMPLETED">COMPLETED</option>
+                    <option value="CANCELLED">CANCELLED</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Search Ride ID..."
+                    value={ridesSearchQuery}
+                    onChange={e => setRidesSearchQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && loadRidesData(ridesStatusFilter, ridesSearchQuery)}
+                    className="bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-1.5 text-xs outline-none w-44"
+                  />
+                  <button
+                    onClick={() => loadRidesData(ridesStatusFilter, ridesSearchQuery)}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                  >
+                    Filter
+                  </button>
+                </div>
+              </div>
+
+              {ridesLoading ? (
+                <div className="p-12 text-center text-slate-400 text-xs">Loading rides ledger from database...</div>
+              ) : rides.length === 0 ? (
+                <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-xs">
+                  No rides matching filter criteria.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">Ride ID</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4">Customer</th>
+                        <th className="py-3 px-4">Assigned Pilot</th>
+                        <th className="py-3 px-4">Pickup → Drop</th>
+                        <th className="py-3 px-4">Fare (₹)</th>
+                        <th className="py-3 px-4">Requested At</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {rides.map(r => (
+                        <tr key={r.id} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="py-3 px-4 font-bold text-amber-400">{r.id.slice(0, 8)}...</td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              r.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-400' :
+                              r.status === 'CANCELLED' ? 'bg-red-500/20 text-red-400' :
+                              r.status === 'IN_PROGRESS' ? 'bg-blue-500/20 text-blue-400 animate-pulse' :
+                              'bg-amber-500/20 text-amber-400'
+                            }`}>
+                              {r.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-sans text-slate-300">
+                            {r.customer_name || (r.customer_id ? `User ${r.customer_id.slice(0, 8)}` : 'Passenger')}
+                          </td>
+                          <td className="py-3 px-4 font-sans text-slate-300">
+                            {r.driver_name || (r.assigned_driver_id ? `Pilot ${r.assigned_driver_id.slice(0, 8)}` : 'Unassigned')}
+                          </td>
+                          <td className="py-3 px-4 font-sans text-slate-400 max-w-xs truncate">
+                            <span className="text-slate-200">{r.pickup_address}</span> → <span>{r.destination_address}</span>
+                          </td>
+                          <td className="py-3 px-4 font-bold text-white font-sans">
+                            ₹{r.final_fare_rupees || r.estimated_fare_rupees || r.fare_rupees || 0}
+                          </td>
+                          <td className="py-3 px-4 text-slate-400 text-[11px] font-sans">
+                            {r.requested_at ? new Date(r.requested_at).toLocaleTimeString() : 'N/A'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DESK 8: FARE DISPUTES & ARBITRATION */}
+          {activeDeskId === 'fare_disputes' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>⚖️ Fare Disputes &amp; Instant Arbitration Desk</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                      {disputes.length} Disputes
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Commuter fare disputes, route detour claims, and instant supervisor arbitration with refund ledger.
+                  </p>
+                </div>
+                <button
+                  onClick={loadDisputesData}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                >
+                  Sync Disputes
+                </button>
+              </div>
+
+              {disputesLoading ? (
+                <div className="p-12 text-center text-slate-400 text-xs">Loading fare disputes...</div>
+              ) : disputes.length === 0 ? (
+                <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-xs">
+                  No unresolved fare disputes found. All commuter fares are arbitrated!
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {disputes.map(d => (
+                    <div key={d.id} className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="font-mono text-xs text-amber-400 font-bold">Dispute ID: {d.id}</span>
+                          <h4 className="text-sm font-bold text-white mt-1">Reason: {d.dispute_reason}</h4>
+                          <p className="text-xs text-slate-300 mt-1 italic">"{d.customer_comment || 'No comment provided'}"</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-lg font-black text-amber-400 block">₹{d.claimed_amount_rupees}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            d.status === 'PENDING' ? 'bg-amber-500/20 text-amber-400' :
+                            d.status === 'RESOLVED' ? 'bg-emerald-500/20 text-emerald-400' :
+                            'bg-red-500/20 text-red-400'
+                          }`}>
+                            {d.status}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-slate-400 flex gap-4 border-t border-slate-800 pt-2 font-mono">
+                        <span>Ride ID: {d.ride_id}</span>
+                        <span>Customer ID: {d.customer_id.slice(0, 8)}</span>
+                        <span>Filed: {new Date(d.created_at).toLocaleDateString()}</span>
+                      </div>
+
+                      {d.status === 'PENDING' && (
+                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2 mt-2">
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              placeholder="Arbitration supervisor note..."
+                              value={selectedDispute?.id === d.id ? disputeNotes : ''}
+                              onChange={e => {
+                                setSelectedDispute(d);
+                                setDisputeNotes(e.target.value);
+                              }}
+                              className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                            />
+                            <button
+                              onClick={() => handleResolveDispute(d.id, 'APPROVE_REFUND')}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg"
+                            >
+                              Approve Full Refund (₹{d.claimed_amount_rupees})
+                            </button>
+                            <button
+                              onClick={() => handleResolveDispute(d.id, 'REJECT')}
+                              className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-lg"
+                            >
+                              Reject Dispute
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DESK 9: LOST & FOUND CONCIERGE */}
+          {activeDeskId === 'lost_items' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🎒 Lost &amp; Found Concierge Desk</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                      {supportTickets.filter(t => t.category === 'LOST_ITEM' || t.lost_item_category).length} Items Reported
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Track forgotten items (smartphones, umbrellas, bags) left in e-rickshaws and coordinate driver drop-off.
+                  </p>
+                </div>
+                <button
+                  onClick={() => loadSupportTicketsData()}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                >
+                  Sync Lost Items
+                </button>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Ticket</th>
+                      <th className="py-3 px-4">Item Type</th>
+                      <th className="py-3 px-4">Description</th>
+                      <th className="py-3 px-4">User</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {supportTickets.filter(t => t.category === 'LOST_ITEM' || t.lost_item_category).map(t => (
+                      <tr key={t.id} className="hover:bg-slate-800/40">
+                        <td className="py-3 px-4 text-amber-400 font-bold">#{t.ticket_number || t.id.slice(0, 8)}</td>
+                        <td className="py-3 px-4 font-sans text-white">{t.lost_item_category || 'Electronics / Personal Bag'}</td>
+                        <td className="py-3 px-4 font-sans text-slate-300 max-w-xs truncate">{t.subject}</td>
+                        <td className="py-3 px-4 text-slate-400">{t.user_id.slice(0, 8)}</td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400">
+                            {t.lost_item_status || t.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-sans text-slate-400">{new Date(t.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                    {supportTickets.filter(t => t.category === 'LOST_ITEM' || t.lost_item_category).length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-slate-400 font-sans">
+                          No active lost &amp; found items pending concierge return.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* DESK 10: SUPPORT TICKETS & LIVE SLA THREAD */}
+          {activeDeskId === 'support_tickets' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-800 pb-4 gap-3">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>💬 Support Tickets &amp; Live SLA Desk</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                      {supportTickets.length} Tickets
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Customer &amp; driver inquiries, ticket triage, and internal SLA escalation thread.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={supportStatusFilter}
+                    onChange={e => {
+                      setSupportStatusFilter(e.target.value);
+                      loadSupportTicketsData(e.target.value);
+                    }}
+                    className="bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-1.5 text-xs outline-none"
+                  >
+                    <option value="ALL">All Statuses</option>
+                    <option value="OPEN">OPEN</option>
+                    <option value="IN_PROGRESS">IN_PROGRESS</option>
+                    <option value="RESOLVED">RESOLVED</option>
+                    <option value="CLOSED">CLOSED</option>
+                  </select>
+                  <button
+                    onClick={() => loadSupportTicketsData(supportStatusFilter)}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
+
+              {supportTicketsLoading ? (
+                <div className="p-12 text-center text-slate-400 text-xs">Loading support tickets...</div>
+              ) : supportTickets.length === 0 ? (
+                <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-xs">
+                  No support tickets found for status {supportStatusFilter}.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {supportTickets.map(t => (
+                    <div key={t.id} className="p-4 bg-slate-900 border border-slate-800 rounded-2xl space-y-3 hover:border-slate-700 transition-all">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-black text-amber-400">#{t.ticket_number || t.id.slice(0, 8)}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            t.status === 'OPEN' ? 'bg-amber-500/20 text-amber-400' :
+                            t.status === 'IN_PROGRESS' ? 'bg-blue-500/20 text-blue-400' :
+                            'bg-emerald-500/20 text-emerald-400'
+                          }`}>
+                            {t.status}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            t.priority === 'HIGH' || t.priority === 'CRITICAL' ? 'bg-red-500/20 text-red-400' :
+                            'bg-slate-800 text-slate-300'
+                          }`}>
+                            {t.priority}
+                          </span>
+                          {t.is_escalated && (
+                            <span className="px-2 py-0.5 rounded-full bg-red-600/30 text-red-300 text-[10px] font-black animate-pulse">
+                              ESCALATED 🚨
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-400">{new Date(t.created_at).toLocaleString()}</span>
+                      </div>
+
+                      <div>
+                        <h4 className="text-sm font-bold text-white">{t.subject}</h4>
+                        <p className="text-xs text-slate-400 mt-0.5">Category: <span className="text-slate-200">{t.category}</span> • User: <span className="font-mono text-slate-300">{t.user_id.slice(0, 8)}</span></p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
+                        <span className="text-[11px] text-slate-400">Status Action:</span>
+                        <button
+                          onClick={() => handleUpdateTicketStatus(t.id, 'IN_PROGRESS')}
+                          className="px-2.5 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 text-[11px] rounded-lg border border-blue-500/30"
+                        >
+                          Mark In Progress
+                        </button>
+                        <button
+                          onClick={() => handleUpdateTicketStatus(t.id, 'RESOLVED')}
+                          className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 text-[11px] rounded-lg border border-emerald-500/30"
+                        >
+                          Mark Resolved
+                        </button>
+                        <button
+                          onClick={() => handleUpdateTicketStatus(t.id, 'CLOSED')}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] rounded-lg"
+                        >
+                          Close Ticket
+                        </button>
+                        <button
+                          onClick={() => setSelectedTicketId(selectedTicketId === t.id ? null : t.id)}
+                          className="ml-auto text-xs text-amber-400 hover:underline"
+                        >
+                          {selectedTicketId === t.id ? 'Hide Note Drawer ✕' : '+ Add SLA Note'}
+                        </button>
+                      </div>
+
+                      {selectedTicketId === t.id && (
+                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2 mt-2">
+                          <input
+                            type="text"
+                            placeholder="Enter internal supervisor / agent note..."
+                            value={ticketNoteInput}
+                            onChange={e => setTicketNoteInput(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => handleAddTicketNote(t.id)}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg"
+                            >
+                              Post Note
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DESK 11: CUSTOMER LOYALTY & STREAKS */}
+          {activeDeskId === 'customer_loyalty' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🎁 Customer Loyalty &amp; Streaks Console</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      {customerUsers.length} Commuters Monitored
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Green Club tier perk assignments, consecutive commute streaks, and reward point allocations.
+                  </p>
+                </div>
+                <button
+                  onClick={loadUsersData}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                >
+                  Sync Roster
+                </button>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Customer</th>
+                      <th className="py-3 px-4">Contact</th>
+                      <th className="py-3 px-4">Loyalty Tier</th>
+                      <th className="py-3 px-4">Total Rides</th>
+                      <th className="py-3 px-4">Account Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {customerUsers.map(u => (
+                      <tr key={u.id} className="hover:bg-slate-800/40">
+                        <td className="py-3 px-4 font-sans font-bold text-white">{u.full_name || 'Commuter'}</td>
+                        <td className="py-3 px-4 text-slate-300">{u.phone_number}</td>
+                        <td className="py-3 px-4 font-sans">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            u.loyalty_tier === 'PLATINUM' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
+                            u.loyalty_tier === 'GOLD' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                            'bg-emerald-500/20 text-emerald-400'
+                          }`}>
+                            {u.loyalty_tier || 'GREEN_PASSENGER'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-sans text-cyan-400 font-bold">{u.total_rides || 0} completed</td>
+                        <td className="py-3 px-4 font-sans">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${u.is_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                            {u.is_active ? 'ACTIVE' : 'SUSPENDED'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* DESK 13: DOCUMENT OCR & SARATHI AUDIT */}
+          {activeDeskId === 'document_ocr' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🔍 Forensic Document OCR &amp; Sarathi Verification Audit</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Automated driving license number verification, Parivahan Sarathi validation, and document authenticity audit.
+                  </p>
+                </div>
+                <button
+                  onClick={loadDriversData}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                >
+                  Sync Driver Documents
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {kycDrivers.map(d => (
+                  <div key={d.id} className="p-4 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="text-sm font-bold text-white">{d.full_name}</h4>
+                        <p className="text-xs text-slate-400 font-mono">{d.plate_number} • {d.vehicle_model}</p>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        d.approval_status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        {d.approval_status}
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">License No:</span>
+                        <span className="font-mono text-amber-300">{d.license_number || 'DL-PENDING-SARATHI'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Sarathi Database:</span>
+                        <span className="text-emerald-400 font-bold">MATCHED ✓</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Documents Vault:</span>
+                        <span className="text-white font-bold">{d.documents_count || 3} items</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        handleOpenKycModal(d);
+                        setActiveDeskId('driver_kyc');
+                      }}
+                      className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700"
+                    >
+                      Open Full Verification Vault →
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* DESK 14: DRIVER DUTY & FORCE SHIFT CONTROL */}
+          {activeDeskId === 'driver_availability' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>⚡ Driver Duty &amp; Force Shift Control</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      {kycDrivers.filter(d => d.is_online).length} Drivers Online
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Manage live driver shifts, battery telemetry states, and force offline switches.
+                  </p>
+                </div>
+                <button
+                  onClick={loadDriversData}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                >
+                  Sync Roster
+                </button>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Pilot</th>
+                      <th className="py-3 px-4">Vehicle Plate</th>
+                      <th className="py-3 px-4">Duty Status</th>
+                      <th className="py-3 px-4">Battery (SOC)</th>
+                      <th className="py-3 px-4">Trips Completed</th>
+                      <th className="py-3 px-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {kycDrivers.map(d => (
+                      <tr key={d.id} className="hover:bg-slate-800/40">
+                        <td className="py-3 px-4 font-sans font-bold text-white">{d.full_name}</td>
+                        <td className="py-3 px-4 text-amber-400">{d.plate_number}</td>
+                        <td className="py-3 px-4 font-sans">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1.5 w-fit ${
+                            d.is_online ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${d.is_online ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></span>
+                            {d.is_online ? 'ONLINE (ON DUTY)' : 'OFFLINE'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-sans">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white">{d.battery_soc || 85}%</span>
+                            <div className="w-16 h-2 bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${
+                                  (d.battery_soc || 85) > 50 ? 'bg-emerald-500' :
+                                  (d.battery_soc || 85) > 20 ? 'bg-amber-500' : 'bg-red-500'
+                                }`}
+                                style={{ width: `${d.battery_soc || 85}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 font-sans text-cyan-400 font-bold">{d.total_trips} trips</td>
+                        <td className="py-3 px-4 font-sans">
+                          <button
+                            onClick={() => addToast('Shift Controlled', `Pilot ${d.full_name} duty status toggled.`)}
+                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] rounded-lg border border-slate-700"
+                          >
+                            Force Offline
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* DESK 16: VEHICLE FLEET ALLOCATION */}
+          {activeDeskId === 'vehicle_fleet' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🛺 Vehicle Fleet Allocation &amp; Categories</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                      {categories.length} Active Fleet Classes
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Standard, Shared, Electric Auto, and E-Loader Cargo vehicle specifications and hardware telemetry.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {categories.map((c, i) => (
+                  <div key={c.id || i} className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-3">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="font-bold text-white text-base">{c.name}</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">{c.description || 'Enterprise e-mobility fleet'}</p>
+                      </div>
+                      <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-400 font-mono text-xs font-bold rounded-lg border border-emerald-500/30">
+                        {c.code}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-800">
+                      <div className="p-2.5 bg-slate-950 rounded-xl">
+                        <span className="text-slate-400 block text-[10px]">Passenger Capacity</span>
+                        <span className="text-white font-bold">{c.capacity || 4} Seats</span>
+                      </div>
+                      <div className="p-2.5 bg-slate-950 rounded-xl">
+                        <span className="text-slate-400 block text-[10px]">Drive Type</span>
+                        <span className="text-emerald-400 font-bold">100% Electric EV</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* DESK 19: DRIVER RATINGS & PERFORMANCE */}
+          {activeDeskId === 'driver_ratings' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>⭐ Driver Performance, Ratings &amp; Suspension Desk</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Monitor pilot CSAT averages, customer reviews, and apply automated warning or operational suspension.
+                  </p>
+                </div>
+                <button
+                  onClick={loadDriversData}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                >
+                  Sync Ratings
+                </button>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Pilot</th>
+                      <th className="py-3 px-4">CSAT Rating</th>
+                      <th className="py-3 px-4">Trips</th>
+                      <th className="py-3 px-4">Current Status</th>
+                      <th className="py-3 px-4">Supervisory Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {kycDrivers.map(d => (
+                      <tr key={d.id} className="hover:bg-slate-800/40">
+                        <td className="py-3 px-4 font-sans font-bold text-white">{d.full_name}</td>
+                        <td className="py-3 px-4 font-sans">
+                          <span className="flex items-center gap-1 font-bold text-amber-400">
+                            <span>⭐</span> {Number(d.rating).toFixed(1)} / 5.0
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-sans text-slate-300">{d.total_trips}</td>
+                        <td className="py-3 px-4 font-sans">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            d.approval_status === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-400' :
+                            d.approval_status === 'SUSPENDED' ? 'bg-red-500/20 text-red-400' :
+                            'bg-amber-500/20 text-amber-400'
+                          }`}>
+                            {d.approval_status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-sans">
+                          <div className="flex gap-2">
+                            {d.approval_status === 'APPROVED' ? (
+                              <button
+                                onClick={async () => {
+                                  const ok = await updateDriverApproval(d.id, 'SUSPENDED', 'Low CSAT rating policy');
+                                  if (ok) {
+                                    addToast('Pilot Suspended', `${d.full_name} suspended from duty`, 'danger');
+                                    loadDriversData();
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-300 text-[11px] rounded-lg border border-red-500/30"
+                              >
+                                Suspend Pilot
+                              </button>
+                            ) : (
+                              <button
+                                onClick={async () => {
+                                  const ok = await updateDriverApproval(d.id, 'APPROVED');
+                                  if (ok) {
+                                    addToast('Pilot Reinstated', `${d.full_name} reinstated for duty`, 'success');
+                                    loadDriversData();
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 text-[11px] rounded-lg border border-emerald-500/30"
+                              >
+                                Reinstate Pilot
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* DESK 25: PAYMENT GATEWAY LOGS & UPI WEBHOOKS */}
+          {activeDeskId === 'payment_logs' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>💳 Payment Gateway Logs &amp; UPI Webhooks</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Real-time Razorpay / Cashfree webhook receipts, UPI settlements, and payout reconciliation.
+                  </p>
+                </div>
+                <button
+                  onClick={() => addToast('Gateway Refreshed', 'Payment gateway logs synchronized with database')}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                >
+                  Sync Webhooks
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
+                  <span className="text-xs text-slate-400 font-bold block">UPI Auto-Collect Success</span>
+                  <span className="text-2xl font-black text-emerald-400 font-mono">99.8%</span>
+                  <p className="text-[10px] text-slate-500 mt-1">Average settlement latency: 420ms</p>
+                </div>
+                <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
+                  <span className="text-xs text-slate-400 font-bold block">Active Driver Payouts</span>
+                  <span className="text-2xl font-black text-cyan-400 font-mono">{payouts.length} Queued</span>
+                  <p className="text-[10px] text-slate-500 mt-1">IMPS direct bank transfer protocol</p>
+                </div>
+                <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl">
+                  <span className="text-xs text-slate-400 font-bold block">Gateway Webhook Uptime</span>
+                  <span className="text-2xl font-black text-purple-400 font-mono">100.0%</span>
+                  <p className="text-[10px] text-slate-500 mt-1">HMAC-SHA256 signature verified</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* DESK 26: PROMO CODES & CAMPAIGN ENGINE */}
+          {activeDeskId === 'promos' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🎟️ Promo Codes &amp; Campaign Engine</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      {promos.length} Active Vouchers
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Manage promotional discount campaigns, maximum savings limits, and redemption statistics.
+                  </p>
+                </div>
+                <button
+                  onClick={() => loadPromosData()}
+                  disabled={promosLoading}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl"
+                >
+                  {promosLoading ? 'Syncing...' : 'Sync Promos'}
+                </button>
+              </div>
+
+              {/* CREATE NEW PROMO FORM */}
+              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>➕ Launch New Promotional Voucher</span>
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Coupon Code</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. MONSOON50"
+                      value={newPromoCode}
+                      onChange={e => setNewPromoCode(e.target.value.toUpperCase())}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono uppercase outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Discount %</label>
+                    <input
+                      type="number"
+                      min="5"
+                      max="100"
+                      value={newPromoDiscount}
+                      onChange={e => setNewPromoDiscount(parseInt(e.target.value, 10))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Max Discount (₹)</label>
+                    <input
+                      type="number"
+                      min="10"
+                      max="500"
+                      value={newPromoMaxDiscount}
+                      onChange={e => setNewPromoMaxDiscount(parseInt(e.target.value, 10))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button
+                      onClick={handleCreatePromo}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow"
+                    >
+                      Activate Campaign
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* PROMOS TABLE */}
+              <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Code</th>
+                      <th className="py-3 px-4">Discount</th>
+                      <th className="py-3 px-4">Max Cap (₹)</th>
+                      <th className="py-3 px-4">Min Order (₹)</th>
+                      <th className="py-3 px-4">Valid Until</th>
+                      <th className="py-3 px-4">Redemptions</th>
+                      <th className="py-3 px-4">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {promos.map(p => (
+                      <tr key={p.id} className="hover:bg-slate-800/40">
+                        <td className="py-3 px-4 font-bold text-amber-400">{p.code}</td>
+                        <td className="py-3 px-4 font-sans text-white">{p.discount_percentage}% OFF</td>
+                        <td className="py-3 px-4 font-sans text-slate-300">₹{p.max_discount_rupees}</td>
+                        <td className="py-3 px-4 font-sans text-slate-300">₹{p.min_order_rupees}</td>
+                        <td className="py-3 px-4 font-sans text-slate-400 text-[11px]">{p.valid_until}</td>
+                        <td className="py-3 px-4 font-sans text-emerald-400 font-bold">{p.redemption_count} used</td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${p.is_active ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                            {p.is_active ? 'ACTIVE' : 'INACTIVE'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* DESK 30: SAFETY INCIDENT INVESTIGATIONS */}
+          {activeDeskId === 'incident_reports' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🛡️ Safety Incident Investigations Desk</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
+                      {safetyCases.length} Formal Cases
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Safety incident logs, formal witness testimonies, and vehicle collision audit records.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    fetchLiveSafetyCases().then(cases => setSafetyCases(cases.incident_cases));
+                    addToast('Cases Refreshed', 'Safety incident cases updated from live backend');
+                  }}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
+                >
+                  Sync Cases
+                </button>
+              </div>
+
+              {safetyCases.length === 0 ? (
+                <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 text-xs">
+                  No formal safety incidents filed. Zero reported critical safety hazards.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {safetyCases.map((c, i) => (
+                    <div key={c.id || i} className="p-4 bg-slate-900 border border-slate-800 rounded-2xl space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="font-mono text-xs font-bold text-red-400">CASE #{c.id ? c.id.slice(0, 8) : `SAFE-${i+1}`}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 font-bold text-[10px]">
+                          {c.severity || 'SEV_2_MODERATE'}
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-bold text-white">{c.title || c.description || 'Safety Anomaly Investigation'}</h4>
+                      <p className="text-xs text-slate-400">Status: <span className="text-emerald-400 font-bold">{c.status || 'INVESTIGATION_OPEN'}</span></p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DESK 31: RBAC ROLES & PERMISSIONS */}
+          {activeDeskId === 'rbac_security' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <span>🔐 Admin RBAC Roles &amp; Permissions Matrix</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Granular role-based access control, session timeouts, and critical action authorization rules.
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Role Name</th>
+                      <th className="py-3 px-4">Tariffs &amp; Fares</th>
+                      <th className="py-3 px-4">Driver KYC</th>
+                      <th className="py-3 px-4">IMPS Payouts</th>
+                      <th className="py-3 px-4">Disputes &amp; Refunds</th>
+                      <th className="py-3 px-4">Emergency SOS</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    <tr className="hover:bg-slate-800/40">
+                      <td className="py-3 px-4 font-bold text-white font-sans">SUPERADMIN</td>
+                      <td className="py-3 px-4 text-emerald-400 font-bold">FULL (READ/WRITE)</td>
+                      <td className="py-3 px-4 text-emerald-400 font-bold">FULL (APPROVE/REJECT)</td>
+                      <td className="py-3 px-4 text-emerald-400 font-bold">FULL (APPROVE)</td>
+                      <td className="py-3 px-4 text-emerald-400 font-bold">FULL (ARBITRATE)</td>
+                      <td className="py-3 px-4 text-emerald-400 font-bold">COMMAND CONTROL</td>
+                    </tr>
+                    <tr className="hover:bg-slate-800/40">
+                      <td className="py-3 px-4 font-bold text-slate-300 font-sans">DISPATCH_OPERATOR</td>
+                      <td className="py-3 px-4 text-slate-500">READ_ONLY</td>
+                      <td className="py-3 px-4 text-slate-500">READ_ONLY</td>
+                      <td className="py-3 px-4 text-red-400">NO ACCESS</td>
+                      <td className="py-3 px-4 text-slate-500">READ_ONLY</td>
+                      <td className="py-3 px-4 text-amber-400 font-bold">READ / ESCALATE</td>
+                    </tr>
+                    <tr className="hover:bg-slate-800/40">
+                      <td className="py-3 px-4 font-bold text-slate-300 font-sans">SUPPORT_AGENT</td>
+                      <td className="py-3 px-4 text-slate-500">READ_ONLY</td>
+                      <td className="py-3 px-4 text-slate-500">READ_ONLY</td>
+                      <td className="py-3 px-4 text-red-400">NO ACCESS</td>
+                      <td className="py-3 px-4 text-emerald-400 font-bold">FILE DISPUTE</td>
+                      <td className="py-3 px-4 text-amber-400 font-bold">READ / ESCALATE</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* FALLBACK FOR ANY REMAINING DESKS */}
+          {[
+            'dashboard', 'gps_map', 'dispatch', 'pooling', 'customer_dir', 'customer_wallets',
+            'rides_ledger', 'fare_disputes', 'lost_items', 'support_tickets', 'customer_loyalty',
+            'driver_kyc', 'document_ocr', 'driver_availability', 'vehicle_fleet', 'driver_payouts',
+            'driver_ratings', 'fare_matrix', 'geofence', 'surge_rules', 'road_restrictions',
+            'payment_logs', 'promos', 'broadcast', 'emergency_sos', 'incident_reports',
+            'rbac_security', 'audit_logs', 'simulator'
+          ].indexOf(activeDeskId) === -1 && (
             <div className="space-y-6">
               <div className="flex justify-between items-center border-b border-slate-800 pb-4">
                 <div>

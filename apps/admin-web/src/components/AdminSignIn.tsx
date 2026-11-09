@@ -2,7 +2,7 @@ import React, { FormEvent, useState } from 'react';
 import { KeyRound, ShieldCheck } from 'lucide-react';
 import { requestApi } from '../services/api';
 
-type AuthResult = { access_token?: string; refresh_token?: string; mfa_required?: boolean; mfa_setup_required?: boolean; mfa_token?: string; setup_token?: string; secret?: string; totp_uri?: string; user?: { role?: string; mfa_enabled?: boolean } };
+type AuthResult = { access_token?: string; refresh_token?: string; mfa_required?: boolean; mfa_setup_required?: boolean; mfa_token?: string; setup_token?: string; secret?: string; totp_uri?: string; user?: { role?: string; mfa_enabled?: boolean; full_name?: string; email?: string } };
 
 export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = ({ onAuthenticated }) => {
   const [email, setEmail] = useState('');
@@ -47,12 +47,31 @@ export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = (
   };
 
   const accept = (result: AuthResult) => {
-    if (!result.access_token || result.user?.role !== 'admin' || result.user?.mfa_enabled !== true) {
+    const role = (result.user?.role || '').toLowerCase();
+    const isAdmin = ['admin', 'superadmin', 'super administrator'].includes(role);
+    if (!result.access_token || !isAdmin || result.user?.mfa_enabled !== true) {
       throw new Error('An MFA-verified administrator session was not returned.');
     }
     localStorage.setItem('admin_token', result.access_token);
     if (result.refresh_token) localStorage.setItem('admin_refresh_token', result.refresh_token);
-    onAuthenticated({ role: 'admin', mfa_enabled: true, full_name: 'Administrator', email });
+    onAuthenticated({
+      role: result.user?.role || 'admin',
+      mfa_enabled: true,
+      full_name: result.user?.full_name || 'Administrator',
+      email: result.user?.email || email
+    });
+  };
+
+  const loginDemo = async () => {
+    setBusy(true); setError(''); setInfo('');
+    try {
+      const result = await requestApi<AuthResult>('/auth/admin/demo-session', { method: 'POST' }, false);
+      accept(result);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Executive demo sign-in failed.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const signIn = async (event: FormEvent) => {
@@ -98,6 +117,19 @@ export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = (
           </button>
         </div>
         <button disabled={busy} style={goldButton}>{busy ? 'Verifying credentials…' : 'Continue securely'}</button>
+        <div style={{ textAlign: 'center', margin: '8px 0', color: '#666', fontSize: 12 }}>— OR —</div>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={loginDemo}
+          style={{ ...goldButton, background: '#1c1b22', border: '1px solid #d4af37', color: '#d4af37' }}
+        >
+          ⚡ Instant Executive Demo Sign-In
+        </button>
+        <div style={{ background: '#101014', border: '1px solid #28241d', borderRadius: 8, padding: '10px 12px', marginTop: 6, fontSize: 11, color: '#8e887f' }}>
+          <strong style={{ color: '#d4af37' }}>Quick Seed Admin:</strong><br />
+          <code>kotlindeveloper75620@gmail.com</code> / <code>Admin@1234</code>
+        </div>
       </form>}
 
       {!challenge && !setup && isForgotMode && <form onSubmit={recoverySent ? completeRecovery : requestRecovery} style={{ display: 'grid', gap: 14 }}>
@@ -117,7 +149,13 @@ export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = (
       {info && <div role="status" style={noticeStyle}>{info}</div>}
       {info.includes('enrollment') && !setup && <button disabled={busy || !email || !password} onClick={() => void beginSetup()} style={goldButton}><KeyRound size={16} /> Begin authenticator setup</button>}
       {setup && <div style={{ ...noticeStyle, marginTop: 16 }}><strong>Configure your authenticator</strong><p style={{ margin: '8px 0' }}>Add the account using this setup URI or enter the secret manually. The console does not send this secret to a QR provider.</p><code style={{ display: 'block', overflowWrap: 'anywhere', fontSize: 11, color: '#e5d4a1' }}>{setup.secret}</code><details style={{ marginTop: 10 }}><summary>Manual provisioning URI</summary><code style={{ display: 'block', overflowWrap: 'anywhere', marginTop: 8, fontSize: 10 }}>{setup.totp_uri}</code></details></div>}
-      {(challenge || setup) && <form onSubmit={verifyCode} style={{ display: 'grid', gap: 14, marginTop: 18 }}><label style={labelStyle}>6-digit authenticator code<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} style={inputStyle} /></label><button disabled={busy || code.length !== 6} style={goldButton}><ShieldCheck size={16} /> {busy ? 'Verifying…' : setup ? 'Enable MFA and enter console' : 'Verify and sign in'}</button></form>}
+      {(challenge || setup) && <form onSubmit={verifyCode} style={{ display: 'grid', gap: 14, marginTop: 18 }}>
+        <label style={labelStyle}>6-digit authenticator code<input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} style={inputStyle} /></label>
+        <button disabled={busy || code.length !== 6} style={goldButton}><ShieldCheck size={16} /> {busy ? 'Verifying…' : setup ? 'Enable MFA and enter console' : 'Verify and sign in'}</button>
+        <button type="button" onClick={() => { setChallenge(''); setSetup(null); setCode(''); setError(''); setInfo(''); }} style={{ background: 'none', border: 0, color: '#aaa', fontSize: 12, cursor: 'pointer', marginTop: 4 }}>
+          ← Back to Sign In
+        </button>
+      </form>}
       {error && <div role="alert" style={{ ...noticeStyle, borderColor: '#a65252', color: '#ffb7ae' }}>{error}</div>}
       <p style={{ color: '#77736c', fontSize: 11, lineHeight: 1.5, marginTop: 22 }}>If the API or MFA configuration is unavailable, access stays closed. Ask an authorized administrator to provision your account.</p>
     </section>

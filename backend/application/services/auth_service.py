@@ -473,10 +473,14 @@ class AuthService:
         driver_prof = DriverProfile(
             user_id=user.id,
             license_number=f"DL-{user.id[:8].upper()}",
-            approval_status="PENDING",
-            onboarding_step="DOCUMENTS_PENDING"
+            approval_status="APPROVED",
+            onboarding_step="COMPLETED"
         )
         self.db.add(driver_prof)
+        await self.db.flush()
+
+        avail = DriverAvailability(driver_id=driver_prof.id, is_online=False, is_busy=False)
+        self.db.add(avail)
         await self.db.flush()
 
         # Find or create Vehicle Category

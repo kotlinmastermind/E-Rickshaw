@@ -1,4 +1,4 @@
-export const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || "https://e-rickshaw-z32z.onrender.com/api/v1";
+export const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) || "/api/v1";
 
 export class ApiError extends Error {
   status: number;
@@ -14,7 +14,9 @@ function resolveUrl(endpoint: string) {
   if (endpoint.startsWith("/api/v1")) {
     return `${rootOrigin}${endpoint}`;
   }
-  return `${API_BASE.replace(/\/$/, "")}/${endpoint.replace(/^\//, "")}`;
+  const cleanBase = API_BASE.replace(/\/$/, "");
+  const cleanEndpoint = endpoint.replace(/^\//, "");
+  return cleanBase ? `${cleanBase}/${cleanEndpoint}` : `/${cleanEndpoint}`;
 }
 
 let activeRefreshPromise: Promise<string | null> | null = null;

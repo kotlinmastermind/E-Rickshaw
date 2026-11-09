@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.auth
+package com.vaisentra.mobility.driver.feature.auth
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -377,7 +377,7 @@ fun DriverAuthenticationDialog(
                                 OutlinedTextField(
                                     value = password,
                                     onValueChange = { password = it },
-                                    label = { Text("Password (min 6 chars)", color = DriverColors.TextMuted) },
+                                    label = { Text("Password (min 12 chars)", color = DriverColors.TextMuted) },
                                     visualTransformation = PasswordVisualTransformation(),
                                     textStyle = DriverTypography.Body,
                                     colors = OutlinedTextFieldDefaults.colors(
@@ -464,6 +464,10 @@ fun DriverAuthenticationDialog(
                                     onClick = {
                                         if (fullName.isBlank() || phoneNumber.isBlank() || email.isBlank() || username.isBlank() || password.isBlank() || vehicleName.isBlank() || vehicleNo.isBlank()) {
                                             errorMessage = "All chauffeur details & vehicle specs are required."
+                                            return@Button
+                                        }
+                                        if (password.length < 12) {
+                                            errorMessage = "Password must be at least 12 characters."
                                             return@Button
                                         }
                                         val reqPayload = DriverSignupRequestPayload(

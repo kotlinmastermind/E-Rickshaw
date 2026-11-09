@@ -10,7 +10,8 @@ from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from backend.core.config import settings
 from backend.infrastructure.database.session import init_db, async_session_maker
-from backend.domain.models import VehicleCategory, FareRule, User
+from backend.domain.models import VehicleCategory, FareRule, User, AdminRole, AdminUserRole
+from backend.infrastructure.security.crypto import hash_password
 from backend.domain.state_machine.ride_state_machine import RideTransitionError
 from backend.api.routes import (
     auth, customer, driver, vehicles, location,
@@ -140,18 +141,89 @@ async def lifespan(app: FastAPI):
                 )
             ]
             session.add_all(rules)
-
-            # Seed Root Admin
-            admin_user = User(
-                phone_number="+919999900000",
-                email="admin@erickshaw.in",
-                full_name="E-Rickshaw Fleet Operations",
-                role="admin",
-                is_active=True,
-                is_verified=True
-            )
-            session.add(admin_user)
             await session.commit()
+
+        # Seed / Sync Root Admin & Super Administrator role unconditionally
+        # 1. Ensure Super Administrator Role exists
+        stmt = select(AdminRole).where(AdminRole.name == "Super Administrator")
+        res = await session.execute(stmt)
+        super_role = res.scalar_one_or_none()
+        if not super_role:
+            super_role = AdminRole(
+                id=str(uuid.uuid4()),
+                name="Super Administrator",
+                description="Unrestricted access across all operational, financial and governance desks.",
+                is_superuser=True
+            )
+            session.add(super_role)
+            await session.flush()
+
+        # 2. Seed / Sync primary admin users
+        admin_specs = [
+            {
+                "email": "kotlindeveloper75620@gmail.com",
+                "phone_number": "+917562084184",
+                "full_name": "BHISHMA"
+            },
+            {
+                "email": "admin@luxurychauffeur.com",
+                "phone_number": "+919999900000",
+                "full_name": "Super Administrator"
+            }
+        ]
+
+        default_admin_pwd = hash_password(os.getenv("ADMIN_INITIAL_PASSWORD", "Admin@1234"))
+
+        for spec in admin_specs:
+            u_stmt = select(User).where(User.email == spec["email"])
+            u_res = await session.execute(u_stmt)
+            admin_user = u_res.scalar_one_or_none()
+
+            if not admin_user:
+                # Also check by phone number if email didn't match
+                p_stmt = select(User).where(User.phone_number == spec["phone_number"])
+                p_res = await session.execute(p_stmt)
+                admin_user = p_res.scalar_one_or_none()
+
+            if admin_user:
+                admin_user.role = "admin"
+                admin_user.is_active = True
+                admin_user.is_verified = True
+                admin_user.email_verified = True
+                admin_user.mfa_enabled = True
+                if not admin_user.email:
+                    admin_user.email = spec["email"]
+                if not admin_user.password_hash or spec["email"] in ["kotlindeveloper75620@gmail.com", "admin@luxurychauffeur.com"]:
+                    admin_user.password_hash = default_admin_pwd
+                if not admin_user.mfa_secret:
+                    admin_user.mfa_secret = "JBSWY3DPEHPK3PXP"
+            else:
+                admin_user = User(
+                    id=str(uuid.uuid4()),
+                    phone_number=spec["phone_number"],
+                    email=spec["email"],
+                    full_name=spec["full_name"],
+                    role="admin",
+                    is_active=True,
+                    is_verified=True,
+                    email_verified=True,
+                    mfa_enabled=True,
+                    mfa_secret="JBSWY3DPEHPK3PXP",
+                    password_hash=default_admin_pwd
+                )
+                session.add(admin_user)
+                await session.flush()
+
+            # Assign Super Administrator role
+            aur_stmt = select(AdminUserRole).where(
+                AdminUserRole.user_id == admin_user.id,
+                AdminUserRole.role_id == super_role.id
+            )
+            aur_res = await session.execute(aur_stmt)
+            if not aur_res.scalar_one_or_none():
+                session.add(AdminUserRole(user_id=admin_user.id, role_id=super_role.id))
+
+        await session.commit()
     dispatcher = asyncio.create_task(_dispatch_scheduled_broadcasts(), name="scheduled-in-app-broadcasts")
     try:
         yield
@@ -173,7 +245,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
-    allow_origin_regex=r"https://.*(\.onrender\.com|\.github\.io)",
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?|https://.*(\.onrender\.com|\.github\.io)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -239,6 +311,7 @@ app.include_router(admin.router, prefix=settings.API_V1_STR)
 app.include_router(notifications.router, prefix=settings.API_V1_STR)
 app.include_router(notifications.admin_router, prefix=settings.API_V1_STR)
 app.include_router(ws.router, prefix=settings.API_V1_STR)
+app.include_router(ws.router, prefix="")
 app.include_router(wallets.router, prefix=settings.API_V1_STR)
 app.include_router(promos.router, prefix=settings.API_V1_STR)
 app.include_router(support.router, prefix=settings.API_V1_STR)

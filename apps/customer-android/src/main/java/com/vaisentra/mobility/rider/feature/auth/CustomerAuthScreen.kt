@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.auth
+package com.vaisentra.mobility.rider.feature.auth
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -323,7 +323,7 @@ fun CustomerAuthScreen(
                 OutlinedTextField(
                     value = signUpPassword,
                     onValueChange = { signUpPassword = it },
-                    label = { Text("Password (min 4 characters)", color = Color.Gray) },
+                    label = { Text("Password (min 12 characters)", color = Color.Gray) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -366,8 +366,8 @@ fun CustomerAuthScreen(
                             errorMessage = "Please enter either a mobile number or an email."
                             return@Button
                         }
-                        if (signUpPassword.length < 4) {
-                            errorMessage = "Password must be at least 4 characters."
+                        if (signUpPassword.length < 12) {
+                            errorMessage = "Password must be at least 12 characters."
                             return@Button
                         }
                         if (signUpPassword != signUpConfirmPassword) {

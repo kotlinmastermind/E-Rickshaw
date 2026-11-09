@@ -100,16 +100,81 @@ export interface LiveDashboardMetrics {
 
 export interface LiveRide {
   id: string;
-  customer_name: string;
+  customer_id?: string;
+  customer_name?: string;
   customer_phone?: string;
-  driver_name: string;
-  driver_plate: string;
+  assigned_driver_id?: string;
+  driver_name?: string;
+  driver_plate?: string;
   pickup_address: string;
   destination_address: string;
-  fare_rupees: number;
-  status: 'REQUESTED' | 'ASSIGNED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
-  created_at: string;
+  estimated_fare_rupees?: number;
+  final_fare_rupees?: number;
+  fare_rupees?: number;
+  status: string;
+  created_at?: string;
+  requested_at?: string;
   surge_applied?: number;
+}
+
+export interface LiveSupportTicket {
+  id: string;
+  ticket_number?: string;
+  complaint_reference_number?: string;
+  user_id: string;
+  ride_id?: string;
+  subject: string;
+  category: string;
+  status: string;
+  priority: string;
+  assigned_squad?: string;
+  language_preference?: string;
+  is_escalated: boolean;
+  escalation_reason?: string;
+  lost_item_category?: string;
+  lost_item_status?: string;
+  refund_amount_rupees?: number;
+  assigned_to?: string;
+  created_at: string;
+}
+
+export interface LiveFareDispute {
+  id: string;
+  ride_id: string;
+  customer_id: string;
+  dispute_reason: string;
+  claimed_amount_rupees: number;
+  customer_comment?: string;
+  status: string;
+  admin_resolution_notes?: string;
+  created_at: string;
+}
+
+export interface LiveGeofence {
+  id: string;
+  name: string;
+  zone_type: string;
+  coordinates?: any;
+  surge_multiplier: number;
+  is_active: boolean;
+}
+
+export interface LiveSurgeRule {
+  id: string;
+  zone_id?: string;
+  zone_name?: string;
+  multiplier: number;
+  reason: string;
+  is_active: boolean;
+}
+
+export interface LiveBroadcastItem {
+  id: string;
+  title: string;
+  message: string;
+  target_role: string;
+  created_at?: string;
+  recipient_count?: number;
 }
 
 export interface LivePromo {
@@ -487,4 +552,251 @@ export async function fetchLiveSafetyCases(): Promise<{ incident_cases: any[]; e
   }
   return { incident_cases: [], emergency_sos_alerts: [] };
 }
+
+export async function fetchLiveRides(params?: { ride_id?: string; status?: string; page?: number; limit?: number }): Promise<{ rides: LiveRide[]; total: number; page: number; limit: number }> {
+  try {
+    const query = new URLSearchParams();
+    if (params?.ride_id) query.set('ride_id', params.ride_id);
+    if (params?.status && params.status !== 'ALL') query.set('status', params.status);
+    if (params?.page) query.set('page', String(params.page));
+    if (params?.limit) query.set('limit', String(params.limit));
+
+    const qs = query.toString();
+    const data = await requestApi<any>(`/admin/rides${qs ? `?${qs}` : ''}`, {}, true);
+    if (data && Array.isArray(data.rides)) {
+      return {
+        rides: data.rides.map((r: any) => ({
+          id: r.id,
+          status: r.status,
+          customer_id: r.customer_id,
+          assigned_driver_id: r.assigned_driver_id || undefined,
+          pickup_address: r.pickup_address,
+          destination_address: r.destination_address,
+          estimated_fare_rupees: r.estimated_fare_cents ? r.estimated_fare_cents / 100 : 0,
+          final_fare_rupees: r.final_fare_cents ? r.final_fare_cents / 100 : (r.estimated_fare_cents ? r.estimated_fare_cents / 100 : 0),
+          requested_at: r.requested_at
+        })),
+        total: data.total || data.rides.length,
+        page: data.page || 1,
+        limit: data.limit || 50
+      };
+    }
+  } catch (err) {
+    console.error('Fetch live rides error:', err);
+  }
+  return { rides: [], total: 0, page: 1, limit: 50 };
+}
+
+export async function fetchLiveSupportTickets(status?: string): Promise<LiveSupportTicket[]> {
+  try {
+    const url = `/admin/support/tickets${status && status !== 'ALL' ? `?status=${encodeURIComponent(status)}` : ''}`;
+    const data = await requestApi<any[]>(url, {}, true);
+    if (Array.isArray(data)) {
+      return data.map((t: any) => ({
+        id: t.id,
+        ticket_number: t.ticket_number || t.complaint_reference_number || t.id.slice(0, 8),
+        complaint_reference_number: t.complaint_reference_number,
+        user_id: t.user_id,
+        ride_id: t.ride_id || undefined,
+        subject: t.subject || 'Support Request',
+        category: t.category || 'GENERAL',
+        status: t.status || 'OPEN',
+        priority: t.priority || 'MEDIUM',
+        assigned_squad: t.assigned_squad || 'TIER_1',
+        language_preference: t.language_preference || 'en',
+        is_escalated: !!t.is_escalated,
+        escalation_reason: t.escalation_reason || undefined,
+        lost_item_category: t.lost_item_category || undefined,
+        lost_item_status: t.lost_item_status || undefined,
+        refund_amount_rupees: t.refund_amount_cents ? t.refund_amount_cents / 100 : 0,
+        assigned_to: t.assigned_to || undefined,
+        created_at: t.created_at || new Date().toISOString()
+      }));
+    }
+  } catch (err) {
+    console.error('Fetch support tickets error:', err);
+  }
+  return [];
+}
+
+export async function updateLiveSupportTicketStatus(ticketId: string, status: string): Promise<boolean> {
+  try {
+    await requestApi(`/admin/support/tickets/${ticketId}/status?status_val=${encodeURIComponent(status)}`, {
+      method: 'PUT'
+    }, true);
+    return true;
+  } catch (err) {
+    console.error('Update ticket status error:', err);
+    return false;
+  }
+}
+
+export async function addLiveSupportTicketNote(ticketId: string, note: string): Promise<boolean> {
+  try {
+    await requestApi(`/admin/support/tickets/${ticketId}/internal-note?note=${encodeURIComponent(note)}`, {
+      method: 'POST'
+    }, true);
+    return true;
+  } catch (err) {
+    console.error('Add support ticket note error:', err);
+    return false;
+  }
+}
+
+export async function fetchLiveDisputes(): Promise<LiveFareDispute[]> {
+  try {
+    const data = await requestApi<any[]>('/admin/disputes', {}, true);
+    if (Array.isArray(data)) {
+      return data.map((d: any) => ({
+        id: d.id,
+        ride_id: d.ride_id,
+        customer_id: d.customer_id,
+        dispute_reason: d.dispute_reason,
+        claimed_amount_rupees: typeof d.claimed_amount_rupees === 'number' ? d.claimed_amount_rupees : (d.claimed_amount_cents ? d.claimed_amount_cents / 100 : 0),
+        customer_comment: d.customer_comment || '',
+        status: d.status || 'PENDING',
+        admin_resolution_notes: d.admin_resolution_notes || undefined,
+        created_at: d.created_at || new Date().toISOString()
+      }));
+    }
+  } catch (err) {
+    console.error('Fetch disputes error:', err);
+  }
+  return [];
+}
+
+export async function resolveLiveDispute(
+  disputeId: string,
+  resolution: 'APPROVE_REFUND' | 'REJECT',
+  notes: string,
+  refundAmountRupees?: number
+): Promise<boolean> {
+  try {
+    await requestApi(`/admin/disputes/${disputeId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({
+        resolution,
+        resolution_notes: notes,
+        refund_amount_cents: refundAmountRupees ? Math.round(refundAmountRupees * 100) : undefined
+      })
+    }, true);
+    return true;
+  } catch (err) {
+    console.error('Resolve dispute error:', err);
+    return false;
+  }
+}
+
+export async function sendLiveBroadcast(title: string, message: string, targetRole: string = 'ALL'): Promise<boolean> {
+  try {
+    await requestApi('/admin/broadcasts', {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        message,
+        target_role: targetRole,
+        channel: 'IN_APP'
+      })
+    }, true);
+    return true;
+  } catch (err) {
+    console.error('Send broadcast error:', err);
+    return false;
+  }
+}
+
+export async function fetchLiveBroadcasts(): Promise<LiveBroadcastItem[]> {
+  try {
+    const data = await requestApi<any[]>('/admin/broadcasts', {}, true);
+    if (Array.isArray(data)) {
+      return data.map((b: any) => ({
+        id: b.id,
+        title: b.title,
+        message: b.message,
+        target_role: b.target_role || 'ALL',
+        created_at: b.created_at,
+        recipient_count: b.recipient_count || b.eligible_count || 0
+      }));
+    }
+  } catch (err) {
+    console.error('Fetch broadcasts error:', err);
+  }
+  return [];
+}
+
+export async function fetchLiveGeofences(): Promise<LiveGeofence[]> {
+  try {
+    const data = await requestApi<any[]>('/admin/geofences', {}, true);
+    if (Array.isArray(data)) {
+      return data.map((g: any) => ({
+        id: g.id,
+        name: g.name,
+        zone_type: g.zone_type || 'STATION_HUB',
+        coordinates: g.coordinates,
+        surge_multiplier: g.surge_multiplier || 1.0,
+        is_active: g.is_active ?? true
+      }));
+    }
+  } catch (err) {
+    console.error('Fetch geofences error:', err);
+  }
+  return [];
+}
+
+export async function createLiveGeofence(payload: { name: string; zone_type: string; coordinates: any; surge_multiplier?: number }): Promise<boolean> {
+  try {
+    await requestApi('/admin/geofences', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: payload.name,
+        zone_type: payload.zone_type,
+        coordinates: payload.coordinates,
+        surge_multiplier: payload.surge_multiplier || 1.0
+      })
+    }, true);
+    return true;
+  } catch (err) {
+    console.error('Create geofence error:', err);
+    return false;
+  }
+}
+
+export async function fetchLiveSurgeRules(): Promise<LiveSurgeRule[]> {
+  try {
+    const data = await requestApi<any[]>('/admin/surge/rules', {}, true);
+    if (Array.isArray(data)) {
+      return data.map((s: any) => ({
+        id: s.id,
+        zone_id: s.zone_id,
+        zone_name: s.zone_name || 'All Zones',
+        multiplier: s.multiplier || 1.0,
+        reason: s.reason || 'Normal Traffic',
+        is_active: s.is_active ?? true
+      }));
+    }
+  } catch (err) {
+    console.error('Fetch surge rules error:', err);
+  }
+  return [];
+}
+
+export async function createLiveSurgeRule(payload: { multiplier: number; reason: string; zone_id?: string; zone_name?: string }): Promise<boolean> {
+  try {
+    await requestApi('/admin/surge/rules', {
+      method: 'POST',
+      body: JSON.stringify({
+        multiplier: payload.multiplier,
+        reason: payload.reason,
+        zone_id: payload.zone_id || null,
+        zone_name: payload.zone_name || null,
+        is_active: true
+      })
+    }, true);
+    return true;
+  } catch (err) {
+    console.error('Create surge rule error:', err);
+    return false;
+  }
+}
+
 

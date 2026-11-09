@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.network
+package com.vaisentra.mobility.driver.core.network
 
 import com.google.gson.annotations.SerializedName
 import retrofit2.Response
@@ -7,6 +7,7 @@ import retrofit2.http.*
 data class DriverTokenResponse(
     @SerializedName("access_token") val accessToken: String,
     @SerializedName("token_type") val tokenType: String,
+    @SerializedName("refresh_token") val refreshToken: String? = null,
     @SerializedName("user") val user: DriverUserDto
 )
 
@@ -260,17 +261,40 @@ interface DriverApiService {
 
     @GET("api/v1/infra/feature-flags")
     suspend fun getFeatureFlags(): Response<List<Map<String, Any>>>
+
+    @GET("api/v1/rides/{ride_id}/chat/messages")
+    suspend fun getRideChatMessages(
+        @Path("ride_id") rideId: String
+    ): Response<List<DriverChatMessageDto>>
+
+    @POST("api/v1/rides/{ride_id}/chat/messages")
+    suspend fun sendRideChatMessage(
+        @Path("ride_id") rideId: String,
+        @Body payload: DriverSendChatMessageRequest
+    ): Response<DriverChatMessageDto>
 }
+
+data class DriverSendChatMessageRequest(
+    @SerializedName("message_text") val messageText: String
+)
+
+data class DriverChatMessageDto(
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("sender_role") val senderRole: String? = null,
+    @SerializedName("message") val message: String? = null,
+    @SerializedName("message_text") val messageText: String? = null,
+    @SerializedName("sent_at") val sentAt: String? = null
+)
 
 data class DriverSignupRequestPayload(
     @SerializedName("phone_number") val phoneNumber: String,
-    @SerializedName("email") val email: String,
-    @SerializedName("full_name") val fullName: String,
+    @SerializedName("email") val email: String? = null,
+    @SerializedName("full_name") val fullName: String = "Driver Partner",
     @SerializedName("password") val password: String,
-    @SerializedName("username") val username: String,
-    @SerializedName("vehicle_type") val vehicleType: String = "SEDAN",
-    @SerializedName("vehicle_name") val vehicleName: String,
-    @SerializedName("vehicle_no") val vehicleNo: String
+    @SerializedName("username") val username: String? = null,
+    @SerializedName("vehicle_type") val vehicleType: String = "E_RICKSHAW_STANDARD",
+    @SerializedName("vehicle_name") val vehicleName: String = "Electric Rickshaw",
+    @SerializedName("vehicle_no") val vehicleNo: String = "DL-01-ER-1001"
 )
 
 data class DriverUnifiedLoginRequestPayload(

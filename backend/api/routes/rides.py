@@ -666,7 +666,7 @@ async def get_current_active_ride(
                 Ride.assigned_driver_id == driver.id,
                 Ride.status.in_(active_statuses)
             )
-        ).order_by(desc(Ride.created_at)).limit(1)
+        ).order_by(desc(Ride.requested_at)).limit(1)
     else:
         cust_res = await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
         customer = cust_res.scalar_one_or_none()
@@ -677,7 +677,7 @@ async def get_current_active_ride(
                 Ride.customer_id == customer.id,
                 Ride.status.in_(active_statuses)
             )
-        ).order_by(desc(Ride.created_at)).limit(1)
+        ).order_by(desc(Ride.requested_at)).limit(1)
 
     result = await db.execute(stmt)
     ride = result.scalar_one_or_none()
@@ -717,7 +717,7 @@ async def get_current_active_ride(
             "payment_method": ride.payment_method,
             "assigned_driver_id": ride.assigned_driver_id,
             "driver": driver_info,
-            "created_at": ride.created_at.isoformat() if ride.created_at else None
+            "created_at": ride.requested_at.isoformat() if ride.requested_at else None
         }
     }
 

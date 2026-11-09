@@ -1119,7 +1119,7 @@ class SafetyAdvancedService:
         current_user: User,
         status_filter: Optional[str] = None
     ) -> Dict[str, Any]:
-        if current_user.role != "ADMIN":
+        if (current_user.role or "").strip().upper() not in ["ADMIN", "SUPERADMIN"]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access reserved for authorized security staff.")
 
         # Incident Reports
@@ -1192,7 +1192,7 @@ class SafetyAdvancedService:
         follow_up_action: str,
         current_user: User
     ) -> Dict[str, Any]:
-        if current_user.role != "ADMIN":
+        if (current_user.role or "").strip().upper() not in ["ADMIN", "SUPERADMIN"]:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Authorized staff only.")
 
         stmt = select(IncidentReport).where(IncidentReport.ticket_number == ticket_number)

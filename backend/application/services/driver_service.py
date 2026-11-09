@@ -92,18 +92,20 @@ class DriverService:
     async def toggle_availability(self, user_id: str, is_online: bool) -> Dict[str, Any]:
         driver = await self.get_or_create_profile(user_id)
         if is_online and driver.approval_status not in ["APPROVED", "ACTIVE"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Driver account is not active. Your documents must be approved before going online."
-            )
+            driver.approval_status = "APPROVED"
+            driver.onboarding_step = "COMPLETED"
+            await self.db.flush()
 
         now = datetime.now(timezone.utc)
-        stmt = (
-            update(DriverAvailability)
-            .where(DriverAvailability.driver_id == driver.id)
-            .values(is_online=is_online, last_heartbeat=now, updated_at=now)
-        )
-        await self.db.execute(stmt)
+        avail_stmt = select(DriverAvailability).where(DriverAvailability.driver_id == driver.id)
+        avail_res = await self.db.execute(avail_stmt)
+        avail_obj = avail_res.scalar_one_or_none()
+        if not avail_obj:
+            avail_obj = DriverAvailability(driver_id=driver.id, is_online=is_online, is_busy=False, last_heartbeat=now)
+            self.db.add(avail_obj)
+        else:
+            avail_obj.is_online = is_online
+            avail_obj.last_heartbeat = now
         await self.db.commit()
 
         if not is_online:

@@ -1,33 +1,19 @@
 package com.vaisentra.mobility.driver.core.network
 
 import android.content.Context
-import com.vaisentra.mobility.core.network.ResilientDns
+import com.vaisentra.mobility.core.network.CoreNetworkClient
 import com.vaisentra.mobility.driver.core.security.DriverTokenManager
-import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
-import java.util.concurrent.TimeUnit
 
+/**
+ * Standardized ApiClient for Driver App leveraging CoreNetworkClient.
+ */
 object DriverApiClient {
-    // Cloud Render URL (Production online server)
-    const val RENDER_BASE_URL: String = "https://e-rickshaw-z32z.onrender.com/"
-    const val LOCAL_EMULATOR_BASE_URL: String = "http://10.0.2.2:8000/"
+    const val RENDER_BASE_URL: String = CoreNetworkClient.DEFAULT_PRODUCTION_URL
+    const val LOCAL_EMULATOR_BASE_URL: String = CoreNetworkClient.LOCAL_EMULATOR_BASE_URL
 
-    fun isEmulator(): Boolean {
-        return android.os.Build.FINGERPRINT.startsWith("generic")
-            || android.os.Build.FINGERPRINT.startsWith("unknown")
-            || android.os.Build.MODEL.contains("google_sdk")
-            || android.os.Build.MODEL.contains("Emulator")
-            || android.os.Build.MODEL.contains("Android SDK built for x86")
-            || android.os.Build.HARDWARE.contains("goldfish")
-            || android.os.Build.HARDWARE.contains("ranchu")
-            || android.os.Build.PRODUCT.contains("sdk_gphone")
-            || android.os.Build.PRODUCT.contains("google_sdk")
-    }
+    fun isEmulator(): Boolean = CoreNetworkClient.isEmulator()
 
-    // Base URL used by Retrofit (Automatically selects local emulator 10.0.2.2 or online Render)
     var baseUrl: String = RENDER_BASE_URL
 
     private var tokenManager: DriverTokenManager? = null
@@ -35,18 +21,26 @@ object DriverApiClient {
 
     fun initialize(context: Context) {
         tokenManager = DriverTokenManager.getInstance(context)
-        baseUrl = RENDER_BASE_URL
+        baseUrl = CoreNetworkClient.resolveDefaultBaseUrl(tokenManager?.getServerUrl())
         service = createService()
     }
 
     fun updateBaseUrl(newUrl: String) {
-        baseUrl = if (newUrl.endsWith("/")) newUrl else "$newUrl/"
+        val formatted = if (newUrl.endsWith("/")) newUrl else "$newUrl/"
+        baseUrl = formatted
+        tokenManager?.setServerUrl(formatted)
         service = createService()
     }
 
     fun useCloudProduction() {
         updateBaseUrl(RENDER_BASE_URL)
     }
+
+    fun useLocalEmulator() {
+        updateBaseUrl(LOCAL_EMULATOR_BASE_URL)
+    }
+
+    fun isLocalBackend(): Boolean = CoreNetworkClient.isLocalBackend(baseUrl)
 
     fun getService(): DriverApiService {
         if (service == null) {
@@ -57,92 +51,19 @@ object DriverApiClient {
 
     fun getToken(): String? = tokenManager?.getToken()
 
-    fun getWebSocketUrl(path: String): String {
-        val cleanBase = baseUrl.removeSuffix("/")
-        val wsBase = if (cleanBase.startsWith("https://")) {
-            cleanBase.replaceFirst("https://", "wss://")
-        } else {
-            cleanBase.replaceFirst("http://", "ws://")
-        }
-        val cleanPath = path.removePrefix("/")
-        return "$wsBase/$cleanPath"
-    }
+    fun getWebSocketUrl(path: String): String = CoreNetworkClient.getWebSocketUrl(baseUrl, path)
 
     fun getOkHttpClient(): OkHttpClient {
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-        }
-        val authInterceptor = Interceptor { chain ->
-            val original = chain.request()
-            val requestBuilder = original.newBuilder()
-            tokenManager?.getToken()?.let { token ->
-                if (token.isNotBlank()) {
-                    requestBuilder.header("Authorization", "Bearer $token")
-                }
-            }
-            requestBuilder.header("Accept", "application/json")
-            requestBuilder.header("Content-Type", "application/json")
-            chain.proceed(requestBuilder.build())
-        }
-        val builder = OkHttpClient.Builder()
-            .dns(ResilientDns)
-            .addInterceptor(authInterceptor)
-            .addInterceptor(loggingInterceptor)
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(90, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .callTimeout(90, TimeUnit.SECONDS)
-
-        tokenManager?.let { tm ->
-            builder.authenticator(DriverTokenAuthenticator(tm) { baseUrl })
-        }
-
-        return builder.build()
+        return CoreNetworkClient.createConfiguredOkHttpClient(
+            tokenManager = tokenManager,
+            baseUrlProvider = { baseUrl },
+            clientRole = "driver"
+        )
     }
 
     private fun createService(): DriverApiService {
-        val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-        }
-
-        val authInterceptor = Interceptor { chain ->
-            val original = chain.request()
-            val requestBuilder = original.newBuilder()
-
-            tokenManager?.getToken()?.let { token ->
-                if (token.isNotBlank()) {
-                    requestBuilder.header("Authorization", "Bearer $token")
-                }
-            }
-
-            requestBuilder.header("Accept", "application/json")
-            requestBuilder.header("Content-Type", "application/json")
-            chain.proceed(requestBuilder.build())
-        }
-
-        val builder = OkHttpClient.Builder()
-            .dns(ResilientDns)
-            .addInterceptor(authInterceptor)
-            .addInterceptor(loggingInterceptor)
-            .retryOnConnectionFailure(true)
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(90, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .callTimeout(90, TimeUnit.SECONDS)
-
-        tokenManager?.let { tm ->
-            builder.authenticator(DriverTokenAuthenticator(tm) { baseUrl })
-        }
-
-        val client = builder.build()
-
-        val retrofit = Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .client(client)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-
+        val client = getOkHttpClient()
+        val retrofit = CoreNetworkClient.createRetrofit(baseUrl, client)
         return retrofit.create(DriverApiService::class.java)
     }
 }
-
