@@ -4,11 +4,7 @@ import {
   BLUEPRINT_DESKS,
   BLUEPRINT_CUSTOMER_SCREENS,
   BLUEPRINT_DRIVER_SCREENS
-} from '../data/blueprintData';
-import {
-  BLUEPRINT_CUSTOMER_UI,
-  BLUEPRINT_DRIVER_UI
-} from '../data/blueprintTemplates';
+} from '../config/missionControlDesks';
 import { AdminRealMap } from './AdminRealMap';
 import { requestApi } from '../services/api';
 import {
@@ -1557,12 +1553,37 @@ export const VaisentraMissionControl: React.FC = () => {
                       Screen {simCustScreenId} of 50 • [{BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.tag || 'App'}]
                     </div>
 
-                    <div
-                      className="screen-scroll"
-                      dangerouslySetInnerHTML={{
-                        __html: BLUEPRINT_CUSTOMER_UI[simCustScreenId.toString()] || '<div class="p-6 text-center text-slate-400 text-xs">Screen rendering...</div>'
-                      }}
-                    />
+                    <div className="screen-scroll p-4 bg-slate-950 flex flex-col justify-between h-[520px]">
+                      <div>
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-xl">🛺</span>
+                          <div>
+                            <h4 className="text-sm font-bold text-white">
+                              {BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.name}
+                            </h4>
+                            <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">
+                              Category: {BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.tag}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed mb-4">
+                          {BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.desc}
+                        </p>
+                        <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5 text-[11px]">
+                          <div className="text-slate-400 font-semibold">Authoritative Database Schema:</div>
+                          <code className="text-amber-300 font-mono text-[10px] block break-all">
+                            {BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.table}
+                          </code>
+                        </div>
+                        <div className="mt-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 flex items-center gap-2">
+                          <span>●</span>
+                          <span>Production REST / WebSocket Integration Active</span>
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-500 text-center">
+                        Vaisentra Commuter App • Enterprise Release
+                      </div>
+                    </div>
 
                     {/* CUSTOMER PERSISTENT BOTTOM NAVIGATION TAB BAR */}
                     <div className="phone-bottom-nav">
@@ -1641,12 +1662,37 @@ export const VaisentraMissionControl: React.FC = () => {
                       Screen {simDriverScreenId} of 50 • [{BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.tag || 'Pilot'}]
                     </div>
 
-                    <div
-                      className="screen-scroll"
-                      dangerouslySetInnerHTML={{
-                        __html: BLUEPRINT_DRIVER_UI[simDriverScreenId.toString()] || '<div class="p-6 text-center text-slate-400 text-xs">Screen rendering...</div>'
-                      }}
-                    />
+                    <div className="screen-scroll p-4 bg-slate-950 flex flex-col justify-between h-[520px]">
+                      <div>
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-xl">⚡</span>
+                          <div>
+                            <h4 className="text-sm font-bold text-white">
+                              {BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.name}
+                            </h4>
+                            <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">
+                              Category: {BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.tag}
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed mb-4">
+                          {BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.desc}
+                        </p>
+                        <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5 text-[11px]">
+                          <div className="text-slate-400 font-semibold">Authoritative Database Schema:</div>
+                          <code className="text-emerald-300 font-mono text-[10px] block break-all">
+                            {BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.table}
+                          </code>
+                        </div>
+                        <div className="mt-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 flex items-center gap-2">
+                          <span>●</span>
+                          <span>Driver Pilot Cockpit & Telemetry Active</span>
+                        </div>
+                      </div>
+                      <div className="text-[10px] text-slate-500 text-center">
+                        Vaisentra Pilot App • Enterprise Release
+                      </div>
+                    </div>
 
                     {/* DRIVER PERSISTENT BOTTOM NAVIGATION TAB BAR */}
                     <div className="phone-bottom-nav">

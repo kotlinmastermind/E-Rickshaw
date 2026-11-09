@@ -115,13 +115,9 @@ object ApiClient {
             }
             requestBuilder.header("Accept", "application/json")
             requestBuilder.header("Content-Type", "application/json")
-            val response = chain.proceed(requestBuilder.build())
-            if (response.code == 401) {
-                tokenManager?.clear()
-            }
-            response
+            chain.proceed(requestBuilder.build())
         }
-        return OkHttpClient.Builder()
+        val builder = OkHttpClient.Builder()
             .dns(ResilientDns)
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)
@@ -129,7 +125,12 @@ object ApiClient {
             .readTimeout(90, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .callTimeout(90, TimeUnit.SECONDS)
-            .build()
+
+        tokenManager?.let { tm ->
+            builder.authenticator(TokenAuthenticator(tm) { baseUrl })
+        }
+
+        return builder.build()
     }
 
     private fun createService(): CustomerApiService {
@@ -149,14 +150,10 @@ object ApiClient {
 
             requestBuilder.header("Accept", "application/json")
             requestBuilder.header("Content-Type", "application/json")
-            val response = chain.proceed(requestBuilder.build())
-            if (response.code == 401) {
-                tokenManager?.clear()
-            }
-            response
+            chain.proceed(requestBuilder.build())
         }
 
-        val client = OkHttpClient.Builder()
+        val builder = OkHttpClient.Builder()
             .dns(ResilientDns)
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)
@@ -165,7 +162,12 @@ object ApiClient {
             .readTimeout(90, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .callTimeout(90, TimeUnit.SECONDS)
-            .build()
+
+        tokenManager?.let { tm ->
+            builder.authenticator(TokenAuthenticator(tm) { baseUrl })
+        }
+
+        val client = builder.build()
 
         val retrofit = Retrofit.Builder()
             .baseUrl(baseUrl)

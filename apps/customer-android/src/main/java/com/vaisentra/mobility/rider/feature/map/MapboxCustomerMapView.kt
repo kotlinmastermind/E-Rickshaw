@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.map
+package com.vaisentra.mobility.rider.feature.map
 
 import android.Manifest
 import android.content.Context

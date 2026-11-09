@@ -215,28 +215,28 @@ export async function fetchLiveSystemMetrics(): Promise<LiveSystemMetrics> {
     const latencyMs = Math.round(performance.now() - startTime);
     return {
       service: data.service || 'e-rickshaw-api',
-      uptime_seconds: data.uptime_seconds || 14820,
+      uptime_seconds: typeof data.uptime_seconds === 'number' ? data.uptime_seconds : 0,
       database: {
-        status: data.database?.status || 'CONNECTED',
-        engine: data.database?.engine || 'PostgreSQL (Render)',
-        pool_size: 20,
+        status: data.database?.status || (data.status === 'healthy' ? 'CONNECTED' : 'UNKNOWN'),
+        engine: data.database?.engine || 'PostgreSQL',
+        pool_size: typeof data.database?.pool_size === 'number' ? data.database.pool_size : 0,
         latency_ms: latencyMs
       },
       redis_cache: {
-        status: data.redis_cache?.status || 'OPERATIONAL'
+        status: data.redis_cache?.status || (data.redis === 'connected' ? 'OPERATIONAL' : 'UNKNOWN')
       },
       telemetry: {
-        active_websockets: data.websockets?.active_connections || 4
+        active_websockets: typeof data.websockets?.active_connections === 'number' ? data.websockets.active_connections : 0
       }
     };
   } catch (err) {
     const latencyMs = Math.round(performance.now() - startTime);
     return {
       service: 'e-rickshaw-api',
-      uptime_seconds: 14820,
-      database: { status: 'CONNECTED', engine: 'PostgreSQL (Render)', pool_size: 20, latency_ms: latencyMs },
-      redis_cache: { status: 'OPERATIONAL' },
-      telemetry: { active_websockets: 4 }
+      uptime_seconds: 0,
+      database: { status: 'DISCONNECTED', engine: 'PostgreSQL', pool_size: 0, latency_ms: latencyMs },
+      redis_cache: { status: 'UNREACHABLE' },
+      telemetry: { active_websockets: 0 }
     };
   }
 }

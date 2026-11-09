@@ -377,79 +377,117 @@ fun CustomerMasterCatalogFlow(
     // Real-Time WebSocket Telemetry & State Machine Synchronization for Screen 14 & 15
     DisposableEffect(currentScreenId, activeRideId) {
         var ws: WebSocket? = null
-        if ((currentScreenId == 14 || currentScreenId == 15) && activeRideId.isNotBlank()) {
-            CustomerLocationForegroundService.start(context, activeRideId)
+        var isDisposed = false
+        var reconnectJob: kotlinx.coroutines.Job? = null
 
+        fun connectWebSocket() {
+            if (isDisposed || (currentScreenId != 14 && currentScreenId != 15) || activeRideId.isBlank()) return
             val token = ApiClient.getToken().orEmpty()
-            if (token.isNotBlank()) {
-                val wsUrl = ApiClient.getWebSocketUrl("api/v1/ws/rides/$activeRideId/tracking")
-                val req = Request.Builder()
-                    .url(wsUrl)
-                    .addHeader("Authorization", "Bearer $token")
-                    .build()
-                ws = ApiClient.getOkHttpClient().newWebSocket(
-                    req,
-                    object : WebSocketListener() {
-                        override fun onMessage(webSocket: WebSocket, text: String) {
-                            try {
-                                val json = JSONObject(text)
-                                val eventType = json.optString("event_type")
-                                val status = json.optString("status")
-                                val payload = json.optJSONObject("payload")
+            if (token.isBlank()) return
 
-                                if (eventType == "RIDE_ACCEPTED" || status in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS")) {
-                                    activeRideStatus = status.ifBlank { "ASSIGNED" }
-                                    if (currentScreenId == 14) {
-                                        scope.launch(Dispatchers.Main) {
-                                            currentScreenId = 15
+            val wsUrl = ApiClient.getWebSocketUrl("api/v1/ws/rides/$activeRideId/tracking")
+            val req = Request.Builder()
+                .url(wsUrl)
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+
+            ws = ApiClient.getOkHttpClient().newWebSocket(
+                req,
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+                        android.util.Log.i("CustomerTrackingWS", "Customer ride tracking WebSocket connected successfully")
+                    }
+
+                    override fun onMessage(webSocket: WebSocket, text: String) {
+                        try {
+                            val json = JSONObject(text)
+                            val eventType = json.optString("event_type")
+                            val status = json.optString("status")
+                            val payload = json.optJSONObject("payload")
+
+                            if (eventType == "RIDE_ACCEPTED" || status in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS")) {
+                                activeRideStatus = status.ifBlank { "ASSIGNED" }
+                                if (currentScreenId == 14) {
+                                    scope.launch(Dispatchers.Main) {
+                                        currentScreenId = 15
+                                    }
+                                }
+                            }
+
+                            if (eventType == "DRIVER_LOCATION_UPDATE" || payload != null) {
+                                val lat = payload?.optDouble("latitude") ?: json.optDouble("driver_latitude")
+                                val lng = payload?.optDouble("longitude") ?: json.optDouble("driver_longitude")
+                                val heading = (payload?.optDouble("heading") ?: json.optDouble("heading", 0.0)).toFloat()
+
+                                if (lat != null && lng != null && !lat.isNaN() && !lng.isNaN() && lat != 0.0 && lng != 0.0) {
+                                    scope.launch(Dispatchers.Main) {
+                                        val newTarget = LatLng(lat, lng)
+                                        val prev = liveDriverLatLng
+                                        if (prev == null) {
+                                            liveDriverLatLng = newTarget
+                                            liveDriverBearing = heading
+                                        } else {
+                                            val computedBearing = if (heading > 0f) heading else MapboxGeoUtils.computeBearing(prev.latitude, prev.longitude, newTarget.latitude, newTarget.longitude)
+                                            liveDriverBearing = computedBearing
+                                            liveDriverLatLng = newTarget
                                         }
                                     }
                                 }
+                            }
 
-                                if (eventType == "DRIVER_LOCATION_UPDATE" || payload != null) {
-                                    val lat = payload?.optDouble("latitude") ?: json.optDouble("driver_latitude")
-                                    val lng = payload?.optDouble("longitude") ?: json.optDouble("driver_longitude")
-                                    val heading = (payload?.optDouble("heading") ?: json.optDouble("heading", 0.0)).toFloat()
-
-                                    if (lat != null && lng != null && !lat.isNaN() && !lng.isNaN() && lat != 0.0 && lng != 0.0) {
-                                        scope.launch(Dispatchers.Main) {
-                                            val newTarget = LatLng(lat, lng)
-                                            val prev = liveDriverLatLng
-                                            if (prev == null) {
-                                                liveDriverLatLng = newTarget
-                                                liveDriverBearing = heading
-                                            } else {
-                                                val computedBearing = if (heading > 0f) heading else MapboxGeoUtils.computeBearing(prev.latitude, prev.longitude, newTarget.latitude, newTarget.longitude)
-                                                liveDriverBearing = computedBearing
-                                                liveDriverLatLng = newTarget
-                                            }
-                                        }
-                                    }
+                            if (eventType == "TRIP_COMPLETED" || status == "COMPLETED") {
+                                scope.launch(Dispatchers.Main) {
+                                    activeRideStatus = "COMPLETED"
+                                    tokenManager.clearActiveRideId()
+                                    CustomerLocationForegroundService.stop(context)
+                                    currentScreenId = 20
                                 }
-
-                                if (eventType == "TRIP_COMPLETED" || status == "COMPLETED") {
-                                    scope.launch(Dispatchers.Main) {
-                                        activeRideStatus = "COMPLETED"
-                                        tokenManager.clearActiveRideId()
-                                        CustomerLocationForegroundService.stop(context)
-                                        currentScreenId = 20
-                                    }
-                                } else if (eventType == "RIDE_CANCELLED" || status == "CANCELLED") {
-                                    scope.launch(Dispatchers.Main) {
-                                        activeRideStatus = "CANCELLED"
-                                        tokenManager.clearActiveRideId()
-                                        CustomerLocationForegroundService.stop(context)
-                                        Toast.makeText(context, "Ride cancelled", Toast.LENGTH_SHORT).show()
-                                        currentScreenId = 7
-                                    }
+                            } else if (eventType == "RIDE_CANCELLED" || status == "CANCELLED") {
+                                scope.launch(Dispatchers.Main) {
+                                    activeRideStatus = "CANCELLED"
+                                    tokenManager.clearActiveRideId()
+                                    CustomerLocationForegroundService.stop(context)
+                                    Toast.makeText(context, "Ride cancelled", Toast.LENGTH_SHORT).show()
+                                    currentScreenId = 7
                                 }
-                            } catch (_: Exception) {}
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
+                        android.util.Log.w("CustomerTrackingWS", "Customer ride tracking WS failure: ${t.message}")
+                        scheduleReconnect()
+                    }
+
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                        android.util.Log.i("CustomerTrackingWS", "Customer ride tracking WS closed ($code: $reason)")
+                        if (code != 1000 && !isDisposed) {
+                            scheduleReconnect()
                         }
                     }
-                )
-            }
+
+                    private fun scheduleReconnect() {
+                        if (isDisposed || (currentScreenId != 14 && currentScreenId != 15)) return
+                        reconnectJob?.cancel()
+                        reconnectJob = scope.launch {
+                            kotlinx.coroutines.delay(4000)
+                            if (!isDisposed && (currentScreenId == 14 || currentScreenId == 15)) {
+                                connectWebSocket()
+                            }
+                        }
+                    }
+                }
+            )
         }
+
+        if ((currentScreenId == 14 || currentScreenId == 15) && activeRideId.isNotBlank()) {
+            CustomerLocationForegroundService.start(context, activeRideId)
+            connectWebSocket()
+        }
+
         onDispose {
+            isDisposed = true
+            reconnectJob?.cancel()
             try { ws?.close(1000, "Leaving active ride screen") } catch (_: Exception) {}
             if (currentScreenId != 14 && currentScreenId != 15) {
                 CustomerLocationForegroundService.stop(context)

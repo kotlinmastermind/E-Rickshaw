@@ -9,6 +9,7 @@ class TokenManager(context: Context) {
 
     companion object {
         private const val KEY_TOKEN = "jwt_access_token"
+        private const val KEY_REFRESH_TOKEN = "jwt_refresh_token"
         private const val KEY_USER_ID = "user_id"
         private const val KEY_PHONE = "user_phone"
         private const val KEY_ROLE = "user_role"
@@ -32,7 +33,7 @@ class TokenManager(context: Context) {
             }
     }
 
-    fun saveAuth(token: String, userId: String, phone: String, role: String, email: String? = null, fullName: String? = null) {
+    fun saveAuth(token: String, userId: String, phone: String, role: String, email: String? = null, fullName: String? = null, refreshToken: String? = null) {
         prefs.edit()
             .putString(KEY_TOKEN, token)
             .putString(KEY_USER_ID, userId)
@@ -41,6 +42,7 @@ class TokenManager(context: Context) {
             .apply {
                 if (email != null) putString(KEY_EMAIL, email)
                 if (fullName != null) putString(KEY_FULL_NAME, fullName)
+                if (refreshToken != null) putString(KEY_REFRESH_TOKEN, refreshToken)
             }
             .apply()
     }
@@ -49,7 +51,16 @@ class TokenManager(context: Context) {
         prefs.edit().putString(KEY_TOKEN, token).apply()
     }
 
+    fun saveTokens(token: String, refreshToken: String? = null) {
+        val editor = prefs.edit().putString(KEY_TOKEN, token)
+        if (refreshToken != null) {
+            editor.putString(KEY_REFRESH_TOKEN, refreshToken)
+        }
+        editor.apply()
+    }
+
     fun getToken(): String? = prefs.getString(KEY_TOKEN, null)
+    fun getRefreshToken(): String? = prefs.getString(KEY_REFRESH_TOKEN, null)
     fun getUserId(): String? = prefs.getString(KEY_USER_ID, null)
     fun getPhone(): String? = prefs.getString(KEY_PHONE, null)
     fun getRole(): String? = prefs.getString(KEY_ROLE, "customer")
