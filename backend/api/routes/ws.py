@@ -148,6 +148,14 @@ class ConnectionManager:
 
         await self.broadcast_admin(message)
 
+    async def broadcast_to_ride(self, ride_id: str, message: dict):
+        """Convenience alias for broadcast_ride_update."""
+        return await self.broadcast_ride_update(ride_id, message)
+
+    async def send_personal_message(self, message: dict, recipient_id: str):
+        """Dispatches event to driver personal channel."""
+        return await self.dispatch_to_driver(recipient_id, message)
+
     async def connect_driver_with_pubsub(
         self,
         driver_id: str,

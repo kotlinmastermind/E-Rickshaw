@@ -79,9 +79,15 @@ class InMemoryCacheFallback:
                 del self._store[key]
         return None
 
-    async def set(self, key: str, value: str, ex: Optional[int] = None) -> bool:
+    async def set(self, key: str, value: str, ex: Optional[int] = None, nx: bool = False) -> bool:
         expires_at = time.time() + (ex if ex else 86400 * 365)
         async with self._lock:
+            if nx:
+                if key in self._store:
+                    val, exp = self._store[key]
+                    if time.time() < exp:
+                        return False
+                    del self._store[key]
             self._store[key] = (value, expires_at)
         return True
 
@@ -119,6 +125,50 @@ class InMemoryCacheFallback:
                     return remaining
                 del self._store[key]
         return -2
+
+    async def sadd(self, key: str, *members: str) -> int:
+        async with self._lock:
+            if key not in self._store:
+                self._store[key] = (set(), time.time() + 86400 * 365)
+            curr_set, exp = self._store[key]
+            if not isinstance(curr_set, set):
+                curr_set = set()
+            added = 0
+            for m in members:
+                m_str = str(m)
+                if m_str not in curr_set:
+                    curr_set.add(m_str)
+                    added += 1
+            self._store[key] = (curr_set, exp)
+            return added
+
+    async def srem(self, key: str, *members: str) -> int:
+        async with self._lock:
+            if key in self._store:
+                curr_set, exp = self._store[key]
+                if isinstance(curr_set, set):
+                    removed = 0
+                    for m in members:
+                        m_str = str(m)
+                        if m_str in curr_set:
+                            curr_set.remove(m_str)
+                            removed += 1
+                    return removed
+            return 0
+
+    async def smembers(self, key: str) -> Set[str]:
+        async with self._lock:
+            if key in self._store:
+                curr_set, exp = self._store[key]
+                if time.time() < exp and isinstance(curr_set, set):
+                    return set(curr_set)
+                elif time.time() >= exp:
+                    del self._store[key]
+            return set()
+
+    async def scard(self, key: str) -> int:
+        members = await self.smembers(key)
+        return len(members)
 
     async def exists(self, key: str) -> bool:
         return (await self.get(key)) is not None
@@ -284,19 +334,19 @@ class RedisManager:
                 return raw
         return None
 
-    async def set(self, key: str, value: str, ex: Optional[int] = None) -> bool:
+    async def set(self, key: str, value: str, ex: Optional[int] = None, nx: bool = False) -> bool:
         self.stats.record_set()
         client = await self._get_redis()
         try:
             if client:
-                await client.set(key, value, ex=ex)
-                return True
+                res = await client.set(key, value, ex=ex, nx=nx)
+                return bool(res)
         except Exception as e:
             self.stats.record_error()
             self.is_connected = False
             logger.warning(f"Redis set failed: {e}. Falling back to memory.")
 
-        return await self._fallback.set(key, value, ex=ex)
+        return await self._fallback.set(key, value, ex=ex, nx=nx)
 
     async def set_json(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
         return await self.set(key, json.dumps(value), ex=ex)
@@ -355,6 +405,47 @@ class RedisManager:
         except Exception:
             self.is_connected = False
         return await self._fallback.exists(key)
+
+    async def sadd(self, key: str, *members: str) -> int:
+        client = await self._get_redis()
+        try:
+            if client:
+                return await client.sadd(key, *members)
+        except Exception as e:
+            self.stats.record_error()
+            self.is_connected = False
+        return await self._fallback.sadd(key, *members)
+
+    async def srem(self, key: str, *members: str) -> int:
+        client = await self._get_redis()
+        try:
+            if client:
+                return await client.srem(key, *members)
+        except Exception as e:
+            self.stats.record_error()
+            self.is_connected = False
+        return await self._fallback.srem(key, *members)
+
+    async def smembers(self, key: str) -> Set[str]:
+        client = await self._get_redis()
+        try:
+            if client:
+                res = await client.smembers(key)
+                return set(res) if res else set()
+        except Exception as e:
+            self.stats.record_error()
+            self.is_connected = False
+        return await self._fallback.smembers(key)
+
+    async def scard(self, key: str) -> int:
+        client = await self._get_redis()
+        try:
+            if client:
+                return await client.scard(key)
+        except Exception as e:
+            self.stats.record_error()
+            self.is_connected = False
+        return await self._fallback.scard(key)
 
     async def publish(self, channel: str, message: Any) -> int:
         self.stats.record_set()

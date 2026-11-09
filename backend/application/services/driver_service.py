@@ -106,6 +106,13 @@ class DriverService:
         await self.db.execute(stmt)
         await self.db.commit()
 
+        if not is_online:
+            try:
+                from backend.application.services.live_location_service import LiveLocationService
+                await LiveLocationService(self.db).remove_driver_from_h3_index(driver.id)
+            except Exception:
+                pass
+
         return {
             "driver_id": driver.id,
             "is_online": is_online,
@@ -152,6 +159,26 @@ class DriverService:
         if availability:
             availability.last_heartbeat = now
         await self.db.commit()
+
+        try:
+            from backend.application.services.live_location_service import LiveLocationService
+            is_online = availability.is_online if availability else True
+            is_busy = availability.is_busy if availability else False
+            await LiveLocationService(self.db).ingest_driver_location(
+                driver_id=driver.id,
+                latitude=lat,
+                longitude=lng,
+                heading=heading,
+                speed_mps=speed_mps,
+                accuracy_m=accuracy_m,
+                is_mock_location=is_mock_location,
+                location_source=location_source,
+                is_online=is_online,
+                is_busy=is_busy
+            )
+        except Exception:
+            pass
+
         return {"status": "RECORDED", "accuracy_m": accuracy_m, "quality_flags": flags,
                 "risk_signal": bool(risk), "risk_action": "REVIEW_SIGNAL_ONLY"}
 

@@ -305,6 +305,8 @@ class RideService:
                 await redis_client.delete(f"dispatch:offer:{ride_id}:{driver.id}")
                 await redis_client.delete(f"driver:active_offer:{driver.id}")
                 await redis_client.delete(f"driver:active_offer:{driver_user_id}")
+                from backend.application.services.live_location_service import LiveLocationService
+                await LiveLocationService(self.db).remove_driver_from_h3_index(driver.id)
             except Exception:
                 pass
 
