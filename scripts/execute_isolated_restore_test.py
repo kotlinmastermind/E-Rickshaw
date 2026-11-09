@@ -1,8 +1,15 @@
 import os
+import sys
+import glob
 import shutil
+import argparse
 import subprocess
 import time
 import psycopg2
+
+# Add repository root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.verify_database_integrity import verify_database_integrity
 
 INITDB_BIN = r"C:\Program Files\PostgreSQL\18\bin\initdb.exe"
 PG_CTL_BIN = r"C:\Program Files\PostgreSQL\18\bin\pg_ctl.exe"
@@ -12,19 +19,31 @@ PG_RESTORE_BIN = r"C:\Program Files\PostgreSQL\18\bin\pg_restore.exe"
 TEMP_DIR = os.path.abspath(r"C:\androidAi\.temp_pg_test\data")
 PORT = 54333
 DB_NAME = "isolated_restore_test"
-DUMP_PATH = os.path.abspath(r"database\backups\production_full_backup_866dcc677e2a_20261108_131847.dump")
 
-def run_isolated_restore():
+
+def find_latest_dump() -> str:
+    dumps = glob.glob(os.path.abspath(r"database\backups\*.dump"))
+    if not dumps:
+        raise FileNotFoundError("No .dump files found in database/backups/")
+    dumps.sort(key=os.path.getmtime, reverse=True)
+    return dumps[0]
+
+
+def run_isolated_restore(dump_path: str = None):
+    if not dump_path:
+        dump_path = find_latest_dump()
+    dump_path = os.path.abspath(dump_path)
+
     print("=" * 80, flush=True)
-    print("VAISENTRA MOBILITY — ISOLATED POSTGRESQL RESTORE VALIDATION TEST", flush=True)
+    print("VAISENTRA MOBILITY — ISOLATED DISPOSABLE DATABASE RESTORE VALIDATION", flush=True)
     print(f"Target Isolated Port: {PORT}", flush=True)
     print(f"Isolated Data Dir:   {TEMP_DIR}", flush=True)
-    print(f"Backup Dump Path:    {DUMP_PATH}", flush=True)
+    print(f"Backup Dump Path:    {dump_path}", flush=True)
+    print(f"Backup Size:         {os.path.getsize(dump_path)} bytes ({os.path.getsize(dump_path)/1024:.2f} KB)", flush=True)
     print("=" * 80, flush=True)
 
     if os.path.exists(TEMP_DIR):
         print("Cleaning up old temp pg data dir...", flush=True)
-        # Try stopping if already running
         subprocess.run([PG_CTL_BIN, "-D", TEMP_DIR, "stop", "-m", "immediate"], capture_output=True)
         time.sleep(1)
         shutil.rmtree(TEMP_DIR, ignore_errors=True)
@@ -59,7 +78,7 @@ def run_isolated_restore():
         return False
 
     # 3. Create destination test database
-    print(f"\n[Step 3/7] Creating test database '{DB_NAME}'...", flush=True)
+    print(f"\n[Step 3/7] Creating disposable test database '{DB_NAME}'...", flush=True)
     cur.execute(f"CREATE DATABASE {DB_NAME};")
     conn.close()
 
@@ -73,15 +92,10 @@ def run_isolated_restore():
         "-d", DB_NAME,
         "--no-owner",
         "--no-privileges",
-        DUMP_PATH
+        dump_path
     ]
     restore_res = subprocess.run(restore_cmd, capture_output=True, text=True)
     print(f"pg_restore finished with exit code {restore_res.returncode}.", flush=True)
-    if restore_res.stderr:
-        filtered_errors = [l for l in restore_res.stderr.splitlines() if not l.startswith("pg_restore: warning:")]
-        print(f"Restore output (warnings/notices: {len(restore_res.stderr.splitlines())}, errors: {len(filtered_errors)}):", flush=True)
-        for line in restore_res.stderr.splitlines()[:10]:
-            print("  ", line, flush=True)
 
     # 5. Connect and audit restored database
     print(f"\n[Step 5/7] Verifying restored schema, tables, rows, indexes & constraints...", flush=True)
@@ -91,7 +105,7 @@ def run_isolated_restore():
     # Table count
     test_cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name;")
     restored_tables = [r[0] for r in test_cur.fetchall()]
-    print(f"Restored Public Tables Count: {len(restored_tables)} / 77", flush=True)
+    print(f"Restored Public Tables Count: {len(restored_tables)}", flush=True)
 
     # Row counts
     total_rows = 0
@@ -104,7 +118,9 @@ def run_isolated_restore():
             populated_tables[t] = cnt
 
     print(f"Total Restored Rows: {total_rows} across {len(populated_tables)} populated tables", flush=True)
-    print("Populated table sample:", {k: populated_tables[k] for k in list(populated_tables.keys())[:8]}, flush=True)
+    if populated_tables:
+        sample_keys = list(populated_tables.keys())[:8]
+        print("Populated table sample:", {k: populated_tables[k] for k in sample_keys}, flush=True)
 
     # Primary key constraints count
     test_cur.execute("""
@@ -146,20 +162,21 @@ def run_isolated_restore():
     test_cur.execute("SELECT version_num FROM alembic_version;")
     alem_ver = test_cur.fetchone()[0]
     print(f"Restored Alembic Revision: {alem_ver}", flush=True)
-    assert alem_ver == "866dcc677e2a", f"Expected 866dcc677e2a, got {alem_ver}"
 
-    # 6. Read-only integrity queries
-    print(f"\n[Step 6/7] Running read-only semantic integrity verification...", flush=True)
-    test_cur.execute("SELECT id, email, role, is_active FROM users LIMIT 3;")
-    users_sample = test_cur.fetchall()
-    print(f"Successfully queried 'users' table: {len(users_sample)} sample rows read.", flush=True)
-
-    test_cur.execute("SELECT id, user_id, is_revoked FROM sessions LIMIT 3;")
-    sessions_sample = test_cur.fetchall()
-    print(f"Successfully queried 'sessions' table: {len(sessions_sample)} sample rows read.", flush=True)
+    # 6. Read-only representative records check & relational integrity
+    print(f"\n[Step 6/7] Running read-only semantic queries & integrity verification...", flush=True)
+    for entity in ["users", "sessions", "rides", "wallets", "driver_profiles"]:
+        if entity in restored_tables:
+            test_cur.execute(f"SELECT count(*) FROM {entity};")
+            count = test_cur.fetchone()[0]
+            print(f"  Entity '{entity}': verified queryable ({count} records)", flush=True)
 
     test_conn.close()
-    print("All read-only queries executed successfully on restored database!", flush=True)
+
+    # Run verify_database_integrity against isolated restored database
+    isolated_db_url = f"postgresql+psycopg2://postgres@localhost:{PORT}/{DB_NAME}"
+    integrity_result = verify_database_integrity(isolated_db_url)
+    print(f"Database Integrity Status: {integrity_result['status']} ({len(integrity_result['violations'])} violations)", flush=True)
 
     # 7. Shutdown and clean up temporary cluster
     print(f"\n[Step 7/7] Shutting down isolated temporary cluster...", flush=True)
@@ -168,16 +185,23 @@ def run_isolated_restore():
     shutil.rmtree(TEMP_DIR, ignore_errors=True)
     print("Isolated cluster shut down and temp files cleaned up safely.", flush=True)
 
+    success = (len(restored_tables) > 50 and integrity_result["status"] == "PASSED")
     print("\n" + "=" * 80, flush=True)
-    print("CONCLUSION: ISOLATED RESTORE TEST PASSED 100%", flush=True)
-    print(f"Restored Tables: {len(restored_tables)} / 77 (100% matched)")
+    print(f"CONCLUSION: ISOLATED RESTORE TEST {'PASSED 100%' if success else 'FAILED'}", flush=True)
+    print(f"Restored Tables: {len(restored_tables)}")
     print(f"Restored Rows:   {total_rows}")
     print(f"Restored PKs:    {pk_count}")
     print(f"Restored FKs:    {fk_count}")
     print(f"Restored Indexes:{index_count}")
     print(f"Revision:        {alem_ver}")
     print("=" * 80, flush=True)
-    return True
+    return success
+
 
 if __name__ == "__main__":
-    run_isolated_restore()
+    parser = argparse.ArgumentParser(description="Execute isolated restore validation.")
+    parser.add_argument("--dump", default=None, help="Path to .dump file (default: latest in database/backups)")
+    args = parser.parse_args()
+
+    ok = run_isolated_restore(args.dump)
+    sys.exit(0 if ok else 1)

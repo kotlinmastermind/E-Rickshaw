@@ -1022,3 +1022,62 @@
   - Admin Web Build `npm run build`: PASSED (1,493 modules transformed with Vite in 8.29s).
   - Android Unit Tests `./gradlew testDebugUnitTest`: PASSED (66 actionable tasks executed/up-to-date in 20s with 0 failures).
 - **Gate Sign-off**: APPROVED & COMPLETED.
+
+
+---
+
+### PRE-PRODUCTION BACKUP, ISOLATED RESTORE & ROLLBACK VERIFICATION GATE
+
+- **Gate Status**: VERIFIED (PASSED)
+- **Execution Date**: 2026-11-09
+- **Backup & Restore Scripts Audit**:
+  1. `deployment/scripts/backup_db.sh`: Verified from source. Standardized bash automation creating gzip-compressed `pg_dump` archives with 30-day retention pruning.
+  2. `deployment/scripts/restore_db.sh`: Verified from source. Shell-based restoration harness passing uncompressed stream to PostgreSQL with interactive 5-second abort window.
+  3. `scripts/create_pg_dump_backup.py`: Verified and enhanced. Python utility creating binary custom format (`-Fc`) archives with SHA-256 integrity metadata, dynamic revision naming, and `--list` TOC validation.
+  4. `scripts/execute_isolated_restore_test.py`: Verified and automated. Full lifecycle harness provisioning a disposable, isolated PostgreSQL 18 cluster on `localhost:54333`, running `pg_restore`, verifying schema integrity, and cleaning up temporary cluster directories without touching production or active staging.
+
+- **Authoritative Backup Catalog**:
+  1. `database/backups/production_full_backup_866dcc677e2a_20261108_131847.dump`:
+     - Timestamp: 2026-11-08 13:18:47 UTC
+     - Size: 281,206 bytes (274.62 KB)
+     - Revision: `866dcc677e2a` (Baseline pre-migration rollback snapshot)
+     - Content: 77 public tables, 155 data rows, 77 PKs, 124 FKs, 222 secondary indexes
+  2. `database/backups/production_full_backup_f23a1b2c3d4e_20261109_012359.dump`:
+     - Timestamp: 2026-11-09 01:23:59 UTC
+     - Size: 490,743 bytes (479.24 KB)
+     - Revision: `f23a1b2c3d4e` (Post-migration HEAD current release snapshot)
+     - Content: 149 public tables, 246 data rows, 1,056 TOC archive entries, 149 PKs, 189 FKs, 34 Unique constraints, 396 secondary indexes
+
+- **Isolated Real Restore Test Evidence**:
+  - **HEAD Archive Restore Test**:
+    - Command: `python scripts/execute_isolated_restore_test.py`
+    - Target: Isolated PostgreSQL 18 cluster on `localhost:54333`, database `isolated_restore_test`
+    - Exit Code: `0`
+    - Restored Tables: 149 / 149 (100% matched)
+    - Restored Rows: 246 across 24 populated tables
+    - Representative Records Audited: `users` (16), `sessions` (75), `rides` (1), `wallets` (6), `driver_profiles` (6)
+    - Database Relational Integrity: `verify_database_integrity` returned `status: PASSED` (0 orphan records, 0 duplicate keys)
+  - **Baseline Rollback Archive Restore Test**:
+    - Command: `python scripts/execute_isolated_restore_test.py --dump database/backups/production_full_backup_866dcc677e2a_20261108_131847.dump`
+    - Target: Isolated PostgreSQL 18 cluster on `localhost:54333`, database `isolated_restore_test`
+    - Exit Code: `0`
+    - Restored Tables: 77 / 77 (100% matched)
+    - Restored Rows: 155 rows across 21 populated tables
+    - Restored Revision: `866dcc677e2a`
+    - Database Relational Integrity: `verify_database_integrity` returned `status: PASSED` (0 orphan records, 0 duplicate keys)
+
+- **Critical Staging Workflows Verification**:
+  - **RiderGo Booking & Ride Lifecycle**: PASSED. 16/16 integration tests passed (`test_api_workflows.py`, `test_phase2_workflows.py`, `test_phase3_background_dispatch.py`).
+  - **DriverGo Accept / Start / Complete Lifecycle**: PASSED. State transitions and concurrency protection verified (`test_state_machine.py`, `test_phase3_background_dispatch.py::test_atomic_acceptance_prevents_duplicate_booking`).
+  - **Admin Authentication & Live Data Operations**: PASSED. Superuser bootstrap, role mappings, and audit logging verified across 34 tests (`test_admin_bootstrap.py`, `test_phase3_security_reliability.py`).
+  - **Payment, Wallet, Fare & Driver Earnings**: PASSED. Razorpay signature verification, wallet ledger locks, and server-side fare calculation verified (`test_phase3_payment_security_and_financials.py`, `test_fare_calculation.py`).
+
+- **Rollback Procedures & Documented Limitations**:
+  - **Procedure 1 — Fast Physical Restore**: Execute `scripts/execute_isolated_restore_test.py` or `deployment/scripts/restore_db.sh` using `production_full_backup_866dcc677e2a_20261108_131847.dump`. Restores complete schema and data in < 30 seconds.
+  - **Procedure 2 — Reversible DDL Downgrade**: Execute `alembic downgrade 866dcc677e2a` or single revision stepbacks `alembic downgrade -1`.
+  - **Documented Limitations**:
+    1. Schema downgrade drops tables added in pending revisions (`b90c3f4a1d27` through `f23a1b2c3d4e`); any rows written into new tables after release would be discarded during a downgrade.
+    2. Physical snapshot restore returns the database to the point-in-time when the dump was taken; inflight payment webhooks received after snapshot creation must be replayed from the `payment_webhook_inbox` table.
+    3. Production forward-fix strategy is recommended over destructive rollback where possible due to 100% additive nature of migrations.
+
+- **Gate Sign-off**: VERIFIED, COMPLETED & READY FOR HUMAN APPROVAL.

@@ -19,7 +19,22 @@ def run_backup():
     
     os.makedirs("database/backups", exist_ok=True)
     timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_dump = f"database/backups/production_full_backup_866dcc677e2a_{timestamp_str}.dump"
+
+    # Get current Alembic revision dynamically
+    current_rev = "f23a1b2c3d4e"
+    try:
+        import psycopg2
+        conn = psycopg2.connect(clean_url, connect_timeout=10)
+        with conn.cursor() as cur:
+            cur.execute("SELECT version_num FROM alembic_version;")
+            row = cur.fetchone()
+            if row:
+                current_rev = row[0]
+        conn.close()
+    except Exception as e:
+        print(f"Warning: could not query alembic_version directly ({e}), using fallback: {current_rev}")
+
+    output_dump = f"database/backups/production_full_backup_{current_rev}_{timestamp_str}.dump"
     
     env = os.environ.copy()
     env["PGHOST"] = parsed.hostname
