@@ -33,6 +33,7 @@ services:
 
   backend:
     image: luxury-registry.io/luxury-ride-backend:${RELEASE_TAG:-latest}
+    container_name: vaisentra-backend-blue
     restart: always
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -55,6 +56,8 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       - /opt/luxury_data/uploads:/app/uploads/documents
     depends_on:
@@ -63,16 +66,65 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - internal_net
+      internal_net:
+        aliases:
+          - backend
+          - backend-1
+          - vaisentra-backend-blue
+
+  backend-green:
+    image: luxury-registry.io/luxury-ride-backend:${GREEN_RELEASE_TAG:-latest}
+    container_name: vaisentra-backend-green
+    restart: "no"
+    profiles:
+      - green
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC}
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      SMS_PROVIDER: firebase
+      ENVIRONMENT: production
+      DEBUG: "False"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    ports:
+      - "127.0.0.1:8001:8000"
+    volumes:
+      - /opt/luxury_data/uploads:/app/uploads/documents
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      internal_net:
+        aliases:
+          - backend-2
+          - vaisentra-backend-green
 
   admin-web:
     image: luxury-registry.io/luxury-ride-admin:${RELEASE_TAG:-latest}
+    container_name: vaisentra-admin-web
     restart: always
     networks:
-      - internal_net
+      internal_net:
+        aliases:
+          - admin-web
+          - vaisentra-admin-web
 
   reverse-proxy:
     image: nginx:1.25-alpine
+    container_name: vaisentra-reverse-proxy
     restart: always
     ports:
       - "80:80"
@@ -84,8 +136,12 @@ services:
       - backend
       - admin-web
     networks:
-      - internal_net
+      internal_net:
+        aliases:
+          - reverse-proxy
+          - nginx
 
 networks:
   internal_net:
+    name: internal_net
     driver: bridge
