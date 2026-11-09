@@ -1081,3 +1081,70 @@
     3. Production forward-fix strategy is recommended over destructive rollback where possible due to 100% additive nature of migrations.
 
 - **Gate Sign-off**: VERIFIED, COMPLETED & READY FOR HUMAN APPROVAL.
+
+
+---
+
+### FINAL PRODUCTION RELEASE HANDOFF & REMAINING RISKS
+
+- **Release Status**: READY FOR HUMAN PRODUCTION APPROVAL (PRE-DEPLOYMENT GATE)
+- **Verified Release Commit**: `315a69a` (Branch: `remediation/master-remediation-100`)
+- **Working Tree**: Clean (0 uncommitted changes)
+- **Target Schema Head**: `f23a1b2c3d4e` (149 tables, 0 relational violations)
+
+#### 1. Technical Explanation of `pg_restore` Exit Code 1
+- **Observed Behavior**: `pg_restore` exited with code `1` during isolated disposable cluster restoration tests, while 100% of tables (149/149), rows (246/246), constraints, and indexes were verified intact.
+- **Root Cause Identified from Stderr Diagnostics**:
+  ```
+  pg_restore: error: could not execute query: ERROR:  schema "public" already exists
+  Command was: CREATE SCHEMA public;
+  pg_restore: warning: errors ignored on restore: 1
+  ```
+- **PostgreSQL Specification**: When a fresh database is initialized with `CREATE DATABASE`, PostgreSQL automatically provisions the default `public` schema from the template database. The dump file contains an explicit `CREATE SCHEMA public;` statement. When `pg_restore` encounters the pre-existing `public` schema, it logs `warning: errors ignored on restore: 1` and returns exit code `1` (which signals non-fatal warnings/ignored errors), reserving exit code `2` for fatal errors. All tables, rows, indexes, and constraints restored completely without data loss or truncation.
+
+#### 2. Environment Identities (Redacted / Secure)
+- **Production Host**: `aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres` (Supabase project `lmrvubzinkziexaqozlw`, AWS AP-Southeast-2)
+- **Production App Container**: Python 3.12-slim Docker container, Gunicorn + 4 Uvicorn workers, unprivileged user `luxuryuser`
+- **Isolated Staging / Verification Cluster**: Local disposable PostgreSQL 18.6 on `localhost:54333`, database `isolated_restore_test`
+- **Admin Mission Control Dashboard**: Node.js / Vite build output in `apps/admin-web/dist`
+
+#### 3. Production Deployment Checklist
+1. [ ] **Human Sign-off**: Obtain explicit written authorization from DevOps and Product Owner.
+2. [ ] **Pre-Flight Snapshot**: Take immediate pre-deployment database dump:
+   ```bash
+   python scripts/create_pg_dump_backup.py
+   ```
+3. [ ] **Database Schema Upgrade**: Apply migrations safely to head:
+   ```bash
+   python scripts/run_migrations.py --revision head
+   python scripts/run_migrations.py --check
+   python scripts/verify_database_integrity.py
+   ```
+4. [ ] **Container Deployment**: Build and deploy backend container:
+   ```bash
+   docker build -t vaisentra-backend:latest .
+   docker stop vaisentra-backend-live && docker rm vaisentra-backend-live
+   docker run -d --name vaisentra-backend-live --env-file .env -p 8000:8000 vaisentra-backend:latest
+   ```
+5. [ ] **Health Check Verification**:
+   - `curl -f http://localhost:8000/health/live` (expects 200 OK)
+   - `curl -f http://localhost:8000/health/ready` (expects 200 OK, database: true)
+6. [ ] **Admin Web Dashboard**: Deploy static build artifacts from `apps/admin-web/dist`.
+7. [ ] **Post-Deployment Smoke Tests**:
+   - Validate Admin authentication and live metrics on Mission Control console.
+   - Verify Razorpay webhook delivery on `/api/v1/payments/webhook`.
+   - Verify RiderGo fare calculation and DriverGo status transitions.
+8. [ ] **Webhook Inbox Monitoring**: Query `payment_webhook_inbox` table to confirm zero unprocessed backlog.
+
+#### 4. Remaining Risks & Operational Mitigations
+1. **Network Latency to Pooler**:
+   - *Risk*: Transaction timeouts if network latency between application host and Supabase pooler spikes.
+   - *Mitigation*: Connection pooling timeouts set to 15s; circuit breaker patterns implemented in backend services.
+2. **Inflight Webhook Deduplication**:
+   - *Risk*: Duplicate payment webhook deliveries during container restart window.
+   - *Mitigation*: `payment_webhook_inbox` deduplicates on `event_digest` (SHA-256 unique constraint); duplicates receive HTTP 200 without duplicate ledger mutations.
+3. **Rollback State Loss**:
+   - *Risk*: Running `alembic downgrade` after live transactions commence would drop newly added tables.
+   - *Mitigation*: Prefer forward-fix patches over destructive schema downgrades; physical dump available in `database/backups/`.
+
+- **Final Handoff Sign-off**: Complete remediation delivered, verified, and documented. Ready for human-authorized deployment.

@@ -96,6 +96,10 @@ def run_isolated_restore(dump_path: str = None):
     ]
     restore_res = subprocess.run(restore_cmd, capture_output=True, text=True)
     print(f"pg_restore finished with exit code {restore_res.returncode}.", flush=True)
+    if restore_res.stderr:
+        print(f"pg_restore stderr diagnostics ({len(restore_res.stderr.splitlines())} lines):", flush=True)
+        for line in restore_res.stderr.splitlines():
+            print(f"  {line}", flush=True)
 
     # 5. Connect and audit restored database
     print(f"\n[Step 5/7] Verifying restored schema, tables, rows, indexes & constraints...", flush=True)
