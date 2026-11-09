@@ -182,6 +182,81 @@ class DriverService:
         return {"status": "RECORDED", "accuracy_m": accuracy_m, "quality_flags": flags,
                 "risk_signal": bool(risk), "risk_action": "REVIEW_SIGNAL_ONLY"}
 
+    async def update_location_batch(self, user_id: str, locations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Atomically ingests a batch of offline buffered driver locations."""
+        if not locations:
+            return {"status": "SUCCESS", "ingested_count": 0}
+
+        driver = await self.get_or_create_profile(user_id)
+        now = datetime.now(timezone.utc)
+        ingested = 0
+        latest_loc = None
+
+        for item in locations:
+            lat = item.get("latitude")
+            lng = item.get("longitude")
+            if lat is None or lng is None:
+                continue
+            heading = item.get("heading")
+            speed = item.get("speed_mps") or item.get("speed")
+            acc = item.get("accuracy_m") or item.get("accuracy")
+            is_mock = item.get("is_mock_location", False)
+            source = item.get("location_source", "FUSED")
+
+            rec_at = item.get("timestamp") or item.get("recorded_at")
+            if isinstance(rec_at, (int, float)):
+                ts = datetime.fromtimestamp(rec_at if rec_at < 1e11 else rec_at / 1000.0, tz=timezone.utc)
+            elif isinstance(rec_at, str):
+                try:
+                    ts = datetime.fromisoformat(rec_at.replace("Z", "+00:00"))
+                except Exception:
+                    ts = now
+            else:
+                ts = now
+
+            loc = DriverLocation(
+                driver_id=driver.id,
+                latitude=lat,
+                longitude=lng,
+                heading=heading,
+                speed=speed,
+                accuracy=acc,
+                spoof_risk_score=0.9 if is_mock else 0.0,
+                quality_flags_json=json.dumps(["BATCH_OFFLINE_UPLOAD"] + (["MOCK_LOCATION_REPORTED"] if is_mock else [])),
+                source=source,
+                recorded_at=ts
+            )
+            self.db.add(loc)
+            ingested += 1
+            latest_loc = (lat, lng, heading, speed, acc, is_mock, source)
+
+        availability = (await self.db.execute(select(DriverAvailability).where(DriverAvailability.driver_id == driver.id))).scalars().first()
+        if availability:
+            availability.last_heartbeat = now
+        await self.db.commit()
+
+        if latest_loc:
+            try:
+                from backend.application.services.live_location_service import LiveLocationService
+                is_online = availability.is_online if availability else True
+                is_busy = availability.is_busy if availability else False
+                await LiveLocationService(self.db).ingest_driver_location(
+                    driver_id=driver.id,
+                    latitude=latest_loc[0],
+                    longitude=latest_loc[1],
+                    heading=latest_loc[2],
+                    speed_mps=latest_loc[3],
+                    accuracy_m=latest_loc[4],
+                    is_mock_location=latest_loc[5],
+                    location_source=latest_loc[6],
+                    is_online=is_online,
+                    is_busy=is_busy
+                )
+            except Exception:
+                pass
+
+        return {"status": "SUCCESS", "ingested_count": ingested}
+
     @staticmethod
     def _location_distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
         import math

@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.core.security
+package com.vaisentra.mobility.rider.core.security
 
 import android.content.Context
 import android.content.SharedPreferences

@@ -1071,9 +1071,26 @@ fun CustomerMasterCatalogFlow(
                             scope.launch {
                                 try {
                                     val cleanPhone = userPhone.replace(" ", "").replace("-", "")
+                                    var resolvedEstId: String? = null
+                                    try {
+                                        val estRes = ApiClient.getService().calculateFareEstimate(
+                                            com.vaisentra.mobility.rider.core.network.FareEstimateRequest(
+                                                categoryId = "default_erickshaw_cat",
+                                                pickupLatitude = pickupLatLng.latitude,
+                                                pickupLongitude = pickupLatLng.longitude,
+                                                destinationLatitude = destLatLng?.latitude ?: (pickupLatLng.latitude + 0.01),
+                                                destinationLongitude = destLatLng?.longitude ?: (pickupLatLng.longitude + 0.01)
+                                            )
+                                        )
+                                        if (estRes.isSuccessful && estRes.body() != null) {
+                                            resolvedEstId = estRes.body()?.estimateId
+                                        }
+                                    } catch (_: Exception) {}
+
+                                    val finalEstimateId = resolvedEstId ?: ("est_live_" + System.currentTimeMillis().toString().takeLast(6))
                                     val res = ApiClient.getService().requestRide(
                                         RideRequestPayload(
-                                            estimateId = "est_live_" + System.currentTimeMillis().toString().takeLast(6),
+                                            estimateId = finalEstimateId,
                                             pickupAddress = pickupAddressText,
                                             destinationAddress = destinationAddress,
                                             paymentMethod = if (selectedPaymentMethod.contains("Wallet")) "WALLET" else "UPI",

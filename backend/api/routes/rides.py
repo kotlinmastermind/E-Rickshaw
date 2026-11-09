@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -204,15 +204,37 @@ class DestinationResponsePayload(BaseModel):
 @router.post("/request")
 async def create_ride_request(
     payload: RideRequestPayload,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     user: User = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db)
 ):
+    if idempotency_key:
+        clean_key = idempotency_key.strip()
+        try:
+            from backend.infrastructure.cache.redis_client import redis_client
+            cached_ride_id = await redis_client.get(f"idempotency:ride:{user.id}:{clean_key}")
+            if cached_ride_id:
+                ride_id_str = cached_ride_id.decode() if isinstance(cached_ride_id, bytes) else str(cached_ride_id)
+                stmt = select(Ride).where(Ride.id == ride_id_str)
+                existing_ride = (await db.execute(stmt)).scalars().first()
+                if existing_ride:
+                    return {
+                        "ride_id": existing_ride.id,
+                        "status": existing_ride.status,
+                        "pickup_address": existing_ride.pickup_address,
+                        "destination_address": existing_ride.destination_address,
+                        "start_otp": existing_ride.start_otp,
+                        "idempotent_replay": True
+                    }
+        except Exception:
+            pass
+
     if payload.is_scheduled and payload.scheduled_pickup_time:
         DispatchAdvancedService.validate_schedule_window(payload.scheduled_pickup_time)
 
     service = RideService(db)
     stops_data = [s.model_dump() for s in payload.stops] if payload.stops else None
-    return await service.create_ride_request(
+    result = await service.create_ride_request(
         customer_user_id=user.id,
         estimate_id=payload.estimate_id,
         pickup_address=payload.pickup_address,
@@ -227,6 +249,15 @@ async def create_ride_request(
         promo_code=payload.promo_code,
         stops=stops_data
     )
+
+    if idempotency_key and isinstance(result, dict) and "ride_id" in result:
+        try:
+            from backend.infrastructure.cache.redis_client import redis_client
+            await redis_client.set(f"idempotency:ride:{user.id}:{idempotency_key.strip()}", result["ride_id"], ex=86400)
+        except Exception:
+            pass
+
+    return result
 
 @router.post("/schedule")
 async def schedule_ride(

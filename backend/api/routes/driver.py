@@ -118,6 +118,19 @@ async def update_location(
     return await service.update_location(user.id, payload.latitude, payload.longitude, payload.heading,
         payload.speed_mps, payload.accuracy_m, payload.is_mock_location, payload.location_source)
 
+class LocationBatchPayload(BaseModel):
+    locations: List[LocationPingPayload] = Field(..., max_length=500)
+
+@router.post("/location/batch")
+async def update_location_batch(
+    payload: LocationBatchPayload,
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    service = DriverService(db)
+    items = [loc.model_dump() for loc in payload.locations]
+    return await service.update_location_batch(user.id, items)
+
 @router.get("/earnings")
 async def get_earnings(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
     service = DriverService(db)

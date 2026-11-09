@@ -43,6 +43,10 @@ data class DriverLocationPayload(
     @SerializedName("location_source") val locationSource: String = "FUSED"
 )
 
+data class DriverLocationBatchPayload(
+    @SerializedName("locations") val locations: List<DriverLocationPayload>
+)
+
 data class StartTripPayload(
     @SerializedName("otp_code") val otpCode: String? = null
 )
@@ -81,6 +85,9 @@ interface DriverApiService {
 
     @POST("api/v1/drivers/location")
     suspend fun pingLocation(@Body payload: DriverLocationPayload): Response<Map<String, Any>>
+
+    @POST("api/v1/drivers/location/batch")
+    suspend fun pingLocationBatch(@Body payload: DriverLocationBatchPayload): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{id}/accept")
     suspend fun acceptRide(@Path("id") rideId: String): Response<Map<String, Any>>

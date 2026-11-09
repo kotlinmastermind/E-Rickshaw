@@ -1,47 +1,14 @@
-﻿package com.vaisentra.mobility.driver.core.network
+package com.vaisentra.mobility.driver.core.network
 
 import android.content.Context
+import com.vaisentra.mobility.core.network.ResilientDns
 import com.vaisentra.mobility.driver.core.security.DriverTokenManager
-import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import java.net.InetAddress
-import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
-
-/**
- * Enterprise Resilient DNS Resolver for Driver App.
- * Automatically resolves e-rickshaw-z32z.onrender.com even if the physical device's
- * local mobile network or WiFi ISP DNS resolver fails, times out, or blocks Render domains in India.
- */
-object ResilientDns : Dns {
-    private val RENDER_FALLBACK_IPS = listOf(
-        byteArrayOf(216.toByte(), 24.toByte(), 57.toByte(), 16.toByte()),
-        byteArrayOf(216.toByte(), 24.toByte(), 57.toByte(), 18.toByte())
-    )
-
-    override fun lookup(hostname: String): List<InetAddress> {
-        return try {
-            val addresses = Dns.SYSTEM.lookup(hostname)
-            if (addresses.isNotEmpty()) addresses else throw UnknownHostException("No IP address found for $hostname")
-        } catch (e: Exception) {
-            if (hostname.contains("onrender.com", ignoreCase = true)) {
-                try {
-                    RENDER_FALLBACK_IPS.map { ipBytes ->
-                        InetAddress.getByAddress(hostname, ipBytes)
-                    }
-                } catch (_: Throwable) {
-                    throw UnknownHostException("Unable to resolve server address for \"$hostname\": ${e.message}")
-                }
-            } else {
-                throw UnknownHostException("Unable to resolve server address for \"$hostname\": ${e.message}")
-            }
-        }
-    }
-}
 
 object DriverApiClient {
     // Cloud Render URL (Production online server)

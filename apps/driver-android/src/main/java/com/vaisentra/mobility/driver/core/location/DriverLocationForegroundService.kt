@@ -452,17 +452,32 @@ class DriverLocationForegroundService : Service() {
     private fun flushOfflineLocations() {
         if (offlineLocationQueue.isEmpty()) return
         serviceScope.launch(Dispatchers.IO) {
+            val batch = mutableListOf<DriverLocationPayload>()
             while (!offlineLocationQueue.isEmpty()) {
                 val queued = offlineLocationQueue.poll() ?: break
-                try {
-                    val resp = DriverApiClient.getService().pingLocation(queued)
-                    if (!resp.isSuccessful) {
-                        offlineLocationQueue.offer(queued)
-                        break
+                batch.add(queued)
+            }
+            if (batch.isEmpty()) return@launch
+
+            try {
+                val resp = DriverApiClient.getService().pingLocationBatch(
+                    com.vaisentra.mobility.driver.core.network.DriverLocationBatchPayload(batch)
+                )
+                if (!resp.isSuccessful) {
+                    for (item in batch) {
+                        if (offlineLocationQueue.size < MAX_OFFLINE_BUFFER_SIZE) {
+                            offlineLocationQueue.offer(item)
+                        }
                     }
-                } catch (e: Exception) {
-                    offlineLocationQueue.offer(queued)
-                    break
+                } else {
+                    Log.d(TAG, "Successfully flushed ${batch.size} offline location pings via batch endpoint")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Batch location flush failed: ${e.message}, restoring queue")
+                for (item in batch) {
+                    if (offlineLocationQueue.size < MAX_OFFLINE_BUFFER_SIZE) {
+                        offlineLocationQueue.offer(item)
+                    }
                 }
             }
         }

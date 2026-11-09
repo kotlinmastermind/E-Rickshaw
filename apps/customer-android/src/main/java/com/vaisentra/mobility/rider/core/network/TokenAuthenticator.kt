@@ -1,6 +1,7 @@
 package com.vaisentra.mobility.rider.core.network
 
 import android.util.Log
+import com.vaisentra.mobility.core.network.ResilientDns
 import com.vaisentra.mobility.rider.core.security.TokenManager
 import okhttp3.Authenticator
 import okhttp3.MediaType.Companion.toMediaType
