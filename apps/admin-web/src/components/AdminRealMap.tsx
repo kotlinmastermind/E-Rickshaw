@@ -413,7 +413,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
         const wsBase = API_BASE.startsWith('http')
           ? API_BASE.replace(/^http/, 'ws')
           : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1`;
-        const wsUrl = `${wsBase.replace(/\/$/, '')}/admin/telemetry?ticket=${encodeURIComponent(ticket)}`;
+        const wsUrl = `${wsBase.replace(/\/$/, '')}/ws/admin/telemetry?ticket=${encodeURIComponent(ticket)}`;
         ws = new WebSocket(wsUrl);
         ws.onmessage = (event) => {
           try {

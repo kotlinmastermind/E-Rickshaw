@@ -4,7 +4,8 @@ import logging
 import os
 import time
 import uuid
-from fastapi import FastAPI, Request, status
+from typing import Optional
+from fastapi import FastAPI, Request, status, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -328,6 +329,12 @@ app.include_router(driver_safety.router, prefix=settings.API_V1_STR)
 app.include_router(driver_financials.router, prefix=settings.API_V1_STR)
 app.include_router(analytics_bi.router, prefix=settings.API_V1_STR)
 app.include_router(dispatch.router, prefix=settings.API_V1_STR)
+
+@app.websocket("/api/v1/admin/telemetry")
+@app.websocket("/admin/telemetry")
+async def admin_telemetry_ws_alias(websocket: WebSocket, ticket: Optional[str] = Query(None)):
+    """Direct alias for admin telemetry to guarantee seamless path compatibility across all environments."""
+    return await ws.admin_telemetry_websocket(websocket, ticket=ticket)
 
 # --- Dynamic Admin Web Panel Hosting on Render ---
 STATIC_ADMIN_DIR = os.path.join(os.path.dirname(__file__), "static", "admin")
