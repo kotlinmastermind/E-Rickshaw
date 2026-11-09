@@ -337,13 +337,19 @@ if os.path.exists(STATIC_ADMIN_DIR):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="admin_assets")
         app.mount("/admin/assets", StaticFiles(directory=assets_dir), name="admin_nested_assets")
 
+SPA_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
 @app.get("/admin", include_in_schema=False)
 @app.get("/admin/{full_path:path}", include_in_schema=False)
 async def serve_admin_panel(full_path: str = ""):
     """Dynamically serve the Luxury Admin Panel SPA from Render."""
     index_file = os.path.join(STATIC_ADMIN_DIR, "index.html")
     if os.path.exists(index_file):
-        return FileResponse(index_file)
+        return FileResponse(index_file, headers=SPA_NO_CACHE_HEADERS)
     return HTMLResponse("<h1>Luxury Admin Panel initializing on Render...</h1>", status_code=200)
 
 @app.get("/", tags=["Root"])
@@ -353,7 +359,7 @@ async def root(request: Request):
     index_file = os.path.join(STATIC_ADMIN_DIR, "index.html")
     # If a browser requests the root URL, dynamically serve the Admin Panel SPA
     if "text/html" in accept and os.path.exists(index_file):
-        return FileResponse(index_file)
+        return FileResponse(index_file, headers=SPA_NO_CACHE_HEADERS)
     return {
         "service": settings.PROJECT_NAME,
         "version": "1.0.0",

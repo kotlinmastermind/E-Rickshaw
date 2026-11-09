@@ -105,9 +105,10 @@ const isValidMapboxToken =
 try {
   if ((mapboxgl as any)?.config) {
     Object.defineProperty((mapboxgl as any).config, 'EVENTS_URL', {
-      value: null,
-      writable: true,
-      configurable: true
+      get: () => null,
+      set: () => {},
+      configurable: true,
+      enumerable: true
     });
   }
 } catch {
