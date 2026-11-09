@@ -11,6 +11,21 @@ export default defineConfig({
     port: 5173,
     host: true,
     proxy: {
+      '/api/v1/admin/telemetry': {
+        target: wsTarget,
+        ws: true,
+        changeOrigin: true
+      },
+      '/api/v1/rides': {
+        target: wsTarget,
+        ws: true,
+        changeOrigin: true
+      },
+      '/api/v1/driver/dispatch': {
+        target: wsTarget,
+        ws: true,
+        changeOrigin: true
+      },
       '/api/v1/ws': {
         target: wsTarget,
         ws: true,
@@ -23,7 +38,8 @@ export default defineConfig({
       },
       '/api/v1': {
         target: backendTarget,
-        changeOrigin: true
+        changeOrigin: true,
+        ws: true
       },
       '/health': {
         target: backendTarget,

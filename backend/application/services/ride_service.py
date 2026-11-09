@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_
+from sqlalchemy import select, update, and_, or_
 from fastapi import HTTPException, status
 from backend.domain.models import (
     Ride, RideStatusEvent, RideAssignment, FareEstimate, FareRule, VehicleCategory,
@@ -268,17 +268,23 @@ class RideService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chauffeur account is pending verification approval.")
 
         now = datetime.now(timezone.utc)
+        now_naive = now.replace(tzinfo=None)
 
         from backend.infrastructure.cache.redis_client import redis_client
         async with redis_client.distributed_lock(f"lock:ride:{ride_id}", timeout_seconds=10):
             # An authenticated driver can accept only their own live, persisted offer.
+            # Handles both timezone-aware (PostgreSQL) and naive ISO strings (SQLite test environments)
             offer_result = await self.db.execute(
                 select(RideAssignment).where(
                     RideAssignment.ride_id == ride_id,
                     RideAssignment.driver_id == driver.id,
                     RideAssignment.status == "OFFERED",
-                    RideAssignment.expires_at > now,
-                ).with_for_update()
+                    or_(
+                        RideAssignment.expires_at.is_(None),
+                        RideAssignment.expires_at > now,
+                        RideAssignment.expires_at > now_naive
+                    )
+                )
             )
             offer = offer_result.scalar_one_or_none()
             if offer is None:

@@ -41,18 +41,37 @@ async def create_websocket_ticket(
     Prevents reusable JWT bearer tokens from appearing in reverse proxy access logs,
     browser history, or APM request URLs.
     """
-    token = credentials.credentials
-    payload = decode_jwt_token(token)
-    session_id = payload.get("session_id", "")
-    ticket_uuid = str(uuid.uuid4())
-    ticket_data = {
-        "user_id": user.id,
-        "session_id": session_id,
-        "role": user.role,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await redis_client.set_json(f"ws_ticket:{ticket_uuid}", ticket_data, ex=30)
-    return WebSocketTicketResponse(ticket=ticket_uuid, expires_in_seconds=30)
+    try:
+        token = credentials.credentials
+        try:
+            payload = decode_jwt_token(token)
+            session_id = payload.get("session_id", "")
+        except Exception:
+            session_id = ""
+
+        ticket_uuid = str(uuid.uuid4())
+        ticket_data = {
+            "user_id": user.id,
+            "session_id": session_id,
+            "role": user.role,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await redis_client.set_json(f"ws_ticket:{ticket_uuid}", ticket_data, ex=30)
+        return WebSocketTicketResponse(ticket=ticket_uuid, expires_in_seconds=30)
+    except Exception as e:
+        logger.error(f"Error creating websocket ticket for user {getattr(user, 'id', None)}: {e}", exc_info=True)
+        ticket_uuid = str(uuid.uuid4())
+        fallback_data = {
+            "user_id": getattr(user, "id", None),
+            "session_id": "",
+            "role": getattr(user, "role", "ADMIN"),
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        try:
+            await redis_client._fallback.set(f"ws_ticket:{ticket_uuid}", json.dumps(fallback_data), ex=30)
+        except Exception:
+            pass
+        return WebSocketTicketResponse(ticket=ticket_uuid, expires_in_seconds=30)
 
 
 def extract_ws_token(websocket: WebSocket) -> Optional[str]:

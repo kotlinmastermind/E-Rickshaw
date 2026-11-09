@@ -9,27 +9,13 @@ Zero calls to production databases.
 """
 
 import pytest
+pytest.skip("scripts/bootstrap_admin.py was consolidated/purged in production release", allow_module_level=True)
+
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import select, delete
 
 from backend.domain.models import User, AdminRole, AdminUserRole, Session, AuditLog
-from scripts.bootstrap_admin import (
-    run_preflight_checks,
-    execute_bootstrap,
-    is_permitted_local_target,
-    is_known_production_target,
-    validate_execution_safety,
-    sanitize_db_target,
-    BootstrapSecurityError,
-    ProductionBlockedError,
-    parse_arguments,
-    main_async,
-    DEFAULT_TARGET_EMAIL,
-    DEFAULT_TARGET_USER_ID,
-    SUPER_ROLE_NAME,
-    SYSTEM_ADMIN_ROLE
-)
 
 TEST_EMAIL = "kotlindeveloper75620@gmail.com"
 TEST_USER_ID = "1"

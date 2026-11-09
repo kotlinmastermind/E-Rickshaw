@@ -126,10 +126,7 @@ export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = (
         >
           ⚡ Instant Executive Demo Sign-In
         </button>
-        <div style={{ background: '#101014', border: '1px solid #28241d', borderRadius: 8, padding: '10px 12px', marginTop: 6, fontSize: 11, color: '#8e887f' }}>
-          <strong style={{ color: '#d4af37' }}>Quick Seed Admin:</strong><br />
-          <code>kotlindeveloper75620@gmail.com</code> / <code>Admin@1234</code>
-        </div>
+
       </form>}
 
       {!challenge && !setup && isForgotMode && <form onSubmit={recoverySent ? completeRecovery : requestRecovery} style={{ display: 'grid', gap: 14 }}>

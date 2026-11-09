@@ -439,6 +439,9 @@ class DriverLocationForegroundService : Service() {
 
                     // 2. Periodic reconciliation check
                     DriverDispatchManager.reconcilePendingOffers(applicationContext)
+
+                    // 3. Attempt flushing any pending SQLite offline telemetry points
+                    flushOfflineLocations()
                 } catch (e: Exception) {
                     Log.d(TAG, "Error in dispatch heartbeat/sync loop: ${e.message}")
                 }
@@ -446,39 +449,34 @@ class DriverLocationForegroundService : Service() {
         }
     }
 
-    private val offlineLocationQueue = java.util.concurrent.ConcurrentLinkedQueue<DriverLocationPayload>()
-    private val MAX_OFFLINE_BUFFER_SIZE = 60
+    private val offlineLocationDb by lazy { DriverOfflineLocationDbHelper.getInstance(applicationContext) }
 
     private fun flushOfflineLocations() {
-        if (offlineLocationQueue.isEmpty()) return
+        val count = offlineLocationDb.getPendingCount()
+        if (count == 0) return
         serviceScope.launch(Dispatchers.IO) {
-            val batch = mutableListOf<DriverLocationPayload>()
-            while (!offlineLocationQueue.isEmpty()) {
-                val queued = offlineLocationQueue.poll() ?: break
-                batch.add(queued)
-            }
-            if (batch.isEmpty()) return@launch
-
             try {
+                val pending = offlineLocationDb.peekPendingLocations(30)
+                if (pending.isEmpty()) return@launch
+
+                val payloads = pending.map { it.second }
+                val ids = pending.map { it.first }
+
                 val resp = DriverApiClient.getService().pingLocationBatch(
-                    com.vaisentra.mobility.driver.core.network.DriverLocationBatchPayload(batch)
+                    com.vaisentra.mobility.driver.core.network.DriverLocationBatchPayload(payloads)
                 )
-                if (!resp.isSuccessful) {
-                    for (item in batch) {
-                        if (offlineLocationQueue.size < MAX_OFFLINE_BUFFER_SIZE) {
-                            offlineLocationQueue.offer(item)
-                        }
+                if (resp.isSuccessful) {
+                    offlineLocationDb.deleteLocations(ids)
+                    Log.d(TAG, "Successfully flushed ${ids.size} SQLite offline location pings via batch endpoint")
+                    // If more remains, flush next chunk
+                    if (offlineLocationDb.getPendingCount() > 0) {
+                        flushOfflineLocations()
                     }
                 } else {
-                    Log.d(TAG, "Successfully flushed ${batch.size} offline location pings via batch endpoint")
+                    Log.w(TAG, "Batch location flush received HTTP ${resp.code()}; retaining offline locations")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Batch location flush failed: ${e.message}, restoring queue")
-                for (item in batch) {
-                    if (offlineLocationQueue.size < MAX_OFFLINE_BUFFER_SIZE) {
-                        offlineLocationQueue.offer(item)
-                    }
-                }
+                Log.w(TAG, "Batch location flush failed: ${e.message}; offline points remain safely persisted in SQLite")
             }
         }
     }
@@ -493,7 +491,7 @@ class DriverLocationForegroundService : Service() {
             telemetryWebSocket?.send(wsPayload)
         } catch (_: Exception) {}
 
-        // 2. Send over REST HTTP Ping Backup with Offline Buffering
+        // 2. Send over REST HTTP Ping Backup with Durable SQLite Persistence
         val payload = DriverLocationPayload(
             latitude = location.latitude,
             longitude = location.longitude,
@@ -510,15 +508,11 @@ class DriverLocationForegroundService : Service() {
                 if (resp.isSuccessful) {
                     flushOfflineLocations()
                 } else {
-                    if (offlineLocationQueue.size < MAX_OFFLINE_BUFFER_SIZE) {
-                        offlineLocationQueue.offer(payload)
-                    }
+                    offlineLocationDb.enqueueLocation(payload)
                 }
             } catch (e: Exception) {
-                Log.d(TAG, "Driver location ping network glitch, buffered in offline queue: ${e.message}")
-                if (offlineLocationQueue.size < MAX_OFFLINE_BUFFER_SIZE) {
-                    offlineLocationQueue.offer(payload)
-                }
+                Log.d(TAG, "Driver location ping network glitch, safely stored in SQLite offline queue: ${e.message}")
+                offlineLocationDb.enqueueLocation(payload)
             }
         }
     }

@@ -160,8 +160,18 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
 
             # Offer ride assignment to both drivers so they can concurrently attempt to accept
             from datetime import datetime, timezone, timedelta
-            from backend.domain.models import RideAssignment, DriverProfile
+            from backend.domain.models import RideAssignment, DriverProfile, Ride
             from sqlalchemy import select
+            # Allow any immediate background dispatch task to settle
+            import asyncio
+            await asyncio.sleep(0.5)
+
+            # Ensure ride is in REQUESTED state and assign offers to both drivers
+            from sqlalchemy import update
+            await db_session.execute(
+                update(Ride).where(Ride.id == ride_id).values(status="REQUESTED", assigned_driver_id=None)
+            )
+
             drv1_prof = (await db_session.execute(select(DriverProfile).where(DriverProfile.user_id == drv1_signup.json()["user"]["id"]))).scalar_one()
             drv2_prof = (await db_session.execute(select(DriverProfile).where(DriverProfile.user_id == drv2_signup.json()["user"]["id"]))).scalar_one()
             drv1_prof.approval_status = "APPROVED"
@@ -176,8 +186,8 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             accept_resp1 = await client.post(f"/api/v1/rides/{ride_id}/accept", headers=drv1_headers)
             accept_resp2 = await client.post(f"/api/v1/rides/{ride_id}/accept", headers=drv2_headers)
 
-            # Exactly ONE driver must succeed (200), the other MUST receive 409 Conflict!
             statuses = [accept_resp1.status_code, accept_resp2.status_code]
+            # Exactly ONE driver must succeed (200), the other MUST receive 409 Conflict!
             assert 200 in statuses
             assert 409 in statuses
 

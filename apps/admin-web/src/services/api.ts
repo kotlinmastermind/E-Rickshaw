@@ -122,11 +122,12 @@ export async function downloadWithAuth(endpoint: string): Promise<Blob> {
 }
 
 export async function getWebSocketTicket(): Promise<string | null> {
+  const token = localStorage.getItem("admin_token");
+  if (!token) return null;
   try {
     const res = await requestApi<{ ticket: string; expires_in_seconds: number }>("/ws/ticket", { method: "POST" });
     return res?.ticket || null;
-  } catch (err) {
-    console.warn("Failed to obtain WebSocket ticket", err);
+  } catch {
     return null;
   }
 }

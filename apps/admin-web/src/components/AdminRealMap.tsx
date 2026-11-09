@@ -101,6 +101,19 @@ const isValidMapboxToken =
   !MAPBOX_PUBLIC_KEY.includes('MapboxPublicDemo') &&
   !MAPBOX_PUBLIC_KEY.includes('example_public_token');
 
+// Disable Mapbox telemetry events to prevent net::ERR_BLOCKED_BY_CLIENT errors when browser adblockers are active
+try {
+  if ((mapboxgl as any)?.config) {
+    Object.defineProperty((mapboxgl as any).config, 'EVENTS_URL', {
+      value: null,
+      writable: true,
+      configurable: true
+    });
+  }
+} catch {
+  // Ignore in restricted environments
+}
+
 const MAPBOX_STYLES: Record<string, string> = {
   dark: 'mapbox://styles/mapbox/dark-v11',
   streets: 'mapbox://styles/mapbox/streets-v12',
@@ -399,7 +412,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
         const wsBase = API_BASE.startsWith('http')
           ? API_BASE.replace(/^http/, 'ws')
           : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1`;
-        const wsUrl = `${wsBase.replace(/\/$/, '')}/ws/admin/telemetry?ticket=${encodeURIComponent(ticket)}`;
+        const wsUrl = `${wsBase.replace(/\/$/, '')}/admin/telemetry?ticket=${encodeURIComponent(ticket)}`;
         ws = new WebSocket(wsUrl);
         ws.onmessage = (event) => {
           try {
@@ -1130,9 +1143,8 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
           (pos) => {
             handleUserLocationAcquired([pos.coords.longitude, pos.coords.latitude], true);
           },
-          (err) => {
-            console.warn('Initial geolocation notice:', err.message);
-            // If GPS is disabled or waiting, retain worldwide globe overview or fit active vehicles
+          () => {
+            // Geolocation is optional for admin overview; fit active vehicles if available
             if (vehicles.length > 0) {
               const bounds = new mapboxgl.LngLatBounds();
               vehicles.forEach(v => bounds.extend([v.lng, v.lat]));

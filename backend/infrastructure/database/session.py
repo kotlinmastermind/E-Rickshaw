@@ -10,23 +10,35 @@ logger = logging.getLogger("backend.database")
 class Base(DeclarativeBase):
     pass
 
-connect_args = {"check_same_thread": False, "timeout": 30} if settings.DATABASE_URL.startswith("sqlite") else {"timeout": 15, "command_timeout": 15}
+db_url = settings.DATABASE_URL
+# Automatically adapt Supabase pooler from session mode (port 5432, max 15 clients) to transaction mode (port 6543)
+if "pooler.supabase.com:5432" in db_url:
+    db_url = db_url.replace("pooler.supabase.com:5432", "pooler.supabase.com:6543")
+
+if db_url.startswith("sqlite"):
+    connect_args = {"check_same_thread": False, "timeout": 30}
+else:
+    connect_args = {"timeout": 15, "command_timeout": 15}
+    if "pooler.supabase.com" in db_url:
+        connect_args["statement_cache_size"] = 0
 
 engine_kwargs = {
     "echo": False,
     "future": True,
     "connect_args": connect_args
 }
-if not settings.DATABASE_URL.startswith("sqlite"):
+if not db_url.startswith("sqlite"):
     engine_kwargs.update({
         "pool_pre_ping": True,
-        "pool_size": 20,
-        "max_overflow": 10,
+        "pool_size": 10,
+        "max_overflow": 5,
+        "pool_recycle": 300,
+        "pool_timeout": 15,
         "isolation_level": "READ COMMITTED"
     })
 
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    db_url,
     **engine_kwargs
 )
 
