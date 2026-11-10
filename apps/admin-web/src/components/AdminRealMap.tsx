@@ -317,9 +317,12 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
 
   // Active Map Mode (can be switched dynamically in HUD)
   const [activeMode, setActiveMode] = useState<string>(mode);
+  const activeModeRef = useRef<string>(mode);
   useEffect(() => {
     setActiveMode(mode);
+    activeModeRef.current = mode;
   }, [mode]);
+  activeModeRef.current = activeMode;
 
   const [tileStyle, setTileStyle] = useState<'dark' | 'streets' | 'satellite'>('dark');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -982,10 +985,6 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
         dEl.innerText = 'DROPOFF';
         const dM = new mapboxgl.Marker({ element: dEl }).setLngLat(drop).addTo(map);
         markersRef.current.push(dM);
-
-        const bounds = new mapboxgl.LngLatBounds();
-        routeCoords.forEach(c => bounds.extend(c));
-        map.fitBounds(bounds, { padding: 80, duration: 1000 });
       }
 
       // 6. SOS INCIDENT BEACON
@@ -1028,8 +1027,6 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
           .setPopup(sosPopup)
           .addTo(map);
         markersRef.current.push(sMarker);
-
-        map.flyTo({ center: incidentCoords, zoom: 16, duration: 1200 });
       }
     },
     [
@@ -1045,12 +1042,53 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
     ]
   );
 
-  // Re-render overlays when vehicle or breadcrumb state updates
+  const renderOverlaysRef = useRef(renderOverlays);
+  renderOverlaysRef.current = renderOverlays;
+  const vehiclesRef = useRef(vehicles);
+  vehiclesRef.current = vehicles;
+
+  // Re-render overlays dynamically on the existing map when vehicle or filter state changes
   useEffect(() => {
-    if (mapInstanceRef.current && mapInstanceRef.current.loaded()) {
-      renderOverlays(mapInstanceRef.current);
+    const map = mapInstanceRef.current;
+    if (map && map.loaded()) {
+      renderOverlays(map);
     }
   }, [vehicles, vehicleFilter, searchQuery, activeMode, geofences, restrictedRoads, renderOverlays]);
+
+  // Animate camera focus ONLY ONCE when switching operational modes
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const applyModeCamera = () => {
+      if (lastModeCameraRef.current !== activeMode) {
+        lastModeCameraRef.current = activeMode;
+        if (activeMode === 'ride_route') {
+          const topVehicle = vehicles.length > 0 ? vehicles[0] : null;
+          const pickup: [number, number] = topVehicle ? [topVehicle.lng, topVehicle.lat] : [77.2195, 28.6328];
+          const drop: [number, number] = [pickup[0] + 0.015, pickup[1] + 0.012];
+          const bounds = new mapboxgl.LngLatBounds();
+          bounds.extend(pickup);
+          bounds.extend(drop);
+          map.fitBounds(bounds, { padding: 80, duration: 1000 });
+        } else if (activeMode === 'sos_incident') {
+          const topVehicle = vehicles.length > 0 ? vehicles[0] : null;
+          const incidentCoords: [number, number] = topVehicle ? [topVehicle.lng, topVehicle.lat] : [77.2230, 28.6385];
+          map.flyTo({ center: incidentCoords, zoom: 16, duration: 1200 });
+        } else if (activeMode === 'trip_playback' && breadcrumbs.length > 0) {
+          const bounds = new mapboxgl.LngLatBounds();
+          breadcrumbs.forEach(b => bounds.extend([b.longitude, b.latitude]));
+          map.fitBounds(bounds, { padding: 80, duration: 800 });
+        }
+      }
+    };
+
+    if (map.isStyleLoaded()) {
+      applyModeCamera();
+    } else {
+      map.once('style.load', applyModeCamera);
+    }
+  }, [activeMode, breadcrumbs, vehicles]);
 
   // Update animated pilot marker position smoothly during playback
   useEffect(() => {
@@ -1085,9 +1123,10 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
     };
   }, [isPlaying, activeMode, breadcrumbs.length, playbackSpeed, isLooping]);
 
-  // Initialize Mapbox GL JS Map
+  // Initialize Mapbox GL JS Map ONCE on mount
   useEffect(() => {
     if (!mapContainerRef.current) return;
+    if (mapInstanceRef.current) return;
 
     mapboxgl.accessToken = MAPBOX_PUBLIC_KEY;
 
@@ -1139,26 +1178,30 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
     });
 
     map.on('load', () => {
-      renderOverlays(map);
-      // Auto-detect real physical device/browser current location on map open and smoothly zoom in from overview!
-      if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+      renderOverlaysRef.current(map);
+      // Auto-detect real physical device/browser current location ONLY ONCE on initial open
+      if (!hasInitialCenteredRef.current && typeof navigator !== 'undefined' && 'geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
-            handleUserLocationAcquired([pos.coords.longitude, pos.coords.latitude], true);
+            if (!hasInitialCenteredRef.current) {
+              hasInitialCenteredRef.current = true;
+              handleUserLocationAcquired([pos.coords.longitude, pos.coords.latitude], true);
+            }
           },
           () => {
-            // Geolocation is optional for admin overview; fit active vehicles if available
-            if (vehicles.length > 0) {
+            if (!hasInitialCenteredRef.current && vehiclesRef.current.length > 0) {
+              hasInitialCenteredRef.current = true;
               const bounds = new mapboxgl.LngLatBounds();
-              vehicles.forEach(v => bounds.extend([v.lng, v.lat]));
+              vehiclesRef.current.forEach(v => bounds.extend([v.lng, v.lat]));
               map.fitBounds(bounds, { padding: 80, duration: 1800 });
             }
           },
           { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 }
         );
-      } else if (vehicles.length > 0) {
+      } else if (!hasInitialCenteredRef.current && vehiclesRef.current.length > 0) {
+        hasInitialCenteredRef.current = true;
         const bounds = new mapboxgl.LngLatBounds();
-        vehicles.forEach(v => bounds.extend([v.lng, v.lat]));
+        vehiclesRef.current.forEach(v => bounds.extend([v.lng, v.lat]));
         map.fitBounds(bounds, { padding: 80, duration: 1800 });
       }
     });
@@ -1166,9 +1209,10 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
     // Map Click Handler for Geofence & Road Restriction Drawing
     map.on('click', (e: mapboxgl.MapMouseEvent) => {
       const pt: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+      const currentMode = activeModeRef.current;
 
       // Geofence Editor
-      if (activeMode === 'geofence_editor') {
+      if (currentMode === 'geofence_editor') {
         setEditorPoints(prev => {
           const updated = [...prev, pt];
 
@@ -1235,7 +1279,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
       }
 
       // Road Restrictions Corridor Drafting
-      if (activeMode === 'road_restrictions') {
+      if (currentMode === 'road_restrictions') {
         setNewCorridorPoints(prev => {
           if (prev.length >= 2) {
             return [pt];
@@ -1283,10 +1327,12 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
 
     return () => {
       clearMarkers();
-      map.remove();
-      mapInstanceRef.current = null;
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
     };
-  }, [activeMode, renderOverlays, clearMarkers]);
+  }, []);
 
   // Switch Tile Style
   const switchTileStyle = (styleKey: 'dark' | 'streets' | 'satellite') => {
@@ -1664,6 +1710,32 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
 
           <button
             onClick={() => {
+              fetchLiveFleet();
+              const map = mapInstanceRef.current;
+              if (map && map.loaded()) {
+                renderOverlays(map);
+              }
+            }}
+            title="Refresh Fleet Telemetry (updates markers in place without moving map)"
+            style={{
+              background: '#16161a',
+              border: '1px solid #10b981',
+              borderRadius: 8,
+              color: '#10b981',
+              padding: '5px 8px',
+              fontSize: 10,
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
+            }}
+          >
+            <RefreshCw size={11} /> Refresh
+          </button>
+
+          <button
+            onClick={() => {
               if (liveAdminGps) {
                 handleFlyTo([liveAdminGps.lng, liveAdminGps.lat], 15);
               } else if (vehicles.length > 0) {
@@ -1674,7 +1746,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
                 handleFlyTo([0, 20], 1.8);
               }
             }}
-            title="Recenter to Live Position or Worldwide Fleet"
+            title="Recenter to Live Position or Fleet"
             style={{
               background: '#16161a',
               border: '1px solid #333',
@@ -1689,7 +1761,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
               gap: 4
             }}
           >
-            <RefreshCw size={11} /> Recenter
+            <Crosshair size={11} /> Recenter
           </button>
 
           <button
