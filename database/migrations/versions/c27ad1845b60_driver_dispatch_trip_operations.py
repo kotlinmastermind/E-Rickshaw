@@ -23,7 +23,7 @@ def upgrade() -> None:
         sa.Column("minimum_fare_cents", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("maximum_pickup_distance_km", sa.Float(), nullable=False, server_default="20"),
         sa.Column("vehicle_categories_json", sa.Text(), nullable=False, server_default="[]"),
-        sa.Column("navigation_provider", sa.String(24), nullable=False, server_default="GOOGLE_MAPS"),
+        sa.Column("navigation_provider", sa.String(24), nullable=False, server_default="MAPBOX_IN_APP"),
         sa.Column("voice_guidance_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("reroute_on_closure_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),

@@ -10,6 +10,11 @@ import android.location.LocationManager
 import android.os.Bundle
 import android.os.Looper
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.*
 
@@ -396,6 +401,8 @@ object DeviceLocationProvider {
     val WORLDWIDE_CENTER = LatLng(20.0, 10.0)
     const val WORLDWIDE_ZOOM = 1.8
 
+    private val providerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /**
      * Checks if coordinates match Android emulator mock location for Googleplex Mountain View CA
      * or Null Island (0,0), which must be bypassed on physical devices.
@@ -418,7 +425,7 @@ object DeviceLocationProvider {
      * Fast background IP-based geolocation fallback when GPS has not yet acquired satellite fix.
      */
     fun fetchIpLocationFallback(onLocation: (LatLng) -> Unit) {
-        Thread {
+        providerScope.launch {
             try {
                 val endpoints = listOf(
                     "https://ipapi.co/json/",
@@ -437,16 +444,16 @@ object DeviceLocationProvider {
                             val lat = json.optDouble("latitude", json.optDouble("lat", Double.NaN))
                             val lng = json.optDouble("longitude", json.optDouble("lon", json.optDouble("lng", Double.NaN)))
                             if (!lat.isNaN() && !lng.isNaN() && isValidPhysicalLocation(lat, lng)) {
-                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                withContext(Dispatchers.Main) {
                                     onLocation(LatLng(lat, lng))
                                 }
-                                return@Thread
+                                return@launch
                             }
                         }
                     } catch (_: Exception) {}
                 }
             } catch (_: Exception) {}
-        }.start()
+        }
     }
 
     /**
@@ -679,9 +686,10 @@ object DeviceLocationProvider {
         lng: Double,
         onAddressResolved: (String) -> Unit
     ) {
-        Thread {
+        val appContext = context.applicationContext
+        providerScope.launch {
             try {
-                val geocoder = android.location.Geocoder(context, Locale.getDefault())
+                val geocoder = android.location.Geocoder(appContext, Locale.getDefault())
                 @Suppress("DEPRECATION")
                 val addresses = geocoder.getFromLocation(lat, lng, 1)
                 if (!addresses.isNullOrEmpty()) {
@@ -695,17 +703,17 @@ object DeviceLocationProvider {
                         locality.takeIf { it.isNotBlank() }
                     ).joinToString(", ")
                     if (formatted.isNotBlank()) {
-                        android.os.Handler(Looper.getMainLooper()).post {
+                        withContext(Dispatchers.Main) {
                             onAddressResolved(formatted)
                         }
-                        return@Thread
+                        return@launch
                     }
                 }
             } catch (_: Exception) {}
-            android.os.Handler(Looper.getMainLooper()).post {
+            withContext(Dispatchers.Main) {
                 onAddressResolved(String.format(Locale.US, "%.5f, %.5f", lat, lng))
             }
-        }.start()
+        }
     }
 }
 

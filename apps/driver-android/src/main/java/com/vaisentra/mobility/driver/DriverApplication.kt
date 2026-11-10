@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver
+package com.vaisentra.mobility.driver
 
 import android.app.ActivityManager
 import android.app.Application
@@ -16,6 +16,10 @@ class DriverApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+
+        if (isDebuggable()) {
+            setupStrictMode()
+        }
 
         setupUncaughtExceptionHandler()
 
@@ -48,6 +52,29 @@ class DriverApplication : Application() {
         return null
     }
 
+    private fun isDebuggable(): Boolean {
+        return (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
+
+    private fun setupStrictMode() {
+        android.os.StrictMode.setThreadPolicy(
+            android.os.StrictMode.ThreadPolicy.Builder()
+                .detectDiskReads()
+                .detectDiskWrites()
+                .detectNetwork()
+                .penaltyLog()
+                .build()
+        )
+        android.os.StrictMode.setVmPolicy(
+            android.os.StrictMode.VmPolicy.Builder()
+                .detectLeakedSqlLiteObjects()
+                .detectLeakedClosableObjects()
+                .penaltyLog()
+                .build()
+        )
+        Log.i("DriverApplication", "StrictMode diagnostics enabled for debug build (penaltyLog).")
+    }
+
     private fun setupSecondaryProcessWebView() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val processName = getAppProcessName()
@@ -63,15 +90,15 @@ class DriverApplication : Application() {
     private fun setupUncaughtExceptionHandler() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            if (isGoogleMapsOrPlayServicesException(thread, throwable)) {
-                Log.w("DriverApplication", "Caught non-fatal Play Services / Maps exception on thread [${thread.name}]: ${throwable.message}")
+            if (isPlayServicesOrNativeMapException(thread, throwable)) {
+                Log.w("DriverApplication", "Caught non-fatal Play Services / Location exception on thread [${thread.name}]: ${throwable.message}")
                 return@setDefaultUncaughtExceptionHandler
             }
             defaultHandler?.uncaughtException(thread, throwable)
         }
     }
 
-    private fun isGoogleMapsOrPlayServicesException(thread: Thread, throwable: Throwable?): Boolean {
+    private fun isPlayServicesOrNativeMapException(thread: Thread, throwable: Throwable?): Boolean {
         if (throwable == null) return false
         val fullTrace = buildString {
             append(thread.name)

@@ -2,7 +2,7 @@
 
 import com.vaisentra.mobility.driver.core.location.DriverLocationForegroundService
 import com.vaisentra.mobility.driver.core.network.DriverLocationPayload
-import com.vaisentra.mobility.driver.core.network.ResilientDns
+import com.vaisentra.mobility.core.network.ResilientDns
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicBoolean

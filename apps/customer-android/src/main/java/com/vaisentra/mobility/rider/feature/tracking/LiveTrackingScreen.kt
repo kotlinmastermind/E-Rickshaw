@@ -32,6 +32,7 @@ import com.vaisentra.mobility.rider.core.designsystem.*
 import com.vaisentra.mobility.rider.core.network.*
 import com.vaisentra.mobility.rider.feature.map.LuxuryMapView
 import com.vaisentra.mobility.rider.feature.safety.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.*
@@ -161,78 +162,115 @@ fun LiveTrackingScreen(
         } catch (_: Exception) {}
     }
 
-    // Feature 105: Automatic Tracking Reconnect with Exponential Backoff
-    fun connectTrackingWebSocket() {
-        val token = ApiClient.getToken()
-        if (token.isNullOrBlank()) {
-            Toast.makeText(context, "Authentication required for live tracking.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val wsUrl = ApiClient.getWebSocketUrl("api/v1/ws/rides/$rideId/tracking")
-        val client = ApiClient.getOkHttpClient()
-        val request = Request.Builder()
-            .url(wsUrl)
-            .addHeader("Authorization", "Bearer $token")
-            .build()
+    // Feature 105: Managed Tracking WebSocket with Lifecycle-Bound Reconnection and Cancellation
+    DisposableEffect(rideId) {
+        var activeWebSocket: WebSocket? = null
+        var isDisposed = false
+        var reconnectJob: kotlinx.coroutines.Job? = null
 
-        client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(ws: WebSocket, response: Response) {
-                isWsConnected = true
-                reconnectAttempts = 0
+        fun connectTrackingWebSocket() {
+            if (isDisposed) return
+            val token = ApiClient.getToken()
+            if (token.isNullOrBlank()) {
+                scope.launch(Dispatchers.Main) {
+                    Toast.makeText(context, "Authentication required for live tracking.", Toast.LENGTH_SHORT).show()
+                }
+                return
             }
+            val wsUrl = ApiClient.getWebSocketUrl("api/v1/ws/rides/$rideId/tracking")
+            val client = ApiClient.getOkHttpClient()
+            val request = Request.Builder()
+                .url(wsUrl)
+                .addHeader("Authorization", "Bearer $token")
+                .build()
 
-            override fun onMessage(ws: WebSocket, text: String) {
-                try {
-                    val map = gson.fromJson<Map<String, Any>>(text, Map::class.java)
-                    val status = map["status"] as? String
-                    if (!status.isNullOrBlank()) {
-                        tripStatus = when (status) {
-                            "REQUESTED", "DRIVER_ASSIGNED" -> "ASSIGNED"
-                            "DRIVER_ARRIVED" -> "ARRIVED"
-                            "IN_PROGRESS" -> "IN_PROGRESS"
-                            "COMPLETED" -> "COMPLETED"
-                            "CANCELLED" -> "CANCELLED"
-                            else -> status
-                        }
-                        if (tripStatus == "COMPLETED") {
-                            val fareCents = (map["final_fare_cents"] as? Number)?.toInt()
-                                ?: (map["estimated_fare_cents"] as? Number)?.toInt()
-                                ?: (rideDetails?.finalFareCents ?: rideDetails?.estimatedFareCents ?: 0)
-                            val fare = fareCents / 100
-                            finalFareRupees = fare
-                            onProceedPayment(rideId, fare)
-                        }
+            try {
+                activeWebSocket?.close(1000, "Reconnecting tracking WebSocket")
+            } catch (_: Exception) {}
+
+            activeWebSocket = client.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(ws: WebSocket, response: Response) {
+                    if (isDisposed) {
+                        try { ws.close(1000, "Screen disposed during handshake") } catch (_: Exception) {}
+                        return
                     }
-                    val dLat = (map["driver_latitude"] as? Number)?.toDouble()
-                    val dLng = (map["driver_longitude"] as? Number)?.toDouble()
-                    if (dLat != null && dLng != null && dLat != 0.0 && dLng != 0.0) {
-                        driverLatLng = LatLng(dLat, dLng)
-                    }
-                } catch (_: Exception) {}
-            }
-
-            override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-                isWsConnected = false
-            }
-
-            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                isWsConnected = false
-                // Exponential reconnect backoff
-                if (tripStatus != "COMPLETED" && tripStatus != "CANCELLED") {
-                    scope.launch {
-                        reconnectAttempts++
-                        val backoffDelay = (1000L * (1 shl minOf(reconnectAttempts, 4)))
-                        delay(backoffDelay)
-                        connectTrackingWebSocket()
+                    scope.launch(Dispatchers.Main) {
+                        isWsConnected = true
+                        reconnectAttempts = 0
                     }
                 }
-            }
-        })
-    }
 
-    DisposableEffect(rideId) {
+                override fun onMessage(ws: WebSocket, text: String) {
+                    if (isDisposed) return
+                    try {
+                        val map = gson.fromJson<Map<String, Any>>(text, Map::class.java)
+                        val status = map["status"] as? String
+                        val dLat = (map["driver_latitude"] as? Number)?.toDouble()
+                        val dLng = (map["driver_longitude"] as? Number)?.toDouble()
+                        val finalFareCents = (map["final_fare_cents"] as? Number)?.toInt()
+                            ?: (map["estimated_fare_cents"] as? Number)?.toInt()
+
+                        scope.launch(Dispatchers.Main) {
+                            if (!status.isNullOrBlank()) {
+                                tripStatus = when (status) {
+                                    "REQUESTED", "DRIVER_ASSIGNED" -> "ASSIGNED"
+                                    "DRIVER_ARRIVED" -> "ARRIVED"
+                                    "IN_PROGRESS" -> "IN_PROGRESS"
+                                    "COMPLETED" -> "COMPLETED"
+                                    "CANCELLED" -> "CANCELLED"
+                                    else -> status
+                                }
+                                if (tripStatus == "COMPLETED") {
+                                    val fareCents = finalFareCents
+                                        ?: (rideDetails?.finalFareCents ?: rideDetails?.estimatedFareCents ?: 0)
+                                    val fare = fareCents / 100
+                                    finalFareRupees = fare
+                                    onProceedPayment(rideId, fare)
+                                }
+                            }
+                            if (dLat != null && dLng != null && dLat != 0.0 && dLng != 0.0) {
+                                driverLatLng = LatLng(dLat, dLng)
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                    scope.launch(Dispatchers.Main) {
+                        isWsConnected = false
+                    }
+                }
+
+                override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                    scope.launch(Dispatchers.Main) {
+                        isWsConnected = false
+                    }
+                    if (!isDisposed && tripStatus != "COMPLETED" && tripStatus != "CANCELLED") {
+                        reconnectJob?.cancel()
+                        reconnectJob = scope.launch {
+                            reconnectAttempts++
+                            val backoffDelay = (1000L * (1 shl minOf(reconnectAttempts, 4)))
+                            delay(backoffDelay)
+                            if (!isDisposed && tripStatus != "COMPLETED" && tripStatus != "CANCELLED") {
+                                connectTrackingWebSocket()
+                            }
+                        }
+                    }
+                }
+            })
+        }
+
         connectTrackingWebSocket()
-        onDispose {}
+
+        onDispose {
+            isDisposed = true
+            reconnectJob?.cancel()
+            try {
+                activeWebSocket?.close(1000, "Leaving live tracking screen")
+            } catch (_: Exception) {}
+            activeWebSocket = null
+            isWsConnected = false
+        }
     }
 
     // Telemetry and HTTP Polling backup
@@ -651,7 +689,7 @@ fun LiveTrackingScreen(
                 }
             }
 
-            // Feature 101: Live Google Maps Driver Approach Surface
+            // Feature 101: Live Mapbox Vector Driver Approach Surface
             Surface(
                 shape = RoundedCornerShape(LuxuryDimensions.RadiusMedium),
                 color = LuxuryColors.DeepGraphite,

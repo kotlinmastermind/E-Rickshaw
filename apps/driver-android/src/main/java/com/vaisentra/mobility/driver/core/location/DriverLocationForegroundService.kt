@@ -275,10 +275,14 @@ class DriverLocationForegroundService : Service() {
         }
     }
 
+    @Volatile
     private var telemetryWebSocket: okhttp3.WebSocket? = null
+    @Volatile
     private var dispatchWebSocket: okhttp3.WebSocket? = null
     private val isDispatchConnecting = AtomicBoolean(false)
+    @Volatile
     private var reconnectBackoffMs = 5000L
+    @Volatile
     private var heartbeatJob: Job? = null
 
     private fun ensureWebSocketConnected() {
@@ -450,10 +454,11 @@ class DriverLocationForegroundService : Service() {
     }
 
     private val offlineLocationDb by lazy { DriverOfflineLocationDbHelper.getInstance(applicationContext) }
+    private val isFlushingOffline = AtomicBoolean(false)
 
     private fun flushOfflineLocations() {
         val count = offlineLocationDb.getPendingCount()
-        if (count == 0) return
+        if (count == 0 || !isFlushingOffline.compareAndSet(false, true)) return
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val pending = offlineLocationDb.peekPendingLocations(30)
@@ -470,39 +475,44 @@ class DriverLocationForegroundService : Service() {
                     Log.d(TAG, "Successfully flushed ${ids.size} SQLite offline location pings via batch endpoint")
                     // If more remains, flush next chunk
                     if (offlineLocationDb.getPendingCount() > 0) {
+                        isFlushingOffline.set(false)
                         flushOfflineLocations()
+                        return@launch
                     }
                 } else {
                     Log.w(TAG, "Batch location flush received HTTP ${resp.code()}; retaining offline locations")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Batch location flush failed: ${e.message}; offline points remain safely persisted in SQLite")
+            } finally {
+                isFlushingOffline.set(false)
             }
         }
     }
 
     private fun sendLocationPing(location: Location, source: String) {
-        val mock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) location.isMock else location.isFromMockProvider
-        
-        // 1. Send over real-time WebSocket Stream
-        try {
-            ensureWebSocketConnected()
-            val wsPayload = """{"latitude":${location.latitude},"longitude":${location.longitude},"heading":${location.bearing},"speed_mps":${location.speed},"source":"$source"}"""
-            telemetryWebSocket?.send(wsPayload)
-        } catch (_: Exception) {}
-
-        // 2. Send over REST HTTP Ping Backup with Durable SQLite Persistence
-        val payload = DriverLocationPayload(
-            latitude = location.latitude,
-            longitude = location.longitude,
-            heading = location.takeIf { it.hasBearing() }?.bearing?.toDouble(),
-            speedMps = location.takeIf { it.hasSpeed() }?.speed?.toDouble(),
-            accuracyM = location.takeIf { it.hasAccuracy() }?.accuracy?.toDouble(),
-            isMockLocation = mock,
-            locationSource = source
-        )
-
+        // Offload payload extraction, JSON formatting, WebSocket transmission and HTTP ping to IO background scope
         serviceScope.launch(Dispatchers.IO) {
+            val mock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) location.isMock else location.isFromMockProvider
+
+            // 1. Send over real-time WebSocket Stream
+            try {
+                ensureWebSocketConnected()
+                val wsPayload = """{"latitude":${location.latitude},"longitude":${location.longitude},"heading":${location.bearing},"speed_mps":${location.speed},"source":"$source"}"""
+                telemetryWebSocket?.send(wsPayload)
+            } catch (_: Exception) {}
+
+            // 2. Send over REST HTTP Ping Backup with Durable SQLite Persistence
+            val payload = DriverLocationPayload(
+                latitude = location.latitude,
+                longitude = location.longitude,
+                heading = location.takeIf { it.hasBearing() }?.bearing?.toDouble(),
+                speedMps = location.takeIf { it.hasSpeed() }?.speed?.toDouble(),
+                accuracyM = location.takeIf { it.hasAccuracy() }?.accuracy?.toDouble(),
+                isMockLocation = mock,
+                locationSource = source
+            )
+
             try {
                 val resp = DriverApiClient.getService().pingLocation(payload)
                 if (resp.isSuccessful) {

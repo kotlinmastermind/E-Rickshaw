@@ -14,22 +14,35 @@ object DriverApiClient {
 
     fun isEmulator(): Boolean = CoreNetworkClient.isEmulator()
 
+    @Volatile
     var baseUrl: String = RENDER_BASE_URL
 
+    @Volatile
     private var tokenManager: DriverTokenManager? = null
+
+    @Volatile
     private var service: DriverApiService? = null
 
+    @Volatile
+    private var cachedOkHttpClient: OkHttpClient? = null
+
     fun initialize(context: Context) {
-        tokenManager = DriverTokenManager.getInstance(context)
-        baseUrl = CoreNetworkClient.resolveDefaultBaseUrl(tokenManager?.getServerUrl())
-        service = createService()
+        synchronized(this) {
+            tokenManager = DriverTokenManager.getInstance(context)
+            baseUrl = CoreNetworkClient.resolveDefaultBaseUrl(tokenManager?.getServerUrl())
+            cachedOkHttpClient = null
+            service = createService()
+        }
     }
 
     fun updateBaseUrl(newUrl: String) {
         val formatted = if (newUrl.endsWith("/")) newUrl else "$newUrl/"
-        baseUrl = formatted
-        tokenManager?.setServerUrl(formatted)
-        service = createService()
+        synchronized(this) {
+            baseUrl = formatted
+            tokenManager?.setServerUrl(formatted)
+            cachedOkHttpClient = null
+            service = createService()
+        }
     }
 
     fun useCloudProduction() {
@@ -43,10 +56,9 @@ object DriverApiClient {
     fun isLocalBackend(): Boolean = CoreNetworkClient.isLocalBackend(baseUrl)
 
     fun getService(): DriverApiService {
-        if (service == null) {
-            service = createService()
+        return service ?: synchronized(this) {
+            service ?: createService().also { service = it }
         }
-        return service!!
     }
 
     fun getToken(): String? = tokenManager?.getToken()
@@ -54,11 +66,13 @@ object DriverApiClient {
     fun getWebSocketUrl(path: String): String = CoreNetworkClient.getWebSocketUrl(baseUrl, path)
 
     fun getOkHttpClient(): OkHttpClient {
-        return CoreNetworkClient.createConfiguredOkHttpClient(
-            tokenManager = tokenManager,
-            baseUrlProvider = { baseUrl },
-            clientRole = "driver"
-        )
+        return cachedOkHttpClient ?: synchronized(this) {
+            cachedOkHttpClient ?: CoreNetworkClient.createConfiguredOkHttpClient(
+                tokenManager = tokenManager,
+                baseUrlProvider = { baseUrl },
+                clientRole = "driver"
+            ).also { cachedOkHttpClient = it }
+        }
     }
 
     private fun createService(): DriverApiService {

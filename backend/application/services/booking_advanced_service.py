@@ -875,7 +875,7 @@ END:VCALENDAR"""
     # ---------------------------------------------------------
     @staticmethod
     def parse_shared_location_link(raw_link: str) -> Dict[str, Any]:
-        """Parses Google Maps, Apple Maps, Geo URIs, and Deep Links into coordinates and label."""
+        """Parses shared Mapbox/Geo URIs, pin links, and Deep Links into coordinates and label."""
         text = raw_link.strip()
         lat, lng, label = 19.0760, 72.8777, "Shared VIP Location"
 
@@ -891,7 +891,7 @@ END:VCALENDAR"""
         if q_match:
             lat = float(q_match.group(1))
             lng = float(q_match.group(2))
-            return {"latitude": lat, "longitude": lng, "label": label, "source": "GOOGLE_MAPS"}
+            return {"latitude": lat, "longitude": lng, "label": label, "source": "SHARED_PIN"}
 
         # Match custom deep link grandchauffeur://book?lat=19.0760&lng=72.8777&name=...
         if "grandchauffeur://" in text or "http" in text:

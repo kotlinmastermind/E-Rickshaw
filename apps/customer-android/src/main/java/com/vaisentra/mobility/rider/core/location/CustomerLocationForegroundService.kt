@@ -56,8 +56,10 @@ class CustomerLocationForegroundService : Service() {
 
     private val isTracking = AtomicBoolean(false)
     private val isForeground = AtomicBoolean(false)
+    @Volatile
     private var currentRideId: String? = null
 
+    @Volatile
     private var telemetryWebSocket: WebSocket? = null
 
     companion object {
@@ -276,12 +278,15 @@ class CustomerLocationForegroundService : Service() {
     }
 
     private fun sendLocationTelemetry(loc: Location, source: String) {
-        val rideIdStr = if (!currentRideId.isNullOrBlank()) """, "ride_id":"$currentRideId"""" else ""
-        val json = """{"latitude":${loc.latitude},"longitude":${loc.longitude},"heading":${loc.bearing},"speed_mps":${loc.speed},"source":"$source"$rideIdStr}"""
-        try {
-            ensureWebSocketConnected()
-            telemetryWebSocket?.send(json)
-        } catch (_: Exception) {}
+        // Offload payload formatting, WebSocket connection verification, and network frame transmission to IO scope
+        serviceScope.launch(Dispatchers.IO) {
+            val rideIdStr = if (!currentRideId.isNullOrBlank()) """, "ride_id":"$currentRideId"""" else ""
+            val json = """{"latitude":${loc.latitude},"longitude":${loc.longitude},"heading":${loc.bearing},"speed_mps":${loc.speed},"source":"$source"$rideIdStr}"""
+            try {
+                ensureWebSocketConnected()
+                telemetryWebSocket?.send(json)
+            } catch (_: Exception) {}
+        }
     }
 
     private fun stopLocationUpdates() {

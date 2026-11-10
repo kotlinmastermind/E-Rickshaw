@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.luxury
+package com.vaisentra.mobility.driver.feature.luxury
 
 import android.content.Context
 import android.content.Intent
@@ -4115,7 +4115,7 @@ fun DriverNavAppSheet(onChooseApp: (String) -> Unit, onDismiss: () -> Unit) {
             Text("Choose Navigation Map Engine", color = DriverLuxuryUiTokens.Gold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Spacer(modifier = Modifier.height(16.dp))
 
-            listOf("Google Maps GPS", "In-App Chauffeur Dark Maps", "Waze Traffic Navigation").forEach { app ->
+            listOf("In-App Mapbox 3D Cockpit", "Waze Traffic Navigation", "System External Navigation").forEach { app ->
                 Surface(
                     color = Color(0xFF1F1F24),
                     shape = RoundedCornerShape(10.dp),

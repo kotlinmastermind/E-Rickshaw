@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.location
+package com.vaisentra.mobility.rider.feature.location
 
 import android.content.Intent
 import android.net.Uri
@@ -79,7 +79,7 @@ fun TripTemplatesDialog(
                 ) {
                     Text("FAVORITE TRIP TEMPLATES", style = LuxuryTypography.TitleGold.copy(fontSize = 15.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
 
@@ -192,7 +192,7 @@ fun TripTemplatesDialog(
                                                 },
                                                 modifier = Modifier.size(24.dp)
                                             ) {
-                                                Text("🗑", fontSize = 12.sp)
+                                                Text("??", fontSize = 12.sp)
                                             }
                                         }
                                         Text("From: ${item.pickupAddress}", style = LuxuryTypography.BodySubtle, maxLines = 1)
@@ -259,13 +259,13 @@ fun SharedLocationDialog(
                 ) {
                     Text("BOOK FROM SHARED LINK", style = LuxuryTypography.TitleGold.copy(fontSize = 15.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "Paste a Google Maps, Apple Maps, or Geo coordinates link shared by a friend, client, or concierge.",
+                    "Paste a Map link, pin URL, or Geo coordinates shared by a friend, client, or concierge.",
                     style = LuxuryTypography.BodySubtle
                 )
 
@@ -385,7 +385,7 @@ fun TrafficRecommendationDialog(
                 ) {
                     Text("TRAFFIC DEPARTURE ADVISORY", style = LuxuryTypography.TitleGold.copy(fontSize = 15.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
 
@@ -538,7 +538,7 @@ fun RecurringScheduleDialog(
                 ) {
                     Text("RECURRING COMMUTE SCHEDULES", style = LuxuryTypography.TitleGold.copy(fontSize = 15.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
 
@@ -736,7 +736,7 @@ fun DependentsDialog(
                 ) {
                     Text("FAMILY & DEPENDENTS REGISTRY", style = LuxuryTypography.TitleGold.copy(fontSize = 15.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
 
@@ -879,7 +879,7 @@ fun DependentsDialog(
                                                 },
                                                 modifier = Modifier.size(32.dp)
                                             ) {
-                                                Text("🗑", fontSize = 12.sp)
+                                                Text("??", fontSize = 12.sp)
                                             }
                                         }
                                     }
@@ -953,13 +953,13 @@ fun MapPinAdjustDialog(
                 ) {
                     Text(title.uppercase(), style = LuxuryTypography.TitleGold.copy(fontSize = 15.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "Nudge or fine-tune coordinate pin for precision porte-cochère or gate pickup.",
+                    "Nudge or fine-tune coordinate pin for precision porte-coch�re or gate pickup.",
                     style = LuxuryTypography.BodySubtle
                 )
 
@@ -1000,7 +1000,7 @@ fun MapPinAdjustDialog(
                         modifier = Modifier.height(32.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
                     ) {
-                        Text("▲ NORTH", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold))
+                        Text("? NORTH", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold))
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -1010,7 +1010,7 @@ fun MapPinAdjustDialog(
                             modifier = Modifier.height(32.dp),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
                         ) {
-                            Text("◀ WEST", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold))
+                            Text("? WEST", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold))
                         }
                         Button(
                             onClick = { currentLatLng = LatLng(currentLatLng.latitude, currentLatLng.longitude + 0.001) },
@@ -1018,7 +1018,7 @@ fun MapPinAdjustDialog(
                             modifier = Modifier.height(32.dp),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
                         ) {
-                            Text("EAST ▶", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold))
+                            Text("EAST ?", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold))
                         }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
@@ -1028,7 +1028,7 @@ fun MapPinAdjustDialog(
                         modifier = Modifier.height(32.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
                     ) {
-                        Text("▼ SOUTH", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold))
+                        Text("? SOUTH", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold))
                     }
                 }
 
@@ -1102,7 +1102,7 @@ fun AirportPickupZoneDialog(
                 ) {
                     Text("AIRPORT VIP PICKUP GUIDANCE", style = LuxuryTypography.TitleGold.copy(fontSize = 14.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
                 Text("Designated VIP chauffeur zones & pillar navigation (Feature 431)", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
@@ -1197,7 +1197,7 @@ fun BuildingEntrancePinDialog(
     val scope = rememberCoroutineScope()
     var entranceNotes by remember { mutableStateOf("") }
     var entranceCode by remember { mutableStateOf("") }
-    var entranceLabel by remember { mutableStateOf("Porte-Cochère") }
+    var entranceLabel by remember { mutableStateOf("Porte-Coch�re") }
     var isSnapping by remember { mutableStateOf(false) }
     var snappedInfo by remember { mutableStateOf<String?>(null) }
     var snappedLat by remember { mutableDoubleStateOf(currentLat) }
@@ -1218,14 +1218,14 @@ fun BuildingEntrancePinDialog(
                 ) {
                     Text("BUILDING ENTRANCE & GATES", style = LuxuryTypography.TitleGold.copy(fontSize = 14.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
-                Text("Porte-cochère, gate code, and curbside road snapping (Features 429, 430, 432)", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
+                Text("Porte-coch�re, gate code, and curbside road snapping (Features 429, 430, 432)", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                    listOf("Porte-Cochère", "VIP North Gate", "Valet Lobby", "Club Entrance").forEach { preset ->
+                    listOf("Porte-Coch�re", "VIP North Gate", "Valet Lobby", "Club Entrance").forEach { preset ->
                         val isSel = entranceLabel == preset
                         Surface(
                             shape = RoundedCornerShape(LuxuryDimensions.RadiusSmall),
@@ -1308,7 +1308,7 @@ fun BuildingEntrancePinDialog(
                                 modifier = Modifier.height(28.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                             ) {
-                                Text(if (isSnapping) "Snapping…" else "Snap Pin", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontSize = 10.sp))
+                                Text(if (isSnapping) "Snapping�" else "Snap Pin", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontSize = 10.sp))
                             }
                         }
                         if (snappedInfo != null) {
@@ -1388,7 +1388,7 @@ fun RouteAlternativesDialog(
                 ) {
                     Text("ROUTE ALTERNATIVES & TRAFFIC", style = LuxuryTypography.TitleGold.copy(fontSize = 14.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
                 Text("Compare fastest express, scenic, and eco routes (Features 434, 435, 436)", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
@@ -1430,7 +1430,7 @@ fun RouteAlternativesDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text("Traffic delay: +$delay min", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = if (delay > 4) Color(0xFFF59E0B) else Color(0xFF34D399)))
-                                    Text("Tolls: ₹$toll", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp))
+                                    Text("Tolls: ?$toll", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp))
                                 }
                             }
                         }
@@ -1474,7 +1474,7 @@ fun RouteAlternativesDialog(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(if (isRefreshingEta) "PROBING TRAFFIC TELEMETRY…" else "REFRESH LIVE TRAFFIC ETA", color = LuxuryColors.ChampagneGold, fontSize = 11.sp)
+                        Text(if (isRefreshingEta) "PROBING TRAFFIC TELEMETRY�" else "REFRESH LIVE TRAFFIC ETA", color = LuxuryColors.ChampagneGold, fontSize = 11.sp)
                     }
                     if (etaRefreshMessage != null) {
                         Text(etaRefreshMessage ?: "", style = LuxuryTypography.BodySubtle.copy(color = Color(0xFF34D399), fontSize = 10.sp), modifier = Modifier.padding(top = 4.dp))
@@ -1529,7 +1529,7 @@ fun LocationAccuracyAndGpsRecoveryDialog(
                 ) {
                     Text("GPS ACCURACY & RECOVERY", style = LuxuryTypography.TitleGold.copy(fontSize = 14.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
                 Text("Diagnostic telemetry & recovery steps (Features 442 & 443)", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
@@ -1547,7 +1547,7 @@ fun LocationAccuracyAndGpsRecoveryDialog(
                             Text(badgeText, style = LuxuryTypography.HeadlineMedium.copy(fontSize = 13.sp, color = badgeColor))
                         }
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("Current accuracy: ±%.1f meters".format(accuracyMeters), style = LuxuryTypography.BodyRegular)
+                        Text("Current accuracy: �%.1f meters".format(accuracyMeters), style = LuxuryTypography.BodyRegular)
                         Text(statusAdvice, style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp), modifier = Modifier.padding(top = 2.dp))
                     }
                 }
@@ -1560,7 +1560,7 @@ fun LocationAccuracyAndGpsRecoveryDialog(
                     "Step 1: Enable 'Use Precise Location' in App Permissions.",
                     "Step 2: Turn on 'Google Location Accuracy' in Location Settings.",
                     "Step 3: In Battery Optimization, set this app to 'Unrestricted'.",
-                    "Step 4: Ensure Wi-Fi Scanning is ON for indoor Porte-Cochère fixes."
+                    "Step 4: Ensure Wi-Fi Scanning is ON for indoor Porte-Coch�re fixes."
                 ).forEach { step ->
                     Text(step, style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp), modifier = Modifier.padding(vertical = 2.dp))
                 }
@@ -1616,7 +1616,7 @@ fun MapAttributionAndOfflineDialog(onDismiss: () -> Unit) {
                 ) {
                     Text("MAP ATTRIBUTION & OFFLINE PACKS", style = LuxuryTypography.TitleGold.copy(fontSize = 13.sp))
                     TextButton(onClick = onDismiss) {
-                        Text("✕", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
+                        Text("?", color = LuxuryColors.SubtleGray, fontSize = 16.sp)
                     }
                 }
                 Text("Legal provider disclosures & regional cache (Features 433, 446, 447)", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
@@ -1631,7 +1631,7 @@ fun MapAttributionAndOfflineDialog(onDismiss: () -> Unit) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Text("DATA ATTRIBUTION & PRIVACY", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(attribution?.get("attribution") as? String ?: "© OpenStreetMap contributors • CartoDB • Google Places", style = LuxuryTypography.BodyRegular.copy(fontSize = 11.sp))
+                        Text(attribution?.get("attribution") as? String ?: "� OpenStreetMap contributors � CartoDB � Google Places", style = LuxuryTypography.BodyRegular.copy(fontSize = 11.sp))
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(attribution?.get("dpdp_compliance_notice") as? String ?: "Coordinates processed in compliance with India DPDP Act 2023. Raw telemetry retained for 90 days max.", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp))
                     }
@@ -1652,7 +1652,7 @@ fun MapAttributionAndOfflineDialog(onDismiss: () -> Unit) {
                         val tiles = (offlinePack?.get("total_tile_count") as? Number)?.toInt() ?: 144
                         val sizeMb = (offlinePack?.get("estimated_size_mb") as? Number)?.toDouble() ?: 12.8
                         Text("Bundle: $bundle ($tiles tiles, ${sizeMb}MB)", style = LuxuryTypography.BodyRegular.copy(fontSize = 11.sp))
-                        Text("Retention TTL: 30 days • Pre-cached for low network connectivity", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp))
+                        Text("Retention TTL: 30 days � Pre-cached for low network connectivity", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp))
                     }
                 }
 

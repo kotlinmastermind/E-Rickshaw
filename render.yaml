@@ -28,7 +28,9 @@ services:
         value: firebase
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
-      - key: GOOGLE_MAPS_API_KEY
+      - key: MAPBOX_SECRET_TOKEN
+        sync: false
+      - key: MAPBOX_PUBLIC_TOKEN
         sync: false
       - key: RAZORPAY_KEY_ID
         sync: false

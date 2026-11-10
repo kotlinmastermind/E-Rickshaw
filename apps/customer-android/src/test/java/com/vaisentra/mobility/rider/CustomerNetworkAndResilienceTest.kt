@@ -1,6 +1,7 @@
 ﻿package com.vaisentra.mobility.rider
 
-import com.vaisentra.mobility.rider.core.network.ResilientDns
+import com.vaisentra.mobility.core.network.ResilientDns
+import com.vaisentra.mobility.rider.core.network.ApiClient
 import com.vaisentra.mobility.rider.feature.auth.EnterpriseAuthViewModel
 import org.junit.Assert.*
 import org.junit.Test
@@ -21,6 +22,13 @@ class CustomerNetworkAndResilienceTest {
             "Must resolve to Cloudflare Anycast Origin IPs (216.24.57.16 or 216.24.57.18)",
             ipStrings.contains("216.24.57.16") || ipStrings.contains("216.24.57.18")
         )
+    }
+
+    @Test
+    fun testApiClientCachesOkHttpClientInstance() {
+        val client1 = ApiClient.getOkHttpClient()
+        val client2 = ApiClient.getOkHttpClient()
+        assertSame("ApiClient.getOkHttpClient() must return cached singleton instance to prevent socket leaks", client1, client2)
     }
 
     @Test

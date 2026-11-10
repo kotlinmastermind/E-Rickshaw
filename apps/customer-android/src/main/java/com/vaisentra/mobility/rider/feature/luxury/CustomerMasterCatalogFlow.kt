@@ -380,6 +380,7 @@ fun CustomerMasterCatalogFlow(
         var ws: WebSocket? = null
         var isDisposed = false
         var reconnectJob: kotlinx.coroutines.Job? = null
+        val reconnectLock = Any()
 
         fun connectWebSocket() {
             if (isDisposed || (currentScreenId != 14 && currentScreenId != 15) || activeRideId.isBlank()) return
@@ -407,9 +408,9 @@ fun CustomerMasterCatalogFlow(
                             val payload = json.optJSONObject("payload")
 
                             if (eventType == "RIDE_ACCEPTED" || status in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS")) {
-                                activeRideStatus = status.ifBlank { "ASSIGNED" }
-                                if (currentScreenId == 14) {
-                                    scope.launch(Dispatchers.Main) {
+                                scope.launch(Dispatchers.Main) {
+                                    activeRideStatus = status.ifBlank { "ASSIGNED" }
+                                    if (currentScreenId == 14) {
                                         currentScreenId = 15
                                     }
                                 }
@@ -468,12 +469,14 @@ fun CustomerMasterCatalogFlow(
                     }
 
                     private fun scheduleReconnect() {
-                        if (isDisposed || (currentScreenId != 14 && currentScreenId != 15)) return
-                        reconnectJob?.cancel()
-                        reconnectJob = scope.launch {
-                            kotlinx.coroutines.delay(4000)
-                            if (!isDisposed && (currentScreenId == 14 || currentScreenId == 15)) {
-                                connectWebSocket()
+                        synchronized(reconnectLock) {
+                            if (isDisposed || (currentScreenId != 14 && currentScreenId != 15)) return
+                            reconnectJob?.cancel()
+                            reconnectJob = scope.launch(Dispatchers.IO) {
+                                kotlinx.coroutines.delay(4000)
+                                if (!isDisposed && (currentScreenId == 14 || currentScreenId == 15)) {
+                                    connectWebSocket()
+                                }
                             }
                         }
                     }
@@ -488,7 +491,9 @@ fun CustomerMasterCatalogFlow(
 
         onDispose {
             isDisposed = true
-            reconnectJob?.cancel()
+            synchronized(reconnectLock) {
+                reconnectJob?.cancel()
+            }
             try { ws?.close(1000, "Leaving active ride screen") } catch (_: Exception) {}
             if (currentScreenId != 14 && currentScreenId != 15) {
                 CustomerLocationForegroundService.stop(context)

@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.trip
+package com.vaisentra.mobility.driver.feature.trip
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -73,7 +73,7 @@ fun ActiveChauffeurTripScreen(
     var destinationLabel by remember { mutableStateOf(destinationAddress) }
     var startChecks by remember { mutableStateOf(List(4) { false }) }
     var completionChecks by remember { mutableStateOf(List(4) { false }) }
-    var navigationProvider by remember { mutableStateOf("GOOGLE_MAPS") }
+    var navigationProvider by remember { mutableStateOf("MAPBOX_IN_APP") }
     var voiceGuidancePreference by remember { mutableStateOf(true) }
     var reroutePreference by remember { mutableStateOf(true) }
 
@@ -104,7 +104,7 @@ fun ActiveChauffeurTripScreen(
         try {
             val preferences = DriverApiClient.getService().getDispatchPreferences()
             if (preferences.isSuccessful) {
-                navigationProvider = preferences.body()?.get("navigation_provider")?.toString() ?: "GOOGLE_MAPS"
+                navigationProvider = preferences.body()?.get("navigation_provider")?.toString() ?: "MAPBOX_IN_APP"
                 voiceGuidancePreference = preferences.body()?.get("voice_guidance_enabled") as? Boolean ?: true
                 reroutePreference = preferences.body()?.get("reroute_on_closure_enabled") as? Boolean ?: true
             }
@@ -197,7 +197,7 @@ fun ActiveChauffeurTripScreen(
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = DriverColors.AlertDanger),
                         contentPadding = PaddingValues(horizontal = 4.dp)
                     ) {
-                        Text("🚨 SOS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("?? SOS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
@@ -208,7 +208,7 @@ fun ActiveChauffeurTripScreen(
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = DriverColors.ChauffeurGold),
                         contentPadding = PaddingValues(horizontal = 4.dp)
                     ) {
-                        Text("🛡️ INCIDENT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("??? INCIDENT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
@@ -219,7 +219,7 @@ fun ActiveChauffeurTripScreen(
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = DriverColors.AlertDanger),
                         contentPadding = PaddingValues(horizontal = 4.dp)
                     ) {
-                        Text("❌ CANCEL", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("? CANCEL", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -245,18 +245,18 @@ fun ActiveChauffeurTripScreen(
                 sharedTrip?.let { pool ->
                     Surface(shape = RoundedCornerShape(12.dp), color = DriverColors.CockpitDark, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                            Text("SHARED TRIP · ${pool["status"] ?: "—"}", style = DriverTypography.Subtitle.copy(color = DriverColors.ChauffeurGold))
+                            Text("SHARED TRIP � ${pool["status"] ?: "�"}", style = DriverTypography.Subtitle.copy(color = DriverColors.ChauffeurGold))
                             val capacity = (pool["max_seats"] as? Number)?.toInt() ?: 0
                             val reserved = (pool["reserved_seats"] as? Number)?.toInt() ?: 0
                             val occupied = (pool["current_occupancy"] as? Number)?.toInt() ?: 0
-                            Text("$occupied seats aboard · $reserved reserved · $capacity capacity", color = DriverColors.TextPure)
+                            Text("$occupied seats aboard � $reserved reserved � $capacity capacity", color = DriverColors.TextPure)
                             Text("Passenger and stop order (refreshes every 10 seconds):", color = DriverColors.TextMuted)
                             (pool["stops"] as? List<*>)?.filterIsInstance<Map<*, *>>()?.sortedBy { (it["sequence_order"] as? Number)?.toInt() ?: Int.MAX_VALUE }?.forEach { stop ->
-                                Text("${stop["sequence_order"] ?: "—"}. ${stop["stop_type"] ?: "STOP"} · ${stop["address"] ?: "Private stop"} · ${stop["status"] ?: "SCHEDULED"}", color = DriverColors.TextPure, style = DriverTypography.Body.copy(fontSize = 12.sp))
+                                Text("${stop["sequence_order"] ?: "�"}. ${stop["stop_type"] ?: "STOP"} � ${stop["address"] ?: "Private stop"} � ${stop["status"] ?: "SCHEDULED"}", color = DriverColors.TextPure, style = DriverTypography.Body.copy(fontSize = 12.sp))
                             }
                             (pool["manifest"] as? List<*>)?.filterIsInstance<Map<*, *>>()?.forEach { passenger ->
                                 val currentRide = passenger["ride_id"]?.toString() == rideId
-                                Text("${if (currentRide) "This pickup" else "Passenger booking"} · ${passenger["seats_reserved"] ?: 0} seats · ${passenger["booking_status"] ?: "—"}", color = if (currentRide) DriverColors.ChauffeurGold else DriverColors.TextMuted)
+                                Text("${if (currentRide) "This pickup" else "Passenger booking"} � ${passenger["seats_reserved"] ?: 0} seats � ${passenger["booking_status"] ?: "�"}", color = if (currentRide) DriverColors.ChauffeurGold else DriverColors.TextMuted)
                             }
                             if (sharedTripMessages.isEmpty()) Text("No pickup coordination messages yet.", color = DriverColors.TextMuted)
                             sharedTripMessages.takeLast(5).forEach { row -> Text("${row["sender"] ?: "Passenger"}: ${row["message"] ?: ""}", color = DriverColors.TextPure, style = DriverTypography.Body.copy(fontSize = 12.sp)) }
@@ -271,7 +271,7 @@ fun ActiveChauffeurTripScreen(
                     }
                 }
 
-                // Real Google Maps Navigation & Turn-by-Turn Telemetry
+                // Native Mapbox 3D Cockpit Navigation & Turn-by-Turn Telemetry
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = DriverColors.CockpitDark,
@@ -283,7 +283,7 @@ fun ActiveChauffeurTripScreen(
                     Box {
                         if (pickupLat != null && pickupLng != null && destLat != null && destLng != null) {
                             DriverMapView(modifier = Modifier.fillMaxSize(), pickupLatLng = LatLng(pickupLat!!, pickupLng!!), pickupTitle = "Pickup: $pickupLabel", destLatLng = LatLng(destLat!!, destLng!!), destTitle = "Dest: $destinationLabel")
-                        } else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading verified trip coordinates…", color = DriverColors.TextMuted) }
+                        } else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading verified trip coordinates�", color = DriverColors.TextMuted) }
 
                         // Floating Turn-by-Turn GPS Navigation Action Button
                         Surface(
@@ -390,7 +390,7 @@ fun ActiveChauffeurTripScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("✦", color = DriverColors.ChauffeurGold, fontSize = 11.sp)
+                                Text("?", color = DriverColors.ChauffeurGold, fontSize = 11.sp)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("VIP SANCTUARY & ACCESSIBILITY BRIEF", style = DriverTypography.Subtitle.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold))
                             }
@@ -409,7 +409,7 @@ fun ActiveChauffeurTripScreen(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column {
                                 Text("CABIN CLIMATE", style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 9.sp))
-                                Text("21.0°C • Silent Discretion", style = DriverTypography.Body.copy(color = DriverColors.ChauffeurGold, fontSize = 10.sp, fontWeight = FontWeight.Bold))
+                                Text("21.0�C � Silent Discretion", style = DriverTypography.Body.copy(color = DriverColors.ChauffeurGold, fontSize = 10.sp, fontWeight = FontWeight.Bold))
                             }
                             Column {
                                 Text("LUGGAGE / CARGO", style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 9.sp))
@@ -417,7 +417,7 @@ fun ActiveChauffeurTripScreen(
                             }
                             Column {
                                 Text("ACCESSIBILITY", style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 9.sp))
-                                Text("Step-Free (≤32cm)", style = DriverTypography.Body.copy(color = DriverColors.AlertSuccess, fontSize = 10.sp, fontWeight = FontWeight.Bold))
+                                Text("Step-Free (=32cm)", style = DriverTypography.Body.copy(color = DriverColors.AlertSuccess, fontSize = 10.sp, fontWeight = FontWeight.Bold))
                             }
                         }
 
@@ -480,11 +480,11 @@ fun ActiveChauffeurTripScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Total Trip Fare", style = DriverTypography.Body)
-                                Text("₹1,600.00", style = DriverTypography.Subtitle)
+                                Text("?1,600.00", style = DriverTypography.Subtitle)
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Chauffeur Net Earning (80%)", style = DriverTypography.Body)
-                                Text("₹1,280.00", style = DriverTypography.MetricValue.copy(fontSize = 20.sp))
+                                Text("?1,280.00", style = DriverTypography.MetricValue.copy(fontSize = 20.sp))
                             }
 
                             Spacer(modifier = Modifier.height(16.dp))
@@ -633,7 +633,7 @@ fun ActiveChauffeurTripScreen(
     }
     pendingDestinationChange?.let { change ->
         val requestId = change["request_id"]?.toString()
-        AlertDialog(onDismissRequest = { }, title = { Text("Passenger requests a route change") }, text = { Text("${change["destination_address"]}\nRevised fare: ₹${((change["proposed_fare_cents"] as? Number)?.toInt() ?: 0) / 100}\nFare change: ₹${((change["fare_difference_cents"] as? Number)?.toInt() ?: 0) / 100}") }, confirmButton = { TextButton(onClick = { if (requestId != null) scope.launch { try { val r = DriverApiClient.getService().respondDestinationChange(rideId, requestId, mapOf("accept" to true, "reason" to "")); if (r.isSuccessful) { pendingDestinationChange = null; val detail = DriverApiClient.getService().getRideDetails(rideId); if (detail.isSuccessful) { val body = detail.body().orEmpty(); destLat = (body["destination_latitude"] as? Number)?.toDouble(); destLng = (body["destination_longitude"] as? Number)?.toDouble(); destinationLabel = body["destination_address"]?.toString() ?: destinationLabel }; actionError = "Route and revised fare approved." } else actionError = "Route change approval failed." } catch (_: Exception) { actionError = "Route change approval failed." } } }) { Text("Approve") } }, dismissButton = { TextButton(onClick = { if (requestId != null) scope.launch { try { val r = DriverApiClient.getService().respondDestinationChange(rideId, requestId, mapOf("accept" to false, "reason" to "Driver declined")); if (r.isSuccessful) pendingDestinationChange = null else actionError = "Route change response failed." } catch (_: Exception) { actionError = "Route change response failed." } } }) { Text("Decline") } })
+        AlertDialog(onDismissRequest = { }, title = { Text("Passenger requests a route change") }, text = { Text("${change["destination_address"]}\nRevised fare: ?${((change["proposed_fare_cents"] as? Number)?.toInt() ?: 0) / 100}\nFare change: ?${((change["fare_difference_cents"] as? Number)?.toInt() ?: 0) / 100}") }, confirmButton = { TextButton(onClick = { if (requestId != null) scope.launch { try { val r = DriverApiClient.getService().respondDestinationChange(rideId, requestId, mapOf("accept" to true, "reason" to "")); if (r.isSuccessful) { pendingDestinationChange = null; val detail = DriverApiClient.getService().getRideDetails(rideId); if (detail.isSuccessful) { val body = detail.body().orEmpty(); destLat = (body["destination_latitude"] as? Number)?.toDouble(); destLng = (body["destination_longitude"] as? Number)?.toDouble(); destinationLabel = body["destination_address"]?.toString() ?: destinationLabel }; actionError = "Route and revised fare approved." } else actionError = "Route change approval failed." } catch (_: Exception) { actionError = "Route change approval failed." } } }) { Text("Approve") } }, dismissButton = { TextButton(onClick = { if (requestId != null) scope.launch { try { val r = DriverApiClient.getService().respondDestinationChange(rideId, requestId, mapOf("accept" to false, "reason" to "Driver declined")); if (r.isSuccessful) pendingDestinationChange = null else actionError = "Route change response failed." } catch (_: Exception) { actionError = "Route change response failed." } } }) { Text("Decline") } })
     }
     if (showStartChecklist) {
         val labels = listOf("Passenger is present", "Vehicle is safe to depart", "Belongings have been checked", "Route is confirmed with passenger")
@@ -669,7 +669,7 @@ fun ActiveChauffeurTripScreen(
                     stage = ChauffeurTripStage.TRIP_FINISHED
                 } else actionError = "Trip completion failed (${finish.code()})."
             } catch (_: Exception) { actionError = "Trip completion could not be saved. Check your connection and retry." } finally { isActionLoading = false } }
-        }) { Text(if (isActionLoading) "Saving…" else "Finish trip") } }, dismissButton = { TextButton(onClick = { showCompletionChecklist = false }) { Text("Cancel") } })
+        }) { Text(if (isActionLoading) "Saving�" else "Finish trip") } }, dismissButton = { TextButton(onClick = { showCompletionChecklist = false }) { Text("Cancel") } })
     }
     if (showNoShowDialog) {
         AlertDialog(onDismissRequest = { showNoShowDialog = false }, title = { Text("Passenger no-show") }, text = { Column {
@@ -700,7 +700,7 @@ fun ActiveChauffeurTripScreen(
             containerColor = DriverColors.CockpitDark,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🚨 ", fontSize = 20.sp)
+                    Text("?? ", fontSize = 20.sp)
                     Text(
                         "CHAUFFEUR EMERGENCY SOS",
                         style = DriverTypography.Subtitle.copy(color = DriverColors.AlertDanger, fontWeight = FontWeight.Bold)
@@ -722,7 +722,7 @@ fun ActiveChauffeurTripScreen(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                         ) {
                             Text(
-                                "✓ Safety alert recorded in the app. Dispatch is not configured; call 112 if you are in immediate danger.",
+                                "? Safety alert recorded in the app. Dispatch is not configured; call 112 if you are in immediate danger.",
                                 style = DriverTypography.Body.copy(color = DriverColors.AlertSuccess, fontSize = 12.sp),
                                 modifier = Modifier.padding(10.dp)
                             )
@@ -730,7 +730,7 @@ fun ActiveChauffeurTripScreen(
                     }
 
                     Button(onClick = { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:112"))) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), colors = ButtonDefaults.buttonColors(containerColor = DriverColors.AlertDanger)) {
-                        Text("CALL EMERGENCY SERVICES · 112", color = DriverColors.TextPure, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("CALL EMERGENCY SERVICES � 112", color = DriverColors.TextPure, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
 
                     Button(
@@ -767,7 +767,7 @@ fun ActiveChauffeurTripScreen(
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = DriverColors.AlertDanger)
                 ) {
-                    Text(if (isDispatchingSos) "RECORDING ALERT…" else "RECORD TRIP SAFETY ALERT", fontWeight = FontWeight.Bold)
+                    Text(if (isDispatchingSos) "RECORDING ALERT�" else "RECORD TRIP SAFETY ALERT", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -821,7 +821,7 @@ fun ActiveChauffeurTripScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                "✓ Incident report recorded for review.",
+                                "? Incident report recorded for review.",
                                 style = DriverTypography.Body.copy(color = DriverColors.AlertSuccess, fontSize = 12.sp),
                                 modifier = Modifier.padding(10.dp)
                             )

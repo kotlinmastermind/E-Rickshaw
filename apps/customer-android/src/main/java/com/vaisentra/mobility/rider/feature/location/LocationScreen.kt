@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.location
+package com.vaisentra.mobility.rider.feature.location
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -109,7 +109,7 @@ fun LocationScreen(
     var savedPinType by remember { mutableStateOf("PICKUP") }
     var savedPins by remember { mutableStateOf<List<SavedPinLocal>>(emptyList()) }
     var locationMessage by remember { mutableStateOf("") }
-    var mapProviderDisclosure by remember { mutableStateOf("Map provider status is being checked…") }
+    var mapProviderDisclosure by remember { mutableStateOf("Map provider status is being checked�") }
     var locationEligibility by remember { mutableStateOf<Map<String, Any>?>(null) }
     var routeAlternatives by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
     var locationDataLoading by remember { mutableStateOf(false) }
@@ -517,7 +517,7 @@ fun LocationScreen(
         } else {
             isGpsLive = false
             pickupVerified = false
-            pickupAddress = "Location access denied • choose a pickup pin"
+            pickupAddress = "Location access denied � choose a pickup pin"
             showGpsGuide = true
         }
     }
@@ -627,7 +627,7 @@ fun LocationScreen(
                 val health = api.getMapProviderHealth()
                 if (health.isSuccessful) {
                     val body = health.body().orEmpty()
-                    val disclosure = "${body["provider"] ?: "Map"} · ${body["status"] ?: "status unknown"}. ${body["message"] ?: "Map provider disclosure"}"
+                    val disclosure = "${body["provider"] ?: "Map"} � ${body["status"] ?: "status unknown"}. ${body["message"] ?: "Map provider disclosure"}"
                     withContext(Dispatchers.Main) { mapProviderDisclosure = disclosure }
                 }
             } catch (_: Exception) {}
@@ -1134,7 +1134,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.ChampagneGold)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("✈ METRO FEEDER", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("? METRO FEEDER", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1146,7 +1146,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.ChampagneGold.copy(alpha = 0.6f))
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🏛 ENTRANCE & GATES", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? ENTRANCE & GATES", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1158,7 +1158,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔀 ROUTE & TRAFFIC", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? ROUTE & TRAFFIC", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1170,7 +1170,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🛰 GPS PRECISION", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? GPS PRECISION", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1182,7 +1182,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🗺 MAP & OFFLINE", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? MAP & OFFLINE", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1194,7 +1194,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.ChampagneGold)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🎧 VIP CONCIERGE & HELP", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? VIP CONCIERGE & HELP", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1206,7 +1206,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.ChampagneGold.copy(alpha = 0.6f))
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🎫 SUPPORT TICKETS", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? SUPPORT TICKETS", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1218,7 +1218,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("⚡ SELF-SERVICE DESK", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("? SELF-SERVICE DESK", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1230,7 +1230,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.ChampagneGold)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("👑 ROYAL LOYALTY", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? ROYAL LOYALTY", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1242,7 +1242,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.ChampagneGold.copy(alpha = 0.6f))
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🤝 REFERRALS", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? REFERRALS", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1254,7 +1254,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("🎁 EXCLUSIVE OFFERS", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? EXCLUSIVE OFFERS", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1266,7 +1266,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("📜 RIDE JOURNALS", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? RIDE JOURNALS", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1278,7 +1278,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("★ TEMPLATES", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("? TEMPLATES", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1290,7 +1290,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("⚑ SHARED LINK", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("? SHARED LINK", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1302,7 +1302,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("⏱ TRAFFIC ADVISOR", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("? TRAFFIC ADVISOR", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1314,7 +1314,7 @@ fun LocationScreen(
                         border = BorderStroke(1.dp, LuxuryColors.CardBorder)
                     ) {
                         Row(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("📅 RECURRING COMMUTE", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
+                            Text("?? RECURRING COMMUTE", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontWeight = FontWeight.Bold, fontSize = 10.sp))
                         }
                     }
                 }
@@ -1353,7 +1353,7 @@ fun LocationScreen(
                         ) {
                             Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    "↻ ${safeAddr.take(24)} (${item.visitCount}x)",
+                                    "? ${safeAddr.take(24)} (${item.visitCount}x)",
                                     style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp, color = LuxuryColors.PlatinumWhite),
                                     maxLines = 1
                                 )
@@ -1363,7 +1363,7 @@ fun LocationScreen(
                 }
             }
 
-            // Real Google Maps Surface with Pin Drag/Adjust & Map-Based Destination Select (Features 32 & 48)
+            // Native Mapbox Vector Map Surface with Pin Drag/Adjust & Map-Based Destination Select (Features 32 & 48)
             Surface(
                 shape = RoundedCornerShape(LuxuryDimensions.RadiusMedium),
                 color = LuxuryColors.DeepGraphite,
@@ -1423,7 +1423,7 @@ fun LocationScreen(
                             }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text("⌖", color = LuxuryColors.ChampagneGold, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            Text("?", color = LuxuryColors.ChampagneGold, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -1442,7 +1442,7 @@ fun LocationScreen(
                             modifier = Modifier.clickable { showPickupPinDialog = true }
                         ) {
                             Text(
-                                text = "📍 ADJUST PIN",
+                                text = "?? ADJUST PIN",
                                 style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontSize = 9.sp, fontWeight = FontWeight.Bold),
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                             )
@@ -1455,7 +1455,7 @@ fun LocationScreen(
                             modifier = Modifier.clickable { showDestPinDialog = true }
                         ) {
                             Text(
-                                text = "🎯 PICK DEST",
+                                text = "?? PICK DEST",
                                 style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.PlatinumWhite, fontSize = 9.sp, fontWeight = FontWeight.Bold),
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                             )
@@ -1469,7 +1469,7 @@ fun LocationScreen(
                         modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter)
                     ) {
                         Text(
-                            text = "📍 $pickupAddress",
+                            text = "?? $pickupAddress",
                             style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp),
                             maxLines = 1,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1495,14 +1495,14 @@ fun LocationScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("🛣️", fontSize = 16.sp)
+                                Text("???", fontSize = 16.sp)
                                 Column {
                                     Text(
                                         text = "SHORTEST ROUTE CONNECTED",
                                         style = LuxuryTypography.TitleGold.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     )
                                     Text(
-                                        text = "${liveRouteDistanceKm} km • ~${liveRouteDurationMinutes?.roundToInt() ?: 5} mins (Fastest Path)",
+                                        text = "${liveRouteDistanceKm} km � ~${liveRouteDurationMinutes?.roundToInt() ?: 5} mins (Fastest Path)",
                                         style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp, color = Color(0xFF10B981), fontWeight = FontWeight.SemiBold)
                                     )
                                 }
@@ -1515,7 +1515,7 @@ fun LocationScreen(
                                     modifier = Modifier.clickable { showNavigationStepsDialog = true }
                                 ) {
                                     Text(
-                                        text = "DIRECTIONS ›",
+                                        text = "DIRECTIONS �",
                                         color = LuxuryColors.ChampagneGold,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
@@ -1555,7 +1555,7 @@ fun LocationScreen(
                     if (isSearchingDestinations) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = LuxuryColors.ChampagneGold, strokeWidth = 2.dp)
                     } else if (destinationSearchQuery.isNotEmpty()) {
-                        Text("✕", color = LuxuryColors.SubtleGray, modifier = Modifier.clickable { destinationSearchQuery = ""; selectedDestination = null }.padding(8.dp))
+                        Text("?", color = LuxuryColors.SubtleGray, modifier = Modifier.clickable { destinationSearchQuery = ""; selectedDestination = null }.padding(8.dp))
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -1609,7 +1609,7 @@ fun LocationScreen(
                                     onClick = { showDependentsDialog = true },
                                     contentPadding = PaddingValues(0.dp)
                                 ) {
-                                    Text("★ Dependents Registry", color = LuxuryColors.ChampagneGold, fontSize = 11.sp)
+                                    Text("? Dependents Registry", color = LuxuryColors.ChampagneGold, fontSize = 11.sp)
                                 }
                             }
                         }
@@ -1807,7 +1807,7 @@ fun LocationScreen(
                                             },
                                             modifier = Modifier.size(24.dp)
                                         ) {
-                                            Text("✕", color = LuxuryColors.CrimsonAlert, fontSize = 12.sp)
+                                            Text("?", color = LuxuryColors.CrimsonAlert, fontSize = 12.sp)
                                         }
                                     }
                                 }
@@ -1961,11 +1961,11 @@ fun LocationScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("${tel.airlineName} • ${tel.flightNumber}", style = LuxuryTypography.BodyRegular.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp))
+                                            Text("${tel.airlineName} � ${tel.flightNumber}", style = LuxuryTypography.BodyRegular.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp))
                                             GoldBadge(tel.status)
                                         }
                                         Text("Arrival: ${tel.scheduledArrival} (Est: ${tel.estimatedArrival})", style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp))
-                                        Text("Delay: +${tel.delayMinutes} mins • Baggage: ${tel.baggageBelt}", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontSize = 11.sp))
+                                        Text("Delay: +${tel.delayMinutes} mins � Baggage: ${tel.baggageBelt}", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontSize = 11.sp))
                                     }
                                 }
                             }
@@ -1988,7 +1988,7 @@ fun LocationScreen(
                                 onClick = { showGuidanceSection = !showGuidanceSection },
                                 contentPadding = PaddingValues(0.dp)
                             ) {
-                                Text(if (showGuidanceSection) "Hide ▲" else "Expand ▼", color = LuxuryColors.ChampagneGold, fontSize = 11.sp)
+                                Text(if (showGuidanceSection) "Hide ?" else "Expand ?", color = LuxuryColors.ChampagneGold, fontSize = 11.sp)
                             }
                         }
 
@@ -2051,7 +2051,7 @@ fun LocationScreen(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("⏳", fontSize = 12.sp)
+                            Text("?", fontSize = 12.sp)
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "${firstPromo.title ?: firstPromo.code}: ${firstPromo.reminderText}",
@@ -2097,7 +2097,7 @@ fun LocationScreen(
                             onClick = { showFeatureComparisonSheet = true },
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
                         ) {
-                            Text("COMPARE MATRIX ›", style = LuxuryTypography.TitleGold.copy(fontSize = 11.sp))
+                            Text("COMPARE MATRIX �", style = LuxuryTypography.TitleGold.copy(fontSize = 11.sp))
                         }
                     }
                 }
@@ -2192,7 +2192,7 @@ fun LocationScreen(
                                     Text(cat.desc, style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp), maxLines = 1)
                                 }
                                 Text(
-                                    text = "₹${cat.fareRupees}",
+                                    text = "?${cat.fareRupees}",
                                     style = LuxuryTypography.HeadlineMedium.copy(color = LuxuryColors.ChampagneGold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 )
                             }
@@ -2206,9 +2206,9 @@ fun LocationScreen(
                             ) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("${cat.legroomInches}\" Legroom", style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp, color = LuxuryColors.MutedSilver))
-                                    Text("•", style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp, color = LuxuryColors.MutedSilver))
-                                    Text("≤ ${cat.quietnessDb} dB Sound", style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp, color = LuxuryColors.MutedSilver))
-                                    Text("•", style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp, color = LuxuryColors.MutedSilver))
+                                    Text("�", style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp, color = LuxuryColors.MutedSilver))
+                                    Text("= ${cat.quietnessDb} dB Sound", style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp, color = LuxuryColors.MutedSilver))
+                                    Text("�", style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp, color = LuxuryColors.MutedSilver))
                                     Text(cat.luggageCapacity, style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp, color = LuxuryColors.MutedSilver))
                                 }
 
@@ -2220,7 +2220,7 @@ fun LocationScreen(
                                     },
                                     contentPadding = PaddingValues(0.dp)
                                 ) {
-                                    Text("GALLERY & INTERIOR ›", color = LuxuryColors.ChampagneGold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("GALLERY & INTERIOR �", color = LuxuryColors.ChampagneGold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -2245,7 +2245,7 @@ fun LocationScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("✦", color = LuxuryColors.ChampagneGold, fontSize = 12.sp)
+                                    Text("?", color = LuxuryColors.ChampagneGold, fontSize = 12.sp)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "BESPOKE SANCTUARY & ACCESSIBILITY",
@@ -2253,7 +2253,7 @@ fun LocationScreen(
                                     )
                                 }
                                 Text(
-                                    text = "Luggage: ${luggageLargeCount}L/${luggageSmallCount}S • ${if (quietRideRequested) "Silent Discretion" else musicRequested} • ${String.format("%.1f", cabinTempRequested)}°C • $driverLanguageRequested • ${if (wheelchairRequested) "WAV Accessible" else if (stepFreePickup) "Step-Free Boarding" else "Standard Boarding"}",
+                                    text = "Luggage: ${luggageLargeCount}L/${luggageSmallCount}S � ${if (quietRideRequested) "Silent Discretion" else musicRequested} � ${String.format("%.1f", cabinTempRequested)}�C � $driverLanguageRequested � ${if (wheelchairRequested) "WAV Accessible" else if (stepFreePickup) "Step-Free Boarding" else "Standard Boarding"}",
                                     style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.PlatinumWhite),
                                     maxLines = 2
                                 )
@@ -2294,9 +2294,9 @@ fun LocationScreen(
                                 }
                             }
                             Column(horizontalAlignment = Alignment.End) {
-                                Text("₹$displayFare.00", style = LuxuryTypography.TitleGold.copy(fontSize = 16.sp))
+                                Text("?$displayFare.00", style = LuxuryTypography.TitleGold.copy(fontSize = 16.sp))
                                 if (fullEstimateResponse?.fareMinRupees != null && fullEstimateResponse?.fareMaxRupees != null) {
-                                    Text("Range: ₹${fullEstimateResponse!!.fareMinRupees!!.toInt()} - ₹${fullEstimateResponse!!.fareMaxRupees!!.toInt()}", style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp))
+                                    Text("Range: ?${fullEstimateResponse!!.fareMinRupees!!.toInt()} - ?${fullEstimateResponse!!.fareMaxRupees!!.toInt()}", style = LuxuryTypography.BodySubtle.copy(fontSize = 9.sp))
                                 }
                             }
                         }
@@ -2310,7 +2310,7 @@ fun LocationScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Itemized Distance, Time & Tax Breakdown ›", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontSize = 10.sp))
+                                Text("Itemized Distance, Time & Tax Breakdown �", style = LuxuryTypography.BodySubtle.copy(color = LuxuryColors.ChampagneGold, fontSize = 10.sp))
                                 if (fullEstimateResponse?.isCapped == true) {
                                     GoldBadge("FARE CAPPED")
                                 }
@@ -2324,7 +2324,7 @@ fun LocationScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("🔒 24-Hour Price Lock Guarantee", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.PlatinumWhite))
+                            Text("?? 24-Hour Price Lock Guarantee", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.PlatinumWhite))
                             Switch(
                                 checked = isPriceLocked,
                                 onCheckedChange = { isPriceLocked = it },
@@ -2337,13 +2337,13 @@ fun LocationScreen(
                         }
 
                         if (isRoundTrip) {
-                            Text("• Includes round-trip return circuit", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.ChampagneGold))
+                            Text("� Includes round-trip return circuit", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.ChampagneGold))
                         }
                         if (intermediateStops.isNotEmpty()) {
-                            Text("• Includes ${intermediateStops.size} intermediate waypoints with designated dwell times", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp))
+                            Text("� Includes ${intermediateStops.size} intermediate waypoints with designated dwell times", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp))
                         }
                         if (isAirportBooking) {
-                            Text("• Includes flight meet-and-greet delay protection", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.ChampagneGold))
+                            Text("� Includes flight meet-and-greet delay protection", style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.ChampagneGold))
                         }
 
                         // Feature 177: Contextual Help & Guidance from Booking Card
@@ -2382,7 +2382,7 @@ fun LocationScreen(
                                     onClick = { showGuidedCancellationDialog = true },
                                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                                 ) {
-                                    Text("Guided Cancellation Support ›", color = LuxuryColors.CrimsonAlert, fontSize = 10.sp)
+                                    Text("Guided Cancellation Support �", color = LuxuryColors.CrimsonAlert, fontSize = 10.sp)
                                 }
                             }
                         }
@@ -2445,7 +2445,7 @@ fun LocationScreen(
                             val res = promoEligibilityResult!!
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = if (res.eligible) "✓ ${res.explanation ?: "Discount applied: ₹${res.discountRupees?.toInt()}"}" else "✕ ${res.reason ?: "Promo not applicable for this trip"}",
+                                text = if (res.eligible) "? ${res.explanation ?: "Discount applied: ?${res.discountRupees?.toInt()}"}" else "? ${res.reason ?: "Promo not applicable for this trip"}",
                                 style = LuxuryTypography.BodySubtle.copy(
                                     color = if (res.eligible) LuxuryColors.EmeraldGreen else LuxuryColors.CrimsonAlert,
                                     fontSize = 10.sp
@@ -2469,7 +2469,7 @@ fun LocationScreen(
                         val summary = PrebookingPreferenceSummaryDto(
                             passengerName = if (bookingForSelf) "Guest Principal" else (passengerName.ifBlank { "VIP Guest" }),
                             cabinAtmosphere = listOf(
-                                "${String.format("%.1f", cabinTempRequested)}°C Dual-Zone Climate",
+                                "${String.format("%.1f", cabinTempRequested)}�C Dual-Zone Climate",
                                 if (quietRideRequested) "Silent Discretion Mode (Chauffeur Silence Guaranteed)" else "Curated Soundscape: $musicRequested",
                                 if (extraLegroomRequested) "Executive Lounge Recline (Front Seat Forwarded)" else "Standard Executive Seating"
                             ),
@@ -2480,7 +2480,7 @@ fun LocationScreen(
                             ),
                             accessibilityCompliance = listOf(
                                 if (wheelchairRequested) "Wheelchair-Accessible Vehicle (WAV) with Hoist Guaranteed" else "Low-Step Vehicle Access",
-                                if (stepFreePickup) "Step-Free Kerbside Boarding (Suspension Lowered to ≤ 32cm)" else "Standard Boarding",
+                                if (stepFreePickup) "Step-Free Kerbside Boarding (Suspension Lowered to = 32cm)" else "Standard Boarding",
                                 if (assistanceAnimal) "Certified Guide/Assistance Animal Accommodated" else "No Assistance Animal",
                                 if (specialAssistanceNotes.isNotBlank()) "Chauffeur Brief: $specialAssistanceNotes" else "No Special Assistance Instructions"
                             ),
@@ -2758,13 +2758,13 @@ fun LocationScreen(
                             style = LuxuryTypography.TitleGold.copy(fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         )
                         Text(
-                            text = "✕",
+                            text = "?",
                             color = LuxuryColors.SubtleGray,
                             modifier = Modifier.clickable { showNavigationStepsDialog = false }.padding(4.dp)
                         )
                     }
                     Text(
-                        text = "Shortest driving route: ${liveRouteDistanceKm ?: 0.0} km • ~${liveRouteDurationMinutes?.roundToInt() ?: 0} mins",
+                        text = "Shortest driving route: ${liveRouteDistanceKm ?: 0.0} km � ~${liveRouteDurationMinutes?.roundToInt() ?: 0} mins",
                         style = LuxuryTypography.BodySubtle.copy(fontSize = 11.sp, color = Color(0xFF10B981))
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -2776,7 +2776,7 @@ fun LocationScreen(
                                     .padding(vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("➤", color = LuxuryColors.ChampagneGold, fontSize = 12.sp, modifier = Modifier.padding(end = 8.dp))
+                                Text("?", color = LuxuryColors.ChampagneGold, fontSize = 12.sp, modifier = Modifier.padding(end = 8.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(step.instruction, style = LuxuryTypography.BodyRegular.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold))
                                     Text(step.distance, style = LuxuryTypography.BodySubtle.copy(fontSize = 10.sp, color = LuxuryColors.SubtleGray))

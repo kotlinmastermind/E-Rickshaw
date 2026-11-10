@@ -25,6 +25,19 @@ open class CoreTokenAuthenticator(
 
     companion object {
         const val MAX_AUTH_RETRY_COUNT = 2
+
+        // Process-wide synchronization lock ensuring thread-safe, serialized token rotation
+        // across all CoreTokenAuthenticator instances, OkHttpClient dispatchers, and worker threads.
+        private val REFRESH_LOCK = Any()
+
+        // Shared, isolated OkHttpClient for token rotation to prevent socket/thread-pool leaks
+        private val refreshHttpClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .dns(ResilientDns)
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .build()
+        }
     }
 
     override fun authenticate(route: Route?, response: Response): Request? {
@@ -40,7 +53,7 @@ open class CoreTokenAuthenticator(
             return null
         }
 
-        synchronized(this) {
+        synchronized(REFRESH_LOCK) {
             val currentAccessToken = tokenManager.getToken()
             val requestToken = response.request.header("Authorization")?.removePrefix("Bearer ")?.trim()
 
@@ -54,12 +67,6 @@ open class CoreTokenAuthenticator(
             // Perform synchronous token rotation with the backend
             val cleanBaseUrl = baseUrlProvider().removeSuffix("/")
             val refreshUrl = "$cleanBaseUrl/api/v1/auth/token/refresh"
-
-            val refreshHttpClient = OkHttpClient.Builder()
-                .dns(ResilientDns)
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
-                .build()
 
             val jsonPayload = JSONObject().apply {
                 put("refresh_token", refreshToken)

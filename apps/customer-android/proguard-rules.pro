@@ -47,7 +47,7 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 
-# Google Play Services Maps & Location
+# Google Play Services Location & Mapbox Native SDK
 -dontwarn com.google.android.gms.**
 -keep class com.google.android.gms.common.** { *; }
 -keep class com.google.android.gms.tasks.** { *; }

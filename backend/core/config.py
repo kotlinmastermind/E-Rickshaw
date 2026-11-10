@@ -36,7 +36,6 @@ class Settings(BaseSettings):
     # Mapbox Web Services Integration (Directions, Geocoding, Matrix & Isochrone)
     MAPBOX_SECRET_TOKEN: Optional[str] = os.getenv("MAPBOX_SECRET_TOKEN", None)
     MAPBOX_PUBLIC_TOKEN: Optional[str] = os.getenv("MAPBOX_PUBLIC_TOKEN", "")
-    GOOGLE_MAPS_API_KEY: Optional[str] = None
 
     # Payments Integration (Razorpay / UPI)
     RAZORPAY_KEY_ID: Optional[str] = os.getenv("RAZORPAY_KEY_ID", None)

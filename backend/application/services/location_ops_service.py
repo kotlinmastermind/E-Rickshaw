@@ -426,10 +426,10 @@ class LocationOpsService:
         provider = get_maps_provider()
         health = provider.provider_health()
         return {
-            "map_provider": health.get("provider", "GOOGLE_MAPS / OSM"),
-            "tile_attribution": "© OpenStreetMap contributors, CartoDB, and Google Maps Platform API.",
+            "map_provider": health.get("provider", "MAPBOX_WEB_SERVICES"),
+            "tile_attribution": "© Mapbox, © OpenStreetMap contributors.",
             "routing_engine": "Haversine Kinematic Engine with Traffic Surcharge Coefficients",
-            "geocoding_attribution": "Curated Luxury Directory & Nominatim Reverse Geocoding Services",
+            "geocoding_attribution": "Mapbox Geocoding & Curated Luxury Directory",
             "privacy_notice": "Under India's Digital Personal Data Protection Act (DPDP), real-time coordinates are processed solely during an active booking and obfuscated in historical analytics.",
             "offline_mode_ready": True,
             "disclaimer": "Visual map renders are indicative. Chauffeurs observe posted local traffic regulations and police convoy holds."

@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.gson.Gson
 import com.vaisentra.mobility.driver.core.designsystem.*
+import com.vaisentra.mobility.driver.core.dispatch.DriverDispatchManager
 import com.vaisentra.mobility.driver.core.network.DriverApiClient
 import com.vaisentra.mobility.driver.core.network.DriverAvailabilityPayload
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.OffsetDateTime
 import java.time.Duration
+import java.util.Locale
 import okhttp3.*
 
 import androidx.compose.ui.platform.LocalContext
@@ -278,62 +280,24 @@ fun DriverDashboardScreen(
         }
     }
 
-    // Real WebSocket for Driver Dispatch (/api/v1/ws/driver/dispatch with Authorization Bearer header)
-    DisposableEffect(isOnline) {
-        val token = DriverApiClient.getToken()
-        if (!isOnline || token.isNullOrBlank()) {
-            onDispose {}
-        } else {
-            val wsUrl = DriverApiClient.getWebSocketUrl("api/v1/ws/driver/dispatch")
-            val client = DriverApiClient.getOkHttpClient()
-            val request = Request.Builder()
-                .url(wsUrl)
-                .addHeader("Authorization", "Bearer $token")
-                .build()
-
-            var webSocket: WebSocket? = null
-            try {
-                webSocket = client.newWebSocket(request, object : WebSocketListener() {
-                    override fun onOpen(ws: WebSocket, response: Response) {
-                        isWsConnected = true
-                    }
-
-                    override fun onMessage(ws: WebSocket, text: String) {
-                        try {
-                            val map = gson.fromJson<Map<String, Any>>(text, Map::class.java)
-                            val type = map["type"] as? String
-                            if (type == "NEW_RIDE_DISPATCH") {
-                                val rideId = map["ride_id"] as? String ?: return
-                                val pickup = map["pickup_address"] as? String ?: "Executive Pickup Location"
-                                val dest = map["destination_address"] as? String ?: "VIP Destination"
-                                val fare = (map["fare_rupees"] as? Number)?.toInt() ?: 1600
-
-                                incomingRideOffer = mapOf(
-                                    "ride_id" to rideId,
-                                    "pickup" to pickup,
-                                    "destination" to dest,
-                                    "fare" to "₹$fare",
-                                    "distance" to "Direct Ride"
-                                )
-                                offerCountdown = 15
-                            }
-                        } catch (_: Exception) {}
-                    }
-
-                    override fun onClosed(ws: WebSocket, code: Int, reason: String) {
-                        isWsConnected = false
-                    }
-
-                    override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                        isWsConnected = false
-                    }
-                })
-            } catch (_: Exception) {
-                isWsConnected = false
-            }
-
-            onDispose {
-                webSocket?.close(1000, "Driver went offline or left cockpit")
+    // Observe DriverDispatchManager authoritative flow when online
+    LaunchedEffect(isOnline) {
+        if (!isOnline) {
+            isWsConnected = false
+            return@LaunchedEffect
+        }
+        isWsConnected = true
+        DriverDispatchManager.activeOfferFlow.collect { offer ->
+            withContext(Dispatchers.Main) {
+                incomingRideOffer = mapOf(
+                    "ride_id" to offer.rideId,
+                    "pickup" to offer.pickupAddress,
+                    "destination" to offer.destinationAddress,
+                    "fare" to offer.formattedFare,
+                    "distance" to (offer.pickupDistanceKm?.let { String.format(Locale.US, "%.1f km", it) } ?: "Direct Ride"),
+                    "expires_at" to (offer.expiresAt ?: "")
+                )
+                offerCountdown = offer.timeoutSeconds
             }
         }
     }
@@ -467,7 +431,7 @@ fun DriverDashboardScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Real Google Maps Live View with GPS tracking
+                // Native Mapbox 3D Vector Cockpit Live View with GPS tracking
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
@@ -783,7 +747,7 @@ fun DriverDashboardScreen(
         var minimumFare by remember(showDispatchSettings, prefs) { mutableStateOf(((prefs["minimum_fare_cents"] as? Number)?.toInt()?.div(100) ?: 0).toString()) }
         var maximumPickup by remember(showDispatchSettings, prefs) { mutableStateOf((prefs["maximum_pickup_distance_km"] as? Number)?.toString() ?: "20") }
         var categories by remember(showDispatchSettings, prefs) { mutableStateOf((prefs["vehicle_categories"] as? List<*>)?.joinToString(",") ?: "") }
-        var provider by remember(showDispatchSettings, prefs) { mutableStateOf(prefs["navigation_provider"]?.toString() ?: "GOOGLE_MAPS") }
+        var provider by remember(showDispatchSettings, prefs) { mutableStateOf(prefs["navigation_provider"]?.toString() ?: "MAPBOX_IN_APP") }
         var voice by remember(showDispatchSettings, prefs) { mutableStateOf(prefs["voice_guidance_enabled"] as? Boolean ?: true) }
         var reroute by remember(showDispatchSettings, prefs) { mutableStateOf(prefs["reroute_on_closure_enabled"] as? Boolean ?: true) }
         AlertDialog(onDismissRequest = { showDispatchSettings = false }, title = { Text("Dispatch preferences") },
@@ -805,7 +769,7 @@ fun DriverDashboardScreen(
                     }
                 }
                 Text("Navigation provider", style = DriverTypography.Subtitle)
-                listOf("GOOGLE_MAPS", "WAZE", "SYSTEM").forEach { choice -> Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(provider == choice, { provider = choice }); Text(choice.replace('_', ' ')) } }
+                listOf("MAPBOX_IN_APP", "WAZE", "SYSTEM").forEach { choice -> Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(provider == choice, { provider = choice }); Text(choice.replace('_', ' ')) } }
                 Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(voice, { voice = it }); Text("Voice guidance preference") }
                 Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(reroute, { reroute = it }); Text("Request alternate route on closure") }
                 Text("Voice and rerouting behavior is controlled by the selected navigation app.", color = DriverColors.TextMuted, fontSize = 12.sp)

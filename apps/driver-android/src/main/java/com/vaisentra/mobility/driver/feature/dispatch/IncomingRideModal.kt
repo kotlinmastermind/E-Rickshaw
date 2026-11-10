@@ -30,8 +30,10 @@ import com.vaisentra.mobility.driver.core.designsystem.*
 import com.vaisentra.mobility.driver.core.network.DriverApiClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * IncomingRideModal
@@ -117,8 +119,8 @@ fun IncomingRideModal(
         // 1. Dismiss modal locally immediately
         onDismissLocally()
 
-        // 2. Fire asynchronous non-blocking network request with retry-once resilience
-        CoroutineScope(Dispatchers.IO).launch {
+        // 2. Fire asynchronous non-blocking network request with retry-once resilience without unmanaged scopes
+        withContext(Dispatchers.IO + NonCancellable) {
             try {
                 DriverApiClient.getService().rejectDispatchOffer(
                     rideId = rideId,

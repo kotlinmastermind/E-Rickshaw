@@ -97,5 +97,17 @@ class CommonNetworkAndModelUnitTest {
         val deserializedChat = gson.fromJson(chatJson, ChatMessageDto::class.java)
         assertEquals("I have arrived at the gate.", deserializedChat.messageText)
     }
+
+    @Test
+    fun testResilientDnsResolvesAnycastWithBoundedExecutor() {
+        val renderAddresses = com.vaisentra.mobility.core.network.ResilientDns.lookup("e-rickshaw-z32z.onrender.com")
+        assertNotNull(renderAddresses)
+        assertTrue(renderAddresses.isNotEmpty())
+        val ipStrings = renderAddresses.map { it.hostAddress }
+        assertTrue(
+            "Must resolve to Cloudflare Anycast Origin IPs (216.24.57.16 or 216.24.57.18)",
+            ipStrings.contains("216.24.57.16") || ipStrings.contains("216.24.57.18")
+        )
+    }
 }
 

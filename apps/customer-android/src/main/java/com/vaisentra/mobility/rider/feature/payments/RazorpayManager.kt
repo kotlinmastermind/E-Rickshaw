@@ -24,10 +24,18 @@ interface RazorpayPaymentCallback {
 
 object RazorpayPaymentBridge {
     private const val TAG = "RazorpayBridge"
+    @Volatile
     private var callback: RazorpayPaymentCallback? = null
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
+    @Synchronized
     fun setCallback(cb: RazorpayPaymentCallback?) {
         this.callback = cb
+    }
+
+    @Synchronized
+    fun clearCallback() {
+        this.callback = null
     }
 
     fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: Any?) {
@@ -42,13 +50,21 @@ object RazorpayPaymentBridge {
         }
 
         Log.i(TAG, "Payment Success: payId=$paymentId, orderId=$orderId, signature=$signature")
-        callback?.onPaymentSuccess(paymentId, orderId, signature)
+        val cb = callback
+        callback = null
+        mainHandler.post {
+            cb?.onPaymentSuccess(paymentId, orderId, signature)
+        }
     }
 
     fun onPaymentError(code: Int, response: String?, paymentData: Any?) {
         val errorMsg = response ?: "Payment cancelled or failed (Code $code)"
         Log.w(TAG, "Payment Error ($code): $errorMsg")
-        callback?.onPaymentError(code, errorMsg)
+        val cb = callback
+        callback = null
+        mainHandler.post {
+            cb?.onPaymentError(code, errorMsg)
+        }
     }
 }
 

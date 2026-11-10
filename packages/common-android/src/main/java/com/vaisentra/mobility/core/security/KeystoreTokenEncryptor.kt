@@ -22,6 +22,7 @@ object KeystoreTokenEncryptor {
     private const val GCM_TAG_LENGTH = 128
     const val ENCRYPTED_PREFIX = "ENC:GCM:"
 
+    @Synchronized
     private fun getOrCreateKey(): SecretKey? {
         return try {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
