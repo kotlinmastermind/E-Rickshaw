@@ -506,9 +506,14 @@ fun DriverDashboardScreen(
                                                 else -> LocationManager.PASSIVE_PROVIDER
                                             }
                                             val loc = lm.getLastKnownLocation(provider)
-                                            if (loc != null) {
+                                            if (loc != null && !com.vaisentra.mobility.core.map.DeviceLocationProvider.isGoogleplexOrMock(loc.latitude, loc.longitude)) {
                                                 driverLatLng = LatLng(loc.latitude, loc.longitude)
                                                 recenterTrigger++
+                                            } else {
+                                                com.vaisentra.mobility.core.map.DeviceLocationProvider.fetchIpLocationFallback { ipLoc ->
+                                                    driverLatLng = ipLoc
+                                                    recenterTrigger++
+                                                }
                                             }
                                         }
                                     } catch (_: Exception) {}
@@ -527,7 +532,7 @@ fun DriverDashboardScreen(
                                     try {
                                         fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                                             ?.addOnSuccessListener { loc ->
-                                                if (loc != null) {
+                                                if (loc != null && !com.vaisentra.mobility.core.map.DeviceLocationProvider.isGoogleplexOrMock(loc.latitude, loc.longitude)) {
                                                     driverLatLng = LatLng(loc.latitude, loc.longitude)
                                                     recenterTrigger++
                                                 } else {

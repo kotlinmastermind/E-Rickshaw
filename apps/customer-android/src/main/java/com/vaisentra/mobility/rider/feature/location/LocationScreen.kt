@@ -380,6 +380,10 @@ fun LocationScreen(
         }
 
         fun processLocationResult(location: android.location.Location) {
+            // Ignore Googleplex emulator mock coordinates
+            if (com.vaisentra.mobility.core.map.DeviceLocationProvider.isGoogleplexOrMock(location.latitude, location.longitude)) {
+                return
+            }
             isDetectingLocation = false
             pickupLatLng = LatLng(location.latitude, location.longitude)
             isGpsLive = true
@@ -417,7 +421,7 @@ fun LocationScreen(
                         try {
                             if (lm.isProviderEnabled(prov)) {
                                 val loc = lm.getLastKnownLocation(prov)
-                                if (loc != null) {
+                                if (loc != null && !com.vaisentra.mobility.core.map.DeviceLocationProvider.isGoogleplexOrMock(loc.latitude, loc.longitude)) {
                                     processLocationResult(loc)
                                     return
                                 }
@@ -442,6 +446,15 @@ fun LocationScreen(
                     } catch (_: Exception) {}
                 }
             } catch (_: Exception) {}
+
+            // Background IP Geolocation Fallback
+            com.vaisentra.mobility.core.map.DeviceLocationProvider.fetchIpLocationFallback { ipLoc ->
+                pickupLatLng = ipLoc
+                isGpsLive = true
+                pickupVerified = true
+                recenterTrigger += 1
+            }
+
             isDetectingLocation = false
             isGpsLive = false
             pickupAddress = "Tap map to set pickup pin"

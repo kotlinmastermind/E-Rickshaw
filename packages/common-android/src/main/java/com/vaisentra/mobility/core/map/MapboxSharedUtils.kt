@@ -393,6 +393,62 @@ data class RealDeviceLocation(
  * Safely fetches real physical GPS / Network device coordinates with permissions check.
  */
 object DeviceLocationProvider {
+    val WORLDWIDE_CENTER = LatLng(20.0, 10.0)
+    const val WORLDWIDE_ZOOM = 1.8
+
+    /**
+     * Checks if coordinates match Android emulator mock location for Googleplex Mountain View CA
+     * or Null Island (0,0), which must be bypassed on physical devices.
+     */
+    fun isGoogleplexOrMock(latitude: Double, longitude: Double): Boolean {
+        if (abs(latitude) < 0.0001 && abs(longitude) < 0.0001) return true
+        // Googleplex Mountain View CA (Android Emulator default mock: 37.421998, -122.084000)
+        return (latitude in 37.410..37.435) && (longitude in -122.095..-122.070)
+    }
+
+    /**
+     * Checks if coordinate is a valid non-mock physical location anywhere on Earth.
+     */
+    fun isValidPhysicalLocation(latitude: Double, longitude: Double): Boolean {
+        if (latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) return false
+        return !isGoogleplexOrMock(latitude, longitude)
+    }
+
+    /**
+     * Fast background IP-based geolocation fallback when GPS has not yet acquired satellite fix.
+     */
+    fun fetchIpLocationFallback(onLocation: (LatLng) -> Unit) {
+        Thread {
+            try {
+                val endpoints = listOf(
+                    "https://ipapi.co/json/",
+                    "https://freeipapi.com/api/json"
+                )
+                for (endpoint in endpoints) {
+                    try {
+                        val url = java.net.URL(endpoint)
+                        val conn = url.openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 3000
+                        conn.readTimeout = 3000
+                        conn.setRequestProperty("User-Agent", "VasantraMobility-Android/1.0")
+                        if (conn.responseCode == 200) {
+                            val res = conn.inputStream.bufferedReader().use { it.readText() }
+                            val json = org.json.JSONObject(res)
+                            val lat = json.optDouble("latitude", json.optDouble("lat", Double.NaN))
+                            val lng = json.optDouble("longitude", json.optDouble("lon", json.optDouble("lng", Double.NaN)))
+                            if (!lat.isNaN() && !lng.isNaN() && isValidPhysicalLocation(lat, lng)) {
+                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                    onLocation(LatLng(lat, lng))
+                                }
+                                return@Thread
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+        }.start()
+    }
+
     /**
      * Checks whether ACCESS_FINE_LOCATION or ACCESS_COARSE_LOCATION has been granted.
      */
@@ -412,6 +468,7 @@ object DeviceLocationProvider {
 
     /**
      * Instantly returns the most accurate and recent last-known location across GPS, Network, and Passive providers.
+     * Skips Googleplex emulator defaults.
      */
     @SuppressLint("MissingPermission")
     fun getLastKnownLocation(context: Context): LatLng? {
@@ -429,6 +486,10 @@ object DeviceLocationProvider {
                 if (lm.isProviderEnabled(provider)) {
                     val loc = lm.getLastKnownLocation(provider)
                     if (loc != null) {
+                        // Skip emulator Googleplex mock default
+                        if (isGoogleplexOrMock(loc.latitude, loc.longitude)) {
+                            continue
+                        }
                         if (bestLocation == null || loc.time > bestLocation.time || loc.accuracy < bestLocation.accuracy) {
                             bestLocation = loc
                         }
@@ -447,8 +508,11 @@ object DeviceLocationProvider {
     @SuppressLint("MissingPermission")
     fun requestCurrentLocation(context: Context, onLocation: (LatLng) -> Unit) {
         val lastKnown = getLastKnownLocation(context)
-        if (lastKnown != null) {
+        if (lastKnown != null && isValidPhysicalLocation(lastKnown.latitude, lastKnown.longitude)) {
             onLocation(lastKnown)
+        } else {
+            // Trigger fast IP fallback while waiting for hardware GPS
+            fetchIpLocationFallback(onLocation)
         }
         if (!hasLocationPermission(context)) return
 
@@ -456,10 +520,12 @@ object DeviceLocationProvider {
 
         val listener = object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                onLocation(LatLng(location.latitude, location.longitude))
-                try {
-                    lm.removeUpdates(this)
-                } catch (_: Exception) {}
+                if (!isGoogleplexOrMock(location.latitude, location.longitude)) {
+                    onLocation(LatLng(location.latitude, location.longitude))
+                    try {
+                        lm.removeUpdates(this)
+                    } catch (_: Exception) {}
+                }
             }
             @Deprecated("Deprecated in Java")
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
@@ -501,22 +567,58 @@ object DeviceLocationProvider {
         minDistanceMeters: Float = 1.0f,
         onLocation: (RealDeviceLocation) -> Unit
     ): () -> Unit {
-        if (!hasLocationPermission(context)) return {}
+        if (!hasLocationPermission(context)) {
+            // Fallback to IP geolocation if GPS permission not yet given
+            fetchIpLocationFallback { ipLoc ->
+                onLocation(
+                    RealDeviceLocation(
+                        latitude = ipLoc.latitude,
+                        longitude = ipLoc.longitude,
+                        provider = "IP_FALLBACK"
+                    )
+                )
+            }
+            return {}
+        }
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return {}
 
-        // Emit cached last known immediately
+        var hasEmittedLocation = false
+
+        // Emit cached last known immediately if valid
         getLastKnownLocation(context)?.let {
-            onLocation(
-                RealDeviceLocation(
-                    latitude = it.latitude,
-                    longitude = it.longitude,
-                    provider = "LAST_KNOWN"
+            if (isValidPhysicalLocation(it.latitude, it.longitude)) {
+                hasEmittedLocation = true
+                onLocation(
+                    RealDeviceLocation(
+                        latitude = it.latitude,
+                        longitude = it.longitude,
+                        provider = "LAST_KNOWN"
+                    )
                 )
-            )
+            }
+        }
+
+        // If no cached location, query IP geolocation immediately so map can zoom to user city without delay
+        if (!hasEmittedLocation) {
+            fetchIpLocationFallback { ipLoc ->
+                if (!hasEmittedLocation) {
+                    hasEmittedLocation = true
+                    onLocation(
+                        RealDeviceLocation(
+                            latitude = ipLoc.latitude,
+                            longitude = ipLoc.longitude,
+                            provider = "IP_FALLBACK"
+                        )
+                    )
+                }
+            }
         }
 
         val listener = object : LocationListener {
             override fun onLocationChanged(loc: Location) {
+                // Reject Googleplex emulator mock
+                if (isGoogleplexOrMock(loc.latitude, loc.longitude)) return
+                hasEmittedLocation = true
                 val speedKmh = if (loc.hasSpeed()) loc.speed * 3.6f else 0f
                 val bearing = if (loc.hasBearing()) loc.bearing else 0f
                 val accuracy = if (loc.hasAccuracy()) loc.accuracy else 0f

@@ -244,14 +244,13 @@ fun MapboxDriverMapView(
                             pointAnnotationManager = annotationPlugin.createPointAnnotationManager()
                             polylineAnnotationManager = annotationPlugin.createPolylineAnnotationManager()
 
-                            // Setup initial 3D Cockpit Camera with worldwide perspective so it animates in smoothly
-                            val initialLoc = DeviceLocationProvider.getLastKnownLocation(ctx) ?: driverLatLng
+                            // Setup initial 3D Cockpit Camera with worldwide perspective so it opens globally and animates smoothly into real driver location
                             mapboxMap.setCamera(
                                 CameraOptions.Builder()
-                                    .center(Point.fromLngLat(initialLoc.longitude, initialLoc.latitude))
-                                    .bearing(bearing.toDouble())
+                                    .center(Point.fromLngLat(DeviceLocationProvider.WORLDWIDE_CENTER.longitude, DeviceLocationProvider.WORLDWIDE_CENTER.latitude))
+                                    .bearing(0.0)
                                     .pitch(0.0)
-                                    .zoom(2.0)
+                                    .zoom(DeviceLocationProvider.WORLDWIDE_ZOOM)
                                     .build()
                             )
                         }
@@ -378,13 +377,17 @@ fun MapboxDriverMapView(
                 modifier = Modifier
                     .size(44.dp)
                     .clickable {
-                        val targetPoint = Point.fromLngLat(activeDriverPos.longitude, activeDriverPos.latitude)
+                        val activePoint = liveDriverLoc?.toLatLng()?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+                            ?: driverLatLng.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+                            ?: DeviceLocationProvider.getLastKnownLocation(context)?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+                            ?: driverLatLng
+                        val targetPoint = Point.fromLngLat(activePoint.longitude, activePoint.latitude)
                         val targetPitch = if (is3DMode) 55.0 else 0.0
                         val cameraOptions = CameraOptions.Builder()
                             .center(targetPoint)
                             .bearing(activeBearing.toDouble())
                             .pitch(targetPitch)
-                            .zoom(zoomLevel.toDouble())
+                            .zoom(zoomLevel.toDouble().coerceAtLeast(16.5))
                             .build()
                         val animOptions = MapAnimationOptions.mapAnimationOptions {
                             duration(1400)
@@ -392,15 +395,17 @@ fun MapboxDriverMapView(
                         mapViewRef?.camera?.flyTo(cameraOptions, animOptions)
 
                         DeviceLocationProvider.requestCurrentLocation(context) { freshLoc ->
-                            liveDriverLoc = RealDeviceLocation(freshLoc.latitude, freshLoc.longitude)
-                            val freshPoint = Point.fromLngLat(freshLoc.longitude, freshLoc.latitude)
-                            val freshCamera = CameraOptions.Builder()
-                                .center(freshPoint)
-                                .bearing(activeBearing.toDouble())
-                                .pitch(targetPitch)
-                                .zoom(zoomLevel.toDouble())
-                                .build()
-                            mapViewRef?.camera?.flyTo(freshCamera, animOptions)
+                            if (DeviceLocationProvider.isValidPhysicalLocation(freshLoc.latitude, freshLoc.longitude)) {
+                                liveDriverLoc = RealDeviceLocation(freshLoc.latitude, freshLoc.longitude)
+                                val freshPoint = Point.fromLngLat(freshLoc.longitude, freshLoc.latitude)
+                                val freshCamera = CameraOptions.Builder()
+                                    .center(freshPoint)
+                                    .bearing(activeBearing.toDouble())
+                                    .pitch(targetPitch)
+                                    .zoom(zoomLevel.toDouble().coerceAtLeast(16.5))
+                                    .build()
+                                mapViewRef?.camera?.flyTo(freshCamera, animOptions)
+                            }
                         }
                         onRecenter?.invoke()
                     }
@@ -668,31 +673,48 @@ fun MapboxDriverMapView(
         }
     }
 
-    // Auto-animate & smooth zoom directly into real device driver location on map open
+    // Auto-animate & smooth zoom directly into real physical driver location on map open
     var hasAutoZoomedDriver by remember { mutableStateOf(false) }
-    LaunchedEffect(activeLoadedStyleUri, activeDriverPos) {
+    LaunchedEffect(activeLoadedStyleUri, liveDriverLoc, driverLatLng) {
         val mapView = mapViewRef ?: return@LaunchedEffect
         if (activeLoadedStyleUri == null || hasAutoZoomedDriver) return@LaunchedEffect
-        hasAutoZoomedDriver = true
 
-        val targetPoint = Point.fromLngLat(activeDriverPos.longitude, activeDriverPos.latitude)
-        val targetPitch = if (is3DMode) 55.0 else 0.0
-
-        val cameraOptions = CameraOptions.Builder()
-            .center(targetPoint)
-            .bearing(activeBearing.toDouble())
-            .pitch(targetPitch)
-            .zoom(zoomLevel.toDouble())
-            .build()
-
-        val animOptions = MapAnimationOptions.mapAnimationOptions {
-            duration(2000)
+        // Resolve real physical location (ignoring emulator Googleplex mock defaults)
+        val physicalLoc = when {
+            liveDriverLoc != null && DeviceLocationProvider.isValidPhysicalLocation(liveDriverLoc!!.latitude, liveDriverLoc!!.longitude) ->
+                liveDriverLoc!!.toLatLng()
+            driverLatLng != null && DeviceLocationProvider.isValidPhysicalLocation(driverLatLng.latitude, driverLatLng.longitude) ->
+                driverLatLng
+            else -> {
+                val last = DeviceLocationProvider.getLastKnownLocation(context)
+                if (last != null && DeviceLocationProvider.isValidPhysicalLocation(last.latitude, last.longitude)) last else null
+            }
         }
-        mapView.camera.flyTo(cameraOptions, animOptions)
+
+        if (physicalLoc != null) {
+            hasAutoZoomedDriver = true
+
+            val targetPoint = Point.fromLngLat(physicalLoc.longitude, physicalLoc.latitude)
+            val targetPitch = if (is3DMode) 55.0 else 0.0
+
+            val cameraOptions = CameraOptions.Builder()
+                .center(targetPoint)
+                .bearing(activeBearing.toDouble())
+                .pitch(targetPitch)
+                .zoom(zoomLevel.toDouble().coerceAtLeast(16.5))
+                .build()
+
+            val animOptions = MapAnimationOptions.mapAnimationOptions {
+                duration(2400)
+            }
+            mapView.camera.flyTo(cameraOptions, animOptions)
+        }
     }
 
-    // Camera follow driver in 3D navigation mode
-    LaunchedEffect(activeDriverPos, activeBearing, is3DMode) {
+    // Camera follow driver in 3D navigation mode (ONLY after initial auto-zoom has landed)
+    LaunchedEffect(activeDriverPos, activeBearing, is3DMode, hasAutoZoomedDriver) {
+        if (!hasAutoZoomedDriver) return@LaunchedEffect
+        if (!DeviceLocationProvider.isValidPhysicalLocation(activeDriverPos.latitude, activeDriverPos.longitude)) return@LaunchedEffect
         val mapView = mapViewRef ?: return@LaunchedEffect
         val targetPoint = Point.fromLngLat(activeDriverPos.longitude, activeDriverPos.latitude)
         val targetPitch = if (is3DMode) 55.0 else 0.0
@@ -701,7 +723,7 @@ fun MapboxDriverMapView(
             .center(targetPoint)
             .bearing(activeBearing.toDouble())
             .pitch(targetPitch)
-            .zoom(zoomLevel.toDouble())
+            .zoom(zoomLevel.toDouble().coerceAtLeast(16.5))
             .build()
 
         val animOptions = MapAnimationOptions.mapAnimationOptions {
@@ -714,7 +736,11 @@ fun MapboxDriverMapView(
     LaunchedEffect(cameraAnimTrigger, cameraTargetLatLng, recenterTrigger) {
         val mapView = mapViewRef ?: return@LaunchedEffect
         if (cameraAnimTrigger == 0 && recenterTrigger == 0) return@LaunchedEffect
-        val target = cameraTargetLatLng ?: driverLatLng
+        val target = cameraTargetLatLng
+            ?: liveDriverLoc?.toLatLng()?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+            ?: driverLatLng.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+            ?: DeviceLocationProvider.getLastKnownLocation(context)?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+            ?: driverLatLng
         val targetPoint = Point.fromLngLat(target.longitude, target.latitude)
         val targetPitch = if (is3DMode) 55.0 else 0.0
 
@@ -722,7 +748,7 @@ fun MapboxDriverMapView(
             .center(targetPoint)
             .bearing(bearing.toDouble())
             .pitch(targetPitch)
-            .zoom(zoomLevel.toDouble())
+            .zoom(zoomLevel.toDouble().coerceAtLeast(16.5))
             .build()
 
         val animOptions = MapAnimationOptions.mapAnimationOptions {

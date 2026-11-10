@@ -289,11 +289,14 @@ fun MapboxCustomerMapView(
                 // 🎯 Current Location FAB
                 FloatingActionButton(
                     onClick = {
-                        val activePoint = liveDeviceLoc?.toLatLng() ?: userLocationLatLng ?: DeviceLocationProvider.getLastKnownLocation(context) ?: pickupLatLng
+                        val activePoint = liveDeviceLoc?.toLatLng()?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+                            ?: userLocationLatLng?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+                            ?: DeviceLocationProvider.getLastKnownLocation(context)?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+                            ?: pickupLatLng
                         val targetPoint = Point.fromLngLat(activePoint.longitude, activePoint.latitude)
                         val cameraOptions = CameraOptions.Builder()
                             .center(targetPoint)
-                            .zoom(zoomLevel.toDouble())
+                            .zoom(zoomLevel.toDouble().coerceAtLeast(16.0))
                             .build()
                         val animOptions = MapAnimationOptions.mapAnimationOptions {
                             duration(1400)
@@ -301,13 +304,15 @@ fun MapboxCustomerMapView(
                         mapViewRef?.camera?.flyTo(cameraOptions, animOptions)
 
                         DeviceLocationProvider.requestCurrentLocation(context) { freshLoc ->
-                            liveDeviceLoc = RealDeviceLocation(freshLoc.latitude, freshLoc.longitude)
-                            val freshPoint = Point.fromLngLat(freshLoc.longitude, freshLoc.latitude)
-                            val freshCamera = CameraOptions.Builder()
-                                .center(freshPoint)
-                                .zoom(zoomLevel.toDouble())
-                                .build()
-                            mapViewRef?.camera?.flyTo(freshCamera, animOptions)
+                            if (DeviceLocationProvider.isValidPhysicalLocation(freshLoc.latitude, freshLoc.longitude)) {
+                                liveDeviceLoc = RealDeviceLocation(freshLoc.latitude, freshLoc.longitude)
+                                val freshPoint = Point.fromLngLat(freshLoc.longitude, freshLoc.latitude)
+                                val freshCamera = CameraOptions.Builder()
+                                    .center(freshPoint)
+                                    .zoom(zoomLevel.toDouble().coerceAtLeast(16.0))
+                                    .build()
+                                mapViewRef?.camera?.flyTo(freshCamera, animOptions)
+                            }
                         }
                         onRecenter?.invoke()
                     },
@@ -467,38 +472,57 @@ fun MapboxCustomerMapView(
         }
     }
 
-    // Auto-animate & smooth zoom directly into real device current location on map open
+    // Auto-animate & smooth zoom directly into real physical device location on map open
     var hasAutoZoomedToLocation by remember { mutableStateOf(false) }
-    LaunchedEffect(activeLoadedStyleUri, userLocationLatLng, liveDeviceLoc) {
+    LaunchedEffect(activeLoadedStyleUri, liveDeviceLoc, userLocationLatLng) {
         val mapView = mapViewRef ?: return@LaunchedEffect
         if (activeLoadedStyleUri == null || hasAutoZoomedToLocation) return@LaunchedEffect
 
-        val loc = liveDeviceLoc?.toLatLng() ?: userLocationLatLng ?: DeviceLocationProvider.getLastKnownLocation(context) ?: pickupLatLng
-        hasAutoZoomedToLocation = true
-
-        val targetPoint = Point.fromLngLat(loc.longitude, loc.latitude)
-        val cameraOptions = CameraOptions.Builder()
-            .center(targetPoint)
-            .zoom(zoomLevel.toDouble())
-            .build()
-
-        val animOptions = MapAnimationOptions.mapAnimationOptions {
-            duration(2000)
+        // Resolve real physical location (ignoring emulator Googleplex mock defaults)
+        val physicalLoc = when {
+            liveDeviceLoc != null && DeviceLocationProvider.isValidPhysicalLocation(liveDeviceLoc!!.latitude, liveDeviceLoc!!.longitude) ->
+                liveDeviceLoc!!.toLatLng()
+            userLocationLatLng != null && DeviceLocationProvider.isValidPhysicalLocation(userLocationLatLng.latitude, userLocationLatLng.longitude) ->
+                userLocationLatLng
+            else -> {
+                val last = DeviceLocationProvider.getLastKnownLocation(context)
+                if (last != null && DeviceLocationProvider.isValidPhysicalLocation(last.latitude, last.longitude)) last else null
+            }
         }
 
-        mapView.camera.flyTo(cameraOptions, animOptions)
+        if (physicalLoc != null) {
+            hasAutoZoomedToLocation = true
+
+            val targetPoint = Point.fromLngLat(physicalLoc.longitude, physicalLoc.latitude)
+            val cameraOptions = CameraOptions.Builder()
+                .center(targetPoint)
+                .zoom(zoomLevel.toDouble().coerceAtLeast(16.0))
+                .pitch(0.0)
+                .bearing(0.0)
+                .build()
+
+            val animOptions = MapAnimationOptions.mapAnimationOptions {
+                duration(2400)
+            }
+
+            mapView.camera.flyTo(cameraOptions, animOptions)
+        }
     }
 
     // Camera Recenter / Animation Handling
     LaunchedEffect(cameraAnimTrigger, cameraTargetLatLng, recenterTrigger) {
         val mapView = mapViewRef ?: return@LaunchedEffect
         if (cameraAnimTrigger == 0 && recenterTrigger == 0) return@LaunchedEffect
-        val target = cameraTargetLatLng ?: userLocationLatLng ?: DeviceLocationProvider.getLastKnownLocation(context) ?: pickupLatLng
+        val target = cameraTargetLatLng
+            ?: liveDeviceLoc?.toLatLng()?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+            ?: userLocationLatLng?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+            ?: DeviceLocationProvider.getLastKnownLocation(context)?.takeIf { DeviceLocationProvider.isValidPhysicalLocation(it.latitude, it.longitude) }
+            ?: pickupLatLng
         val targetPoint = Point.fromLngLat(target.longitude, target.latitude)
 
         val cameraOptions = CameraOptions.Builder()
             .center(targetPoint)
-            .zoom(zoomLevel.toDouble())
+            .zoom(zoomLevel.toDouble().coerceAtLeast(16.0))
             .build()
 
         val animOptions = MapAnimationOptions.mapAnimationOptions {
