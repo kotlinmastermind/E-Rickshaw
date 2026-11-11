@@ -26,6 +26,8 @@ import com.vaisentra.mobility.driver.feature.safety.DriverSafetySupportScreen
 import com.vaisentra.mobility.driver.feature.trip.ActiveChauffeurTripScreen
 import com.vaisentra.mobility.driver.feature.trip.RideHistoryScreen
 import com.vaisentra.mobility.driver.feature.trip.RideSummaryScreen
+import com.vaisentra.mobility.core.designsystem.ElectricNeoTokens
+import com.vaisentra.mobility.driver.feature.demo.DriverDemoInspectorOverlay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -54,6 +56,7 @@ fun DriverAppNavigation(
     val tokenManager = remember { TokenManager.getDriverInstance(context) }
     val dutyRepo = remember { DriverDutyRepository.getInstance(context) }
     val scope = rememberCoroutineScope()
+    var activeDemoScreenId by remember { mutableStateOf<Int?>(null) }
 
     var currentDestination by remember {
         mutableStateOf<DriverDestination>(
@@ -135,135 +138,140 @@ fun DriverAppNavigation(
         }
     }
 
-    Surface(
-        color = Color(0xFF0A0D0B),
-        modifier = Modifier.fillMaxSize()
+    DriverDemoInspectorOverlay(
+        activeScreenId = activeDemoScreenId,
+        onSelectScreen = { activeDemoScreenId = it }
     ) {
-        if (isCheckingSession) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = DriverColors.ChauffeurGold)
-            }
-        } else {
-            when (val dest = currentDestination) {
-                DriverDestination.Auth -> {
-                    DriverAuthScreen(
-                        onAuthenticationSuccess = { _ ->
-                            scope.launch {
-                                dutyRepo.reconcileAvailability()
+        Surface(
+            color = ElectricNeoTokens.CyberVoid,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (isCheckingSession) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = ElectricNeoTokens.NeonEmerald)
+                }
+            } else {
+                when (val dest = currentDestination) {
+                    DriverDestination.Auth -> {
+                        DriverAuthScreen(
+                            onAuthenticationSuccess = { _ ->
+                                scope.launch {
+                                    dutyRepo.reconcileAvailability()
+                                }
+                                currentDestination = DriverDestination.Dashboard
                             }
-                            currentDestination = DriverDestination.Dashboard
-                        }
-                    )
-                }
-                DriverDestination.Dashboard -> {
-                    DriverDashboardScreen(
-                        onAcceptRide = { rideId, pickup, destination ->
-                            tokenManager.saveActiveRideId(rideId)
-                            currentDestination = DriverDestination.ActiveTrip(rideId, pickup, destination)
-                        },
-                        onNavigateDocuments = {
-                            currentDestination = DriverDestination.Documents
-                        },
-                        onNavigateOnboarding = {
-                            currentDestination = DriverDestination.Onboarding
-                        },
-                        onNavigateEarnings = {
-                            currentDestination = DriverDestination.Earnings
-                        },
-                        onNavigateProfile = {
-                            currentDestination = DriverDestination.Profile
-                        },
-                        onNavigateSafety = {
-                            currentDestination = DriverDestination.Safety
-                        },
-                        onNavigateNotifications = {
-                            currentDestination = DriverDestination.Notifications
-                        }
-                    )
-                }
-                is DriverDestination.ActiveTrip -> {
-                    ActiveChauffeurTripScreen(
-                        rideId = dest.rideId,
-                        pickupAddress = dest.pickupAddress,
-                        destinationAddress = dest.destinationAddress,
-                        onTripFinished = {
-                            tokenManager.clearActiveRideId()
-                            currentDestination = DriverDestination.RideSummary(
-                                rideId = dest.rideId,
-                                pickupAddress = dest.pickupAddress,
-                                destinationAddress = dest.destinationAddress
-                            )
-                        }
-                    )
-                }
-                is DriverDestination.RideSummary -> {
-                    RideSummaryScreen(
-                        rideId = dest.rideId,
-                        pickupAddress = dest.pickupAddress,
-                        destinationAddress = dest.destinationAddress,
-                        onConfirmAndClose = { _, _ ->
-                            currentDestination = DriverDestination.Dashboard
-                        }
-                    )
-                }
-                DriverDestination.RideHistory -> {
-                    RideHistoryScreen(
-                        onNavigateBack = {
-                            currentDestination = DriverDestination.Profile
-                        }
-                    )
-                }
-                DriverDestination.Documents -> {
-                    DocumentUploadScreen(
-                        onNavigateBack = {
-                            currentDestination = DriverDestination.Dashboard
-                        }
-                    )
-                }
-                DriverDestination.Onboarding -> {
-                    DriverOnboardingScreen(
-                        onBack = {
-                            currentDestination = DriverDestination.Dashboard
-                        }
-                    )
-                }
-                DriverDestination.Earnings -> {
-                    EarningsAndWalletScreen(
-                        onNavigateBack = {
-                            currentDestination = DriverDestination.Dashboard
-                        }
-                    )
-                }
-                DriverDestination.Profile -> {
-                    DriverProfileScreen(
-                        onNavigateBack = {
-                            currentDestination = DriverDestination.Dashboard
-                        },
-                        onNavigateRideHistory = {
-                            currentDestination = DriverDestination.RideHistory
-                        },
-                        onSignOut = {
-                            scope.launch {
-                                runCatching { dutyRepo.setDutyOffline() }
-                                tokenManager.clear()
-                                currentDestination = DriverDestination.Auth
+                        )
+                    }
+                    DriverDestination.Dashboard -> {
+                        DriverDashboardScreen(
+                            onAcceptRide = { rideId, pickup, destination ->
+                                tokenManager.saveActiveRideId(rideId)
+                                currentDestination = DriverDestination.ActiveTrip(rideId, pickup, destination)
+                            },
+                            onNavigateDocuments = {
+                                currentDestination = DriverDestination.Documents
+                            },
+                            onNavigateOnboarding = {
+                                currentDestination = DriverDestination.Onboarding
+                            },
+                            onNavigateEarnings = {
+                                currentDestination = DriverDestination.Earnings
+                            },
+                            onNavigateProfile = {
+                                currentDestination = DriverDestination.Profile
+                            },
+                            onNavigateSafety = {
+                                currentDestination = DriverDestination.Safety
+                            },
+                            onNavigateNotifications = {
+                                currentDestination = DriverDestination.Notifications
                             }
-                        }
-                    )
-                }
-                DriverDestination.Safety -> {
-                    DriverSafetySupportScreen(
-                        onBack = {
-                            currentDestination = DriverDestination.Dashboard
-                        }
-                    )
-                }
-                DriverDestination.Notifications -> {
-                    DriverNotificationScreen(
-                        onBack = {
-                            currentDestination = DriverDestination.Dashboard
-                        }
-                    )
+                        )
+                    }
+                    is DriverDestination.ActiveTrip -> {
+                        ActiveChauffeurTripScreen(
+                            rideId = dest.rideId,
+                            pickupAddress = dest.pickupAddress,
+                            destinationAddress = dest.destinationAddress,
+                            onTripFinished = {
+                                tokenManager.clearActiveRideId()
+                                currentDestination = DriverDestination.RideSummary(
+                                    rideId = dest.rideId,
+                                    pickupAddress = dest.pickupAddress,
+                                    destinationAddress = dest.destinationAddress
+                                )
+                            }
+                        )
+                    }
+                    is DriverDestination.RideSummary -> {
+                        RideSummaryScreen(
+                            rideId = dest.rideId,
+                            pickupAddress = dest.pickupAddress,
+                            destinationAddress = dest.destinationAddress,
+                            onConfirmAndClose = { _, _ ->
+                                currentDestination = DriverDestination.Dashboard
+                            }
+                        )
+                    }
+                    DriverDestination.RideHistory -> {
+                        RideHistoryScreen(
+                            onNavigateBack = {
+                                currentDestination = DriverDestination.Profile
+                            }
+                        )
+                    }
+                    DriverDestination.Documents -> {
+                        DocumentUploadScreen(
+                            onNavigateBack = {
+                                currentDestination = DriverDestination.Dashboard
+                            }
+                        )
+                    }
+                    DriverDestination.Onboarding -> {
+                        DriverOnboardingScreen(
+                            onBack = {
+                                currentDestination = DriverDestination.Dashboard
+                            }
+                        )
+                    }
+                    DriverDestination.Earnings -> {
+                        EarningsAndWalletScreen(
+                            onNavigateBack = {
+                                currentDestination = DriverDestination.Dashboard
+                            }
+                        )
+                    }
+                    DriverDestination.Profile -> {
+                        DriverProfileScreen(
+                            onNavigateBack = {
+                                currentDestination = DriverDestination.Dashboard
+                            },
+                            onNavigateRideHistory = {
+                                currentDestination = DriverDestination.RideHistory
+                            },
+                            onSignOut = {
+                                scope.launch {
+                                    runCatching { dutyRepo.setDutyOffline() }
+                                    tokenManager.clear()
+                                    currentDestination = DriverDestination.Auth
+                                }
+                            }
+                        )
+                    }
+                    DriverDestination.Safety -> {
+                        DriverSafetySupportScreen(
+                            onBack = {
+                                currentDestination = DriverDestination.Dashboard
+                            }
+                        )
+                    }
+                    DriverDestination.Notifications -> {
+                        DriverNotificationScreen(
+                            onBack = {
+                                currentDestination = DriverDestination.Dashboard
+                            }
+                        )
+                    }
                 }
             }
         }

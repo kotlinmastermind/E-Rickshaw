@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Master Interactive Design Studio • RideGo & DriverGo (50+50 Screens & 30 Popups)</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .neon-cyan-glow { box-shadow: 0 0 25px rgba(0, 242, 254, 0.35); }
+    .neon-green-glow { box-shadow: 0 0 25px rgba(16, 185, 129, 0.4); }
+    .pulse-ring { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.08); } }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0b111b; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #00f2fe; }
+  </style>
+</head>
+<body class="bg-[#06090e] text-[#e2e8f0] antialiased min-h-screen p-3 md:p-6">
+
+  <!-- Top Hero Header -->
+  <header class="max-w-7xl mx-auto mb-6 text-center">
+    <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#00f2fe]/10 border border-[#00f2fe]/30 text-[#00f2fe] text-xs font-bold uppercase tracking-wider mb-2">
+      ⚡ Master Interactive UI Design Studio • 100 Screens & 30 Popups
+    </div>
+    <h1 class="text-2xl md:text-4xl font-extrabold text-white tracking-tight">
+      RideGo & DriverGo Complete Premium Ecosystem
+    </h1>
+    <p class="text-slate-400 max-w-3xl mx-auto text-xs md:text-sm mt-1.5">
+      Select any of the <span class="text-[#00f2fe] font-semibold">50 RiderGo Screens</span>, <span class="text-[#10b981] font-semibold">50 DriverGo Screens</span>, or <span class="text-purple-400 font-semibold">30 Interactive Popups</span> below to instantly load and test them live in the high-fidelity mobile simulator.
+    </p>
+
+    <!-- Top Master Mode Switcher -->
+    <div class="flex flex-wrap justify-center gap-2.5 mt-4">
+      <button id="tabBtnRider" onclick="switchStudioMode('rider')" class="px-5 py-2 rounded-full bg-[#00f2fe] text-[#041e49] font-extrabold text-xs shadow-lg shadow-[#00f2fe]/20 hover:scale-105 transition-all">
+        🚖 RiderGo (50 Screens)
+      </button>
+      <button id="tabBtnDriver" onclick="switchStudioMode('driver')" class="px-5 py-2 rounded-full bg-[#111a28] border border-slate-700 text-slate-300 font-extrabold text-xs hover:border-[#10b981] hover:text-[#10b981] transition-all">
+        ⚡ DriverGo (50 Screens)
+      </button>
+      <button id="tabBtnPopups" onclick="switchStudioMode('popups')" class="px-5 py-2 rounded-full bg-[#111a28] border border-slate-700 text-slate-300 font-extrabold text-xs hover:border-purple-400 hover:text-purple-300 transition-all">
+        💬 30 Popups & Modals Studio
+      </button>
+      <button id="tabBtnSim" onclick="switchStudioMode('simulation')" class="px-5 py-2 rounded-full bg-[#111a28] border border-slate-700 text-slate-300 font-extrabold text-xs hover:border-amber-400 hover:text-amber-300 transition-all">
+        🔄 Live End-to-End Trip Flow
+      </button>
+    </div>
+  </header>
+
+  <!-- Master Interactive Workplace Grid -->
+  <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+    <!-- LEFT / MAIN: High-Fidelity Mobile Device Simulator (5 Cols) -->
+    <div class="lg:col-span-5 flex flex-col items-center sticky top-4">
+      <!-- Active Screen Meta Tag -->
+      <div class="w-full flex items-center justify-between px-3 py-1.5 mb-2 bg-[#0b111b] border border-slate-800 rounded-2xl text-xs">
+        <div class="flex items-center gap-2">
+          <span id="simulatorAppBadge" class="w-2.5 h-2.5 rounded-full bg-[#00f2fe] animate-ping"></span>
+          <span id="simulatorAppTitle" class="font-bold text-white">RideGo • Rider Screen #7</span>
+        </div>
+        <span id="simulatorCategoryBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-[#111a28] text-[#00f2fe] border border-[#00f2fe]/30">Radar & Booking</span>
+      </div>
+
+      <!-- Mobile Device Chassis (iPhone / Pixel Frame) -->
+      <div class="w-[340px] h-[680px] rounded-[44px] bg-[#070b12] border-4 border-slate-700 shadow-2xl relative overflow-hidden flex flex-col justify-between select-none">
+        <!-- Top Dynamic Island / Speaker -->
+        <div class="absolute top-2 left-1/2 -translate-x-1/2 w-24 h-4 bg-black rounded-full z-50 flex items-center justify-center">
+          <div class="w-2 h-2 rounded-full bg-[#10b981] mr-1.5"></div>
+          <div class="w-1.5 h-1.5 rounded-full bg-slate-800"></div>
+        </div>
+
+        <!-- Mobile Screen Content Container -->
+        <div id="mobileScreenViewport" class="w-full h-full pt-8 pb-14 px-3 overflow-y-auto relative bg-[#070b12]">
+          <!-- Injected dynamically via JavaScript -->
+        </div>
+
+        <!-- Overlaid Interactive Popup Modal (Hidden by Default) -->
+        <div id="mobilePopupOverlay" class="absolute inset-0 bg-black/75 backdrop-blur-sm z-40 hidden flex items-end justify-center p-3 transition-all">
+          <div id="popupModalCard" class="w-full bg-[#0e1624] border-2 border-[#00f2fe] rounded-[28px] p-4 shadow-2xl relative animate-bounce-short">
+            <!-- Injected dynamically -->
+          </div>
+        </div>
+
+        <!-- Mobile Bottom Navigation Bar -->
+        <div id="mobileBottomNav" class="absolute bottom-0 inset-x-0 h-12 bg-[#090f18]/95 backdrop-blur-md border-t border-slate-800 flex items-center justify-around text-[10px] text-slate-400 z-30">
+          <div onclick="selectScreenById(7)" class="flex flex-col items-center cursor-pointer text-[#00f2fe]">
+            <span>🗺️</span>
+            <span class="font-bold">Radar</span>
+          </div>
+          <div onclick="selectScreenById(16)" class="flex flex-col items-center cursor-pointer hover:text-white">
+            <span>💰</span>
+            <span>Wallet</span>
+          </div>
+          <div onclick="selectScreenById(21)" class="flex flex-col items-center cursor-pointer hover:text-white">
+            <span>👥</span>
+            <span>Pool</span>
+          </div>
+          <div onclick="selectScreenById(39)" class="flex flex-col items-center cursor-pointer hover:text-white">
+            <span>🕒</span>
+            <span>Activity</span>
+          </div>
+          <div onclick="selectScreenById(50)" class="flex flex-col items-center cursor-pointer hover:text-white">
+            <span>👤</span>
+            <span>Profile</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Simulator Actions -->
+      <div class="flex items-center gap-2 mt-3">
+        <button onclick="navigateScreenStep(-1)" class="px-3 py-1 bg-[#111a28] hover:bg-slate-700 text-xs font-bold rounded-lg border border-slate-700">◀ Prev</button>
+        <span id="screenCounterLabel" class="text-xs font-mono text-slate-400">Screen 7 / 50</span>
+        <button onclick="navigateScreenStep(1)" class="px-3 py-1 bg-[#111a28] hover:bg-slate-700 text-xs font-bold rounded-lg border border-slate-700">Next ▶</button>
+        <button onclick="triggerActivePopupPreview(1)" class="ml-2 px-3 py-1 bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 text-xs font-bold rounded-lg border border-purple-500/50">Test Popup 🔔</button>
+      </div>
+    </div>
+
+    <!-- RIGHT: Screen Catalog & Interactive Explorer (7 Cols) -->
+    <div class="lg:col-span-7 space-y-4">
+
+      <!-- Search & Category Filters Bar -->
+      <div class="bg-[#0b111b] border border-slate-800 rounded-3xl p-4 shadow-xl">
+        <div class="flex flex-col sm:flex-row gap-3 items-center justify-between">
+          <div class="relative w-full sm:w-72">
+            <input id="catalogSearchInput" oninput="filterCatalogList()" type="text" placeholder="Search by name, category, or #id..." class="w-full bg-[#111a28] border border-slate-700 rounded-full px-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00f2fe]" />
+            <span class="absolute right-3.5 top-2.5 text-xs text-slate-500">🔍</span>
+          </div>
+          <div id="categoryFilterContainer" class="flex flex-wrap gap-1.5 w-full sm:w-auto">
+            <!-- Dynamically populated category chips -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Scrollable Catalog Grid View -->
+      <div class="bg-[#0b111b] border border-slate-800 rounded-3xl p-4 shadow-xl">
+        <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+          <h3 id="catalogHeaderTitle" class="text-sm font-extrabold text-white flex items-center gap-2">
+            <span>🚖</span> <span>RiderGo Screens (1 to 50)</span>
+          </h3>
+          <span id="catalogCountBadge" class="text-xs font-mono text-[#00f2fe] bg-[#00f2fe]/10 px-2 py-0.5 rounded-full border border-[#00f2fe]/30">50 Screens Available</span>
+        </div>
+
+        <div id="catalogCardsContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[500px] overflow-y-auto pr-1">
+          <!-- Dynamically populated cards -->
+        </div>
+      </div>
+
+      <!-- Quick Concept Summary -->
+      <div class="bg-[#0e1624] border border-slate-800 rounded-3xl p-4 text-xs text-slate-400 space-y-1.5">
+        <p class="font-bold text-white flex items-center gap-1.5">
+          <span>💡</span> <span>Architecture Note:</span>
+        </p>
+        <p>• Clicking any card instantly renders the exact layout, state controls, inputs, and gauges on the phone simulator.</p>
+        <p>• In <b>30 Popups Studio</b>, clicking any modal triggers the animated backdrop blur overlay with functional action dismissals.</p>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ======================================================== -->
+  <!-- JAVASCRIPT MASTER STATE & DATA ENGINE                    -->
+  <!-- ======================================================== -->
+  <script>
+    // Master 50 RiderGo Screens Catalog
+    const RIDER_SCREENS = [
+      { id: 1, title: "Brand Splash & Locale", cat: "Onboarding", icon: "⚡", desc: "Cyber Neo Splash with Hindi, English, Tamil, Bengali locale switch" },
+      { id: 2, title: "Phone & Cyber Auth", cat: "Onboarding", icon: "🔐", desc: "Mobile number & encrypted password sign-in with JWT token" },
+      { id: 3, title: "SMS OTP Quick Login", cat: "Onboarding", icon: "📲", desc: "6-digit OTP auto-read with resend cooldown timer" },
+      { id: 4, title: "Password & Pin Reset", cat: "Onboarding", icon: "🔑", desc: "OTP verified biometric PIN & credential recovery" },
+      { id: 5, title: "Customer Registration & KYC", cat: "Onboarding", icon: "👤", desc: "Full profile setup with Aadhaar verification & avatar" },
+      { id: 6, title: "Passkey & Biometric Lock", cat: "Onboarding", icon: "🛡️", desc: "Fingerprint / Face Unlock with 4-digit fallback PIN" },
+      { id: 7, title: "Map Home & Live Radar", cat: "Radar & Booking", icon: "🗺️", desc: "Real-time GPS map with nearby e-rickshaws live radar" },
+      { id: 8, title: "Destination Search & Places", cat: "Radar & Booking", icon: "🔍", desc: "Autocomplete address search with frequent landmarks" },
+      { id: 9, title: "Multi-Stop Route Planner", cat: "Radar & Booking", icon: "📍", desc: "Add up to 3 intermediate stops with waypoint re-ordering" },
+      { id: 10, title: "Vehicle Tier & Fare Matrix", cat: "Radar & Booking", icon: "🛺", desc: "Compare Eco Share, Standard EV, Auto, and Cargo loaders" },
+      { id: 11, title: "Ride Comfort & Cabin Preferences", cat: "Preferences", icon: "❄️", desc: "In-cabin AC temperature, quiet ride, music genre presets" },
+      { id: 12, title: "Accessibility & EV-Only Filter", cat: "Preferences", icon: "♿", desc: "Wheelchair access, assistance animal, 100% green filter" },
+      { id: 13, title: "Price Lock & Fare Breakdown", cat: "Preferences", icon: "🏷️", desc: "Locked quote breakdown: base, distance, surge, and GST" },
+      { id: 14, title: "Promo Codes & Vouchers", cat: "Preferences", icon: "🎟️", desc: "Apply promotional coupons with instant cashback calculation" },
+      { id: 15, title: "Payment Method & UPI Picker", cat: "Wallet & Pay", icon: "💳", desc: "Pay via UPI (GPay/PhonePe), Credit Card, Cash, or Wallet" },
+      { id: 16, title: "Cashless Wallet Hub", cat: "Wallet & Pay", icon: "💰", desc: "Check live wallet balance, add money, UPI QR scanner" },
+      { id: 17, title: "Wallet Auto-Topup Rules", cat: "Wallet & Pay", icon: "🔄", desc: "Set minimum threshold and automated reload amount" },
+      { id: 18, title: "Schedule Later & Airport Sync", cat: "Radar & Booking", icon: "✈️", desc: "Book advance rides with automated flight delay tracking" },
+      { id: 19, title: "Book for Family / Guest", cat: "Radar & Booking", icon: "👨‍👩‍👧", desc: "Enter guest passenger name, phone & relation for trip sharing" },
+      { id: 20, title: "Corporate & Business Profile", cat: "Preferences", icon: "💼", desc: "Cost center, project code & GST tax invoice claiming" },
+      { id: 21, title: "Eco-Pool Shared Seat Booking", cat: "Carpool", icon: "👥", desc: "Reserve 1 or 2 seats in shared electric corridor" },
+      { id: 22, title: "Shared Pool Passenger Chat", cat: "Carpool", icon: "💬", desc: "Group chat announcements for co-passengers on route" },
+      { id: 23, title: "Dispatch Radar & Pilot Matching", cat: "In-Trip HUD", icon: "📡", desc: "Animated cascading dispatch radar scanning 1.5 km perimeter" },
+      { id: 24, title: "Pilot Assigned & ETA Tracker", cat: "In-Trip HUD", icon: "👨‍✈️", desc: "Pilot photo, vehicle plate, verified badge & live ETA" },
+      { id: 25, title: "Driver En-Route & Vehicle RC", cat: "In-Trip HUD", icon: "📋", desc: "Commercial permit, vehicle registration plate and PUC check" },
+      { id: 26, title: "Pilot Arrived & Meeting Point", cat: "In-Trip HUD", icon: "🎯", desc: "Arrival photo proof, gate landmark & buzzer notification" },
+      { id: 27, title: "Boarding & 4-Digit Security OTP", cat: "In-Trip HUD", icon: "🔢", desc: "Encrypted start OTP display with auto-refresh mechanism" },
+      { id: 28, title: "Live Telemetry & Speedometer HUD", cat: "In-Trip HUD", icon: "⚡", desc: "Real-time digital speedometer, heading & route corridor" },
+      { id: 29, title: "Route Deviations & Unplanned Stops", cat: "Safety & SOS", icon: "⚠️", desc: "Automated alert when vehicle departs mapped trajectory" },
+      { id: 30, title: "In-Cabin Audio Safety Recording", cat: "Safety & SOS", icon: "🎙️", desc: "Encrypted emergency ambient audio recording for trip security" },
+      { id: 31, title: "Live Journey Link Sharing", cat: "Safety & SOS", icon: "🔗", desc: "Share live tracking link via WhatsApp/SMS to trusted contacts" },
+      { id: 32, title: "Emergency SOS & Police 112", cat: "Safety & SOS", icon: "🚨", desc: "1-tap emergency panic dispatch notifying 112 & Security Center" },
+      { id: 33, title: "Emergency Contacts Manager", cat: "Safety & SOS", icon: "📞", desc: "Manage trusted family contacts for auto trip notifications" },
+      { id: 34, title: "In-Trip Pilot Chat & Translate", cat: "In-Trip HUD", icon: "🌐", desc: "Two-way instant messaging with Hindi-English translation" },
+      { id: 35, title: "Split Fare with Co-Riders", cat: "Wallet & Pay", icon: "➗", desc: "Split bill equally or by custom percentage with contacts" },
+      { id: 36, title: "Ride Completed & Receipt", cat: "Post-Trip", icon: "🧾", desc: "Final itemized digital receipt with distance & time breakdown" },
+      { id: 37, title: "Driver Rating & Factor CSAT", cat: "Post-Trip", icon: "⭐", desc: "5-star rating with driving, cleanliness, and courtesy tags" },
+      { id: 38, title: "Driver Tip & Compliments", cat: "Post-Trip", icon: "💵", desc: "Tip pilot directly (₹10, ₹20, ₹50) with instant wallet credit" },
+      { id: 39, title: "Past Trips & Activity History", cat: "Post-Trip", icon: "📑", desc: "Searchable history of completed and cancelled bookings" },
+      { id: 40, title: "GST Tax Invoice & PDF Download", cat: "Post-Trip", icon: "📄", desc: "Official corporate invoice with company GSTIN and tax seal" },
+      { id: 41, title: "Fare Dispute & Refund Claim", cat: "Support", icon: "⚖️", desc: "Dispute route extra charges with instant automatic arbitration" },
+      { id: 42, title: "Lost Item Concierge Desk", cat: "Support", icon: "🎒", desc: "Report lost phones, bags, or items left in the vehicle" },
+      { id: 43, title: "Support Ticket Helpdesk", cat: "Support", icon: "🎟️", desc: "Submit tickets for payment, safety, or vehicle complaints" },
+      { id: 44, title: "Live Support Executive Chat", cat: "Support", icon: "💬", desc: "Real-time chat with human operations concierge agent" },
+      { id: 45, title: "Safety Incident Formal Report", cat: "Support", icon: "🛡️", desc: "Log formal incident report with photo evidence and severity" },
+      { id: 46, title: "Refer & Earn Electric Cash", cat: "Loyalty", icon: "🎁", desc: "Unique referral link with ₹100 wallet reward per friend" },
+      { id: 47, title: "Green Club Loyalty & Streaks", cat: "Loyalty", icon: "🏆", desc: "Tier perks: Bronze, Silver, Gold, Platinum with ride discounts" },
+      { id: 48, title: "Notification Inbox & Alerts", cat: "Account", icon: "🔔", desc: "System updates, weather warnings, and promotional offers" },
+      { id: 49, title: "Saved Places & Favorite Pins", cat: "Account", icon: "⭐", desc: "Manage Home, Work, Gym, Metro shortcuts with 1-tap booking" },
+      { id: 50, title: "Account Governance & Delete", cat: "Account", icon: "⚙️", desc: "Data export, consent settings, and account deactivation" }
+    ];
+
+    // Master 50 DriverGo Screens Catalog
+    const DRIVER_SCREENS = [
+      { id: 1, title: "Pilot Cockpit Login", cat: "Auth & KYC", icon: "⚡", desc: "Driver credentials sign-in with phone + encrypted password" },
+      { id: 2, title: "Pilot SMS OTP Sign-In", cat: "Auth & KYC", icon: "📲", desc: "Quick authentication for pilots on the road via SMS" },
+      { id: 3, title: "Pilot Password Recovery", cat: "Auth & KYC", icon: "🔑", desc: "SMS-verified pilot credential reset procedure" },
+      { id: 4, title: "Pilot Profile & Academy KYC", cat: "Auth & KYC", icon: "📋", desc: "License number, badge ID, academy certifications" },
+      { id: 5, title: "Document Vault & Verification", cat: "Auth & KYC", icon: "🗂️", desc: "Aadhaar, Driving License, Police Verification clearance" },
+      { id: 6, title: "Document Expiry Watchdog", cat: "Auth & KYC", icon: "⏳", desc: "Upcoming document expiry warnings and resubmissions" },
+      { id: 7, title: "Assigned Vehicle & Inspection", cat: "Vehicle & Duty", icon: "🛺", desc: "E-Rickshaw model, year, registration plate, battery status" },
+      { id: 8, title: "Vehicle RC, Fitness & PUC", cat: "Vehicle & Duty", icon: "📑", desc: "Permit number, PUC emission validity, insurance policy" },
+      { id: 9, title: "Shift Start & Odometer Log", cat: "Vehicle & Duty", icon: "🛣️", desc: "Enter initial km reading and battery percentage to start shift" },
+      { id: 10, title: "Duty Switch & Auto-Accept Radar", cat: "Vehicle & Duty", icon: "⚡", desc: "Go Online / Offline toggle with auto-dispatch radius" },
+      { id: 11, title: "High-Frequency GPS Ping", cat: "Telemetry", icon: "📡", desc: "Real-time location, heading, speed & anti-spoof check" },
+      { id: 12, title: "Driver Fatigue & Rest Check", cat: "Vehicle & Duty", icon: "☕", desc: "Mandatory rest prompts after continuous driving limit" },
+      { id: 13, title: "Heatmap & Surge Zones", cat: "Telemetry", icon: "🌐", desc: "Live city demand map showing surge multipliers" },
+      { id: 14, title: "Road Restrictions & Hazards", cat: "Telemetry", icon: "🚫", desc: "Live municipal road blocks, waterlogging, detours" },
+      { id: 15, title: "Incoming Ride Offer Card", cat: "Turn Navigation", icon: "🚖", desc: "Accept/Decline offer card with pickup dist, fare, time" },
+      { id: 16, title: "Auto-Dispatch Offer Queue", cat: "Turn Navigation", icon: "📥", desc: "Continuous trip matching and queued requests" },
+      { id: 17, title: "Navigation to Pickup Spot", cat: "Turn Navigation", icon: "📍", desc: "Turn-by-turn routing to commuter boarding point" },
+      { id: 18, title: "Arrived at Pickup Point", cat: "Turn Navigation", icon: "🎯", desc: "Notify customer with photo proof and entrance guidance" },
+      { id: 19, title: "Waiting Timer & Billable Meter", cat: "Turn Navigation", icon: "⏱️", desc: "Grace waiting period tracker and per-minute wait fee" },
+      { id: 20, title: "Boarding & Commuter OTP Verify", cat: "Turn Navigation", icon: "🔢", desc: "Enter customer's 4-digit code to unlock the trip" },
+      { id: 21, title: "In-Trip Turn Navigation", cat: "Turn Navigation", icon: "🧭", desc: "Live route guide with ETA, distance left, speed limit" },
+      { id: 22, title: "Multi-Stop Waypoints", cat: "Turn Navigation", icon: "🗺️", desc: "Sequential stop navigation with passenger instruction notes" },
+      { id: 23, title: "Route Deviation & Anomaly Alarm", cat: "Safety & SOS", icon: "⚠️", desc: "Detects abnormal route detours and stationary delays" },
+      { id: 24, title: "In-Cabin Sound & Safety Status", cat: "Safety & SOS", icon: "🎙️", desc: "Cabin ambient sound level check and safety check-in" },
+      { id: 25, title: "Driver Emergency SOS Panic", cat: "Safety & SOS", icon: "🚨", desc: "Instant assistance trigger with SOC agent connect" },
+      { id: 26, title: "Passenger In-Trip Messaging", cat: "Turn Navigation", icon: "💬", desc: "Quick-canned phrases and live chat with passenger" },
+      { id: 27, title: "Shared Pool Trip Manifest", cat: "Carpool", icon: "👥", desc: "View co-passengers, seats occupied and total pool payout" },
+      { id: 28, title: "Pooled Stops Queue", cat: "Carpool", icon: "📋", desc: "Optimized pickup and drop-off sequence for shared rides" },
+      { id: 29, title: "Trip Finished & Fare Meter", cat: "Earnings", icon: "🧾", desc: "Actual distance, actual minutes, final earnings breakdown" },
+      { id: 30, title: "Cash Collection Confirmer", cat: "Earnings", icon: "💵", desc: "Collect exact cash, verify bill, mark cash collected" },
+      { id: 31, title: "Dynamic Driver UPI QR Code", cat: "Earnings", icon: "📲", desc: "Display UPI code for instant passenger scan" },
+      { id: 32, title: "Passenger Rating & Reviews", cat: "Profile & Targets", icon: "⭐", desc: "Driver rating breakdown and badge accolades" },
+      { id: 33, title: "Tips & Extra Earnings Ledger", cat: "Earnings", icon: "🎁", desc: "View customer tips credited 100% to pilot balance" },
+      { id: 34, title: "Shift Summary & Metrics", cat: "Profile & Targets", icon: "📊", desc: "Gross fares, platform cut, net earnings, trip count" },
+      { id: 35, title: "Shift End & Closing Odometer", cat: "Vehicle & Duty", icon: "🏁", desc: "Enter ending odometer, vehicle handover check" },
+      { id: 36, title: "Daily Targets & Incentive Bonus", cat: "Profile & Targets", icon: "🎯", desc: "Target ride completions and bonus progress tracker" },
+      { id: 37, title: "Weekly Goals & Progress", cat: "Profile & Targets", icon: "📈", desc: "Track weekly ride goals and milestone bonuses" },
+      { id: 38, title: "Streak Missions & Badges", cat: "Profile & Targets", icon: "🔥", desc: "Consecutive peak-hour completions for tiered multipliers" },
+      { id: 39, title: "Pilot Earnings & Balance", cat: "Earnings", icon: "💰", desc: "Total wallet balance, today's pay, pending settlements" },
+      { id: 40, title: "Payout Bank & UPI Accounts", cat: "Earnings", icon: "🏦", desc: "Manage bank account, IFSC code, and primary UPI VPA" },
+      { id: 41, title: "Instant IMPS/UPI Payout", cat: "Earnings", icon: "⚡", desc: "Withdraw earnings to bank account instantly" },
+      { id: 42, title: "Driver Account Ledger", cat: "Earnings", icon: "📑", desc: "Itemized statement of all ride credits and deductions" },
+      { id: 43, title: "Performance & Safety Scorecard", cat: "Profile & Targets", icon: "🏆", desc: "Lifetime rating, cancellation rate, on-time percentage" },
+      { id: 44, title: "Electric Academy Training", cat: "Support", icon: "🎓", desc: "E-rickshaw maintenance, road safety & customer etiquette" },
+      { id: 45, title: "Driver Incident Reporting", cat: "Safety & SOS", icon: "🛡️", desc: "File road crash, passenger dispute or route incident" },
+      { id: 46, title: "Found Lost Item in Cab", cat: "Support", icon: "🎒", desc: "Report customer items found in the e-rickshaw rear seat" },
+      { id: 47, title: "Driver Helpdesk Tickets", cat: "Support", icon: "🎟️", desc: "Submit queries regarding vehicle maintenance, pay, KYC" },
+      { id: 48, title: "Driver Emergency Contacts", cat: "Safety & SOS", icon: "📞", desc: "Set family contact for safety alerts and SOS escalation" },
+      { id: 49, title: "Push Notifications Center", cat: "Support", icon: "🔔", desc: "Platform alerts, weather warnings, surge announcements" },
+      { id: 50, title: "App Settings & Night HUD", cat: "Profile & Targets", icon: "⚙️", desc: "Voice navigation volume, HUD night theme, auto-reply" }
+    ];
+
+    // Master 30 Popups Catalog (15 Rider + 15 Driver)
+    const MASTER_POPUPS = [
+      // 15 RIDER POPUPS
+      { id: 1, app: "RiderGo", title: "Ride Cancellation Confirmation", level: "WARNING", icon: "🛑", desc: "Confirm cancellation with reason selector & ₹15 fee disclaimer." },
+      { id: 2, app: "RiderGo", title: "SOS 112 Emergency Panic Alert", level: "CRITICAL", icon: "🚨", desc: "5s countdown with Police 112 trigger & live location broadcast." },
+      { id: 3, app: "RiderGo", title: "Promo Voucher Applied", level: "SUCCESS", icon: "🎟️", desc: "Instant ₹65 discount confirmation celebration dialog." },
+      { id: 4, app: "RiderGo", title: "Pilot Arrived at Gate Buzzer", level: "INFO", icon: "🎯", desc: "Meeting spot photo proof, vehicle plate & horn buzzer alert." },
+      { id: 5, app: "RiderGo", title: "Locked Fare Breakdown & Surcharge", level: "INFO", icon: "🏷️", desc: "Itemized base fare, distance, dynamic surge, and 5% GST." },
+      { id: 6, app: "RiderGo", title: "Dynamic UPI QR Scanner Modal", level: "INFO", icon: "📲", desc: "Scan to pay via Paytm, GPay, PhonePe, or Cred." },
+      { id: 7, app: "RiderGo", title: "Driver 5-Star CSAT Rating & Tip", level: "SUCCESS", icon: "⭐", desc: "Star rating drawer with 1-tap tip pills (₹10, ₹20, ₹50)." },
+      { id: 8, app: "RiderGo", title: "EV Battery Critical Reroute", level: "WARNING", icon: "🪫", desc: "Reroute passenger or swap vehicle due to low EV charge." },
+      { id: 9, app: "RiderGo", title: "In-Cabin Temperature & Music Drawer", level: "INFO", icon: "❄️", desc: "Customize AC speed and lo-fi chill / acoustic music presets." },
+      { id: 10, app: "RiderGo", title: "Split Fare with Co-Riders Dialog", level: "INFO", icon: "➗", desc: "Select 2-4 contacts to divide trip payment evenly." },
+      { id: 11, app: "RiderGo", title: "Lost Item Report Confirmation", level: "INFO", icon: "🎒", desc: "24/7 concierge will contact driver to inspect rear seat." },
+      { id: 12, app: "RiderGo", title: "Identity & Aadhaar KYC Prompt", level: "INFO", icon: "📋", desc: "Instant DigiLocker OTP verification for verified rider badge." },
+      { id: 13, app: "RiderGo", title: "Passkey / Biometric Lock Sheet", level: "INFO", icon: "🛡️", desc: "Touch fingerprint or enter PIN to authorize wallet transaction." },
+      { id: 14, app: "RiderGo", title: "Co-Rider Joining Shared Corridor", level: "INFO", icon: "👥", desc: "Passenger Ananya booked Seat #2 on your ongoing trip." },
+      { id: 15, app: "RiderGo", title: "Scheduled Ride Alarm Reminder", level: "INFO", icon: "⏰", desc: "Advance pickup in 20 minutes for Airport Terminal." },
+
+      // 15 DRIVER POPUPS
+      { id: 16, app: "DriverGo", title: "Incoming 15s Dispatch Offer Card", level: "WARNING", icon: "🚖", desc: "15s countdown ring: ₹85 fare, 450m pickup, Accept vs Pass." },
+      { id: 17, app: "DriverGo", title: "Commuter 4-Digit Boarding OTP Modal", level: "INFO", icon: "🔢", desc: "Enter passenger's 4-digit start OTP to unlock trip." },
+      { id: 18, app: "DriverGo", title: "Rider Cancelled Trip Notice", level: "INFO", icon: "🛑", desc: "Rider canceled en-route. ₹25 compensation credited." },
+      { id: 19, app: "DriverGo", title: "Low Battery Depot Reroute Alert", level: "WARNING", icon: "🪫", desc: "Battery at 16%. Nearest swap station: Sector 18 Hub." },
+      { id: 20, app: "DriverGo", title: "Mandatory Pilot Fatigue Break (15m)", level: "WARNING", icon: "☕", desc: "4.5h continuous duty. Safety compliance rest enforced." },
+      { id: 21, app: "DriverGo", title: "Route Deviation & Detour Alarm", level: "CRITICAL", icon: "⚠️", desc: "Vehicle departed mapped corridor by 800m. Recalculating." },
+      { id: 22, app: "DriverGo", title: "Cash Collection Confirmer (₹120)", level: "SUCCESS", icon: "💵", desc: "Verify passenger gave exact cash before trip close." },
+      { id: 23, app: "DriverGo", title: "Peak Surge 1.8x Multiplier Active", level: "SUCCESS", icon: "🔥", desc: "High demand near City Station. Extra ₹40/trip active." },
+      { id: 24, app: "DriverGo", title: "Emergency SOS Panic Escalation", level: "CRITICAL", icon: "🚨", desc: "Audio & telemetry stream transmitting to Police & SOC." },
+      { id: 25, app: "DriverGo", title: "High Speed & Harsh Braking Warning", level: "WARNING", icon: "⚡", desc: "Maintain 25 km/h EV speed limit for passenger safety." },
+      { id: 26, app: "DriverGo", title: "Daily Target Milestone Unlocked", level: "SUCCESS", icon: "🎯", desc: "10 Rides Finished! ₹300 incentive added to wallet." },
+      { id: 27, app: "DriverGo", title: "Extra Luggage Surcharge Consent", level: "INFO", icon: "🧳", desc: "Passenger carries 2 large bags. Confirm ₹30 extra fee." },
+      { id: 28, app: "DriverGo", title: "Instant IMPS Bank Withdrawal Sent", level: "SUCCESS", icon: "🏦", desc: "₹1,200 transferred to HDFC Bank A/c ending in 4184." },
+      { id: 29, app: "DriverGo", title: "Shift Closing Handover & Odometer", level: "INFO", icon: "🏁", desc: "Log closing odometer (14,280 km) & plug in charger." },
+      { id: 30, app: "DriverGo", title: "Municipal Geo-Fence Restricted Zone", level: "WARNING", icon: "🚫", desc: "E-Rickshaws prohibited on Expressway Flyover. Turn back." }
+    ];
+
+    // Current State
+    let currentMode = "rider"; // "rider", "driver", "popups", "simulation"
+    let currentScreenId = 7;
+    let selectedCategory = "All";
+
+    // Initialize UI on Load
+    window.addEventListener("DOMContentLoaded", () => {
+      renderCategoryFilters();
+      renderCatalogCards();
+      renderMobileScreen(currentScreenId);
+    });
+
+    // Switch Studio Top Tabs
+    function switchStudioMode(mode) {
+      currentMode = mode;
+      selectedCategory = "All";
+      document.getElementById("catalogSearchInput").value = "";
+
+      // Update Top Button Colors
+      ["tabBtnRider", "tabBtnDriver", "tabBtnPopups", "tabBtnSim"].forEach(id => {
+        document.getElementById(id).className = "px-5 py-2 rounded-full bg-[#111a28] border border-slate-700 text-slate-300 font-extrabold text-xs hover:border-slate-500 transition-all";
+      });
+
+      if (mode === "rider") {
+        document.getElementById("tabBtnRider").className = "px-5 py-2 rounded-full bg-[#00f2fe] text-[#041e49] font-extrabold text-xs shadow-lg shadow-[#00f2fe]/20 hover:scale-105 transition-all";
+        currentScreenId = 7;
+        document.getElementById("catalogHeaderTitle").innerHTML = "<span>🚖</span> <span>RiderGo Screens (1 to 50)</span>";
+      } else if (mode === "driver") {
+        document.getElementById("tabBtnDriver").className = "px-5 py-2 rounded-full bg-[#10b981] text-[#041e49] font-extrabold text-xs shadow-lg shadow-[#10b981]/20 hover:scale-105 transition-all";
+        currentScreenId = 10;
+        document.getElementById("catalogHeaderTitle").innerHTML = "<span>⚡</span> <span>DriverGo Screens (1 to 50)</span>";
+      } else if (mode === "popups") {
+        document.getElementById("tabBtnPopups").className = "px-5 py-2 rounded-full bg-purple-600 text-white font-extrabold text-xs shadow-lg shadow-purple-600/20 hover:scale-105 transition-all";
+        document.getElementById("catalogHeaderTitle").innerHTML = "<span>💬</span> <span>30 Popups & Modals Component Studio</span>";
+      } else if (mode === "simulation") {
+        document.getElementById("tabBtnSim").className = "px-5 py-2 rounded-full bg-amber-500 text-slate-900 font-extrabold text-xs shadow-lg shadow-amber-500/20 hover:scale-105 transition-all";
+        document.getElementById("catalogHeaderTitle").innerHTML = "<span>🔄</span> <span>Live End-to-End Trip Flow Simulation</span>";
+      }
+
+      renderCategoryFilters();
+      renderCatalogCards();
+      renderMobileScreen(currentScreenId);
+    }
+
+    // Render Filter Categories
+    function renderCategoryFilters() {
+      const container = document.getElementById("categoryFilterContainer");
+      container.innerHTML = "";
+
+      let cats = ["All"];
+      if (currentMode === "rider") {
+        cats = ["All", "Onboarding", "Radar & Booking", "Preferences", "Wallet & Pay", "Carpool", "In-Trip HUD", "Safety & SOS", "Post-Trip", "Support", "Account"];
+      } else if (currentMode === "driver") {
+        cats = ["All", "Auth & KYC", "Vehicle & Duty", "Telemetry", "Turn Navigation", "Safety & SOS", "Carpool", "Earnings", "Profile & Targets", "Support"];
+      } else if (currentMode === "popups") {
+        cats = ["All", "RiderGo", "DriverGo", "CRITICAL", "WARNING", "SUCCESS", "INFO"];
+      } else {
+        cats = ["All", "Step 1: Booking", "Step 2: Dispatch", "Step 3: Boarding", "Step 4: In-Trip", "Step 5: Completion"];
+      }
+
+      cats.forEach(c => {
+        const btn = document.createElement("button");
+        const isSelected = selectedCategory === c;
+        btn.textContent = c;
+        btn.className = `px-2.5 py-1 rounded-full text-[11px] font-bold transition-all ${
+          isSelected 
+            ? "bg-[#00f2fe] text-[#041e49]" 
+            : "bg-[#111a28] text-slate-400 hover:text-white border border-slate-700/60"
+        }`;
+        btn.onclick = () => {
+          selectedCategory = c;
+          renderCategoryFilters();
+          renderCatalogCards();
+        };
+        container.appendChild(btn);
+      });
+    }
+
+    // Render List of Cards
+    function renderCatalogCards() {
+      const container = document.getElementById("catalogCardsContainer");
+      container.innerHTML = "";
+      const query = document.getElementById("catalogSearchInput").value.toLowerCase();
+
+      let dataset = [];
+      if (currentMode === "rider") dataset = RIDER_SCREENS;
+      else if (currentMode === "driver") dataset = DRIVER_SCREENS;
+      else if (currentMode === "popups") dataset = MASTER_POPUPS;
+      else {
+        // Simulation steps
+        dataset = [
+          { id: 7, title: "Step 1: Rider Books E-Rickshaw", cat: "Step 1: Booking", icon: "🗺️", desc: "Select pickup point, vehicle tier & tap Confirm" },
+          { id: 16, title: "Step 2: Driver Receives 15s Dispatch Offer", cat: "Step 2: Dispatch", icon: "🚖", desc: "Driver cockpit beeps with ₹85 fare and Accept button" },
+          { id: 27, title: "Step 3: Rider Shows 4-Digit Boarding OTP", cat: "Step 3: Boarding", icon: "🔢", desc: "Driver verifies code 4184 to unlock the ignition meter" },
+          { id: 28, title: "Step 4: Active In-Trip Speedometer HUD", cat: "Step 4: In-Trip", icon: "⚡", desc: "Live GPS corridor with route deviation & SOS monitors" },
+          { id: 36, title: "Step 5: Trip Completed & UPI Settlement", cat: "Step 5: Completion", icon: "🧾", desc: "Digital receipt, driver 5-star rating & instant wallet credit" }
+        ];
+      }
+
+      const filtered = dataset.filter(item => {
+        const matchCat = selectedCategory === "All" || (item.cat === selectedCategory || item.app === selectedCategory || item.level === selectedCategory);
+        const matchQuery = !query || item.title.toLowerCase().includes(query) || (item.desc && item.desc.toLowerCase().includes(query)) || item.id.toString() === query;
+        return matchCat && matchQuery;
+      });
+
+      document.getElementById("catalogCountBadge").textContent = `${filtered.length} Items Listed`;
+
+      filtered.forEach(item => {
+        const card = document.createElement("div");
+        const isActive = (currentMode === "popups" ? false : currentScreenId === item.id);
+        card.className = `p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2.5 ${
+          isActive 
+            ? "bg-[#172338] border-[#00f2fe] shadow-lg shadow-[#00f2fe]/10 scale-[1.01]" 
+            : "bg-[#111a28]/80 border-slate-800 hover:border-slate-600 hover:bg-[#111a28]"
+        }`;
+        card.onclick = () => {
+          if (currentMode === "popups") {
+            triggerActivePopupPreview(item.id);
+          } else {
+            selectScreenById(item.id);
+          }
+        };
+
+        card.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-8 h-8 rounded-xl bg-slate-800/80 flex items-center justify-center text-base shrink-0">
+              ${item.icon || "📱"}
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="text-xs font-bold text-white truncate">${item.title}</span>
+                <span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">#${item.id}</span>
+              </div>
+              <p class="text-[10px] text-slate-400 truncate">${item.desc}</p>
+            </div>
+          </div>
+          <span class="text-xs text-slate-500 shrink-0">➔</span>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function filterCatalogList() {
+      renderCatalogCards();
+    }
+
+    function selectScreenById(id) {
+      currentScreenId = id;
+      renderCatalogCards();
+      renderMobileScreen(id);
+      closePopupOverlay();
+    }
+
+    function navigateScreenStep(delta) {
+      let max = (currentMode === "rider" || currentMode === "driver") ? 50 : 30;
+      let next = currentScreenId + delta;
+      if (next < 1) next = max;
+      if (next > max) next = 1;
+      selectScreenById(next);
+    }
+
+    // Render Screen Inside Phone Simulator
+    function renderMobileScreen(id) {
+      const viewport = document.getElementById("mobileScreenViewport");
+      const titleBadge = document.getElementById("simulatorAppTitle");
+      const catBadge = document.getElementById("simulatorCategoryBadge");
+      const counterLabel = document.getElementById("screenCounterLabel");
+
+      counterLabel.textContent = `Screen ${id} / 50`;
+
+      if (currentMode === "driver") {
+        const item = DRIVER_SCREENS.find(s => s.id === id) || DRIVER_SCREENS[9];
+        titleBadge.textContent = `DriverGo • Pilot Screen #${item.id}`;
+        catBadge.textContent = item.cat;
+        catBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded bg-[#111a28] text-[#10b981] border border-[#10b981]/30";
+        document.getElementById("simulatorAppBadge").className = "w-2.5 h-2.5 rounded-full bg-[#10b981] animate-ping";
+
+        viewport.innerHTML = renderDriverScreenTemplate(item);
+      } else {
+        const item = RIDER_SCREENS.find(s => s.id === id) || RIDER_SCREENS[6];
+        titleBadge.textContent = `RideGo • Rider Screen #${item.id}`;
+        catBadge.textContent = item.cat;
+        catBadge.className = "text-[10px] font-mono px-2 py-0.5 rounded bg-[#111a28] text-[#00f2fe] border border-[#00f2fe]/30";
+        document.getElementById("simulatorAppBadge").className = "w-2.5 h-2.5 rounded-full bg-[#00f2fe] animate-ping";
+
+        viewport.innerHTML = renderRiderScreenTemplate(item);
+      }
+    }
+
+    // Template Engine for Rider Screens
+    function renderRiderScreenTemplate(item) {
+      // Dynamic rendering based on category & screen
+      if (item.cat === "Onboarding") {
+        return `
+          <div class="flex flex-col items-center justify-center h-full text-center py-6">
+            <div class="w-16 h-16 rounded-3xl bg-[#00f2fe]/10 border-2 border-[#00f2fe] flex items-center justify-center text-3xl mb-3 shadow-lg neon-cyan-glow">
+              ${item.icon}
+            </div>
+            <h2 class="text-xl font-extrabold text-white mb-1">${item.title}</h2>
+            <p class="text-xs text-slate-400 mb-6 px-4">${item.desc}</p>
+
+            <div class="w-full space-y-3">
+              <input type="text" placeholder="+91 9876543210" class="w-full bg-[#111a28] border border-slate-700 rounded-2xl px-4 py-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#00f2fe]" value="+91 7562084184" />
+              <button class="w-full py-3.5 rounded-full bg-[#00f2fe] text-[#041e49] font-bold text-xs shadow-lg shadow-[#00f2fe]/20">
+                GET INSTANT SMS OTP
+              </button>
+            </div>
+            <p class="text-[10px] text-slate-500 mt-6">Twilio Telecom Verified • 100% Secure</p>
+          </div>
+        `;
+      } else if (item.cat === "Wallet & Pay") {
+        return `
+          <div class="space-y-3 pt-2">
+            <div class="flex items-center justify-between">
+              <h2 class="text-base font-bold text-white flex items-center gap-1.5">
+                <span>${item.icon}</span> <span>${item.title}</span>
+              </h2>
+              <span class="text-[10px] font-mono text-[#00f2fe] bg-[#00f2fe]/10 px-2 py-0.5 rounded">AUTO-RELOAD</span>
+            </div>
+
+            <!-- Balance Card -->
+            <div class="bg-gradient-to-br from-[#172338] to-[#0e1624] border border-[#00f2fe]/40 rounded-3xl p-4 shadow-xl">
+              <p class="text-[10px] text-slate-400 font-mono">AVAILABLE CASHLESS BALANCE</p>
+              <p class="text-2xl font-black text-white mt-1">₹640.50</p>
+              <div class="flex gap-2 mt-4">
+                <button class="flex-1 py-2 rounded-full bg-[#00f2fe] text-[#041e49] font-bold text-xs">+ ADD MONEY</button>
+                <button class="flex-1 py-2 rounded-full bg-[#111a28] border border-slate-700 text-xs font-bold text-white">SCAN UPI</button>
+              </div>
+            </div>
+
+            <!-- Fast Top-Up Chips -->
+            <div class="flex gap-2">
+              <button class="flex-1 py-1.5 rounded-xl bg-[#111a28] border border-slate-800 text-xs text-slate-300 font-bold hover:border-[#00f2fe]">+₹100</button>
+              <button class="flex-1 py-1.5 rounded-xl bg-[#111a28] border border-slate-800 text-xs text-slate-300 font-bold hover:border-[#00f2fe]">+₹200</button>
+              <button class="flex-1 py-1.5 rounded-xl bg-[#111a28] border border-slate-800 text-xs text-slate-300 font-bold hover:border-[#00f2fe]">+₹500</button>
+            </div>
+
+            <!-- Payment Methods List -->
+            <div class="space-y-2 pt-2">
+              <div class="p-2.5 rounded-2xl bg-[#111a28] border border-slate-800 flex items-center justify-between text-xs">
+                <span class="flex items-center gap-2"><span>📱</span> <span>UPI: sunil@okaxis</span></span>
+                <span class="text-[#10b981] font-bold text-[10px]">CONNECTED</span>
+              </div>
+              <div class="p-2.5 rounded-2xl bg-[#111a28] border border-slate-800 flex items-center justify-between text-xs">
+                <span class="flex items-center gap-2"><span>💳</span> <span>HDFC Visa ending 8184</span></span>
+                <span class="text-slate-400 text-[10px]">Change ›</span>
+              </div>
+            </div>
+          </div>
+        `;
+      } else if (item.cat === "In-Trip HUD") {
+        return `
+          <div class="space-y-3 pt-2">
+            <!-- Simulated Navigation Mini Map -->
+            <div class="h-44 rounded-3xl bg-[#0e1624] border border-[#00f2fe]/40 relative overflow-hidden flex flex-col justify-between p-3">
+              <div class="flex items-center justify-between text-xs font-mono">
+                <span class="bg-[#10b981]/20 text-[#10b981] px-2 py-0.5 rounded-full border border-[#10b981]">TRIP IN PROGRESS</span>
+                <span class="text-white font-bold">ETA: 6 mins</span>
+              </div>
+              <!-- Speedometer Center -->
+              <div class="text-center">
+                <p class="text-3xl font-black text-[#00f2fe] tracking-tight">24 <span class="text-xs text-slate-400 font-mono">km/h</span></p>
+                <p class="text-[10px] text-slate-400">Green Electric Corridor • Sector 62</p>
+              </div>
+              <div class="flex justify-between text-[11px] text-slate-300">
+                <span>Dist: 1.8 km</span>
+                <span class="text-amber-400">Battery: 82%</span>
+              </div>
+            </div>
+
+            <!-- Start OTP Card -->
+            <div class="bg-[#111a28] border border-slate-800 rounded-3xl p-3 flex items-center justify-between">
+              <div>
+                <p class="text-[10px] text-slate-400">SECURITY START OTP</p>
+                <p class="text-xl font-mono font-black text-amber-400 tracking-widest">4 1 8 4</p>
+              </div>
+              <button onclick="triggerActivePopupPreview(2)" class="px-3 py-1.5 rounded-full bg-red-600/20 text-red-400 border border-red-500 font-bold text-xs flex items-center gap-1">
+                <span>🚨</span> <span>SOS 112</span>
+              </button>
+            </div>
+
+            <!-- Driver Mini Card -->
+            <div class="bg-[#111a28] border border-slate-800 rounded-3xl p-3 flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xl">👨‍✈️</div>
+              <div class="flex-1 min-w-0">
+                <p class="text-xs font-bold text-white flex items-center gap-1">Ramesh Kumar <span class="text-[10px] text-amber-400">★ 4.9</span></p>
+                <p class="text-[10px] text-slate-400">DL 1ER 8942 • Mahindra Treo EV</p>
+              </div>
+              <button class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs">📞</button>
+            </div>
+          </div>
+        `;
+      } else {
+        // Default Radar & Booking Map View
+        return `
+          <div class="space-y-3 pt-2">
+            <!-- Floating Pill Search -->
+            <div class="bg-[#111a28]/95 border border-slate-700 rounded-full p-2 flex items-center justify-between shadow-lg">
+              <div class="flex items-center gap-2 pl-2 text-xs">
+                <span>🔍</span>
+                <span class="text-slate-300 font-medium">Patna Junction / Metro Gate 2</span>
+              </div>
+              <div class="w-6 h-6 rounded-full bg-[#00f2fe] text-[#041e49] flex items-center justify-center text-[10px] font-bold">GO</div>
+            </div>
+
+            <!-- Map Surface -->
+            <div class="h-44 rounded-3xl bg-[#090f18] border border-slate-800 relative overflow-hidden flex items-center justify-center">
+              <div class="absolute top-3 left-3 bg-[#00f2fe]/20 text-[#00f2fe] text-[10px] font-bold px-2 py-0.5 rounded-full border border-[#00f2fe]/40">🛺 4 Nearby</div>
+              <div class="w-5 h-5 rounded-full bg-[#00f2fe] border-2 border-white pulse-ring shadow-lg"></div>
+            </div>
+
+            <!-- Vehicle Tier List -->
+            <div class="space-y-2">
+              <div class="p-2.5 rounded-2xl bg-[#172338] border border-[#00f2fe] flex items-center justify-between text-xs">
+                <div class="flex items-center gap-2.5">
+                  <span class="text-xl">🛺</span>
+                  <div>
+                    <p class="font-bold text-white">RideGo Eco Rickshaw</p>
+                    <p class="text-[10px] text-slate-400">2 min away • 3 seats</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p class="font-extrabold text-[#00f2fe]">₹35</p>
+                  <p class="text-[9px] text-slate-400 line-through">₹45</p>
+                </div>
+              </div>
+
+              <div class="p-2.5 rounded-2xl bg-[#111a28] border border-slate-800 flex items-center justify-between text-xs opacity-75">
+                <div class="flex items-center gap-2.5">
+                  <span class="text-xl">⚡</span>
+                  <div>
+                    <p class="font-bold text-white">Metro Corridor Share</p>
+                    <p class="text-[10px] text-slate-400">Fixed line • Shared seat</p>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <p class="font-bold text-white">₹15</p>
+                  <p class="text-[9px] text-[#10b981]">Flat Rate</p>
+                </div>
+              </div>
+            </div>
+
+            <button onclick="triggerActivePopupPreview(16)" class="w-full py-3 rounded-full bg-gradient-to-r from-[#00f2fe] to-[#10b981] text-[#041e49] font-extrabold text-xs shadow-lg">
+              CONFIRM RIDEGO BOOKING ➔
+            </button>
+          </div>
+        `;
+      }
+    }
+
+    // Template Engine for Driver Screens
+    function renderDriverScreenTemplate(item) {
+      return `
+        <div class="space-y-3 pt-2">
+          <!-- Duty Pill Header -->
+          <div class="bg-[#111a28] border border-[#10b981]/50 p-2.5 rounded-3xl flex items-center justify-between neon-green-glow">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-[#10b981] animate-pulse"></span>
+              <div>
+                <p class="text-xs font-black text-[#10b981]">ONLINE & ON DUTY</p>
+                <p class="text-[10px] text-slate-400">WebSocket Dispatch Live</p>
+              </div>
+            </div>
+            <button class="px-3 py-1 rounded-full bg-[#10b981] text-[#041e49] font-black text-[10px]">GO OFFLINE</button>
+          </div>
+
+          <!-- Driver Cockpit Metrics -->
+          <div class="grid grid-cols-3 gap-1.5">
+            <div class="bg-[#111a28] p-2 rounded-2xl text-center border border-slate-800">
+              <p class="text-[9px] text-slate-400">EARNINGS</p>
+              <p class="text-sm font-black text-white">₹1,450</p>
+            </div>
+            <div class="bg-[#111a28] p-2 rounded-2xl text-center border border-slate-800">
+              <p class="text-[9px] text-slate-400">COMPLETED</p>
+              <p class="text-sm font-black text-[#00f2fe]">12 Rides</p>
+            </div>
+            <div class="bg-[#111a28] p-2 rounded-2xl text-center border border-slate-800">
+              <p class="text-[9px] text-slate-400">BATTERY</p>
+              <p class="text-sm font-black text-[#10b981]">84%</p>
+            </div>
+          </div>
+
+          <!-- Active Driver Screen Details Card -->
+          <div class="bg-[#111a28] border border-slate-800 rounded-3xl p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-bold text-white flex items-center gap-1.5">
+                <span>${item.icon}</span> <span>${item.title}</span>
+              </h3>
+              <span class="text-[9px] font-mono text-[#10b981] bg-[#10b981]/10 px-2 py-0.5 rounded">#${item.id}</span>
+            </div>
+            <p class="text-[11px] text-slate-400">${item.desc}</p>
+
+            <div class="pt-2 border-t border-slate-800 flex gap-2">
+              <button onclick="triggerActivePopupPreview(16)" class="flex-1 py-2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold text-[11px]">
+                🔔 Test Incoming Dispatch
+              </button>
+              <button onclick="triggerActivePopupPreview(17)" class="flex-1 py-2 rounded-full bg-[#10b981] text-[#041e49] font-bold text-[11px]">
+                🔢 Verify OTP
+              </button>
+            </div>
+          </div>
+
+          <!-- Simulated Live GPS Route Radar -->
+          <div class="h-32 rounded-3xl bg-[#090f18] border border-slate-800 p-2 flex flex-col justify-between text-[11px]">
+            <div class="flex justify-between text-slate-400 font-mono">
+              <span>GPS: HIGH PRECISION</span>
+              <span class="text-[#10b981]">22 km/h</span>
+            </div>
+            <div class="text-center font-bold text-slate-300">
+              Corridor: Ashok Rajpath ➔ Station Road
+            </div>
+            <div class="flex justify-between text-[10px] text-slate-400">
+              <span>Nearest Depot: 1.2 km</span>
+              <span>Surge: 1.4x</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Trigger Popup Modal Preview
+    function triggerActivePopupPreview(popupId) {
+      const popup = MASTER_POPUPS.find(p => p.id === popupId) || MASTER_POPUPS[0];
+      const overlay = document.getElementById("mobilePopupOverlay");
+      const card = document.getElementById("popupModalCard");
+
+      let borderClass = "border-[#00f2fe]";
+      let badgeClass = "bg-[#00f2fe]/20 text-[#00f2fe]";
+      if (popup.level === "CRITICAL") {
+        borderClass = "border-red-500";
+        badgeClass = "bg-red-500/20 text-red-400 border border-red-500/40";
+      } else if (popup.level === "SUCCESS") {
+        borderClass = "border-[#10b981]";
+        badgeClass = "bg-[#10b981]/20 text-[#10b981] border border-[#10b981]/40";
+      } else if (popup.level === "WARNING") {
+        borderClass = "border-amber-400";
+        badgeClass = "bg-amber-400/20 text-amber-300 border border-amber-400/40";
+      }
+
+      card.className = `w-full bg-[#0e1624] border-2 ${borderClass} rounded-[28px] p-4 shadow-2xl relative`;
+      card.innerHTML = `
+        <div class="flex items-center justify-between mb-2">
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${badgeClass}">
+            ${popup.icon} ${popup.level} ALERT
+          </span>
+          <span class="text-[10px] font-mono text-slate-400">${popup.app} • #${popup.id}</span>
+        </div>
+
+        <h3 class="text-sm font-extrabold text-white mb-1">${popup.title}</h3>
+        <p class="text-xs text-slate-300 mb-4">${popup.desc}</p>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="closePopupOverlay()" class="py-2.5 rounded-full bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700">
+            DISMISS
+          </button>
+          <button onclick="handlePopupConfirm('${popup.title}')" class="py-2.5 rounded-full bg-[#00f2fe] text-[#041e49] font-black text-xs shadow-md">
+            PROCEED ➔
+          </button>
+        </div>
+      `;
+
+      overlay.classList.remove("hidden");
+    }
+
+    function closePopupOverlay() {
+      document.getElementById("mobilePopupOverlay").classList.add("hidden");
+    }
+
+    function handlePopupConfirm(title) {
+      alert(`Action Confirmed for: ${title}`);
+      closePopupOverlay();
+    }
+  </script>
+</body>
+</html>

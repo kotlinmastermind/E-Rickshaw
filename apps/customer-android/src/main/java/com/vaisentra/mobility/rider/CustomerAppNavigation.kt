@@ -22,6 +22,8 @@ import com.vaisentra.mobility.rider.feature.profile.ProfileEditScreen
 import com.vaisentra.mobility.rider.feature.security.AppLockOverlay
 import com.vaisentra.mobility.rider.feature.splash.SplashScreen
 import com.vaisentra.mobility.rider.feature.tracking.LiveTrackingScreen
+import com.vaisentra.mobility.core.designsystem.ElectricNeoTokens
+import com.vaisentra.mobility.rider.feature.demo.CustomerDemoInspectorOverlay
 import kotlinx.coroutines.withTimeoutOrNull
 
 sealed interface CustomerDestination {
@@ -40,6 +42,7 @@ fun CustomerAppNavigation() {
     val tokenManager = remember { TokenManager.getInstance(context) }
 
     var showSplash by remember { mutableStateOf(true) }
+    var activeDemoScreenId by remember { mutableStateOf<Int?>(null) }
     var isAppLocked by remember {
         mutableStateOf(tokenManager.isLoggedIn() && tokenManager.isAppLockEnabled())
     }
@@ -109,113 +112,118 @@ fun CustomerAppNavigation() {
         }
     }
 
-    Surface(
-        color = com.vaisentra.mobility.core.designsystem.SharedDesignTokens.BackgroundDark,
-        modifier = Modifier.fillMaxSize()
+    CustomerDemoInspectorOverlay(
+        activeScreenId = activeDemoScreenId,
+        onSelectScreen = { activeDemoScreenId = it }
     ) {
-        if (showSplash) {
-            SplashScreen(
-                onNavigateNext = {
-                    showSplash = false
+        Surface(
+            color = ElectricNeoTokens.CyberVoid,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (showSplash) {
+                SplashScreen(
+                    onNavigateNext = {
+                        showSplash = false
+                    }
+                )
+            } else if (isAppLocked) {
+                AppLockOverlay(
+                    onUnlocked = {
+                        isAppLocked = false
+                    }
+                )
+            } else if (isCheckingSession) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = ElectricNeoTokens.ElectricCyan)
                 }
-            )
-        } else if (isAppLocked) {
-            AppLockOverlay(
-                onUnlocked = {
-                    isAppLocked = false
-                }
-            )
-        } else if (isCheckingSession) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = com.vaisentra.mobility.core.designsystem.SharedDesignTokens.BrandGold)
-            }
-        } else {
-            when (val dest = currentDestination) {
-                CustomerDestination.Auth -> {
-                    CustomerAuthScreen(
-                        onAuthSuccess = {
-                            if (tokenManager.isAppLockEnabled()) {
-                                isAppLocked = true
+            } else {
+                when (val dest = currentDestination) {
+                    CustomerDestination.Auth -> {
+                        CustomerAuthScreen(
+                            onAuthSuccess = {
+                                if (tokenManager.isAppLockEnabled()) {
+                                    isAppLocked = true
+                                }
+                                currentDestination = CustomerDestination.Home
                             }
-                            currentDestination = CustomerDestination.Home
-                        }
-                    )
-                }
-                CustomerDestination.Home -> {
-                    LocationScreen(
-                        onRideRequested = { rideId, otp ->
-                            tokenManager.saveActiveRideId(rideId)
-                            tokenManager.saveActiveRideOtp(otp)
-                            currentDestination = CustomerDestination.Tracking(rideId, otp)
-                        },
-                        onNavigateProfile = {
-                            currentDestination = CustomerDestination.Profile
-                        },
-                        onNavigateNotifications = {
-                            currentDestination = CustomerDestination.Notifications
-                        },
-                        onNavigateGovernance = {
-                            currentDestination = CustomerDestination.Governance
-                        },
-                        onSharedRideBooked = { rideId, otp, _, _ ->
-                            tokenManager.saveActiveRideId(rideId)
-                            tokenManager.saveActiveRideOtp(otp)
-                            currentDestination = CustomerDestination.Tracking(rideId, otp)
-                        }
-                    )
-                }
-                is CustomerDestination.Tracking -> {
-                    LiveTrackingScreen(
-                        rideId = dest.rideId,
-                        startOtp = dest.startOtp,
-                        onRideCancelled = {
-                            tokenManager.clearActiveRideId()
-                            currentDestination = CustomerDestination.Home
-                        },
-                        onProceedPayment = { rId, amt ->
-                            tokenManager.clearActiveRideId()
-                            currentDestination = CustomerDestination.Payment(rId, amt)
-                        }
-                    )
-                }
-                is CustomerDestination.Payment -> {
-                    PaymentScreen(
-                        rideId = dest.rideId,
-                        amountRupees = dest.amountRupees,
-                        onPaymentAndReviewCompleted = {
-                            tokenManager.clearActiveRideId()
-                            currentDestination = CustomerDestination.Home
-                        }
-                    )
-                }
-                CustomerDestination.Profile -> {
-                    ProfileEditScreen(
-                        onNavigateBack = {
-                            currentDestination = CustomerDestination.Home
-                        },
-                        onNavigateGovernance = {
-                            currentDestination = CustomerDestination.Governance
-                        },
-                        onSignOut = {
-                            tokenManager.clear()
-                            isAppLocked = false
-                            currentDestination = CustomerDestination.Auth
-                        }
-                    )
-                }
-                CustomerDestination.Notifications -> {
-                    NotificationScreen(
-                        onNavigateBack = {
-                            currentDestination = CustomerDestination.Home
-                        }
-                    )
-                }
-                CustomerDestination.Governance -> {
-                    AccountGovernanceScreen(
-                        onNavigateBack = {
-                            currentDestination = CustomerDestination.Home
-                        }
-                    )
+                        )
+                    }
+                    CustomerDestination.Home -> {
+                        LocationScreen(
+                            onRideRequested = { rideId, otp ->
+                                tokenManager.saveActiveRideId(rideId)
+                                tokenManager.saveActiveRideOtp(otp)
+                                currentDestination = CustomerDestination.Tracking(rideId, otp)
+                            },
+                            onNavigateProfile = {
+                                currentDestination = CustomerDestination.Profile
+                            },
+                            onNavigateNotifications = {
+                                currentDestination = CustomerDestination.Notifications
+                            },
+                            onNavigateGovernance = {
+                                currentDestination = CustomerDestination.Governance
+                            },
+                            onSharedRideBooked = { rideId, otp, _, _ ->
+                                tokenManager.saveActiveRideId(rideId)
+                                tokenManager.saveActiveRideOtp(otp)
+                                currentDestination = CustomerDestination.Tracking(rideId, otp)
+                            }
+                        )
+                    }
+                    is CustomerDestination.Tracking -> {
+                        LiveTrackingScreen(
+                            rideId = dest.rideId,
+                            startOtp = dest.startOtp,
+                            onRideCancelled = {
+                                tokenManager.clearActiveRideId()
+                                currentDestination = CustomerDestination.Home
+                            },
+                            onProceedPayment = { rId, amt ->
+                                tokenManager.clearActiveRideId()
+                                currentDestination = CustomerDestination.Payment(rId, amt)
+                            }
+                        )
+                    }
+                    is CustomerDestination.Payment -> {
+                        PaymentScreen(
+                            rideId = dest.rideId,
+                            amountRupees = dest.amountRupees,
+                            onPaymentAndReviewCompleted = {
+                                tokenManager.clearActiveRideId()
+                                currentDestination = CustomerDestination.Home
+                            }
+                        )
+                    }
+                    CustomerDestination.Profile -> {
+                        ProfileEditScreen(
+                            onNavigateBack = {
+                                currentDestination = CustomerDestination.Home
+                            },
+                            onNavigateGovernance = {
+                                currentDestination = CustomerDestination.Governance
+                            },
+                            onSignOut = {
+                                tokenManager.clear()
+                                isAppLocked = false
+                                currentDestination = CustomerDestination.Auth
+                            }
+                        )
+                    }
+                    CustomerDestination.Notifications -> {
+                        NotificationScreen(
+                            onNavigateBack = {
+                                currentDestination = CustomerDestination.Home
+                            }
+                        )
+                    }
+                    CustomerDestination.Governance -> {
+                        AccountGovernanceScreen(
+                            onNavigateBack = {
+                                currentDestination = CustomerDestination.Home
+                            }
+                        )
+                    }
                 }
             }
         }
