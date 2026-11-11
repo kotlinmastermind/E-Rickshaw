@@ -1,31 +1,26 @@
 package com.vaisentra.mobility.rider.core.network
 
 import com.google.gson.annotations.SerializedName
+import com.vaisentra.mobility.core.model.*
 import okhttp3.MultipartBody
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.*
 
-data class TokenResponse(
-    @SerializedName("access_token") val accessToken: String,
-    @SerializedName("token_type") val tokenType: String,
-    @SerializedName("refresh_token") val refreshToken: String? = null,
-    @SerializedName("user") val user: UserDto
-)
-
-data class UserDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("phone_number") val phoneNumber: String,
-    @SerializedName("full_name") val fullName: String?,
-    @SerializedName("email") val email: String?,
-    @SerializedName("role") val role: String,
-    @SerializedName("email_verified") val emailVerified: Boolean = false,
-    @SerializedName("avatar_url") val avatarUrl: String? = null,
-    @SerializedName("biometric_enabled") val biometricEnabled: Boolean = false,
-    @SerializedName("mfa_enabled") val mfaEnabled: Boolean = false,
-    @SerializedName("has_pin") val hasPin: Boolean = false,
-    @SerializedName("has_passkey") val hasPasskey: Boolean = false
-)
+typealias VehicleCategoryDto = com.vaisentra.mobility.core.model.VehicleCategoryDto
+typealias SosTriggerRequest = com.vaisentra.mobility.core.model.SosTriggerRequest
+typealias SosTriggerResponse = com.vaisentra.mobility.core.model.SosTriggerResponse
+typealias EmergencyContactDto = com.vaisentra.mobility.core.model.EmergencyContactDto
+typealias IncidentReportRequest = com.vaisentra.mobility.core.model.IncidentReportRequest
+typealias IncidentReportResponse = com.vaisentra.mobility.core.model.IncidentReportResponse
+typealias PrivacyDsarSubmissionDto = com.vaisentra.mobility.core.model.PrivacyDsarSubmissionDto
+typealias PrivacyDsarResponseDto = com.vaisentra.mobility.core.model.PrivacyDsarResponseDto
+typealias SendChatMessageRequest = com.vaisentra.mobility.core.model.SendChatMessageRequest
+typealias RideChatMessageDto = com.vaisentra.mobility.core.model.RideChatMessageDto
+typealias NearbyVehicleDto = com.vaisentra.mobility.core.model.NearbyVehicleDto
+typealias NearbyVehiclesResponse = com.vaisentra.mobility.core.model.NearbyVehiclesResponse
+typealias NotificationDto = com.vaisentra.mobility.core.model.NotificationDto
+typealias NotificationInboxDto = com.vaisentra.mobility.core.model.NotificationInboxDto
 
 data class PasswordRegisterPayload(
     @SerializedName("email") val email: String,
@@ -258,32 +253,6 @@ data class ProfileUpdateRequest(
     @SerializedName("avatar_url") val avatarUrl: String? = null,
     @SerializedName("emergency_contact_phone") val emergencyContactPhone: String? = null,
     @SerializedName("preferred_payment_method") val preferredPaymentMethod: String? = null
-)
-
-data class VehicleCategoryDto(
-    @SerializedName("id") val id: String = "cat_1",
-    @SerializedName("code") val code: String = "SEDAN",
-    @SerializedName("name") val name: String = "Executive Sedan",
-    @SerializedName("description") val description: String = "Chauffeur Driven",
-    @SerializedName("icon_url") val iconUrl: String = "",
-    @SerializedName("capacity") val capacity: Int = 4,
-    @SerializedName("legroom_inches") val legroomInches: Double? = null,
-    @SerializedName("quietness_db") val quietnessDb: Double? = null,
-    @SerializedName("luggage_large_capacity") val luggageLargeCapacity: Int? = null,
-    @SerializedName("luggage_small_capacity") val luggageSmallCapacity: Int? = null,
-    @SerializedName("has_wifi") val hasWifi: Boolean? = null,
-    @SerializedName("has_massage_seats") val hasMassageSeats: Boolean? = null,
-    @SerializedName("has_champagne_cooler") val hasChampagneCooler: Boolean? = null,
-    @SerializedName("has_reclining_seats") val hasRecliningSeats: Boolean? = null,
-    @SerializedName("is_electric") val isElectric: Boolean? = null,
-    @SerializedName("emissions_g_per_km") val emissionsGPerKm: Double? = null,
-    @SerializedName("wheelchair_accessible") val wheelchairAccessible: Boolean? = null,
-    @SerializedName("step_free_height_cm") val stepFreeHeightCm: Double? = null,
-    @SerializedName("pet_friendly") val petFriendly: Boolean? = null,
-    @SerializedName("child_seat_available") val childSeatAvailable: Boolean? = null,
-    @SerializedName("available_colors") val availableColors: List<String>? = null,
-    @SerializedName("available_amenities") val availableAmenities: List<String>? = null,
-    @SerializedName("photos_gallery") val photosGallery: List<String>? = null
 )
 
 // Part 3 Bespoke Customization & Preferences DTOs (Features 51-75)
@@ -748,23 +717,6 @@ data class RateDriverRequest(
     @SerializedName("feedback") val feedback: String?
 )
 
-data class NotificationDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("title") val title: String,
-    @SerializedName("body") val body: String,
-    @SerializedName("event_type") val eventType: String,
-    @SerializedName("is_read") val isRead: Boolean,
-    @SerializedName("created_at") val createdAt: String,
-    @SerializedName("delivery_status") val deliveryStatus: String? = null,
-    @SerializedName("action_url") val actionUrl: String? = null
-)
-
-data class NotificationInboxDto(
-    val items: List<NotificationDto> = emptyList(),
-    @SerializedName("unread_count") val unreadCount: Int = 0,
-    val total: Int = 0
-)
-
 data class SharedEstimateRequest(
     @SerializedName("category_id") val categoryId: String,
     @SerializedName("pickup_latitude") val pickupLatitude: Double,
@@ -836,19 +788,6 @@ data class WalletTransactionDto(
     @SerializedName("created_at") val createdAt: String = ""
 )
 
-data class RideChatMessageDto(
-    @SerializedName("id") val id: String = "",
-    @SerializedName("sender_user_id") val senderUserId: String = "",
-    @SerializedName("sender_role") val senderRole: String = "CUSTOMER",
-    @SerializedName("message") val message: String = "",
-    @SerializedName("message_text") val messageText: String = "",
-    @SerializedName("sent_at") val sentAt: String = ""
-)
-
-data class SendChatMessageRequest(
-    @SerializedName("message_text") val messageText: String
-)
-
 data class TopupWalletRequest(
     @SerializedName("amount_cents") val amountCents: Int,
     @SerializedName("idempotency_key") val idempotencyKey: String,
@@ -865,36 +804,6 @@ data class PromoValidateResponse(
     @SerializedName("code") val code: String,
     @SerializedName("discount_cents") val discountCents: Int,
     @SerializedName("final_fare_cents") val finalFareCents: Int
-)
-
-
-
-data class NearbyVehicleDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("driver_name") val driverName: String,
-    @SerializedName("driver_phone") val driverPhone: String? = null,
-    @SerializedName("rating") val rating: Double = 4.8,
-    @SerializedName("category_code") val categoryCode: String,
-    @SerializedName("vehicle_type_name") val vehicleTypeName: String,
-    @SerializedName("model_name") val modelName: String,
-    @SerializedName("license_plate") val licensePlate: String,
-    @SerializedName("icon_type") val iconType: String = "e_rickshaw",
-    @SerializedName("capacity") val capacity: Int = 4,
-    @SerializedName("latitude") val latitude: Double,
-    @SerializedName("longitude") val longitude: Double,
-    @SerializedName("bearing") val bearing: Float = 0f,
-    @SerializedName("battery_level") val batteryLevel: Int = 85,
-    @SerializedName("distance_km") val distanceKm: Double = 0.5,
-    @SerializedName("eta_minutes") val etaMinutes: Int = 3,
-    @SerializedName("status") val status: String = "AVAILABLE"
-)
-
-data class NearbyVehiclesResponse(
-    @SerializedName("customer_latitude") val customerLatitude: Double,
-    @SerializedName("customer_longitude") val customerLongitude: Double,
-    @SerializedName("radius_km") val radiusKm: Double,
-    @SerializedName("total_available") val totalAvailable: Int,
-    @SerializedName("vehicles") val vehicles: List<NearbyVehicleDto>
 )
 
 data class RoutePointDto(
@@ -1855,6 +1764,12 @@ interface CustomerApiService {
     @POST("api/v1/auth/login/unified")
     suspend fun unifiedLogin(@Body payload: UnifiedLoginRequestPayload): Response<TokenResponse>
 
+    @POST("api/v1/auth/otp/request")
+    suspend fun requestOtp(@Body payload: CustomerOtpRequestPayload): Response<Map<String, Any>>
+
+    @POST("api/v1/auth/otp/verify")
+    suspend fun verifyOtp(@Body payload: CustomerOtpVerifyPayload): Response<TokenResponse>
+
     // Part 19: Infrastructure, Resilience & Developer Platform (Features 451-475)
     @GET("api/v1/infra/openapi-client-spec")
     suspend fun getOpenApiClientSpec(@Query("app_type") appType: String = "CUSTOMER"): Response<Map<String, Any>>
@@ -1946,19 +1861,17 @@ data class UnifiedLoginRequestPayload(
     @SerializedName("password") val password: String? = null
 )
 
-data class PrivacyDsarSubmissionDto(
-    @SerializedName("request_type") val requestType: String,
-    @SerializedName("details") val details: String? = null
+data class CustomerOtpRequestPayload(
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("role") val role: String = "customer"
 )
 
-data class PrivacyDsarResponseDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("request_number") val requestNumber: String,
-    @SerializedName("request_type") val requestType: String,
-    @SerializedName("status") val status: String,
-    @SerializedName("message") val message: String
+data class CustomerOtpVerifyPayload(
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("otp_code") val otpCode: String,
+    @SerializedName("role") val role: String = "customer",
+    @SerializedName("full_name") val fullName: String? = null
 )
-
 
 // ----------------- Part 4 DTOs -----------------
 data class FareCompareRequest(
@@ -2440,38 +2353,6 @@ data class MeetingPointRequest(
 )
 
 // ----------------- Part 6 DTOs (Features 126 - 150) -----------------
-data class SosTriggerRequest(
-    @SerializedName("ride_id") val rideId: String,
-    @SerializedName("latitude") val latitude: Double,
-    @SerializedName("longitude") val longitude: Double,
-    @SerializedName("alert_type") val alertType: String = "SOS_BUTTON",
-    @SerializedName("notes") val notes: String? = null
-)
-
-data class SosTriggerResponse(
-    @SerializedName("success") val success: Boolean,
-    @SerializedName("alert_id") val alertId: String,
-    @SerializedName("ride_id") val rideId: String,
-    @SerializedName("status") val status: String,
-    @SerializedName("alert_type") val alertType: String,
-    @SerializedName("triggered_at") val triggeredAt: String,
-    @SerializedName("contacts_notified_count") val contactsNotifiedCount: Int,
-    @SerializedName("emergency_share_url") val emergencyShareUrl: String,
-    @SerializedName("soc_hotline") val socHotline: String,
-    @SerializedName("police_hotline") val policeHotline: String,
-    @SerializedName("message") val message: String
-)
-
-data class EmergencyContactDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("name") val name: String,
-    @SerializedName("relationship") val relationship: String,
-    @SerializedName("phone_number") val phoneNumber: String,
-    @SerializedName("notify_on_trip_start") val notifyOnTripStart: Boolean,
-    @SerializedName("notify_on_arrival") val notifyOnArrival: Boolean,
-    @SerializedName("created_at") val createdAt: String? = null
-)
-
 data class AddEmergencyContactRequest(
     @SerializedName("name") val name: String,
     @SerializedName("relationship") val relationship: String,
@@ -2608,24 +2489,6 @@ data class RecordingStatusResponse(
     @SerializedName("session_id") val sessionId: String?,
     @SerializedName("encryption_algorithm") val encryptionAlgorithm: String,
     @SerializedName("retention_period_days") val retentionPeriodDays: Int
-)
-
-data class IncidentReportRequest(
-    @SerializedName("ride_id") val rideId: String? = null,
-    @SerializedName("category") val category: String,
-    @SerializedName("severity") val severity: String = "MEDIUM",
-    @SerializedName("description") val description: String,
-    @SerializedName("photo_url") val photoUrl: String? = null,
-    @SerializedName("role") val role: String = "CUSTOMER"
-)
-
-data class IncidentReportResponse(
-    @SerializedName("ticket_number") val ticketNumber: String,
-    @SerializedName("status") val status: String,
-    @SerializedName("category") val category: String,
-    @SerializedName("severity") val severity: String,
-    @SerializedName("created_at") val createdAt: String,
-    @SerializedName("message") val message: String
 )
 
 data class IncidentTimelineStep(

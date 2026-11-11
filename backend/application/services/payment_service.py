@@ -1,5 +1,6 @@
 import json
 import hashlib
+import inspect
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,7 +119,9 @@ class PaymentService:
                     attempts=1,
                     last_error="Invalid webhook signature."
                 )
-                self.db.add(failed_inbox)
+                add_res = self.db.add(failed_inbox)
+                if inspect.isawaitable(add_res):
+                    await add_res
                 await self.db.commit()
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature.")
 
@@ -138,7 +141,9 @@ class PaymentService:
                 status="PENDING",
                 attempts=1
             )
-            self.db.add(existing_inbox)
+            add_res = self.db.add(existing_inbox)
+            if inspect.isawaitable(add_res):
+                await add_res
             try:
                 await self.db.flush()
             except Exception:

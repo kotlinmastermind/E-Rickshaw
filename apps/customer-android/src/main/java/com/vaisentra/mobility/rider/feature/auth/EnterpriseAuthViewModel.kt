@@ -1,11 +1,11 @@
-﻿package com.vaisentra.mobility.rider.feature.auth
+package com.vaisentra.mobility.rider.feature.auth
 
 import android.app.Activity
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vaisentra.mobility.rider.core.network.*
-import com.vaisentra.mobility.rider.core.security.TokenManager
+import com.vaisentra.mobility.core.security.TokenManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

@@ -35,8 +35,7 @@ export const MISSION_CONTROL_CATEGORIES: MissionControlCategory[] = [
   { id: 'geofence', label: 'Geofence & Zones', icon: '🌐' },
   { id: 'marketing', label: 'Growth & CRM', icon: '📢' },
   { id: 'safety', label: 'Safety & SOC', icon: '🚨' },
-  { id: 'security', label: 'Security & RBAC', icon: '🔐' },
-  { id: 'simulator', label: 'Remote App Console', icon: '📱' }
+  { id: 'security', label: 'Security & RBAC', icon: '🔐' }
 ];
 
 export const MISSION_CONTROL_DESKS: MissionControlDesk[] = [
@@ -71,8 +70,7 @@ export const MISSION_CONTROL_DESKS: MissionControlDesk[] = [
   { id: "emergency_sos", category: "safety", icon: "🚨", title: "29. Emergency SOS & Security Desk", table: "emergency_alerts, sos_events", badge: "SOC Desk" },
   { id: "incident_reports", category: "safety", icon: "🛡️", title: "30. Safety Incident Investigations", table: "incident_reports, evidence", badge: "Legal" },
   { id: "rbac_security", category: "security", icon: "🔐", title: "31. Admin RBAC Roles & Permissions", table: "admin_roles, permissions", badge: "Security" },
-  { id: "audit_logs", category: "security", icon: "📜", title: "32. Platform Audit Trails & Compliance", table: "audit_logs, route_latency", badge: "Audit" },
-  { id: "simulator", category: "simulator", icon: "📱", title: "33. Remote Device Status Console", table: "device_tokens, sessions", badge: "Console" }
+  { id: "audit_logs", category: "security", icon: "📜", title: "32. Platform Audit Trails & Compliance", table: "audit_logs, route_latency", badge: "Audit" }
 ];
 
 export const APP_CUSTOMER_SCREENS: AppScreenMetadata[] = [

@@ -14,7 +14,7 @@ from backend.core.config import settings
 from backend.infrastructure.security.crypto import decode_jwt_token
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.infrastructure.database.session import async_session_maker
-from backend.domain.models import User, DriverProfile, RideAssignment, Ride
+from backend.domain.models import User, DriverProfile, CustomerProfile, RideAssignment, Ride
 from backend.api.deps import get_current_user, security_scheme
 
 logger = logging.getLogger("backend.ws")
@@ -428,7 +428,7 @@ async def driver_dispatch_websocket(
         return
 
     user_id = payload.get("user_id") or payload.get("sub")
-    role = payload.get("role")
+    role = str(payload.get("role") or "").lower()
     session_id = payload.get("session_id", "")
 
     if role not in ("driver", "admin") or not user_id:
@@ -608,25 +608,93 @@ async def ride_tracking_websocket(
 ):
     raw_token = extract_ws_token(websocket)
     if not raw_token:
+        logger.warning(f"Rejected /rides/{ride_id}/tracking: Missing authentication credentials.")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     payload = await validate_ws_credentials(raw_token)
     if not payload:
+        logger.warning(f"Rejected /rides/{ride_id}/tracking: Invalid or expired credentials.")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     user_id = payload.get("user_id") or payload.get("sub")
+    role = str(payload.get("role") or "").lower()
     session_id = payload.get("session_id", "")
     if not user_id or not session_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     if await redis_client.exists(f"revoked_session:{session_id}") or await redis_client.exists(f"revoked_user:{user_id}"):
+        logger.warning(f"Rejected /rides/{ride_id}/tracking: Revoked session for user {user_id}.")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
+    # Ride ownership & authorization validation
+    if role not in ("admin", "superadmin"):
+        try:
+            async with async_session_maker() as db:
+                ride = await db.get(Ride, ride_id)
+                if not ride:
+                    logger.warning(f"Rejected /rides/{ride_id}/tracking: Ride {ride_id} does not exist.")
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    return
+
+                # Get customer profile IDs for user
+                cust_ids = (await db.execute(
+                    select(CustomerProfile.id).where(
+                        or_(CustomerProfile.user_id == user_id, CustomerProfile.id == user_id)
+                    )
+                )).scalars().all()
+
+                # Get driver profile IDs for user
+                driver_ids = (await db.execute(
+                    select(DriverProfile.id).where(
+                        or_(DriverProfile.user_id == user_id, DriverProfile.id == user_id)
+                    )
+                )).scalars().all()
+
+                is_customer = ride.customer_id in cust_ids or ride.customer_id == user_id
+                is_driver = bool(ride.assigned_driver_id and (ride.assigned_driver_id in driver_ids or ride.assigned_driver_id == user_id))
+
+                if not (is_customer or is_driver):
+                    logger.warning(
+                        f"Rejected /rides/{ride_id}/tracking: User {user_id} (role: {role}) "
+                        f"is neither customer nor assigned driver of ride {ride_id}."
+                    )
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    return
+        except Exception as e:
+            logger.error(f"Error checking ride authorization in /rides/{ride_id}/tracking: {e}", exc_info=True)
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
     await ws_manager.connect_ride(ride_id, websocket)
+
+    # Immediately emit authoritative state snapshot upon connection for seamless state recovery
+    try:
+        async with async_session_maker() as db:
+            current_ride = await db.get(Ride, ride_id)
+            if current_ride:
+                snapshot = {
+                    "event_type": "RIDE_STATE_SNAPSHOT",
+                    "ride_id": current_ride.id,
+                    "status": current_ride.status,
+                    "pickup_address": current_ride.pickup_address,
+                    "destination_address": current_ride.destination_address,
+                    "estimated_fare_cents": current_ride.estimated_fare_cents,
+                    "final_fare_cents": current_ride.final_fare_cents
+                }
+                if current_ride.assigned_driver_id:
+                    d_loc = await redis_client.get_json(f"driver:location:{current_ride.assigned_driver_id}")
+                    if d_loc:
+                        snapshot["driver_latitude"] = d_loc.get("latitude")
+                        snapshot["driver_longitude"] = d_loc.get("longitude")
+                        snapshot["driver_heading"] = d_loc.get("heading")
+                await websocket.send_json(snapshot)
+    except Exception as snap_err:
+        logger.debug(f"Could not send initial snapshot for ride {ride_id}: {snap_err}")
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -660,7 +728,7 @@ async def location_telemetry_websocket(
         return
 
     user_id = payload.get("user_id") or payload.get("sub")
-    role = payload.get("role")
+    role = str(payload.get("role") or "").lower()
     session_id = payload.get("session_id", "")
     if not user_id or not session_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -718,6 +786,8 @@ async def location_telemetry_websocket(
                         broadcast_payload = {
                             "event_type": event_type,
                             "ride_id": ride_id,
+                            "driver_latitude": lat if role == "driver" else None,
+                            "driver_longitude": lng if role == "driver" else None,
                             "payload": {
                                 "user_id": user_id,
                                 "latitude": lat,
@@ -786,7 +856,7 @@ async def admin_telemetry_websocket(
         return
 
     user_id = payload.get("user_id") or payload.get("sub")
-    role = payload.get("role")
+    role = str(payload.get("role") or "").lower()
     session_id = payload.get("session_id", "")
 
     if role not in ("admin", "superadmin") or not user_id:

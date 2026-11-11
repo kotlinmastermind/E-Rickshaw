@@ -24,6 +24,9 @@ local.properties
 
 # Environment & Secrets
 .env
+.env.*
+!.env.example
+!.env.production
 *.env.local
 *.pem
 *.key

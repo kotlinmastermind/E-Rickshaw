@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.earnings
+package com.vaisentra.mobility.driver.feature.earnings
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -1202,25 +1202,39 @@ private fun ShiftsAndEarningsTabContent(
             }
         }
 
-        // Feature 252: Ride Items with Tap to View Detailed Breakdown
-        item {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = DriverColors.CockpitDark,
-                modifier = Modifier.fillMaxWidth().clickable { onSelectRideForBreakdown("demo-sample-ride") }
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        // Feature 252: Real Daily History Items with Tap to View Detailed Breakdown
+        if (dailyHistory.isEmpty()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = DriverColors.CockpitDark,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("The Taj Mahal Palace → CSM Airport T2", style = DriverTypography.Body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), maxLines = 1)
-                        Text("Today 14:35 • 24.5 km • Includes ₹150 Toll Reimbursement", style = DriverTypography.Body.copy(fontSize = 11.sp, color = DriverColors.TextMuted))
+                    Box(modifier = Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                        Text("No completed rides recorded in this period", style = DriverTypography.Body.copy(fontSize = 12.sp, color = DriverColors.TextMuted))
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("+₹2,050.00", style = DriverTypography.Body.copy(fontSize = 14.sp, color = DriverColors.StatusOnline, fontWeight = FontWeight.Bold))
-                        Text("View Itemized ➔", style = DriverTypography.Body.copy(fontSize = 10.sp, color = DriverColors.ChauffeurGold))
+                }
+            }
+        } else {
+            items(dailyHistory) { item ->
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = DriverColors.CockpitDark,
+                    modifier = Modifier.fillMaxWidth().clickable { onSelectRideForBreakdown(item.date) }
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("${item.dayName} (${item.date})", style = DriverTypography.Body.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold), maxLines = 1)
+                            Text("${item.tripsCount} trips completed", style = DriverTypography.Body.copy(fontSize = 11.sp, color = DriverColors.TextMuted))
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("+₹%,.2f".format(item.netEarningsRupees), style = DriverTypography.Body.copy(fontSize = 14.sp, color = DriverColors.StatusOnline, fontWeight = FontWeight.Bold))
+                            Text("View Itemized ➔", style = DriverTypography.Body.copy(fontSize = 10.sp, color = DriverColors.ChauffeurGold))
+                        }
                     }
                 }
             }

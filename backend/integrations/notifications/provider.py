@@ -1,8 +1,16 @@
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+"""
+Google Firebase Cloud Messaging (FCM v1) & Transactional Notification Provider.
+ARCHITECTURAL BOUNDARY:
+- FCM is strictly and exclusively dedicated to push notifications (ride dispatch, arrivals, chat alerts).
+- OTP SMS authentication is strictly handled by Twilio Verify Service (backend/integrations/sms).
+"""
+import os
+import re
 import json
 import logging
-import re
+from abc import ABC, abstractmethod
+from typing import Dict, Any, Optional
+import httpx
 from backend.core.config import settings
 
 logger = logging.getLogger("notifications_provider")
@@ -64,7 +72,7 @@ class NotificationProvider(ABC):
 class StandardNotificationProvider(NotificationProvider):
     """
     Standard Notification Provider for Supabase & FastAPI.
-    Delivers notifications conforming to FCM v1 payload specifications.
+    Delivers notifications conforming to official Google FCM HTTP v1 API.
     """
     def __init__(self):
         self.last_error: str = ""
@@ -72,23 +80,131 @@ class StandardNotificationProvider(NotificationProvider):
         self.last_message_id: Optional[str] = None
         self.last_payload: Optional[Dict[str, Any]] = None
 
+    def _get_fcm_credentials(self):
+        """
+        Retrieves google.oauth2 service account credentials and project ID if configured.
+        Never commits or logs raw secrets.
+        """
+        try:
+            from google.oauth2 import service_account
+        except ImportError:
+            return None, None
+
+        scopes = ["https://www.googleapis.com/auth/firebase.messaging"]
+
+        # 1. From JSON environment variable string
+        sa_json_str = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON") or getattr(settings, "FIREBASE_SERVICE_ACCOUNT_JSON", None)
+        if sa_json_str and sa_json_str.strip():
+            try:
+                info = json.loads(sa_json_str)
+                creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+                return creds, creds.project_id
+            except Exception:
+                logger.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON", exc_info=True)
+                return None, None
+
+        # 2. From file path in environment
+        sa_file = (
+            os.getenv("FIREBASE_CREDENTIALS_PATH")
+            or os.getenv("FCM_CREDENTIALS_PATH")
+            or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            or getattr(settings, "FIREBASE_CREDENTIALS_PATH", None)
+            or getattr(settings, "FCM_CREDENTIALS_PATH", None)
+        )
+        if sa_file and os.path.isfile(sa_file):
+            try:
+                creds = service_account.Credentials.from_service_account_file(sa_file, scopes=scopes)
+                return creds, creds.project_id
+            except Exception:
+                logger.error(f"Failed to load service account from file: {sa_file}", exc_info=True)
+                return None, None
+
+        return None, None
+
     async def send_push_notification(
         self, device_token: str, title: str, body: str, data: Optional[Dict[str, Any]] = None
     ) -> bool:
         if not device_token or not device_token.strip():
             self.last_error = "Device push token is empty."
             self.last_error_code = "INVALID_TOKEN"
+            self.last_message_id = None
             return False
 
         # Validate and construct canonical FCM v1 payload
         payload = build_fcm_v1_payload(device_token, title, body, data)
         self.last_payload = payload
 
-        logger.info(f"[PUSH_NOTIFICATION] Dispatched to {device_token[:10]}... | Title: {title} | Body: {body}")
-        self.last_message_id = f"fcm_msg_{device_token[:8]}_{int(len(body))}"
-        self.last_error = ""
-        self.last_error_code = ""
-        return True
+        # Check credentials
+        creds, project_id = self._get_fcm_credentials()
+        if not creds or not project_id:
+            self.last_error = "Firebase service account credentials are not configured."
+            self.last_error_code = "PROVIDER_NOT_CONFIGURED"
+            self.last_message_id = None
+            logger.warning("[FCM_PUSH_UNAVAILABLE] Firebase service account is not configured; push delivery withheld.")
+            return False
+
+        # Acquire OAuth 2.0 access token
+        try:
+            from google.auth.transport.requests import Request
+            creds.refresh(Request())
+            access_token = creds.token
+        except Exception as auth_exc:
+            self.last_error = f"Failed to authenticate with Google FCM OAuth: {auth_exc}"
+            self.last_error_code = "AUTH_FAILED"
+            self.last_message_id = None
+            logger.error("[FCM_AUTH_FAILED] OAuth token acquisition failed.")
+            return False
+
+        # Dispatch HTTP v1 POST request
+        url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+
+                if response.status_code == 200:
+                    resp_json = response.json()
+                    self.last_message_id = resp_json.get("name")
+                    self.last_error = ""
+                    self.last_error_code = ""
+                    logger.info(f"[FCM_SUCCESS] Message accepted by Firebase HTTP v1: {self.last_message_id}")
+                    return True
+
+                resp_text = response.text
+                status = response.status_code
+                if status in (400, 404):
+                    if "UNREGISTERED" in resp_text:
+                        self.last_error_code = "UNREGISTERED"
+                    else:
+                        self.last_error_code = "INVALID_TOKEN"
+                elif status in (401, 403):
+                    self.last_error_code = "AUTH_FAILED"
+                elif status == 429:
+                    self.last_error_code = "QUOTA_EXCEEDED"
+                else:
+                    self.last_error_code = f"HTTP_{status}"
+
+                self.last_error = f"Firebase rejected message: HTTP {status}"
+                self.last_message_id = None
+                logger.warning(f"[FCM_FAILURE] {self.last_error_code}: HTTP {status}")
+                return False
+
+        except httpx.TimeoutException:
+            self.last_error = "Firebase FCM request timed out after 10s."
+            self.last_error_code = "TIMEOUT"
+            self.last_message_id = None
+            logger.warning("[FCM_TIMEOUT] Connection to Google FCM timed out.")
+            return False
+        except Exception as exc:
+            self.last_error = f"FCM network error: {exc}"
+            self.last_error_code = "NETWORK_ERROR"
+            self.last_message_id = None
+            logger.warning(f"[FCM_ERROR] Network error during FCM dispatch: {exc}")
+            return False
 
 
 async def send_transactional_email(
@@ -168,11 +284,17 @@ def get_notification_provider() -> NotificationProvider:
     return _notif_instance
 
 async def get_notification_provider_health() -> Dict[str, Any]:
+    provider = get_notification_provider()
+    has_creds = False
+    if isinstance(provider, StandardNotificationProvider):
+        creds, _ = provider._get_fcm_credentials()
+        has_creds = creds is not None
+
     return {
-        "push": "CONFIGURED",
-        "push_provider": "FastAPI Real-Time WebSocket & Push Service (FCM v1 compliant)",
-        "push_last_error_code": None,
-        "health_boundary": "Direct Supabase database & WebSocket notification pipeline.",
+        "push": "CONFIGURED" if has_creds else "UNCONFIGURED",
+        "push_provider": "Google Firebase Cloud Messaging (FCM HTTP v1)",
+        "push_last_error_code": provider.last_error_code if not has_creds else None,
+        "health_boundary": "Official Google FCM HTTP v1 API with OAuth token exchange.",
         "email": "CONFIGURED",
         "email_provider": "FastAPI Transactional Mailer & Audit Pipeline",
         "email_last_error_code": None

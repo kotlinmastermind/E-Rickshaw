@@ -2,11 +2,11 @@ from datetime import datetime, timezone
 import json
 from typing import Dict, Any, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, desc
 from fastapi import HTTPException, status, UploadFile
 from backend.domain.models import (
     DriverProfile, DriverDocument, DriverAvailability, DriverLocation,
-    Vehicle, DriverVehicleAssignment, Ride, Payment
+    Vehicle, DriverVehicleAssignment, Ride, Payment, RideLocationHistory
 )
 from backend.integrations.storage.provider import get_storage_provider
 
@@ -89,12 +89,62 @@ class DriverService:
             for d in docs
         ]
 
+    async def get_availability(self, user_id: str) -> Dict[str, Any]:
+        driver = await self.get_or_create_profile(user_id)
+        avail_stmt = select(DriverAvailability).where(DriverAvailability.driver_id == driver.id)
+        avail_res = await self.db.execute(avail_stmt)
+        avail_obj = avail_res.scalar_one_or_none()
+
+        active_ride_stmt = (
+            select(Ride.id)
+            .where(
+                Ride.assigned_driver_id == driver.id,
+                Ride.status.in_(["ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED"])
+            )
+            .limit(1)
+        )
+        active_ride_res = await self.db.execute(active_ride_stmt)
+        active_ride_id = active_ride_res.scalar_one_or_none()
+
+        return {
+            "driver_id": driver.id,
+            "is_online": avail_obj.is_online if avail_obj else False,
+            "is_busy": avail_obj.is_busy if avail_obj else False,
+            "approval_status": driver.approval_status,
+            "active_ride_id": active_ride_id,
+            "last_heartbeat": avail_obj.last_heartbeat.isoformat() if avail_obj and avail_obj.last_heartbeat else None
+        }
+
     async def toggle_availability(self, user_id: str, is_online: bool) -> Dict[str, Any]:
         driver = await self.get_or_create_profile(user_id)
         if is_online and driver.approval_status not in ["APPROVED", "ACTIVE"]:
-            driver.approval_status = "APPROVED"
-            driver.onboarding_step = "COMPLETED"
-            await self.db.flush()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Driver must be approved before going online. Mandatory document verification and admin approval required.",
+                headers={
+                    "X-Error-Code": "DRIVER_NOT_APPROVED",
+                    "X-Approval-Status": str(driver.approval_status),
+                    "X-Can-Go-Online": "false"
+                }
+            )
+
+        # Section 9: Validate Ride Safety - Prevent going offline during active rides
+        if not is_online:
+            active_ride_stmt = (
+                select(Ride.id)
+                .where(
+                    Ride.assigned_driver_id == driver.id,
+                    Ride.status.in_(["ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED"])
+                )
+                .limit(1)
+            )
+            active_ride_res = await self.db.execute(active_ride_stmt)
+            active_ride_id = active_ride_res.scalar_one_or_none()
+            if active_ride_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Cannot go offline while on an active ride ({active_ride_id}). Please complete or cancel the active ride first."
+                )
 
         now = datetime.now(timezone.utc)
         avail_stmt = select(DriverAvailability).where(DriverAvailability.driver_id == driver.id)
@@ -118,6 +168,9 @@ class DriverService:
         return {
             "driver_id": driver.id,
             "is_online": is_online,
+            "is_busy": avail_obj.is_busy,
+            "approval_status": driver.approval_status,
+            "active_ride_id": None,
             "last_heartbeat": now.isoformat()
         }
 
@@ -157,6 +210,31 @@ class DriverService:
             recorded_at=now
         )
         self.db.add(loc)
+
+        # Record active ride breadcrumb if driver is on trip
+        active_ride_stmt = (
+            select(Ride)
+            .where(
+                Ride.assigned_driver_id == driver.id,
+                Ride.status.in_(["ASSIGNED", "ARRIVED", "IN_PROGRESS"])
+            )
+            .order_by(desc(Ride.requested_at))
+            .limit(1)
+        )
+        active_ride = (await self.db.execute(active_ride_stmt)).scalars().first()
+        if active_ride:
+            crumb = RideLocationHistory(
+                ride_id=active_ride.id,
+                driver_id=driver.id,
+                latitude=lat,
+                longitude=lng,
+                heading=heading,
+                speed_kmh=(speed_mps * 3.6 if speed_mps is not None else None),
+                accuracy_meters=accuracy_m,
+                recorded_at=now
+            )
+            self.db.add(crumb)
+
         availability = (await self.db.execute(select(DriverAvailability).where(DriverAvailability.driver_id == driver.id))).scalars().first()
         if availability:
             availability.last_heartbeat = now
@@ -176,7 +254,8 @@ class DriverService:
                 is_mock_location=is_mock_location,
                 location_source=location_source,
                 is_online=is_online,
-                is_busy=is_busy
+                is_busy=is_busy,
+                active_ride_id=active_ride.id if active_ride else None
             )
         except Exception:
             pass
@@ -193,6 +272,17 @@ class DriverService:
         now = datetime.now(timezone.utc)
         ingested = 0
         latest_loc = None
+
+        active_ride_stmt = (
+            select(Ride)
+            .where(
+                Ride.assigned_driver_id == driver.id,
+                Ride.status.in_(["ASSIGNED", "ARRIVED", "IN_PROGRESS"])
+            )
+            .order_by(desc(Ride.requested_at))
+            .limit(1)
+        )
+        active_ride = (await self.db.execute(active_ride_stmt)).scalars().first()
 
         for item in locations:
             lat = item.get("latitude")
@@ -229,6 +319,18 @@ class DriverService:
                 recorded_at=ts
             )
             self.db.add(loc)
+            if active_ride:
+                crumb = RideLocationHistory(
+                    ride_id=active_ride.id,
+                    driver_id=driver.id,
+                    latitude=lat,
+                    longitude=lng,
+                    heading=heading,
+                    speed_kmh=(speed * 3.6 if speed is not None else None),
+                    accuracy_meters=acc,
+                    recorded_at=ts
+                )
+                self.db.add(crumb)
             ingested += 1
             latest_loc = (lat, lng, heading, speed, acc, is_mock, source)
 
@@ -252,7 +354,8 @@ class DriverService:
                     is_mock_location=latest_loc[5],
                     location_source=latest_loc[6],
                     is_online=is_online,
-                    is_busy=is_busy
+                    is_busy=is_busy,
+                    active_ride_id=active_ride.id if active_ride else None
                 )
             except Exception:
                 pass

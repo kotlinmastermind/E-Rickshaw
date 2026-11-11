@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.core.localization
+package com.vaisentra.mobility.rider.core.localization
 
 import androidx.compose.runtime.*
 import com.vaisentra.mobility.rider.core.network.ApiClient

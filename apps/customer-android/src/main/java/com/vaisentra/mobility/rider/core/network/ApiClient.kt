@@ -1,83 +1,25 @@
 package com.vaisentra.mobility.rider.core.network
 
 import android.content.Context
-import com.vaisentra.mobility.core.network.CoreNetworkClient
-import com.vaisentra.mobility.rider.core.security.TokenManager
-import okhttp3.OkHttpClient
+import com.vaisentra.mobility.core.network.BaseApiClient
+import com.vaisentra.mobility.core.network.NetworkEnvironmentManager
+import com.vaisentra.mobility.core.security.BaseTokenManager
+import com.vaisentra.mobility.core.security.TokenManager
+import com.vaisentra.mobility.rider.BuildConfig
 
 /**
- * Standardized ApiClient for Rider App leveraging CoreNetworkClient.
+ * Standardized ApiClient for Rider App extending BaseApiClient.
+ * Strictly locks to the canonical Production API: https://e-rickshaw-z32z.onrender.com/
  */
-object ApiClient {
-    const val RENDER_BASE_URL: String = CoreNetworkClient.DEFAULT_PRODUCTION_URL
-    const val LOCAL_EMULATOR_BASE_URL: String = CoreNetworkClient.LOCAL_EMULATOR_BASE_URL
+object ApiClient : BaseApiClient<CustomerApiService>("customer", CustomerApiService::class.java) {
+    const val CANONICAL_PRODUCTION_URL: String = NetworkEnvironmentManager.CANONICAL_PRODUCTION_URL
+    const val RENDER_BASE_URL: String = NetworkEnvironmentManager.CANONICAL_PRODUCTION_URL
 
-    fun isEmulator(): Boolean = CoreNetworkClient.isEmulator()
-
-    @Volatile
-    var baseUrl: String = RENDER_BASE_URL
-
-    @Volatile
-    private var tokenManager: TokenManager? = null
-
-    @Volatile
-    private var service: CustomerApiService? = null
-
-    @Volatile
-    private var cachedOkHttpClient: OkHttpClient? = null
+    override fun resolveTokenManager(context: Context): BaseTokenManager {
+        return TokenManager.getCustomerInstance(context)
+    }
 
     fun initialize(context: Context) {
-        synchronized(this) {
-            tokenManager = TokenManager.getInstance(context)
-            baseUrl = CoreNetworkClient.resolveDefaultBaseUrl(tokenManager?.getServerUrl())
-            cachedOkHttpClient = null
-            service = createService()
-        }
-    }
-
-    fun updateBaseUrl(newUrl: String) {
-        val formatted = if (newUrl.endsWith("/")) newUrl else "$newUrl/"
-        synchronized(this) {
-            baseUrl = formatted
-            tokenManager?.setServerUrl(formatted)
-            cachedOkHttpClient = null
-            service = createService()
-        }
-    }
-
-    fun useCloudProduction() {
-        updateBaseUrl(RENDER_BASE_URL)
-    }
-
-    fun useLocalEmulator() {
-        updateBaseUrl(LOCAL_EMULATOR_BASE_URL)
-    }
-
-    fun isLocalBackend(): Boolean = CoreNetworkClient.isLocalBackend(baseUrl)
-
-    fun getService(): CustomerApiService {
-        return service ?: synchronized(this) {
-            service ?: createService().also { service = it }
-        }
-    }
-
-    fun getToken(): String? = tokenManager?.getToken()
-
-    fun getWebSocketUrl(path: String): String = CoreNetworkClient.getWebSocketUrl(baseUrl, path)
-
-    fun getOkHttpClient(): OkHttpClient {
-        return cachedOkHttpClient ?: synchronized(this) {
-            cachedOkHttpClient ?: CoreNetworkClient.createConfiguredOkHttpClient(
-                tokenManager = tokenManager,
-                baseUrlProvider = { baseUrl },
-                clientRole = "customer"
-            ).also { cachedOkHttpClient = it }
-        }
-    }
-
-    private fun createService(): CustomerApiService {
-        val client = getOkHttpClient()
-        val retrofit = CoreNetworkClient.createRetrofit(baseUrl, client)
-        return retrofit.create(CustomerApiService::class.java)
+        initialize(context, isRelease = !BuildConfig.DEBUG, isDebug = BuildConfig.DEBUG)
     }
 }

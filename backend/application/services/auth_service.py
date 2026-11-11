@@ -16,6 +16,7 @@ from backend.infrastructure.security.crypto import (
     hash_password, verify_password, validate_password_strength, DUMMY_PASSWORD_HASH
 )
 from backend.infrastructure.cache.redis_client import redis_client
+from backend.integrations.sms.provider import get_sms_provider, normalize_e164_phone
 from backend.core.config import settings
 
 logger = logging.getLogger("auth_service")
@@ -73,6 +74,162 @@ class AuthService:
             "exists": False,
             "identifier": ident,
             "role": role
+        }
+
+    async def request_otp(self, phone_number: str) -> Dict[str, Any]:
+        """
+        Dispatches telecom SMS verification passcode via Twilio Verify Service.
+        Includes Redis cooldown to prevent SMS flooding.
+        """
+        norm_phone = normalize_e164_phone(phone_number)
+        if not norm_phone or len(norm_phone) < 10:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A valid mobile phone number is required (e.g., +919876543210)."
+            )
+
+        # Enforce resend cooldown to protect against SMS spamming
+        cooldown_key = f"otp_cooldown:{norm_phone}"
+        try:
+            if await redis_client.exists(cooldown_key):
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Please wait {settings.OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting a new passcode."
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+        sms_provider = get_sms_provider()
+        await sms_provider.send_verification_otp(norm_phone)
+
+        try:
+            await redis_client.set(cooldown_key, "1", ex=settings.OTP_RESEND_COOLDOWN_SECONDS)
+        except Exception:
+            pass
+
+        phone_masked = f"{norm_phone[-4:].rjust(len(norm_phone), '*')}"
+        return {
+            "message": f"Verification passcode dispatched to {phone_masked} via Twilio.",
+            "phone_masked": phone_masked,
+            "expires_in_seconds": settings.OTP_EXPIRE_SECONDS
+        }
+
+    async def verify_otp(
+        self,
+        phone_number: str,
+        otp_code: str,
+        role: str = "customer",
+        full_name: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Verifies SMS OTP via Twilio Verify Service and authenticates user session.
+        Auto-registers new users seamlessly if account doesn't exist yet.
+        STRICT FAIL-CLOSED: All previous bypasses (e.g. 123456) have been permanently deleted.
+        """
+        norm_phone = normalize_e164_phone(phone_number)
+        clean_code = (otp_code or "").strip()
+
+        if not norm_phone or not clean_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Mobile phone number and OTP code are required."
+            )
+
+        # 1. Twilio Verify API check (NO BYPASS)
+        sms_provider = get_sms_provider()
+        is_valid = await sms_provider.verify_otp(norm_phone, clean_code)
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired OTP passcode. Please check the code and try again."
+            )
+
+        # 2. Database lookup
+        phone_digits = "".join(filter(str.isdigit, norm_phone))
+        conditions = [
+            User.phone_number == norm_phone
+        ]
+        if len(phone_digits) >= 10:
+            conditions.append(User.phone_number.endswith(phone_digits[-10:]))
+
+        stmt = select(User).where(or_(*conditions))
+        res = await self.db.execute(stmt)
+        user = res.scalars().first()
+
+        is_new_user = False
+        target_role = (role or "customer").lower().strip()
+        if target_role not in ("customer", "driver", "admin"):
+            target_role = "customer"
+
+        if not user:
+            # Auto-create user account seamlessly
+            is_new_user = True
+            default_name = (full_name or "").strip()
+            if not default_name:
+                default_name = "Valued Customer" if target_role == "customer" else "Driver Partner"
+
+            user = User(
+                id=str(uuid.uuid4()),
+                phone_number=norm_phone,
+                email=None,
+                full_name=default_name,
+                role=target_role,
+                is_active=True,
+                is_verified=True,
+                password_hash=hash_password(f"OtpUserPass_{uuid.uuid4().hex[:12]}")
+            )
+            self.db.add(user)
+            await self.db.flush()
+        else:
+            if not user.is_active:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated. Please contact support.")
+            # If user provided their full name and previous full name was placeholder, update it
+            if full_name and full_name.strip() and user.full_name in ("Valued Customer", "Driver Partner", None, ""):
+                user.full_name = full_name.strip()
+
+        # Clear lockout tier upon successful verification
+        try:
+            from backend.infrastructure.security.lockout import reset_account_lockout
+            await reset_account_lockout(norm_phone, db=self.db)
+        except Exception:
+            pass
+
+        # 3. Create active session and issue access + refresh tokens
+        session_id = str(uuid.uuid4())
+        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="access")
+        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="refresh")
+        token_hash = hash_secret(refresh_token)
+        session = Session(
+            id=session_id,
+            user_id=user.id,
+            token_hash=token_hash,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            is_revoked=False,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7)
+        )
+        self.db.add(session)
+        await self.db.commit()
+
+        return {
+            "message": f"Welcome back, {user.full_name}!" if not is_new_user else f"Welcome to Vaisentra Mobility, {user.full_name}!",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer",
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "is_new_user": is_new_user,
+            "user": {
+                "id": user.id,
+                "phone_number": user.phone_number,
+                "email": user.email,
+                "username": user.username,
+                "full_name": user.full_name,
+                "role": user.role
+            }
         }
 
     async def refresh_token_rotation(self, refresh_token_str: str) -> Dict[str, Any]:
@@ -473,8 +630,8 @@ class AuthService:
         driver_prof = DriverProfile(
             user_id=user.id,
             license_number=f"DL-{user.id[:8].upper()}",
-            approval_status="APPROVED",
-            onboarding_step="COMPLETED"
+            approval_status="PENDING",
+            onboarding_step="DOCUMENTS_PENDING"
         )
         self.db.add(driver_prof)
         await self.db.flush()
@@ -597,10 +754,20 @@ class AuthService:
             raise HTTPException(status_code=403, detail="Account is deactivated. Please contact support.")
 
         mode = login_type.strip().upper()
-        if mode != "PASSWORD":
+        if mode == "OTP":
+            if not password:
+                raise HTTPException(status_code=400, detail="OTP passcode is required for OTP login.")
+            return await self.verify_otp(
+                phone_number=identifier,
+                otp_code=password,
+                role=user.role if user else "customer",
+                ip_address=ip_address,
+                user_agent=user_agent
+            )
+        elif mode != "PASSWORD":
             raise HTTPException(
                 status_code=400,
-                detail="OTP login has been decommissioned. Please sign in with your registered password."
+                detail="Unsupported login type. Supported types: OTP, PASSWORD."
             )
         if not password:
             raise HTTPException(status_code=400, detail="Password is required for password login.")

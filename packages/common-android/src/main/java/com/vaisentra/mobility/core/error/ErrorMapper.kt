@@ -29,8 +29,13 @@ object ErrorMapper {
                 diagnosticMessage = "Socket timeout: ${throwable.message ?: "read/write timeout"}",
                 cause = throwable
             )
-            is UnknownHostException -> AppError.ConnectionError(
+            is UnknownHostException -> AppError.DnsError(
+                hostname = throwable.message,
                 diagnosticMessage = "DNS resolution failure for host: ${throwable.message}",
+                cause = throwable
+            )
+            is javax.net.ssl.SSLException -> AppError.TlsError(
+                diagnosticMessage = "TLS handshake or verification failure: ${throwable.message}",
                 cause = throwable
             )
             is ConnectException, is NoRouteToHostException -> AppError.ConnectionError(
@@ -90,3 +95,4 @@ object ErrorMapper {
         }
     }
 }
+

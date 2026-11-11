@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -294,7 +295,13 @@ async def verify_razorpay_payment(
         r_res = await db.execute(select(Ride).where(Ride.id == target_ride_id))
         ride = r_res.scalar_one_or_none()
         if ride and ride.status in ["IN_PROGRESS", "ACCEPTED", "ARRIVED", "STARTED"]:
+            now_comp = datetime.now(timezone.utc)
             ride.status = "COMPLETED"
+            ride.completed_at = ride.completed_at or now_comp
+            if ride.final_fare_cents is None:
+                ride.final_fare_cents = payment.amount_cents or ride.estimated_fare_cents or 0
+            if not ride.assigned_driver_id and payment.driver_id:
+                ride.assigned_driver_id = payment.driver_id
 
     await db.commit()
 

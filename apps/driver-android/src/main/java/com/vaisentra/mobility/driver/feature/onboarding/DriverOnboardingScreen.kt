@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.onboarding
+package com.vaisentra.mobility.driver.feature.onboarding
 
 import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult

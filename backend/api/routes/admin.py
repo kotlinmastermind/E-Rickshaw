@@ -138,6 +138,37 @@ async def review_driver(
         rejection_reason=payload.rejection_reason
     )
 
+class DriverDutyAdminPayload(BaseModel):
+    is_online: bool
+    reason: Optional[str] = "Admin operational override"
+
+@router.put("/drivers/{driver_id}/duty")
+async def admin_set_driver_duty(
+    driver_id: str,
+    payload: DriverDutyAdminPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import DriverProfile, AdministrativeAuditLog
+    import json
+    driver = await db.get(DriverProfile, driver_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver record not found.")
+
+    from backend.application.services.driver_service import DriverService
+    result = await DriverService(db).toggle_availability(driver.user_id, payload.is_online)
+
+    audit = AdministrativeAuditLog(
+        admin_user_id=admin.id,
+        action="ADMIN_SET_DRIVER_DUTY",
+        target_resource="driver_availability",
+        target_id=driver_id,
+        changes_json=json.dumps({"is_online": payload.is_online, "reason": payload.reason})
+    )
+    db.add(audit)
+    await db.commit()
+    return result
+
 @router.get("/drivers/{driver_id}/documents")
 async def list_driver_documents(
     driver_id: str,
@@ -816,6 +847,45 @@ async def list_corporate_billings(
             "date": r.requested_at.isoformat()
         }
         for r in rides
+    ]
+
+@router.get("/roles")
+async def list_admin_roles(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import AdminRole
+    stmt = select(AdminRole).order_by(AdminRole.name)
+    res = await db.execute(stmt)
+    roles = res.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "description": r.description,
+            "is_superuser": r.is_superuser,
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        }
+        for r in roles
+    ]
+
+@router.get("/permissions")
+async def list_admin_permissions(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import AdminPermission
+    stmt = select(AdminPermission).order_by(AdminPermission.category, AdminPermission.permission_key)
+    res = await db.execute(stmt)
+    perms = res.scalars().all()
+    return [
+        {
+            "id": p.id,
+            "permission_key": p.permission_key,
+            "description": p.description,
+            "category": p.category
+        }
+        for p in perms
     ]
 
 

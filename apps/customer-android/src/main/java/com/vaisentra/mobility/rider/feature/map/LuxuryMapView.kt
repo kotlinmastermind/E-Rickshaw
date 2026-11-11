@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.map
+package com.vaisentra.mobility.rider.feature.map
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun LuxuryMapView(
     modifier: Modifier = Modifier,
-    pickupLatLng: LatLng = LatLng(25.6888, 85.2155),
+    pickupLatLng: LatLng? = null,
     pickupTitle: String = "Pickup Point",
     destLatLng: LatLng? = null,
     destTitle: String? = null,
@@ -60,6 +60,9 @@ fun LuxuryMapView(
     onCameraIdle: ((LatLng) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val effectivePickup = pickupLatLng 
+        ?: com.vaisentra.mobility.core.map.DeviceLocationProvider.getLastKnownLocation(context)?.let { LatLng(it.latitude, it.longitude) }
+        ?: LatLng(0.0, 0.0)
     var selectedVehiclePopup by remember { mutableStateOf<NearbyVehicleDto?>(null) }
     var currentMapLayer by remember { mutableStateOf(if (isLightMode) "LIGHT" else "DARK") } // "LIGHT", "DARK", "SATELLITE", "TERRAIN"
     var mapDetailsState by remember { mutableStateOf(AppMapDetailsCatalog.getDefaultMap()) }
@@ -72,12 +75,12 @@ fun LuxuryMapView(
     var isochroneLoading by remember { mutableStateOf(false) }
 
     // Fetch dynamic Isochrone reachable polygon when toggled
-    LaunchedEffect(showIsochroneRadius, pickupLatLng) {
+    LaunchedEffect(showIsochroneRadius, effectivePickup) {
         if (showIsochroneRadius) {
             isochroneLoading = true
             try {
                 ApiClient.getService().getIsochrone(
-                    IsochroneRequest(pickupLatLng.latitude, pickupLatLng.longitude, 15)
+                    IsochroneRequest(effectivePickup.latitude, effectivePickup.longitude, 15)
                 )
             } catch (_: Exception) {
             } finally {
@@ -90,7 +93,7 @@ fun LuxuryMapView(
         // 1. Native Mapbox Map Core View
         MapboxCustomerMapView(
             modifier = Modifier.fillMaxSize(),
-            pickupLatLng = pickupLatLng,
+            pickupLatLng = effectivePickup,
             pickupTitle = pickupTitle,
             destLatLng = destLatLng,
             destTitle = destTitle,
@@ -128,7 +131,7 @@ fun LuxuryMapView(
             FloatingActionButton(
                 onClick = {
                     internalRecenterCount++
-                    onCameraIdle?.invoke(pickupLatLng)
+                    onCameraIdle?.invoke(effectivePickup)
                 },
                 modifier = Modifier.size(44.dp),
                 shape = CircleShape,

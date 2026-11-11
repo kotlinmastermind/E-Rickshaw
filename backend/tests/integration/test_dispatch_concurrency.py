@@ -17,6 +17,7 @@ from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
     VehicleCategory, FareRule, Ride, RideAssignment
 )
+from backend.infrastructure.database.session import async_session_maker
 from backend.application.services.smart_dispatch_service import SmartDispatchService
 from backend.application.services.live_location_service import LiveLocationService
 from backend.infrastructure.cache.redis_client import redis_client
@@ -82,14 +83,15 @@ async def test_driver_cannot_receive_two_conflicting_offers(db_session):
     db_session.add_all([ride1, ride2])
     await db_session.commit()
 
-    # Trigger simultaneous dispatches
-    svc1 = SmartDispatchService(db_session)
-    svc2 = SmartDispatchService(db_session)
+    # Trigger simultaneous dispatches using distinct sessions to model concurrent workers
+    async with async_session_maker() as session1, async_session_maker() as session2:
+        svc1 = SmartDispatchService(session1)
+        svc2 = SmartDispatchService(session2)
 
-    res1, res2 = await asyncio.gather(
-        svc1.search_and_dispatch(ride1.id, max_rings=2),
-        svc2.search_and_dispatch(ride2.id, max_rings=2)
-    )
+        res1, res2 = await asyncio.gather(
+            svc1.search_and_dispatch(ride1.id, max_rings=2),
+            svc2.search_and_dispatch(ride2.id, max_rings=2)
+        )
 
     # Exactly one ride must secure the driver; the other must receive None (or expired)
     assignments = [a for a in [res1, res2] if a is not None]

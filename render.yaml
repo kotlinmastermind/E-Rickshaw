@@ -25,7 +25,13 @@ services:
       - key: API_V1_STR
         value: /api/v1
       - key: SMS_PROVIDER
-        value: firebase
+        value: twilio
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_VERIFY_SERVICE_SID
+        sync: false
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
       - key: MAPBOX_SECRET_TOKEN

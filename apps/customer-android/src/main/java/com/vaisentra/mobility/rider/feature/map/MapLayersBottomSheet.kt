@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.map
+package com.vaisentra.mobility.rider.feature.map
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background

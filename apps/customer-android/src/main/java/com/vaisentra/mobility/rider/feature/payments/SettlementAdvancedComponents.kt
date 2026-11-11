@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.payments
+package com.vaisentra.mobility.rider.feature.payments
 
 import android.content.Intent
 import android.net.Uri

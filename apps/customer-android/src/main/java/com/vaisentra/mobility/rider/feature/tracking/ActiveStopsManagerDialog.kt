@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.tracking
+package com.vaisentra.mobility.rider.feature.tracking
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*

@@ -92,17 +92,43 @@ data class PasswordLoginResponse(
 )
 
 data class VehicleCategoryDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("code") val code: String,
-    @SerializedName("name") val name: String,
-    @SerializedName("description") val description: String? = null,
+    @SerializedName("id") val id: String = "cat_1",
+    @SerializedName("code") val code: String = "SEDAN",
+    @SerializedName("name") val name: String = "Executive Sedan",
+    @SerializedName("description") val description: String? = "Chauffeur Driven",
     @SerializedName("icon_url") val iconUrl: String? = null,
     @SerializedName("capacity") val capacity: Int = 4,
     @SerializedName("sort_order") val sortOrder: Int = 1,
     @SerializedName("is_electric") val isElectric: Boolean = true,
     @SerializedName("emissions_g_per_km") val emissionsGPerKm: Double = 0.0,
-    @SerializedName("legroom_inches") val legroomInches: Double = 36.0,
-    @SerializedName("quietness_db") val quietnessDb: Double = 45.0
+    @SerializedName("legroom_inches") val legroomInches: Double? = 36.0,
+    @SerializedName("quietness_db") val quietnessDb: Double? = 45.0,
+    @SerializedName("luggage_large_capacity") val luggageLargeCapacity: Int? = null,
+    @SerializedName("luggage_small_capacity") val luggageSmallCapacity: Int? = null,
+    @SerializedName("has_wifi") val hasWifi: Boolean? = null,
+    @SerializedName("has_massage_seats") val hasMassageSeats: Boolean? = null,
+    @SerializedName("has_champagne_cooler") val hasChampagneCooler: Boolean? = null,
+    @SerializedName("has_reclining_seats") val hasRecliningSeats: Boolean? = null,
+    @SerializedName("step_free_height_cm") val stepFreeHeightCm: Double? = null,
+    @SerializedName("pet_friendly") val petFriendly: Boolean? = null,
+    @SerializedName("child_seat_available") val childSeatAvailable: Boolean? = null,
+    @SerializedName("available_colors") val availableColors: List<String>? = null,
+    @SerializedName("available_amenities") val availableAmenities: List<String>? = null,
+    @SerializedName("photos_gallery") val photosGallery: List<String>? = null,
+    @SerializedName("wheelchair_accessible") val wheelchairAccessible: Boolean = false,
+    @SerializedName("air_purifier") val airPurifier: Boolean = true,
+    @SerializedName("wifi_available") val wifiAvailable: Boolean = true,
+    @SerializedName("beverage_service") val beverageService: Boolean = false,
+    @SerializedName("climate_control") val climateControl: Boolean = true,
+    @SerializedName("display_order") val displayOrder: Int = 1,
+    @SerializedName("is_active") val isActive: Boolean = true,
+    @SerializedName("base_fare_rupees") val baseFareRupees: Double? = null,
+    @SerializedName("per_km_rate_rupees") val perKmRateRupees: Double? = null,
+    @SerializedName("per_minute_rate_rupees") val perMinuteRateRupees: Double? = null,
+    @SerializedName("minimum_fare_rupees") val minimumFareRupees: Double? = null,
+    @SerializedName("surge_multiplier") val surgeMultiplier: Double? = 1.0,
+    @SerializedName("estimated_fare_rupees") val estimatedFareRupees: Double? = null,
+    @SerializedName("eta_minutes") val etaMinutes: Int? = 3
 )
 
 data class FareEstimateRequest(
@@ -191,6 +217,7 @@ data class LocationBatchPayload(
 
 // Shared Driver & Chauffeur DTOs
 data class DriverProfileDto(
+    @SerializedName("id") val id: String? = null,
     @SerializedName("user_id") val userId: String,
     @SerializedName("driver_id") val driverId: String,
     @SerializedName("full_name") val fullName: String?,
@@ -200,7 +227,9 @@ data class DriverProfileDto(
     @SerializedName("rating_average") val ratingAverage: Double,
     @SerializedName("total_trips") val totalTrips: Int,
     @SerializedName("wallet_balance_cents") val walletBalanceCents: Int
-)
+) {
+    val canonicalId: String get() = id ?: driverId
+}
 
 data class DriverAvailabilityPayload(
     @SerializedName("is_online") val isOnline: Boolean

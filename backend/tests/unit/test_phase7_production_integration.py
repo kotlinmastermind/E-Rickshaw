@@ -11,10 +11,14 @@ from backend.infrastructure.security.crypto import hash_password
 
 @pytest.mark.asyncio
 async def test_production_ride_booking_with_coordinates(db_session):
+    import uuid
+    suffix = uuid.uuid4().hex[:6]
+    test_email = f"commuter.{suffix}@ridego.com"
+    test_phone = f"+91987{suffix[:5]}0"
     # Setup test customer user and profile
     cust_user = User(
-        email="commuter.test@ridego.com",
-        phone_number="+919876543210",
+        email=test_email,
+        phone_number=test_phone,
         password_hash=hash_password("CustomerPass123!"),
         role="customer",
         is_active=True
@@ -32,7 +36,7 @@ async def test_production_ride_booking_with_coordinates(db_session):
         # Authenticate via real password login to create an active DB session
         login_resp = await client.post(
             "/api/v1/auth/password/login",
-            json={"email": "commuter.test@ridego.com", "password": "CustomerPass123!"}
+            json={"email": test_email, "password": "CustomerPass123!"}
         )
         assert login_resp.status_code == 200, login_resp.text
         cust_token = login_resp.json()["access_token"]

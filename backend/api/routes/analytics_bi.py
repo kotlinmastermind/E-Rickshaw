@@ -19,8 +19,8 @@ router = APIRouter(prefix="", tags=["Analytics, BI & Governance"])
 # Pydantic Request Models
 # -----------------------------------------------------------------------------
 class ExportDatasetPayload(BaseModel):
-    dataset: str = Field(..., example="RIDES")  # RIDES, CHAUFFEURS, FINANCE_SETTLEMENTS, SUMMARY
-    format: str = Field(default="CSV", example="CSV")  # CSV, JSON
+    dataset: str = Field(..., json_schema_extra={"example": "RIDES"})  # RIDES, CHAUFFEURS, FINANCE_SETTLEMENTS, SUMMARY
+    format: str = Field(default="CSV", json_schema_extra={"example": "CSV"})  # CSV, JSON
     filters: Optional[Dict[str, Any]] = None
 
 class CreateScheduledReportPayload(BaseModel):
@@ -64,7 +64,7 @@ class RetentionPurgePayload(BaseModel):
     dry_run: bool = True
 
 class PrivacyRequestSubmissionPayload(BaseModel):
-    request_type: str = Field(..., example="DATA_EXPORT_PORTABILITY")  # DATA_EXPORT_PORTABILITY, RIGHT_TO_ERASURE, RECTIFICATION_CORRECTION, RESTRICT_PROCESSING
+    request_type: str = Field(..., json_schema_extra={"example": "DATA_EXPORT_PORTABILITY"})  # DATA_EXPORT_PORTABILITY, RIGHT_TO_ERASURE, RECTIFICATION_CORRECTION, RESTRICT_PROCESSING
     details: Optional[str] = None
 
 class PrivacyRequestReviewPayload(BaseModel):

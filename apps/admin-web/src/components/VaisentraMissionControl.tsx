@@ -1,11 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import {
   BLUEPRINT_CATEGORIES,
-  BLUEPRINT_DESKS,
-  BLUEPRINT_CUSTOMER_SCREENS,
-  BLUEPRINT_DRIVER_SCREENS
+  BLUEPRINT_DESKS
 } from '../config/missionControlDesks';
-import { AdminRealMap } from './AdminRealMap';
+// Lazy-load Mapbox GL telemetry engine to avoid loading 1.6+ MB map bundle into initial page load
+const LazyAdminRealMap = React.lazy(() => import('./AdminRealMap').then(m => ({ default: m.AdminRealMap })));
+
+const MapLoadingFallback: React.FC = () => (
+  <div className="w-full h-full min-h-[360px] flex items-center justify-center bg-slate-950/80 text-amber-400 border border-slate-800 rounded-xl">
+    <div className="text-center">
+      <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+      <div className="text-xs font-semibold tracking-wider uppercase text-slate-400">Loading Telemetry Map Engine...</div>
+    </div>
+  </div>
+);
+
+const AdminRealMap: React.FC<React.ComponentProps<typeof LazyAdminRealMap>> = (props) => (
+  <React.Suspense fallback={<MapLoadingFallback />}>
+    <LazyAdminRealMap {...props} />
+  </React.Suspense>
+);
 import { requestApi } from '../services/api';
 import {
   fetchLiveUsers,
@@ -27,8 +41,12 @@ import {
   fetchLiveBroadcasts,
   fetchLiveGeofences,
   fetchLiveSurgeRules,
+  createLiveSurgeRule,
   fetchLivePromos,
   createLivePromo,
+  createOrUpdateLiveFareRule,
+  forceDriverOffline,
+  exportCSVData,
   LiveDashboardMetrics,
   LiveUser,
   LiveDriver,
@@ -77,11 +95,7 @@ export const VaisentraMissionControl: React.FC = () => {
   const [confirmModal, setConfirmModal] = useState<ConfirmModalState | null>(null);
   const [deskSearch, setDeskSearch] = useState<string>('');
 
-  // Simulator State
-  const [simCustScreenId, setSimCustScreenId] = useState<number>(7);
-  const [simDriverScreenId, setSimDriverScreenId] = useState<number>(8);
-
-  // Live Backend & Supabase Data
+  // Live Backend Data
   const [categories, setCategories] = useState<any[]>([]);
   const [_isLoadingCategories, setIsLoadingCategories] = useState<boolean>(false);
   const [safetyCases, setSafetyCases] = useState<any[]>([]);
@@ -453,10 +467,6 @@ export const VaisentraMissionControl: React.FC = () => {
 
   const handleCategorySwitch = (catId: string) => {
     setActiveCategory(catId);
-    if (catId === 'simulator') {
-      setActiveDeskId('simulator');
-      return;
-    }
     const firstDesk = BLUEPRINT_DESKS.find(d => d.category === catId) || BLUEPRINT_DESKS[0];
     setActiveDeskId(firstDesk.id);
   };
@@ -621,12 +631,92 @@ export const VaisentraMissionControl: React.FC = () => {
     }
   };
 
-  const handleSaveFares = () => {
-    addToast('Tariffs Updated', 'Dynamic Fare Rules saved to Supabase PostgreSQL cluster.');
+  const [fareBase, setFareBase] = useState<number>(20);
+  const [farePerKm, setFarePerKm] = useState<number>(12);
+  const [fareMin, setFareMin] = useState<number>(25);
+  const [fareSurge, setFareSurge] = useState<number>(1.25);
+  const [savingFares, setSavingFares] = useState<boolean>(false);
+
+  const handleSaveFares = async () => {
+    setSavingFares(true);
+    const ok = await createOrUpdateLiveFareRule({
+      base_fare_rupees: fareBase,
+      per_km_rupees: farePerKm,
+      per_minute_rupees: 1,
+      minimum_fare_rupees: fareMin,
+      surge_multiplier: fareSurge
+    });
+    setSavingFares(false);
+    if (ok) {
+      addToast('Tariffs Updated', 'Dynamic Fare Rules saved to backend successfully.', 'success');
+    } else {
+      addToast('Tariff Error', 'Failed to save fare rules to backend.', 'danger');
+    }
   };
 
-  const handleTriggerSOS = () => {
-    addToast('🚨 EMERGENCY BROADCAST ACTIVE', 'Emergency alert dispatched to 128 active drivers and 112 Police command center.', 'danger');
+  const handleTriggerSOS = async () => {
+    const ok = await sendLiveBroadcast(
+      '🚨 EMERGENCY FLEET SOS ALERT',
+      'Emergency protocol activated by Fleet Operations Control.',
+      'ALL'
+    );
+    if (ok) {
+      addToast('🚨 Emergency Broadcast Dispatched', 'Emergency alert broadcast dispatched across all active fleet units.', 'danger');
+    } else {
+      addToast('Broadcast Error', 'Failed to dispatch emergency alert to backend.', 'danger');
+    }
+  };
+
+  const handleExportCustomers = () => {
+    if (!customerUsers.length) {
+      addToast('Export Info', 'No customer records available to export.', 'info');
+      return;
+    }
+    const headers = ['User ID', 'Full Name', 'Phone Number', 'Email', 'Role', 'Status', 'Joined At'];
+    const rows = customerUsers.map((u: LiveUser) => [
+      u.id,
+      `"${(u.full_name || '').replace(/"/g, '""')}"`,
+      `"${u.phone_number}"`,
+      `"${u.email || ''}"`,
+      u.role,
+      u.is_active ? 'ACTIVE' : 'SUSPENDED',
+      u.created_at || ''
+    ]);
+    exportCSVData('vasentra_customers', headers, rows);
+    addToast('Export Complete', `Exported ${customerUsers.length} customer records to CSV.`, 'success');
+  };
+
+  const handleExportAuditLogs = () => {
+    if (!auditLogs.length) {
+      addToast('Export Info', 'No audit logs available to export.', 'info');
+      return;
+    }
+    const headers = ['Log ID', 'Actor ID', 'Action', 'Target Resource', 'Target ID', 'Status', 'Timestamp'];
+    const rows = auditLogs.map(a => [
+      a.id,
+      `"${a.actor_id || 'System'}"`,
+      `"${a.action}"`,
+      `"${a.target_resource || ''}"`,
+      `"${a.target_id || ''}"`,
+      a.status,
+      a.created_at || ''
+    ]);
+    exportCSVData('vasentra_audit_logs', headers, rows);
+    addToast('Export Complete', `Exported ${auditLogs.length} audit logs to CSV.`, 'success');
+  };
+
+  const handleApplySurge = async () => {
+    const ok = await createLiveSurgeRule({
+      multiplier: surgeMultiplier,
+      reason: 'Global demand override on active zones',
+      zone_name: 'Metro Corridors'
+    });
+    if (ok) {
+      addToast('Surge Multiplier Set', `Global demand surge set to ${surgeMultiplier.toFixed(1)}x on active zones.`, 'success');
+      loadSurgeRulesData();
+    } else {
+      addToast('Surge Error', 'Failed to apply surge multiplier to backend.', 'danger');
+    }
   };
 
   // Filtered desks list
@@ -693,7 +783,10 @@ export const VaisentraMissionControl: React.FC = () => {
           </button>
 
           <button
-            onClick={() => addToast('Refreshed', 'Telemetry synced with Supabase PostgreSQL')}
+            onClick={async () => {
+              await loadAllLiveData();
+              addToast('Refreshed', 'Telemetry and operational state synced with live backend.', 'info');
+            }}
             className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 border border-slate-700 transition-all"
           >
             <span>🔄</span>
@@ -728,11 +821,6 @@ export const VaisentraMissionControl: React.FC = () => {
             >
               <span>{cat.icon}</span>
               <span>{cat.label}</span>
-              {cat.id === 'simulator' && (
-                <span className="ml-1 px-1.5 py-0.2 bg-amber-500/30 text-amber-300 text-[9px] rounded font-mono">
-                  BOTH APPS
-                </span>
-              )}
             </button>
           );
         })}
@@ -778,21 +866,15 @@ export const VaisentraMissionControl: React.FC = () => {
             })}
           </div>
 
-          {/* Quick Dual App Remote Launcher in Sidebar Footer */}
+          {/* System Status in Sidebar Footer */}
           <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              <span className="text-[11px] text-slate-400 font-bold">Remote App Sync</span>
+              <span className="text-[11px] text-slate-400 font-bold">FastAPI Production Core</span>
             </div>
-            <button
-              onClick={() => {
-                setActiveCategory('simulator');
-                setActiveDeskId('simulator');
-              }}
-              className="px-2.5 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 rounded-lg text-[10px] font-black hover:bg-amber-500/30 transition-all"
-            >
-              📱 Launch Sim
-            </button>
+            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded text-[10px] font-mono">
+              ONLINE
+            </span>
           </div>
         </aside>
 
@@ -833,9 +915,9 @@ export const VaisentraMissionControl: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => {
-                      loadAllLiveData();
-                      addToast('Refreshed', 'Telemetry synced with Supabase PostgreSQL');
+                    onClick={async () => {
+                      await loadAllLiveData();
+                      addToast('Refreshed', 'Live telemetry synchronized from backend services.', 'info');
                     }}
                     disabled={dashboardLoading}
                     className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl border border-slate-700 shadow"
@@ -972,7 +1054,7 @@ export const VaisentraMissionControl: React.FC = () => {
                 <div className="flex gap-2">
                   <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-full font-bold text-xs border border-emerald-500/30 flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                    128 Active Beacons
+                    {dashboardMetrics ? `${dashboardMetrics.online_drivers} Active Beacons` : `${kycDrivers.filter((d) => d.is_online).length} Active Beacons`}
                   </span>
                 </div>
               </div>
@@ -1042,7 +1124,7 @@ export const VaisentraMissionControl: React.FC = () => {
                   >
                     {customerLoading ? 'Loading...' : 'Refresh Customers'}
                   </button>
-                  <button onClick={() => addToast('Exported', 'Customer database exported to CSV')} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow">
+                  <button onClick={handleExportCustomers} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow">
                     Export CSV
                   </button>
                 </div>
@@ -1393,8 +1475,12 @@ export const VaisentraMissionControl: React.FC = () => {
                   <h2 className="text-xl font-black text-white">🏷️ Dynamic Fare Matrix &amp; Tariffs Configuration</h2>
                   <p className="text-xs text-slate-400">Manage base fare, per km rate, and minimum tariffs for all vehicle tiers. Connected to <code>fare_rules</code>.</p>
                 </div>
-                <button onClick={handleSaveFares} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-600/30">
-                  Save Changes to Supabase
+                <button
+                  onClick={handleSaveFares}
+                  disabled={savingFares}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-600/30"
+                >
+                  {savingFares ? 'Saving Tariffs...' : 'Save Changes to Backend'}
                 </button>
               </div>
 
@@ -1407,19 +1493,40 @@ export const VaisentraMissionControl: React.FC = () => {
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div>
                       <label className="text-slate-400 text-[10px] uppercase font-bold block mb-1">Base Fare (₹)</label>
-                      <input type="number" defaultValue="20" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-bold" />
+                      <input
+                        type="number"
+                        value={fareBase}
+                        onChange={e => setFareBase(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-bold"
+                      />
                     </div>
                     <div>
                       <label className="text-slate-400 text-[10px] uppercase font-bold block mb-1">Per Km Rate (₹)</label>
-                      <input type="number" defaultValue="12" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-bold" />
+                      <input
+                        type="number"
+                        value={farePerKm}
+                        onChange={e => setFarePerKm(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-bold"
+                      />
                     </div>
                     <div>
                       <label className="text-slate-400 text-[10px] uppercase font-bold block mb-1">Min Fare (₹)</label>
-                      <input type="number" defaultValue="25" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-bold" />
+                      <input
+                        type="number"
+                        value={fareMin}
+                        onChange={e => setFareMin(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-bold"
+                      />
                     </div>
                     <div>
-                      <label className="text-slate-400 text-[10px] uppercase font-bold block mb-1">Night Surge Multiplier</label>
-                      <input type="number" defaultValue="1.25" step="0.05" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-bold" />
+                      <label className="text-slate-400 text-[10px] uppercase font-bold block mb-1">Surge Multiplier</label>
+                      <input
+                        type="number"
+                        value={fareSurge}
+                        step="0.05"
+                        onChange={e => setFareSurge(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-bold"
+                      />
                     </div>
                   </div>
                 </div>
@@ -1461,7 +1568,7 @@ export const VaisentraMissionControl: React.FC = () => {
                   <p className="text-xs text-slate-400">Instantly adjust dynamic surge multipliers for rain, peak hours, or metro delays.</p>
                 </div>
                 <button
-                  onClick={() => addToast('Surge Multiplier Set', `Global demand surge set to ${surgeMultiplier}x on active zones.`)}
+                  onClick={handleApplySurge}
                   className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-600/30"
                 >
                   Apply Surge to All Metro Corridors
@@ -1689,7 +1796,7 @@ export const VaisentraMissionControl: React.FC = () => {
                   <button
                     onClick={() => {
                       recordAudit('MANUAL_AUDIT_EXPORT', 'All System Logs', 'Admin regulatory compliance audit');
-                      addToast('Exported', 'Audit ledger downloaded as CSV');
+                      handleExportAuditLogs();
                     }}
                     className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl border border-slate-700"
                   >
@@ -1757,242 +1864,6 @@ export const VaisentraMissionControl: React.FC = () => {
                     )}
                   </tbody>
                 </table>
-              </div>
-            </div>
-          )}
-
-          {activeDeskId === 'simulator' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-                <div>
-                  <h2 className="text-xl font-black text-white">📱 Dual App Remote Simulator &amp; Screen Inspector</h2>
-                  <p className="text-xs text-slate-400">Live preview and remote control of both Customer Android App (50 screens) and Driver Android App (50 screens).</p>
-                </div>
-                <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full text-xs font-bold">
-                  Persistent Bottom Navigation Active
-                </span>
-              </div>
-
-              {/* DUAL PHONE DISPLAY */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start justify-items-center">
-                
-                {/* PHONE 1: CUSTOMER APP */}
-                <div className="flex flex-col items-center">
-                  <div className="mb-2 flex items-center justify-between w-full max-w-[360px] text-xs font-bold">
-                    <span className="text-amber-400">👤 Customer App (50 Screens)</span>
-                    <select
-                      value={simCustScreenId}
-                      onChange={e => setSimCustScreenId(parseInt(e.target.value, 10))}
-                      className="bg-slate-900 border border-slate-700 text-white rounded-lg px-2 py-1 text-xs outline-none"
-                    >
-                      {BLUEPRINT_CUSTOMER_SCREENS.map(s => (
-                        <option key={s.id} value={s.id}>{s.id}. {s.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="phone-frame">
-                    <div className="phone-notch">
-                      <div className="phone-speaker"></div>
-                    </div>
-                    <div className="phone-status-bar">
-                      <span>9:41</span>
-                      <div className="flex items-center gap-1"><span>5G</span><span>100%</span></div>
-                    </div>
-                    
-                    <div className="px-3 py-1 bg-slate-900 border-b border-slate-800 text-[9px] font-bold text-amber-400 truncate">
-                      Screen {simCustScreenId} of 50 • [{BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.tag || 'App'}]
-                    </div>
-
-                    <div className="screen-scroll p-4 bg-slate-950 flex flex-col justify-between h-[520px]">
-                      <div>
-                        <div className="flex items-center gap-2 mb-3">
-                          <span className="text-xl">🛺</span>
-                          <div>
-                            <h4 className="text-sm font-bold text-white">
-                              {BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.name}
-                            </h4>
-                            <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">
-                              Category: {BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.tag}
-                            </span>
-                          </div>
-                        </div>
-                        <p className="text-xs text-slate-300 leading-relaxed mb-4">
-                          {BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.desc}
-                        </p>
-                        <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5 text-[11px]">
-                          <div className="text-slate-400 font-semibold">Authoritative Database Schema:</div>
-                          <code className="text-amber-300 font-mono text-[10px] block break-all">
-                            {BLUEPRINT_CUSTOMER_SCREENS.find(s => s.id === simCustScreenId)?.table}
-                          </code>
-                        </div>
-                        <div className="mt-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 flex items-center gap-2">
-                          <span>●</span>
-                          <span>Production REST / WebSocket Integration Active</span>
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-slate-500 text-center">
-                        Vaisentra Commuter App • Enterprise Release
-                      </div>
-                    </div>
-
-                    {/* CUSTOMER PERSISTENT BOTTOM NAVIGATION TAB BAR */}
-                    <div className="phone-bottom-nav">
-                      <button
-                        onClick={() => setSimCustScreenId(7)}
-                        className={`flex flex-col items-center text-[9px] ${simCustScreenId === 7 ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">🏠</span>
-                        <span>Home</span>
-                      </button>
-                      <button
-                        onClick={() => setSimCustScreenId(10)}
-                        className={`flex flex-col items-center text-[9px] ${simCustScreenId === 10 ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">🚖</span>
-                        <span>Rides</span>
-                      </button>
-                      <button
-                        onClick={() => setSimCustScreenId(22)}
-                        className={`flex flex-col items-center text-[9px] ${simCustScreenId === 22 ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">💳</span>
-                        <span>Wallet</span>
-                      </button>
-                      <button
-                        onClick={() => setSimCustScreenId(16)}
-                        className={`flex flex-col items-center text-[9px] ${simCustScreenId === 16 ? 'text-red-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">🛡️</span>
-                        <span>Safety</span>
-                      </button>
-                      <button
-                        onClick={() => setSimCustScreenId(25)}
-                        className={`flex flex-col items-center text-[9px] ${simCustScreenId === 25 ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">👤</span>
-                        <span>Profile</span>
-                      </button>
-                      <button
-                        onClick={() => setSimCustScreenId(s => (s % 50) + 1)}
-                        className="flex flex-col items-center text-[9px] text-slate-400"
-                      >
-                        <span className="text-base">📑</span>
-                        <span>All (50)</span>
-                      </button>
-                    </div>
-                    <div className="phone-home-indicator"></div>
-                  </div>
-                </div>
-
-                {/* PHONE 2: DRIVER PILOT APP */}
-                <div className="flex flex-col items-center">
-                  <div className="mb-2 flex items-center justify-between w-full max-w-[360px] text-xs font-bold">
-                    <span className="text-emerald-400">⚡ Driver Pilot App (50 Screens)</span>
-                    <select
-                      value={simDriverScreenId}
-                      onChange={e => setSimDriverScreenId(parseInt(e.target.value, 10))}
-                      className="bg-slate-900 border border-slate-700 text-white rounded-lg px-2 py-1 text-xs outline-none"
-                    >
-                      {BLUEPRINT_DRIVER_SCREENS.map(s => (
-                        <option key={s.id} value={s.id}>{s.id}. {s.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="phone-frame">
-                    <div className="phone-notch">
-                      <div className="phone-speaker"></div>
-                    </div>
-                    <div className="phone-status-bar">
-                      <span>9:41</span>
-                      <div className="flex items-center gap-1"><span>5G</span><span>100%</span></div>
-                    </div>
-                    
-                    <div className="px-3 py-1 bg-slate-900 border-b border-slate-800 text-[9px] font-bold text-emerald-400 truncate">
-                      Screen {simDriverScreenId} of 50 • [{BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.tag || 'Pilot'}]
-                    </div>
-
-                    <div className="screen-scroll p-4 bg-slate-950 flex flex-col justify-between h-[520px]">
-                      <div>
-                        <div className="flex items-center gap-2 mb-3">
-                          <span className="text-xl">⚡</span>
-                          <div>
-                            <h4 className="text-sm font-bold text-white">
-                              {BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.name}
-                            </h4>
-                            <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">
-                              Category: {BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.tag}
-                            </span>
-                          </div>
-                        </div>
-                        <p className="text-xs text-slate-300 leading-relaxed mb-4">
-                          {BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.desc}
-                        </p>
-                        <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5 text-[11px]">
-                          <div className="text-slate-400 font-semibold">Authoritative Database Schema:</div>
-                          <code className="text-emerald-300 font-mono text-[10px] block break-all">
-                            {BLUEPRINT_DRIVER_SCREENS.find(s => s.id === simDriverScreenId)?.table}
-                          </code>
-                        </div>
-                        <div className="mt-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400 flex items-center gap-2">
-                          <span>●</span>
-                          <span>Driver Pilot Cockpit & Telemetry Active</span>
-                        </div>
-                      </div>
-                      <div className="text-[10px] text-slate-500 text-center">
-                        Vaisentra Pilot App • Enterprise Release
-                      </div>
-                    </div>
-
-                    {/* DRIVER PERSISTENT BOTTOM NAVIGATION TAB BAR */}
-                    <div className="phone-bottom-nav">
-                      <button
-                        onClick={() => setSimDriverScreenId(8)}
-                        className={`flex flex-col items-center text-[9px] ${simDriverScreenId === 8 ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">⚡</span>
-                        <span>Cockpit</span>
-                      </button>
-                      <button
-                        onClick={() => setSimDriverScreenId(11)}
-                        className={`flex flex-col items-center text-[9px] ${simDriverScreenId === 11 ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">🧭</span>
-                        <span>Nav</span>
-                      </button>
-                      <button
-                        onClick={() => setSimDriverScreenId(19)}
-                        className={`flex flex-col items-center text-[9px] ${simDriverScreenId === 19 ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">💰</span>
-                        <span>Earnings</span>
-                      </button>
-                      <button
-                        onClick={() => setSimDriverScreenId(16)}
-                        className={`flex flex-col items-center text-[9px] ${simDriverScreenId === 16 ? 'text-red-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">🚨</span>
-                        <span>SOS</span>
-                      </button>
-                      <button
-                        onClick={() => setSimDriverScreenId(25)}
-                        className={`flex flex-col items-center text-[9px] ${simDriverScreenId === 25 ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
-                      >
-                        <span className="text-base">👤</span>
-                        <span>Profile</span>
-                      </button>
-                      <button
-                        onClick={() => setSimDriverScreenId(s => (s % 50) + 1)}
-                        className="flex flex-col items-center text-[9px] text-slate-400"
-                      >
-                        <span className="text-base">📑</span>
-                        <span>All (50)</span>
-                      </button>
-                    </div>
-                    <div className="phone-home-indicator"></div>
-                  </div>
-                </div>
               </div>
             </div>
           )}
@@ -2629,7 +2500,15 @@ export const VaisentraMissionControl: React.FC = () => {
                         <td className="py-3 px-4 font-sans text-cyan-400 font-bold">{d.total_trips} trips</td>
                         <td className="py-3 px-4 font-sans">
                           <button
-                            onClick={() => addToast('Shift Controlled', `Pilot ${d.full_name} duty status toggled.`)}
+                            onClick={async () => {
+                              const ok = await forceDriverOffline(d.id);
+                              if (ok) {
+                                addToast('Shift Controlled', `Pilot ${d.full_name} set offline on server.`, 'success');
+                                loadDriversData();
+                              } else {
+                                addToast('Shift Control Error', `Failed to update duty for ${d.full_name}`, 'danger');
+                              }
+                            }}
                             className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] rounded-lg border border-slate-700"
                           >
                             Force Offline
@@ -2791,7 +2670,10 @@ export const VaisentraMissionControl: React.FC = () => {
                   </p>
                 </div>
                 <button
-                  onClick={() => addToast('Gateway Refreshed', 'Payment gateway logs synchronized with database')}
+                  onClick={async () => {
+                    await loadPayoutsData();
+                    addToast('Gateway Refreshed', 'Payment gateway logs and payouts synchronized.', 'success');
+                  }}
                   className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
                 >
                   Sync Webhooks
@@ -2943,9 +2825,14 @@ export const VaisentraMissionControl: React.FC = () => {
                   </p>
                 </div>
                 <button
-                  onClick={() => {
-                    fetchLiveSafetyCases().then(cases => setSafetyCases(cases.incident_cases));
-                    addToast('Cases Refreshed', 'Safety incident cases updated from live backend');
+                  onClick={async () => {
+                    try {
+                      const cases = await fetchLiveSafetyCases();
+                      setSafetyCases(cases.incident_cases);
+                      addToast('Cases Refreshed', 'Safety incident cases updated from live backend.', 'success');
+                    } catch {
+                      addToast('Error', 'Failed to refresh safety incident cases.', 'danger');
+                    }
                   }}
                   className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl"
                 >
@@ -3040,7 +2927,7 @@ export const VaisentraMissionControl: React.FC = () => {
             'driver_kyc', 'document_ocr', 'driver_availability', 'vehicle_fleet', 'driver_payouts',
             'driver_ratings', 'fare_matrix', 'geofence', 'surge_rules', 'road_restrictions',
             'payment_logs', 'promos', 'broadcast', 'emergency_sos', 'incident_reports',
-            'rbac_security', 'audit_logs', 'simulator'
+            'rbac_security', 'audit_logs'
           ].indexOf(activeDeskId) === -1 && (
             <div className="space-y-6">
               <div className="flex justify-between items-center border-b border-slate-800 pb-4">
@@ -3050,23 +2937,20 @@ export const VaisentraMissionControl: React.FC = () => {
                     <span>{activeDesk.title}</span>
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">
-                    Supabase Database Tables: <code className="text-amber-400 font-mono">{activeDesk.table}</code>
+                    Database Schema: <code className="text-amber-400 font-mono">{activeDesk.table}</code>
                   </p>
                 </div>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => addToast('Synchronized', `Desk parameters updated for ${activeDesk.title} in Supabase`)}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/30"
-                  >
-                    Save &amp; Commit Changes
-                  </button>
+                  <span className="px-3 py-1 bg-slate-800 text-slate-300 font-medium text-xs rounded-xl border border-slate-700">
+                    Active Schema View
+                  </span>
                 </div>
               </div>
 
               <div className="p-6 bg-slate-900 border border-slate-800 rounded-2xl space-y-4">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-slate-400">Desk Category: <strong className="text-white uppercase">{activeDesk.category}</strong></span>
-                  <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-400 rounded-full font-bold text-[10px]">69 Supabase Tables Active</span>
+                  <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-400 rounded-full font-bold text-[10px]">Production Database Connected</span>
                 </div>
                 
                 <div className="p-4 bg-slate-950 border border-slate-800/80 rounded-xl space-y-2 text-xs">
@@ -3084,14 +2968,9 @@ export const VaisentraMissionControl: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="p-6 border border-dashed border-slate-800 rounded-xl text-center space-y-3">
-                  <p className="text-xs text-slate-400">Live operation parameters and automated state machines are actively monitoring this desk.</p>
-                  <button
-                    onClick={() => addToast('Executed', `Operation executed for ${activeDesk.title}`)}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700"
-                  >
-                    Execute Immediate Sync
-                  </button>
+                <div className="p-6 border border-dashed border-slate-800 rounded-xl text-center space-y-2">
+                  <p className="text-xs text-slate-400">Database schema <code className="text-amber-400 font-mono">{activeDesk.table}</code> is maintained by Alembic migrations.</p>
+                  <p className="text-[11px] text-slate-500">Live operational records stream directly from FastAPI backend REST services.</p>
                 </div>
               </div>
             </div>

@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.tracking
+package com.vaisentra.mobility.rider.feature.tracking
 
 import android.content.ClipData
 import android.content.ClipboardManager

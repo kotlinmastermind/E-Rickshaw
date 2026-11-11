@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.fares
+package com.vaisentra.mobility.rider.feature.fares
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke

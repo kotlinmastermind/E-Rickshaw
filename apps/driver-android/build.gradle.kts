@@ -118,6 +118,8 @@ android {
 
         compose = true
 
+        buildConfig = true
+
         resValues = false
 
     }
@@ -135,6 +137,10 @@ android {
         jniLibs {
             useLegacyPackaging = false
         }
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
 }

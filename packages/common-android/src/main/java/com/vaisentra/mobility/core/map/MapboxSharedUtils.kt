@@ -475,14 +475,15 @@ object DeviceLocationProvider {
 
     /**
      * Instantly returns the most accurate and recent last-known location across GPS, Network, and Passive providers.
-     * Skips Googleplex emulator defaults.
+     * Skips Googleplex emulator defaults and guards against stale historical locations.
      */
     @SuppressLint("MissingPermission")
-    fun getLastKnownLocation(context: Context): LatLng? {
+    fun getLastKnownLocation(context: Context, maxAgeMs: Long = 15 * 60 * 1000L): LatLng? {
         if (!hasLocationPermission(context)) return null
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
 
         var bestLocation: Location? = null
+        val now = System.currentTimeMillis()
         val providers = listOf(
             LocationManager.GPS_PROVIDER,
             LocationManager.NETWORK_PROVIDER,
@@ -495,6 +496,10 @@ object DeviceLocationProvider {
                     if (loc != null) {
                         // Skip emulator Googleplex mock default
                         if (isGoogleplexOrMock(loc.latitude, loc.longitude)) {
+                            continue
+                        }
+                        // Stale location check: reject historical locations older than maxAgeMs
+                        if (now - loc.time > maxAgeMs) {
                             continue
                         }
                         if (bestLocation == null || loc.time > bestLocation.time || loc.accuracy < bestLocation.accuracy) {

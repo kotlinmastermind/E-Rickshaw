@@ -76,6 +76,7 @@ ADMIN_LIMIT = int(os.getenv("RATE_LIMIT_ADMIN", "100"))
 
 # Predefined rate limiters for key endpoints
 auth_rate_limiter = RateLimiter(max_requests=AUTH_LIMIT, window_seconds=60, scope="auth")
+otp_rate_limiter = RateLimiter(max_requests=10, window_seconds=60, scope="otp_request")
 ride_booking_rate_limiter = RateLimiter(max_requests=RIDE_LIMIT, window_seconds=60, scope="ride_booking", by_user=True)
 driver_accept_rate_limiter = RateLimiter(max_requests=DRIVER_LIMIT, window_seconds=60, scope="driver_accept", by_user=True)
 payment_rate_limiter = RateLimiter(max_requests=PAYMENT_LIMIT, window_seconds=60, scope="payment", by_user=True)

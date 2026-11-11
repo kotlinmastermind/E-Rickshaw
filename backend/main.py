@@ -38,193 +38,210 @@ async def _dispatch_scheduled_broadcasts():
             logger.exception("Scheduled notification dispatch cycle failed")
         await asyncio.sleep(30)
 
+async def _seed_baseline_data():
+    """Resiliently initialize database tables and baseline data with retries."""
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Initialize database tables
+            await init_db()
+            # Seed baseline luxury categories and default fare schedules if not present
+            async with async_session_maker() as session:
+                stmt = select(VehicleCategory)
+                res = await session.execute(stmt)
+                if not res.scalars().first():
+                    standard = VehicleCategory(
+                        code="E_RICKSHAW_STANDARD",
+                        name="Standard E-Rickshaw",
+                        description="Eco-friendly electric 3-wheeler for quick city commutes, metro station feeder transit, and local errands.",
+                        icon_url="https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=400&q=80",
+                        capacity=4,
+                        sort_order=1,
+                        is_electric=True,
+                        emissions_g_per_km=0.0,
+                        legroom_inches=36.0,
+                        quietness_db=45.0,
+                        luggage_large_capacity=1,
+                        luggage_small_capacity=2,
+                        wheelchair_accessible=False,
+                        pet_friendly=True,
+                        child_seat_available=False
+                    )
+                    shared = VehicleCategory(
+                        code="E_RICKSHAW_SHARE",
+                        name="Shared E-Rickshaw (Eco-Pool)",
+                        description="Ultra-affordable per-seat shared electric rickshaw on high-frequency metro and market routes.",
+                        icon_url="https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?auto=format&fit=crop&w=400&q=80",
+                        capacity=4,
+                        sort_order=2,
+                        is_electric=True,
+                        emissions_g_per_km=0.0,
+                        legroom_inches=35.0,
+                        quietness_db=45.0,
+                        luggage_large_capacity=0,
+                        luggage_small_capacity=1,
+                        wheelchair_accessible=False,
+                        pet_friendly=False,
+                        child_seat_available=False
+                    )
+                    e_auto = VehicleCategory(
+                        code="E_AUTO",
+                        name="High-Speed Electric Auto",
+                        description="Modern enclosed L5M electric auto rickshaw with weather-shielding doors and higher speed.",
+                        icon_url="https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=400&q=80",
+                        capacity=3,
+                        sort_order=3,
+                        is_electric=True,
+                        emissions_g_per_km=0.0,
+                        legroom_inches=38.0,
+                        quietness_db=44.0,
+                        luggage_large_capacity=2,
+                        luggage_small_capacity=2,
+                        wheelchair_accessible=True,
+                        pet_friendly=True,
+                        child_seat_available=False
+                    )
+                    e_cargo = VehicleCategory(
+                        code="E_CARGO_LOADER",
+                        name="E-Loader Cargo",
+                        description="Electric commercial cargo loader 3-wheeler for parcels, shop goods, and heavy luggage.",
+                        icon_url="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=400&q=80",
+                        capacity=1,
+                        sort_order=4,
+                        is_electric=True,
+                        emissions_g_per_km=0.0,
+                        legroom_inches=34.0,
+                        quietness_db=46.0,
+                        luggage_large_capacity=4,
+                        luggage_small_capacity=4,
+                        wheelchair_accessible=False,
+                        pet_friendly=False,
+                        child_seat_available=False
+                    )
+                    session.add_all([standard, shared, e_auto, e_cargo])
+                    await session.flush()
+
+                    # Seed default affordable E-Rickshaw fare rules (in paise/cents: 100 paise = 1 INR)
+                    rules = [
+                        FareRule(
+                            category_id=standard.id, version=1, base_fare_cents=2000,
+                            per_km_cents=1000, per_minute_cents=100, minimum_fare_cents=2000,
+                            cancellation_fee_cents=1000, surge_multiplier=1.0, is_active=True
+                        ),
+                        FareRule(
+                            category_id=shared.id, version=1, base_fare_cents=1000,
+                            per_km_cents=600, per_minute_cents=50, minimum_fare_cents=1500,
+                            cancellation_fee_cents=500, surge_multiplier=1.0, is_active=True
+                        ),
+                        FareRule(
+                            category_id=e_auto.id, version=1, base_fare_cents=3000,
+                            per_km_cents=1200, per_minute_cents=150, minimum_fare_cents=3000,
+                            cancellation_fee_cents=1500, surge_multiplier=1.0, is_active=True
+                        ),
+                        FareRule(
+                            category_id=e_cargo.id, version=1, base_fare_cents=5000,
+                            per_km_cents=1500, per_minute_cents=200, minimum_fare_cents=6000,
+                            cancellation_fee_cents=2000, surge_multiplier=1.0, is_active=True
+                        )
+                    ]
+                    session.add_all(rules)
+                    await session.commit()
+
+                # Seed / Sync Root Admin & Super Administrator role unconditionally
+                # 1. Ensure Super Administrator Role exists
+                stmt = select(AdminRole).where(AdminRole.name == "Super Administrator")
+                res = await session.execute(stmt)
+                super_role = res.scalar_one_or_none()
+                if not super_role:
+                    super_role = AdminRole(
+                        id=str(uuid.uuid4()),
+                        name="Super Administrator",
+                        description="Unrestricted access across all operational, financial and governance desks.",
+                        is_superuser=True
+                    )
+                    session.add(super_role)
+                    await session.flush()
+
+                # 2. Seed / Sync primary admin users
+                admin_specs = [
+                    {
+                        "email": "kotlindeveloper75620@gmail.com",
+                        "phone_number": "+917562084184",
+                        "full_name": "BHISHMA"
+                    },
+                    {
+                        "email": "admin@luxurychauffeur.com",
+                        "phone_number": "+919999900000",
+                        "full_name": "Super Administrator"
+                    }
+                ]
+
+                default_admin_pwd = hash_password(os.getenv("ADMIN_INITIAL_PASSWORD", "Admin@1234"))
+
+                for spec in admin_specs:
+                    u_stmt = select(User).where(User.email == spec["email"])
+                    u_res = await session.execute(u_stmt)
+                    admin_user = u_res.scalar_one_or_none()
+
+                    if not admin_user:
+                        # Also check by phone number if email didn't match
+                        p_stmt = select(User).where(User.phone_number == spec["phone_number"])
+                        p_res = await session.execute(p_stmt)
+                        admin_user = p_res.scalar_one_or_none()
+
+                    if admin_user:
+                        admin_user.role = "admin"
+                        admin_user.is_active = True
+                        admin_user.is_verified = True
+                        admin_user.email_verified = True
+                        admin_user.mfa_enabled = True
+                        if not admin_user.email:
+                            admin_user.email = spec["email"]
+                        if not admin_user.password_hash or spec["email"] in ["kotlindeveloper75620@gmail.com", "admin@luxurychauffeur.com"]:
+                            admin_user.password_hash = default_admin_pwd
+                        if not admin_user.mfa_secret:
+                            admin_user.mfa_secret = "JBSWY3DPEHPK3PXP"
+                    else:
+                        admin_user = User(
+                            id=str(uuid.uuid4()),
+                            phone_number=spec["phone_number"],
+                            email=spec["email"],
+                            full_name=spec["full_name"],
+                            role="admin",
+                            is_active=True,
+                            is_verified=True,
+                            email_verified=True,
+                            mfa_enabled=True,
+                            mfa_secret="JBSWY3DPEHPK3PXP",
+                            password_hash=default_admin_pwd
+                        )
+                        session.add(admin_user)
+                        await session.flush()
+
+                    # Assign Super Administrator role
+                    aur_stmt = select(AdminUserRole).where(
+                        AdminUserRole.user_id == admin_user.id,
+                        AdminUserRole.role_id == super_role.id
+                    )
+                    aur_res = await session.execute(aur_stmt)
+                    if not aur_res.scalar_one_or_none():
+                        session.add(AdminUserRole(user_id=admin_user.id, role_id=super_role.id))
+
+                await session.commit()
+            logger.info("Database initialization and baseline seeding completed successfully.")
+            return True
+        except Exception as exc:
+            logger.warning("Database startup init/seed attempt %d/%d failed: %s", attempt, max_retries, exc)
+            if attempt < max_retries:
+                await asyncio.sleep(1.5 * attempt)
+            else:
+                logger.error("Database connection unavailable during startup lifespan. Application starting in degraded mode.", exc_info=True)
+                return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize database tables
-    await init_db()
-    # Seed baseline luxury categories and default fare schedules if not present
-    async with async_session_maker() as session:
-        stmt = select(VehicleCategory)
-        res = await session.execute(stmt)
-        if not res.scalars().first():
-            standard = VehicleCategory(
-                code="E_RICKSHAW_STANDARD",
-                name="Standard E-Rickshaw",
-                description="Eco-friendly electric 3-wheeler for quick city commutes, metro station feeder transit, and local errands.",
-                icon_url="https://images.unsplash.com/photo-1558981806-ec527fa84c39?auto=format&fit=crop&w=400&q=80",
-                capacity=4,
-                sort_order=1,
-                is_electric=True,
-                emissions_g_per_km=0.0,
-                legroom_inches=36.0,
-                quietness_db=45.0,
-                luggage_large_capacity=1,
-                luggage_small_capacity=2,
-                wheelchair_accessible=False,
-                pet_friendly=True,
-                child_seat_available=False
-            )
-            shared = VehicleCategory(
-                code="E_RICKSHAW_SHARE",
-                name="Shared E-Rickshaw (Eco-Pool)",
-                description="Ultra-affordable per-seat shared electric rickshaw on high-frequency metro and market routes.",
-                icon_url="https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?auto=format&fit=crop&w=400&q=80",
-                capacity=4,
-                sort_order=2,
-                is_electric=True,
-                emissions_g_per_km=0.0,
-                legroom_inches=35.0,
-                quietness_db=45.0,
-                luggage_large_capacity=0,
-                luggage_small_capacity=1,
-                wheelchair_accessible=False,
-                pet_friendly=False,
-                child_seat_available=False
-            )
-            e_auto = VehicleCategory(
-                code="E_AUTO",
-                name="High-Speed Electric Auto",
-                description="Modern enclosed L5M electric auto rickshaw with weather-shielding doors and higher speed.",
-                icon_url="https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&w=400&q=80",
-                capacity=3,
-                sort_order=3,
-                is_electric=True,
-                emissions_g_per_km=0.0,
-                legroom_inches=38.0,
-                quietness_db=44.0,
-                luggage_large_capacity=2,
-                luggage_small_capacity=2,
-                wheelchair_accessible=True,
-                pet_friendly=True,
-                child_seat_available=False
-            )
-            e_cargo = VehicleCategory(
-                code="E_CARGO_LOADER",
-                name="E-Loader Cargo",
-                description="Electric commercial cargo loader 3-wheeler for parcels, shop goods, and heavy luggage.",
-                icon_url="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=400&q=80",
-                capacity=1,
-                sort_order=4,
-                is_electric=True,
-                emissions_g_per_km=0.0,
-                legroom_inches=34.0,
-                quietness_db=46.0,
-                luggage_large_capacity=4,
-                luggage_small_capacity=4,
-                wheelchair_accessible=False,
-                pet_friendly=False,
-                child_seat_available=False
-            )
-            session.add_all([standard, shared, e_auto, e_cargo])
-            await session.flush()
-
-            # Seed default affordable E-Rickshaw fare rules (in paise/cents: 100 paise = 1 INR)
-            rules = [
-                FareRule(
-                    category_id=standard.id, version=1, base_fare_cents=2000,
-                    per_km_cents=1000, per_minute_cents=100, minimum_fare_cents=2000,
-                    cancellation_fee_cents=1000, surge_multiplier=1.0, is_active=True
-                ),
-                FareRule(
-                    category_id=shared.id, version=1, base_fare_cents=1000,
-                    per_km_cents=600, per_minute_cents=50, minimum_fare_cents=1500,
-                    cancellation_fee_cents=500, surge_multiplier=1.0, is_active=True
-                ),
-                FareRule(
-                    category_id=e_auto.id, version=1, base_fare_cents=3000,
-                    per_km_cents=1200, per_minute_cents=150, minimum_fare_cents=3000,
-                    cancellation_fee_cents=1500, surge_multiplier=1.0, is_active=True
-                ),
-                FareRule(
-                    category_id=e_cargo.id, version=1, base_fare_cents=5000,
-                    per_km_cents=1500, per_minute_cents=200, minimum_fare_cents=6000,
-                    cancellation_fee_cents=2000, surge_multiplier=1.0, is_active=True
-                )
-            ]
-            session.add_all(rules)
-            await session.commit()
-
-        # Seed / Sync Root Admin & Super Administrator role unconditionally
-        # 1. Ensure Super Administrator Role exists
-        stmt = select(AdminRole).where(AdminRole.name == "Super Administrator")
-        res = await session.execute(stmt)
-        super_role = res.scalar_one_or_none()
-        if not super_role:
-            super_role = AdminRole(
-                id=str(uuid.uuid4()),
-                name="Super Administrator",
-                description="Unrestricted access across all operational, financial and governance desks.",
-                is_superuser=True
-            )
-            session.add(super_role)
-            await session.flush()
-
-        # 2. Seed / Sync primary admin users
-        admin_specs = [
-            {
-                "email": "kotlindeveloper75620@gmail.com",
-                "phone_number": "+917562084184",
-                "full_name": "BHISHMA"
-            },
-            {
-                "email": "admin@luxurychauffeur.com",
-                "phone_number": "+919999900000",
-                "full_name": "Super Administrator"
-            }
-        ]
-
-        default_admin_pwd = hash_password(os.getenv("ADMIN_INITIAL_PASSWORD", "Admin@1234"))
-
-        for spec in admin_specs:
-            u_stmt = select(User).where(User.email == spec["email"])
-            u_res = await session.execute(u_stmt)
-            admin_user = u_res.scalar_one_or_none()
-
-            if not admin_user:
-                # Also check by phone number if email didn't match
-                p_stmt = select(User).where(User.phone_number == spec["phone_number"])
-                p_res = await session.execute(p_stmt)
-                admin_user = p_res.scalar_one_or_none()
-
-            if admin_user:
-                admin_user.role = "admin"
-                admin_user.is_active = True
-                admin_user.is_verified = True
-                admin_user.email_verified = True
-                admin_user.mfa_enabled = True
-                if not admin_user.email:
-                    admin_user.email = spec["email"]
-                if not admin_user.password_hash or spec["email"] in ["kotlindeveloper75620@gmail.com", "admin@luxurychauffeur.com"]:
-                    admin_user.password_hash = default_admin_pwd
-                if not admin_user.mfa_secret:
-                    admin_user.mfa_secret = "JBSWY3DPEHPK3PXP"
-            else:
-                admin_user = User(
-                    id=str(uuid.uuid4()),
-                    phone_number=spec["phone_number"],
-                    email=spec["email"],
-                    full_name=spec["full_name"],
-                    role="admin",
-                    is_active=True,
-                    is_verified=True,
-                    email_verified=True,
-                    mfa_enabled=True,
-                    mfa_secret="JBSWY3DPEHPK3PXP",
-                    password_hash=default_admin_pwd
-                )
-                session.add(admin_user)
-                await session.flush()
-
-            # Assign Super Administrator role
-            aur_stmt = select(AdminUserRole).where(
-                AdminUserRole.user_id == admin_user.id,
-                AdminUserRole.role_id == super_role.id
-            )
-            aur_res = await session.execute(aur_stmt)
-            if not aur_res.scalar_one_or_none():
-                session.add(AdminUserRole(user_id=admin_user.id, role_id=super_role.id))
-
-        await session.commit()
+    # Initialize database tables with retry protection
+    await _seed_baseline_data()
     dispatcher = asyncio.create_task(_dispatch_scheduled_broadcasts(), name="scheduled-in-app-broadcasts")
     try:
         yield
@@ -307,14 +324,11 @@ app.include_router(location.router, prefix=settings.API_V1_STR)
 app.include_router(fares.router, prefix=settings.API_V1_STR)
 app.include_router(rides.router, prefix=settings.API_V1_STR)
 app.include_router(payments.router, prefix=settings.API_V1_STR)
-app.include_router(payments.router, prefix="")
 app.include_router(admin.router, prefix=settings.API_V1_STR)
+app.include_router(admin.router, prefix="")
 app.include_router(notifications.router, prefix=settings.API_V1_STR)
 app.include_router(notifications.admin_router, prefix=settings.API_V1_STR)
 app.include_router(ws.router, prefix=settings.API_V1_STR)
-app.include_router(ws.router, prefix=f"{settings.API_V1_STR}/ws")
-app.include_router(ws.router, prefix="/ws")
-app.include_router(ws.router, prefix="")
 app.include_router(wallets.router, prefix=settings.API_V1_STR)
 app.include_router(promos.router, prefix=settings.API_V1_STR)
 app.include_router(support.router, prefix=settings.API_V1_STR)
@@ -330,12 +344,6 @@ app.include_router(driver_financials.router, prefix=settings.API_V1_STR)
 app.include_router(analytics_bi.router, prefix=settings.API_V1_STR)
 app.include_router(dispatch.router, prefix=settings.API_V1_STR)
 
-@app.websocket("/api/v1/admin/telemetry")
-@app.websocket("/admin/telemetry")
-async def admin_telemetry_ws_alias(websocket: WebSocket, ticket: Optional[str] = Query(None)):
-    """Direct alias for admin telemetry to guarantee seamless path compatibility across all environments."""
-    return await ws.admin_telemetry_websocket(websocket, ticket=ticket)
-
 # --- Dynamic Admin Web Panel Hosting on Render ---
 STATIC_ADMIN_DIR = os.path.join(os.path.dirname(__file__), "static", "admin")
 if os.path.exists(STATIC_ADMIN_DIR):
@@ -350,10 +358,29 @@ SPA_NO_CACHE_HEADERS = {
     "Expires": "0",
 }
 
+STATIC_ASSET_EXTENSIONS = (
+    ".js", ".css", ".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif",
+    ".ico", ".woff", ".woff2", ".ttf", ".eot", ".map", ".json", ".txt"
+)
+
 @app.get("/admin", include_in_schema=False)
 @app.get("/admin/{full_path:path}", include_in_schema=False)
 async def serve_admin_panel(full_path: str = ""):
-    """Dynamically serve the Luxury Admin Panel SPA from Render."""
+    """Dynamically serve the Luxury Admin Panel SPA from Render without route collisions."""
+    norm = full_path.strip("/")
+
+    # 1. Unknown or sub-path API requests must return JSON 404
+    if norm.startswith(("api/", "api", "v1/")) or norm.startswith("admin/api"):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+
+    # 2. Missing static assets must return 404 rather than index.html
+    if norm.startswith("assets/") or norm.endswith(STATIC_ASSET_EXTENSIONS):
+        asset_file = os.path.join(STATIC_ADMIN_DIR, norm)
+        if os.path.isfile(asset_file):
+            return FileResponse(asset_file)
+        return JSONResponse(status_code=404, content={"detail": "Asset not found"})
+
+    # 3. Serve SPA entry point for valid frontend routing
     index_file = os.path.join(STATIC_ADMIN_DIR, "index.html")
     if os.path.exists(index_file):
         return FileResponse(index_file, headers=SPA_NO_CACHE_HEADERS)
@@ -454,16 +481,26 @@ async def privacy_policy():
 @app.get("/{full_path:path}", include_in_schema=False)
 async def catch_all_spa(full_path: str):
     """Fallback handler to route SPA client-side routes (e.g. /dashboard, /rides, /fleet) to index.html."""
-    if full_path.startswith(("api/", "health", "docs", "openapi.json", "redoc", "privacy-policy", "ws")):
+    norm = full_path.strip("/")
+
+    # Reject API and system routes with JSON 404
+    if norm.startswith(("api/", "api", "health", "docs", "openapi.json", "redoc", "privacy-policy", "ws")):
         return JSONResponse(status_code=404, content={"detail": "Not Found"})
-    
-    file_path = os.path.join(STATIC_ADMIN_DIR, full_path)
+
+    # Reject missing static asset files with 404
+    if norm.startswith("assets/") or norm.endswith(STATIC_ASSET_EXTENSIONS):
+        asset_file = os.path.join(STATIC_ADMIN_DIR, norm)
+        if os.path.isfile(asset_file):
+            return FileResponse(asset_file)
+        return JSONResponse(status_code=404, content={"detail": "Asset not found"})
+
+    file_path = os.path.join(STATIC_ADMIN_DIR, norm)
     if os.path.isfile(file_path):
         return FileResponse(file_path)
 
     index_file = os.path.join(STATIC_ADMIN_DIR, "index.html")
     if os.path.exists(index_file):
-        return FileResponse(index_file)
+        return FileResponse(index_file, headers=SPA_NO_CACHE_HEADERS)
     return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 if __name__ == "__main__":

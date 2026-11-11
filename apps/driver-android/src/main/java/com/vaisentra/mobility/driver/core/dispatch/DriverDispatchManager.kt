@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.dispatch
+package com.vaisentra.mobility.driver.core.dispatch
 
 import android.content.Context
 import android.util.Log

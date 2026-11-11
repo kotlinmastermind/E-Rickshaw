@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.profile
+package com.vaisentra.mobility.driver.feature.profile
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -170,10 +170,14 @@ fun VehicleChangeRequestDialog(
                                     )
                                 )
                                 isSubmitting = false
-                                successNotice = true
-                            } catch (_: Exception) {
+                                if (res.isSuccessful) {
+                                    successNotice = true
+                                } else {
+                                    errorMessage = "Server rejected change request (HTTP ${res.code()}). Please try again."
+                                }
+                            } catch (e: Exception) {
                                 isSubmitting = false
-                                successNotice = true // Client fallback success for offline/mock
+                                errorMessage = e.message ?: "Network error. Please check your connection."
                             }
                         }
                     }

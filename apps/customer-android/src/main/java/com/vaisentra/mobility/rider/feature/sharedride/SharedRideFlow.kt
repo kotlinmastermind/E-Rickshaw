@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.sharedride
+package com.vaisentra.mobility.rider.feature.sharedride
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState

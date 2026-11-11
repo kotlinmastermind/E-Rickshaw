@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.loyalty
+package com.vaisentra.mobility.rider.feature.loyalty
 
 import android.content.ClipData
 import android.content.ClipboardManager

@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.notifications
+package com.vaisentra.mobility.rider.feature.notifications
 
 import android.Manifest
 import android.content.pm.PackageManager

@@ -719,12 +719,24 @@ async def get_trip_history_breadcrumbs(
 ):
     """Returns historical breadcrumb sequence for completed trip playback."""
     from backend.application.services.mapbox_modular_services import TripHistoryService
+    from backend.domain.models import Ride
+    from sqlalchemy import select
+    import logging
+    _log = logging.getLogger("backend.routes.location")
     try:
         crumbs = await TripHistoryService.get_trip_breadcrumbs(db, ride_id)
     except Exception:
         crumbs = []
 
+    ride = None
+    try:
+        ride_res = await db.execute(select(Ride).where(Ride.id == ride_id))
+        ride = ride_res.scalar_one_or_none()
+    except Exception as e:
+        _log.warning(f"Error fetching ride in get_trip_history_breadcrumbs: {e}", exc_info=True)
+
     if crumbs:
+        last_distance = crumbs[-1].get("distance_km", 0.0)
         return {
             "ride_id": ride_id,
             "breadcrumbs": crumbs,
@@ -732,65 +744,23 @@ async def get_trip_history_breadcrumbs(
             "is_synthetic": False,
             "source": "database_records",
             "summary": {
-                "distance_km": crumbs[-1].get("distance_km", 0.0),
-                "data_type": "Persisted GPS Breadcrumbs"
+                "origin": getattr(ride, "pickup_address", None) or "Pickup Point",
+                "destination": getattr(ride, "destination_address", None) or "Destination Point",
+                "distance_km": last_distance if last_distance > 0 else float(getattr(ride, "estimated_distance_km", 0.0) or 0.0),
+                "data_type": "Persisted GPS Breadcrumbs",
+                "started_at": crumbs[0].get("recorded_at"),
+                "ended_at": crumbs[-1].get("recorded_at")
             }
         }
 
-    # If no breadcrumbs are recorded in DB, provide demonstration trajectory explicitly labeled as sample fixture
-    base_time = datetime.now(timezone.utc) - timedelta(minutes=25)
-    waypoints = [
-        (28.6328, 77.2195, 16.5, 140.0),
-        (28.6315, 77.2205, 18.0, 142.0),
-        (28.6300, 77.2215, 19.5, 145.0),
-        (28.6285, 77.2225, 21.0, 150.0),
-        (28.6270, 77.2230, 20.0, 160.0),
-        (28.6250, 77.2235, 22.5, 165.0),
-        (28.6230, 77.2238, 23.0, 170.0),
-        (28.6210, 77.2240, 21.5, 172.0),
-        (28.6190, 77.2242, 19.0, 175.0),
-        (28.6170, 77.2245, 18.0, 175.0),
-        (28.6155, 77.2250, 17.5, 168.0),
-        (28.6140, 77.2260, 16.0, 155.0),
-        (28.6135, 77.2275, 15.0, 130.0),
-        (28.6130, 77.2290, 17.0, 110.0),
-        (28.6129, 77.2295, 18.5, 95.0),
-        (28.6128, 77.2305, 19.0, 90.0),
-        (28.6126, 77.2315, 18.0, 92.0),
-        (28.6124, 77.2325, 16.5, 95.0),
-        (28.6120, 77.2335, 15.0, 105.0),
-        (28.6115, 77.2340, 14.0, 120.0),
-        (28.6110, 77.2345, 12.0, 135.0),
-        (28.6105, 77.2350, 0.0, 140.0)
-    ]
-    demo_crumbs = []
-    cum_dist = 0.0
-    for idx, (lat, lng, spd, hdg) in enumerate(waypoints):
-        t = (base_time + timedelta(seconds=idx * 15)).isoformat()
-        if idx > 0:
-            p_lat, p_lng = waypoints[idx - 1][0], waypoints[idx - 1][1]
-            cum_dist += (((lat - p_lat)**2 + (lng - p_lng)**2)**0.5) * 111.0
-        demo_crumbs.append({
-            "latitude": lat,
-            "longitude": lng,
-            "speed_kmh": spd,
-            "heading": hdg,
-            "distance_km": round(cum_dist, 2),
-            "recorded_at": t
-        })
+    # If no breadcrumbs are recorded in DB, return empty real payload
     return {
         "ride_id": ride_id,
-        "breadcrumbs": demo_crumbs,
-        "count": len(demo_crumbs),
-        "is_synthetic": True,
-        "source": "sample_demonstration_trajectory",
-        "summary": {
-            "origin": "Connaught Place Radial 1",
-            "destination": "India Gate C-Hexagon",
-            "distance_km": demo_crumbs[-1].get("distance_km", 3.2),
-            "duration_minutes": round((len(demo_crumbs) * 15) / 60, 1),
-            "data_type": "Demonstration Sample Trajectory (No live GPS records in DB)"
-        }
+        "breadcrumbs": [],
+        "count": 0,
+        "is_synthetic": False,
+        "source": "database_records",
+        "summary": None
     }
 
 
@@ -800,12 +770,14 @@ async def get_admin_fleet_map(
 ):
     """Admin live fleet radar returning real-time pilot locations and status."""
     from sqlalchemy import select, desc
-    from backend.domain.models import DriverProfile, DriverAvailability, DriverLocation
+    from backend.domain.models import DriverProfile, DriverAvailability, DriverLocation, User
 
     fleet = {}
+    now = datetime.now(timezone.utc)
     try:
         stmt = (
-            select(DriverProfile, DriverAvailability, DriverLocation)
+            select(DriverProfile, DriverAvailability, DriverLocation, User)
+            .outerjoin(User, User.id == DriverProfile.user_id)
             .outerjoin(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
             .outerjoin(DriverLocation, DriverLocation.driver_id == DriverProfile.id)
             .order_by(desc(DriverLocation.recorded_at))
@@ -813,13 +785,27 @@ async def get_admin_fleet_map(
         res = await db.execute(stmt)
         rows = res.all()
 
-        for prof, avail, loc in rows:
+        for prof, avail, loc, user in rows:
             if prof.id not in fleet and loc:
-                st = avail.status if avail else "OFFLINE"
-                mapped_status = "available" if st == "AVAILABLE" else ("on_trip" if st == "BUSY" else "en_route")
+                is_online = bool(avail.is_online) if avail else False
+                is_busy = bool(avail.is_busy) if avail else False
+
+                # Check location freshness (stale if > 15 minutes or driver offline)
+                rec_at = loc.recorded_at if loc.recorded_at.tzinfo else loc.recorded_at.replace(tzinfo=timezone.utc)
+                age_seconds = max(0, int((now - rec_at).total_seconds()))
+                is_stale = age_seconds > 900 or not is_online
+
+                if not is_online:
+                    mapped_status = "offline"
+                elif is_busy:
+                    mapped_status = "on_trip"
+                else:
+                    mapped_status = "available"
+
+                driver_name = (user.full_name if user and user.full_name else None) or prof.security_badge_id or "Pilot"
                 fleet[prof.id] = {
                     "id": prof.id,
-                    "driver": prof.badge_number or "Pilot",
+                    "driver": driver_name,
                     "plate": prof.license_number or "DL-9988",
                     "model": "RideGo E-Rickshaw EV",
                     "lat": loc.latitude,
@@ -828,59 +814,30 @@ async def get_admin_fleet_map(
                     "heading": loc.heading if loc.heading is not None else 0.0,
                     "battery": 88,
                     "status": mapped_status,
-                    "last_seen": loc.recorded_at.isoformat(),
+                    "is_online": is_online,
+                    "is_stale": is_stale,
+                    "freshness_seconds": age_seconds,
+                    "last_seen": rec_at.isoformat(),
                     "is_synthetic": False
                 }
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"Error fetching real-time fleet locations: {exc}", exc_info=True)
         fleet = {}
 
-    if not fleet:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        sample_pilots = [
-            {
-                "id": "demo_driver_101",
-                "driver": "Rajesh Sharma (Pilot 101)",
-                "plate": "DL-1ER-4821",
-                "model": "RideGo EcoPro EV",
-                "lat": 28.6328,
-                "lng": 77.2195,
-                "speed": 18.5,
-                "heading": 85.0,
-                "battery": 92,
-                "status": "available",
-                "last_seen": now_iso,
-                "is_synthetic": True
-            },
-            {
-                "id": "demo_driver_102",
-                "driver": "Amit Verma (Pilot 102)",
-                "plate": "DL-1ER-8842",
-                "model": "Mahindra Treo EV",
-                "lat": 28.6372,
-                "lng": 77.2215,
-                "speed": 22.0,
-                "heading": 170.0,
-                "battery": 78,
-                "status": "on_trip",
-                "passenger": "Active Trip #8801",
-                "fare": 140.0,
-                "last_seen": now_iso,
-                "is_synthetic": True
-            }
-        ]
+    if fleet:
+        fleet_list = list(fleet.values())
         return {
-            "fleet": sample_pilots,
-            "drivers": sample_pilots,
-            "count": len(sample_pilots),
-            "is_live": False,
-            "source": "sample_demonstration"
+            "fleet": fleet_list,
+            "drivers": fleet_list,
+            "count": len(fleet_list),
+            "is_live": True,
+            "source": "database_live"
         }
 
-    fleet_list = list(fleet.values())
     return {
-        "fleet": fleet_list,
-        "drivers": fleet_list,
-        "count": len(fleet_list),
+        "fleet": [],
+        "drivers": [],
+        "count": 0,
         "is_live": True,
         "source": "database_live"
     }

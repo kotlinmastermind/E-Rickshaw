@@ -20,8 +20,24 @@ def test_jwt_lifecycle():
     assert payload["sub"] == "user_test_uuid_123"
     assert payload["role"] == "customer"
     assert payload["session_id"] == "session_456"
-    assert payload["iss"] == "luxury-ride-platform"
-    assert payload["aud"] == "luxury-ride-clients"
+    assert payload["iss"] == "vaisentra-mobility"
+    assert payload["aud"] == "vaisentra-mobility-clients"
+
+def test_jwt_backward_compatibility():
+    import jwt
+    from backend.core.config import settings
+    legacy_payload = {
+        "sub": "user_legacy_123",
+        "role": "driver",
+        "session_id": "session_legacy",
+        "token_type": "access",
+        "iss": "luxury-ride-platform",
+        "aud": "luxury-ride-clients"
+    }
+    legacy_token = jwt.encode(legacy_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    decoded = decode_jwt_token(legacy_token)
+    assert decoded["sub"] == "user_legacy_123"
+    assert decoded["iss"] == "luxury-ride-platform"
 
 def test_hmac_signature_verification():
     secret = "whsec_test_secret_key"

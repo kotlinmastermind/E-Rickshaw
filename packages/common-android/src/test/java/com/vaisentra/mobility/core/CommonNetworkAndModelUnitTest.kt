@@ -9,6 +9,9 @@ import com.vaisentra.mobility.core.model.IdentityLookupRequest
 import com.vaisentra.mobility.core.model.TokenResponse
 import com.vaisentra.mobility.core.model.UserDto
 import com.vaisentra.mobility.core.network.CoreNetworkClient
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -21,29 +24,25 @@ class CommonNetworkAndModelUnitTest {
 
     @Test
     fun testResolveDefaultBaseUrl() {
-        val saved = "https://custom.backend.api"
-        val resolved = CoreNetworkClient.resolveDefaultBaseUrl(saved)
-        assertEquals("https://custom.backend.api/", resolved)
+        val resolved = CoreNetworkClient.resolveDefaultBaseUrl()
+        assertEquals(CoreNetworkClient.CANONICAL_PRODUCTION_URL, resolved)
 
-        val emptyResolved = CoreNetworkClient.resolveDefaultBaseUrl("")
-        assertTrue(emptyResolved == CoreNetworkClient.DEFAULT_PRODUCTION_URL || emptyResolved == CoreNetworkClient.LOCAL_EMULATOR_BASE_URL)
+        val resolvedFromSaved = CoreNetworkClient.resolveDefaultBaseUrl("https://unverified.com")
+        assertEquals(CoreNetworkClient.CANONICAL_PRODUCTION_URL, resolvedFromSaved)
     }
 
     @Test
-    fun testIsLocalBackend() {
-        assertTrue(CoreNetworkClient.isLocalBackend("http://10.0.2.2:8000/"))
-        assertTrue(CoreNetworkClient.isLocalBackend("http://localhost:8000/"))
-        assertTrue(CoreNetworkClient.isLocalBackend("http://127.0.0.1:8000/"))
+    fun testIsLocalBackendStrictlyFalse() {
         assertFalse(CoreNetworkClient.isLocalBackend("https://e-rickshaw-z32z.onrender.com/"))
     }
 
     @Test
     fun testWebSocketUrlConstruction() {
-        val wsUrl = CoreNetworkClient.getWebSocketUrl("https://api.example.com", "rides/123/ws")
-        assertEquals("wss://api.example.com/rides/123/ws", wsUrl)
+        val wsUrl = CoreNetworkClient.getWebSocketUrl(CoreNetworkClient.CANONICAL_PRODUCTION_URL, "rides/123/ws")
+        assertEquals("wss://e-rickshaw-z32z.onrender.com/rides/123/ws", wsUrl)
 
-        val httpWsUrl = CoreNetworkClient.getWebSocketUrl("http://10.0.2.2:8000/", "/tracking/ws")
-        assertEquals("ws://10.0.2.2:8000/tracking/ws", httpWsUrl)
+        val wsUrlWithPath = CoreNetworkClient.getWebSocketUrl(CoreNetworkClient.CANONICAL_PRODUCTION_URL, "/api/v1/ws/telemetry")
+        assertEquals("wss://e-rickshaw-z32z.onrender.com/api/v1/ws/telemetry", wsUrlWithPath)
     }
 
     @Test
@@ -108,6 +107,130 @@ class CommonNetworkAndModelUnitTest {
             "Must resolve to Cloudflare Anycast Origin IPs (216.24.57.16 or 216.24.57.18)",
             ipStrings.contains("216.24.57.16") || ipStrings.contains("216.24.57.18")
         )
+    }
+
+    @Test
+    fun testMultipartUploadInterceptorPreservesBoundary() {
+        val client = CoreNetworkClient.createConfiguredOkHttpClient(
+            tokenManager = null,
+            baseUrlProvider = { "https://e-rickshaw-z32z.onrender.com/" },
+            clientRole = "driver",
+            isDebug = false
+        )
+
+        // 1. Construct a Multipart upload request (as Retrofit @Multipart produces)
+        val imageBytes = "binary-image-data".toByteArray()
+        val multipartBody = okhttp3.MultipartBody.Builder()
+            .setType(okhttp3.MultipartBody.FORM)
+            .addFormDataPart("document_type", "DRIVING_LICENSE")
+            .addFormDataPart(
+                "file",
+                "license.jpg",
+                imageBytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
+            )
+            .build()
+
+        val multipartRequest = okhttp3.Request.Builder()
+            .url("https://e-rickshaw-z32z.onrender.com/api/v1/drivers/documents")
+            .header("Authorization", "Bearer test_driver_token_xyz")
+            .post(multipartBody)
+            .build()
+
+        // Execute interceptor chain
+        val authInterceptor = client.interceptors.first()
+        var interceptedRequest: okhttp3.Request? = null
+
+        val fakeChain = object : okhttp3.Interceptor.Chain {
+            override fun request(): okhttp3.Request = multipartRequest
+            override fun proceed(request: okhttp3.Request): okhttp3.Response {
+                interceptedRequest = request
+                return okhttp3.Response.Builder()
+                    .request(request)
+                    .protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body("{\"status\":\"ok\"}".toResponseBody("application/json".toMediaTypeOrNull()))
+                    .build()
+            }
+            override fun connection() = null
+            override fun call(): okhttp3.Call = throw UnsupportedOperationException()
+            override fun connectTimeoutMillis() = 10000
+            override fun withConnectTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit) = this
+            override fun readTimeoutMillis() = 10000
+            override fun withReadTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit) = this
+            override fun writeTimeoutMillis() = 10000
+            override fun withWriteTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit) = this
+        }
+
+        authInterceptor.intercept(fakeChain)
+
+        assertNotNull(interceptedRequest)
+        val req = interceptedRequest!!
+        // Header assertions
+        assertEquals("Android", req.header("X-Client-Platform"))
+        assertEquals("driver", req.header("X-Client-Role"))
+        assertEquals("application/json", req.header("Accept"))
+        assertEquals("Bearer test_driver_token_xyz", req.header("Authorization"))
+
+        // Critical: Multipart request body Content-Type must NOT be overwritten with application/json
+        val reqContentType = req.header("Content-Type")
+        assertTrue(
+            "Content-Type header must either be null (to let OkHttp write multipart boundary) or start with multipart/form-data; boundary=",
+            reqContentType == null || reqContentType.startsWith("multipart/form-data")
+        )
+        assertFalse(
+            "Content-Type must NOT be forced to application/json for multipart uploads",
+            reqContentType == "application/json"
+        )
+        assertTrue(req.body?.contentType().toString().startsWith("multipart/form-data; boundary="))
+    }
+
+    @Test
+    fun testJsonRequestRetainsApplicationJson() {
+        val client = CoreNetworkClient.createConfiguredOkHttpClient(
+            tokenManager = null,
+            baseUrlProvider = { "https://e-rickshaw-z32z.onrender.com/" },
+            clientRole = "customer",
+            isDebug = false
+        )
+
+        val jsonRequest = okhttp3.Request.Builder()
+            .url("https://e-rickshaw-z32z.onrender.com/api/v1/auth/login")
+            .post("{\"email\":\"a@b.com\"}".toRequestBody("application/json".toMediaTypeOrNull()))
+            .build()
+
+        val authInterceptor = client.interceptors.first()
+        var interceptedRequest: okhttp3.Request? = null
+
+        val fakeChain = object : okhttp3.Interceptor.Chain {
+            override fun request(): okhttp3.Request = jsonRequest
+            override fun proceed(request: okhttp3.Request): okhttp3.Response {
+                interceptedRequest = request
+                return okhttp3.Response.Builder()
+                    .request(request)
+                    .protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body("{}".toResponseBody("application/json".toMediaTypeOrNull()))
+                    .build()
+            }
+            override fun connection() = null
+            override fun call(): okhttp3.Call = throw UnsupportedOperationException()
+            override fun connectTimeoutMillis() = 10000
+            override fun withConnectTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit) = this
+            override fun readTimeoutMillis() = 10000
+            override fun withReadTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit) = this
+            override fun writeTimeoutMillis() = 10000
+            override fun withWriteTimeout(timeout: Int, unit: java.util.concurrent.TimeUnit) = this
+        }
+
+        authInterceptor.intercept(fakeChain)
+
+        assertNotNull(interceptedRequest)
+        val req = interceptedRequest!!
+        assertEquals("Android", req.header("X-Client-Platform"))
+        assertEquals("customer", req.header("X-Client-Role"))
+        assertEquals("application/json", req.header("Content-Type"))
     }
 }
 

@@ -14,11 +14,6 @@ sealed class AppResult<out T> {
     fun getOrNull(): T? = (this as? Success)?.data
     fun errorOrNull(): AppError? = (this as? Failure)?.error
 
-    fun getOrDefault(default: @UnsafeVariance T): T = when (this) {
-        is Success -> data
-        is Failure -> default
-    }
-
     inline fun <R> map(transform: (T) -> R): AppResult<R> = when (this) {
         is Success -> Success(transform(data))
         is Failure -> this
@@ -52,3 +47,13 @@ sealed class AppResult<out T> {
         fun failure(error: AppError): AppResult<Nothing> = Failure(error)
     }
 }
+
+/**
+ * Returns the encapsulated value if this instance represents [AppResult.Success]
+ * or the [default] value if it is [AppResult.Failure].
+ */
+fun <T> AppResult<T>.getOrDefault(default: T): T = when (this) {
+    is AppResult.Success -> data
+    is AppResult.Failure -> default
+}
+

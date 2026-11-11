@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.payments
+package com.vaisentra.mobility.rider.feature.payments
 
 import android.app.Activity
 import android.util.Log
@@ -429,13 +429,18 @@ fun PaymentScreen(
                                                                                 )
                                                                             )
                                                                             if (verifyCall.isSuccessful && verifyCall.body()?.success == true) {
+                                                                                paymentSettled = true
                                                                                 Toast.makeText(context, "Payment Verified & Settled via Razorpay!", Toast.LENGTH_LONG).show()
+                                                                            } else {
+                                                                                // Payment captured at gateway, authoritative server verification pending
+                                                                                Toast.makeText(context, "Payment captured ($paymentId). Verification pending. Please do not retry.", Toast.LENGTH_LONG).show()
                                                                             }
                                                                         } catch (e: Exception) {
-                                                                            Log.w("PaymentScreen", "Verification error: ${e.message}")
+                                                                            Log.w("PaymentScreen", "Verification network error: ${e.message}")
+                                                                            Toast.makeText(context, "Payment received at gateway ($paymentId). Awaiting verification. Please do not pay again.", Toast.LENGTH_LONG).show()
+                                                                        } finally {
+                                                                            isProcessing = false
                                                                         }
-                                                                        paymentSettled = true
-                                                                        isProcessing = false
                                                                     }
                                                                 }
 

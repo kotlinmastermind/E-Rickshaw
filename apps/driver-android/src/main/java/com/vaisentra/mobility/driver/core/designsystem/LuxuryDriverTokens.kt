@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.designsystem
+package com.vaisentra.mobility.driver.core.designsystem
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -7,6 +7,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.padding
+import com.vaisentra.mobility.core.designsystem.SharedDesignTokens
 
 object DriverColors {
     val MidnightBlack = Color(0xFF090A0F)
@@ -14,29 +15,29 @@ object DriverColors {
     val SurfaceCard = Color(0xFF1B1E2E)
     val SurfaceBorder = Color(0xFF282C42)
     
-    val ChauffeurGold = Color(0xFFD4AF37)
-    val StatusOnline = Color(0xFF10B981)
-    val StatusBusy = Color(0xFFF59E0B)
+    val ChauffeurGold = SharedDesignTokens.ChauffeurGold
+    val StatusOnline = SharedDesignTokens.Emerald
+    val StatusBusy = SharedDesignTokens.Amber
     val StatusOffline = Color(0xFF6B7280)
-    val AlertSuccess = Color(0xFF10B981)
-    val AlertDanger = Color(0xFFEF4444)
+    val AlertSuccess = SharedDesignTokens.Emerald
+    val AlertDanger = SharedDesignTokens.Red
     
-    val TextPure = Color(0xFFFFFFFF)
+    val TextPure = SharedDesignTokens.White
     val TextMuted = Color(0xFF9CA3AF)
 }
 
 object DriverMobilityColors {
-    val PrimaryYellow = Color(0xFFF9C933)
-    val PrimaryYellowDark = Color(0xFFE5B422)
-    val EcoGreen = Color(0xFF0F8A4E)
-    val LightGreen = Color(0xFFE8F5E9)
-    val BackgroundPure = Color(0xFFFFFFFF)
-    val SurfaceLight = Color(0xFFF7F8FA)
-    val BorderLight = Color(0xFFE5E7EB)
-    val TextDark = Color(0xFF1E2022)
-    val TextMuted = Color(0xFF6B7280)
-    val StatusOnline = Color(0xFF10B981)
-    val StatusOffline = Color(0xFFEF4444)
+    val PrimaryYellow = SharedDesignTokens.PrimaryYellow
+    val PrimaryYellowDark = SharedDesignTokens.PrimaryYellowDark
+    val EcoGreen = SharedDesignTokens.EcoGreen
+    val LightGreen = SharedDesignTokens.LightGreen
+    val BackgroundPure = SharedDesignTokens.BackgroundPure
+    val SurfaceLight = SharedDesignTokens.SurfaceLight
+    val BorderLight = SharedDesignTokens.BorderLight
+    val TextDark = SharedDesignTokens.TextDark
+    val TextMuted = SharedDesignTokens.TextMuted
+    val StatusOnline = SharedDesignTokens.Emerald
+    val StatusOffline = SharedDesignTokens.Red
 }
 
 object DriverTypography {

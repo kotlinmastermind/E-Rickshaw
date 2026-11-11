@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.safety
+package com.vaisentra.mobility.driver.feature.safety
 
 import android.content.Intent
 import android.net.Uri
@@ -14,8 +14,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.vaisentra.mobility.core.model.PrivacyDsarSubmissionDto
 import com.vaisentra.mobility.driver.core.designsystem.*
 import com.vaisentra.mobility.driver.core.network.DriverApiClient
+import com.vaisentra.mobility.driver.feature.duty.DriverDutyRepository
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -79,7 +81,7 @@ fun DriverSafetySupportScreen(onBack: () -> Unit, rideId: String? = null, pickup
                 OutlinedButton(onClick = { scope.launch { try { val r = DriverApiClient.getService().respondDriverSafetyCheckin(mapOf("ride_id" to rideId, "response_type" to "NEED_HELP")); message = if (r.isSuccessful) "Safety alert recorded. Call 112 now if anyone is in immediate danger." else "Could not record alert. Call 112 directly." } catch (_: Exception) { message = "Could not record alert. Call 112 directly." } } }) { Text("I need help") }
             }
             SafetyCard("Safety check-in", "Take a moment to assess whether you are safe and fit to drive.") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("FIT", "NEEDS_REST", "UNFIT").forEach { state -> OutlinedButton(onClick = { scope.launch { try { val r=DriverApiClient.getService().submitFatigueCheck(mapOf("result" to state,"ride_id" to rideId)); if(r.isSuccessful && state!="FIT") DriverApiClient.getService().setAvailability(com.vaisentra.mobility.driver.core.network.DriverAvailabilityPayload(false)); message=if(r.isSuccessful) "Check-in recorded. ${r.body()?.get("guidance")}" else "Check-in could not be saved." } catch (_:Exception) { message="Check-in could not be saved." } } }) { Text(state.replace('_',' ')) } } }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("FIT", "NEEDS_REST", "UNFIT").forEach { state -> OutlinedButton(onClick = { scope.launch { try { val r=DriverApiClient.getService().submitFatigueCheck(mapOf("result" to state,"ride_id" to rideId)); if(r.isSuccessful && state!="FIT") DriverDutyRepository.getInstance(context).setDutyOffline(); message=if(r.isSuccessful) "Check-in recorded. ${r.body()?.get("guidance")}" else "Check-in could not be saved." } catch (_:Exception) { message="Check-in could not be saved." } } }) { Text(state.replace('_',' ')) } } }
             }
             SafetyCard("Trip location privacy", "Location sharing is optional and applies to the active trip only. Review the privacy notice before changing this setting.") {
                 Row { Switch(shareLocation, { shareLocation = it }); Text("Share trip location with passenger", Modifier.padding(start=8.dp), color=DriverColors.TextPure) }
@@ -153,7 +155,7 @@ fun DriverSafetySupportScreen(onBack: () -> Unit, rideId: String? = null, pickup
         val body=text.trim(); if(body.length < if(dialog=="appeal") 20 else 10) { message="Please provide more detail before submitting."; return@TextButton }
         if (dialog=="incident" && incidentCategory!="OTHER" && rideId==null) { message="${incidentCategory.replace('_',' ')} reports require an active ride. Open this screen from an active ride."; return@TextButton }
         val action=dialog; dialog=""; text=""
-        scope.launch { try { val api=DriverApiClient.getService(); val response=when(action) { "appeal" -> api.appealRating(selectedRating,mapOf("reason" to body)); "callback" -> api.requestDriverCallback(mapOf("subject" to body,"preferred_time_window" to "WITHIN_1_HOUR")); "ticket" -> api.createDriverSupportTicket(mapOf("subject" to body.take(255),"message" to body,"category" to "SAFETY")); "privacy" -> api.submitPrivacyDsar(com.vaisentra.mobility.driver.core.network.DriverPrivacyDsarPayload(requestType = privacyType, reason = body)); else -> api.createDriverIncident(mapOf("ride_id" to rideId,"category" to incidentCategory,"description" to body,"severity" to "MEDIUM")) }; message=if(response.isSuccessful) response.body()?.get("message")?.toString() ?: "Request submitted." else "Request could not be submitted (${response.code()})."; if(action=="incident" && response.isSuccessful) lastIncidentTicket=response.body()?.get("ticket_number")?.toString(); refresh() } catch (_:Exception) { message="Request could not be submitted. Check your connection." } }
+        scope.launch { try { val api=DriverApiClient.getService(); val response=when(action) { "appeal" -> api.appealRating(selectedRating,mapOf("reason" to body)); "callback" -> api.requestDriverCallback(mapOf("subject" to body,"preferred_time_window" to "WITHIN_1_HOUR")); "ticket" -> api.createDriverSupportTicket(mapOf("subject" to body.take(255),"message" to body,"category" to "SAFETY")); "privacy" -> api.submitPrivacyDsar(PrivacyDsarSubmissionDto(requestType = privacyType, reason = body)); else -> api.createDriverIncident(mapOf("ride_id" to rideId,"category" to incidentCategory,"description" to body,"severity" to "MEDIUM")) }; message=if(response.isSuccessful) response.body()?.get("message")?.toString() ?: "Request submitted." else "Request could not be submitted (${response.code()})."; if(action=="incident" && response.isSuccessful) lastIncidentTicket=response.body()?.get("ticket_number")?.toString(); refresh() } catch (_:Exception) { message="Request could not be submitted. Check your connection." } }
     }) { Text("Submit") } }, dismissButton={ TextButton(onClick={dialog=""}) { Text("Cancel") } })
 }
 

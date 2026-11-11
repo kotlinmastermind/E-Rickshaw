@@ -67,15 +67,47 @@ sealed class AppError(
         override val cause: Throwable? = null
     ) : AppError(code, userMessage, diagnosticMessage, ErrorCategory.TIMEOUT, isRecoverable, isRetryEligible, correlationId, cause)
 
-    data class ConnectionError(
+    open class ConnectionError(
         override val code: String = "ERR_NET_CONNECTION",
         override val userMessage: String = "Cannot connect to server. Please verify your connection.",
-        override val diagnosticMessage: String = "TCP connection refused or DNS lookup failure",
+        override val diagnosticMessage: String = "TCP connection refused or host unreachable",
         override val isRecoverable: Boolean = true,
         override val isRetryEligible: Boolean = true,
         override val correlationId: String = UUID.randomUUID().toString(),
         override val cause: Throwable? = null
     ) : AppError(code, userMessage, diagnosticMessage, ErrorCategory.CONNECTION, isRecoverable, isRetryEligible, correlationId, cause)
+
+    class DnsError(
+        val hostname: String? = null,
+        code: String = "ERR_NET_CONNECTION",
+        userMessage: String = "Unable to resolve server address. Please check your internet and DNS settings.",
+        diagnosticMessage: String = "DNS lookup failure${hostname?.let { " for host: $it" } ?: ""}",
+        isRecoverable: Boolean = true,
+        isRetryEligible: Boolean = true,
+        correlationId: String = UUID.randomUUID().toString(),
+        cause: Throwable? = null
+    ) : ConnectionError(code, userMessage, diagnosticMessage, isRecoverable, isRetryEligible, correlationId, cause)
+
+    data class TlsError(
+        override val code: String = "ERR_NET_TLS",
+        override val userMessage: String = "Secure TLS connection could not be established. Please check system date/time and network security.",
+        override val diagnosticMessage: String = "TLS/SSL handshake or certificate verification failure",
+        override val isRecoverable: Boolean = false,
+        override val isRetryEligible: Boolean = false,
+        override val correlationId: String = UUID.randomUUID().toString(),
+        override val cause: Throwable? = null
+    ) : AppError(code, userMessage, diagnosticMessage, ErrorCategory.SECURITY, isRecoverable, isRetryEligible, correlationId, cause)
+
+    data class EmptyResponseError(
+        val httpCode: Int = 200,
+        override val code: String = "ERR_RESP_EMPTY",
+        override val userMessage: String = "Received an empty response from server. Please try again.",
+        override val diagnosticMessage: String = "HTTP $httpCode response body was unexpectedly null or empty",
+        override val isRecoverable: Boolean = true,
+        override val isRetryEligible: Boolean = true,
+        override val correlationId: String = UUID.randomUUID().toString(),
+        override val cause: Throwable? = null
+    ) : AppError(code, userMessage, diagnosticMessage, ErrorCategory.SERIALIZATION, isRecoverable, isRetryEligible, correlationId, cause)
 
     data class HttpError(
         val statusCode: Int,
@@ -297,9 +329,14 @@ sealed class AppError(
                 409 -> "A conflict occurred with the current state. Please refresh and retry."
                 422 -> "Validation failed. Please verify the information entered."
                 429 -> "Too many requests. Please wait a moment and try again."
+                500 -> "Internal server error. Please try again shortly."
+                502 -> "Bad Gateway. Backend server is starting up or temporarily unavailable. Please retry in a few moments."
+                503 -> "Service temporarily unavailable. Please try again shortly."
+                504 -> "Gateway timeout. Server took too long to respond. Please try again."
                 in 500..599 -> "Our servers are experiencing issues. Please try again shortly."
                 else -> "An unexpected network response was received. Please try again."
             }
         }
     }
 }
+

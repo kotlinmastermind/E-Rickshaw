@@ -62,18 +62,6 @@ export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = (
     });
   };
 
-  const loginDemo = async () => {
-    setBusy(true); setError(''); setInfo('');
-    try {
-      const result = await requestApi<AuthResult>('/auth/admin/demo-session', { method: 'POST' }, false);
-      accept(result);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Executive demo sign-in failed.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const signIn = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError(''); setInfo('');
     try {
@@ -105,7 +93,7 @@ export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = (
 
   return <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: 'radial-gradient(circle at 50% 0%, #28251e, #0a0a0e 62%)', color: '#f8f5ee' }}>
     <section style={{ width: 'min(100%, 460px)', padding: 34, borderRadius: 22, background: '#15141a', border: '1px solid rgba(212,175,55,.32)', boxShadow: '0 24px 90px #0008' }}>
-      <div style={{ color: '#d4af37', fontFamily: 'Georgia,serif', letterSpacing: '.18em', fontSize: 12 }}>GRAND CHAUFFEUR</div>
+      <div style={{ color: '#d4af37', fontFamily: 'Georgia,serif', letterSpacing: '.18em', fontSize: 12 }}>VAISENTRA MOBILITY</div>
       <h1 style={{ fontFamily: 'Georgia,serif', fontWeight: 500, fontSize: 30, margin: '12px 0 6px' }}>Executive access</h1>
       <p style={{ color: '#aca69c', lineHeight: 1.6, marginBottom: 24 }}>Sign in with an administrator account and verify with your authenticator. Customer and driver accounts cannot enter this console.</p>
       {!challenge && !setup && !isForgotMode && <form onSubmit={signIn} style={{ display: 'grid', gap: 14 }}>
@@ -117,16 +105,6 @@ export const AdminSignIn: React.FC<{ onAuthenticated: (user: any) => void }> = (
           </button>
         </div>
         <button disabled={busy} style={goldButton}>{busy ? 'Verifying credentials…' : 'Continue securely'}</button>
-        <div style={{ textAlign: 'center', margin: '8px 0', color: '#666', fontSize: 12 }}>— OR —</div>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={loginDemo}
-          style={{ ...goldButton, background: '#1c1b22', border: '1px solid #d4af37', color: '#d4af37' }}
-        >
-          ⚡ Instant Executive Demo Sign-In
-        </button>
-
       </form>}
 
       {!challenge && !setup && isForgotMode && <form onSubmit={recoverySent ? completeRecovery : requestRecovery} style={{ display: 'grid', gap: 14 }}>

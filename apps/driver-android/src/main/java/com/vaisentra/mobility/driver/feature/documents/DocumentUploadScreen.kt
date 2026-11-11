@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.documents
+package com.vaisentra.mobility.driver.feature.documents
 
 import android.net.Uri
 import android.provider.OpenableColumns

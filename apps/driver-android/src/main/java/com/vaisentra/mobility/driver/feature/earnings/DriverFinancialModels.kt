@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.earnings
+package com.vaisentra.mobility.driver.feature.earnings
 
 import com.google.gson.annotations.SerializedName
 

@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.governance
+package com.vaisentra.mobility.rider.feature.governance
 
 import android.content.Context
 import androidx.compose.foundation.BorderStroke
@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.core.designsystem.*
 import com.vaisentra.mobility.rider.core.network.*
-import com.vaisentra.mobility.rider.core.security.TokenManager
+import com.vaisentra.mobility.core.security.TokenManager
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody

@@ -42,8 +42,15 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: Optional[str] = os.getenv("RAZORPAY_KEY_SECRET", None)
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = os.getenv("RAZORPAY_WEBHOOK_SECRET", None)
 
-    # Primary SMS Gateway
-    SMS_PROVIDER: str = os.getenv("SMS_PROVIDER", "console")
+    # Primary SMS Gateway (Twilio Verify Service)
+    SMS_PROVIDER: str = os.getenv("SMS_PROVIDER", "twilio")
+    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+    TWILIO_VERIFY_SERVICE_SID: str = os.getenv("TWILIO_VERIFY_SERVICE_SID", "")
+    TWILIO_API_KEY: Optional[str] = os.getenv("TWILIO_API_KEY", None)
+    TWILIO_PHONE_NUMBER: Optional[str] = os.getenv("TWILIO_PHONE_NUMBER", None)
+    FCM_CREDENTIALS_PATH: Optional[str] = os.getenv("FCM_CREDENTIALS_PATH", None)
+    FIREBASE_CREDENTIALS_PATH: Optional[str] = os.getenv("FIREBASE_CREDENTIALS_PATH", None)
 
     # Push Notifications & Real-Time Dispatch Governance (Phase 3.3)
     PUSH_PROVIDER: str = os.getenv("PUSH_PROVIDER", "websocket")

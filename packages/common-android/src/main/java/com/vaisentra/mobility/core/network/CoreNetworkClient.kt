@@ -17,38 +17,43 @@ import java.util.concurrent.TimeUnit
  * client telemetry headers, and TLS certificate pinning for production backend domains.
  */
 object CoreNetworkClient {
-    const val DEFAULT_PRODUCTION_URL: String = "https://e-rickshaw-z32z.onrender.com/"
-    const val LOCAL_EMULATOR_BASE_URL: String = "http://10.0.2.2:8000/"
-    const val PRODUCTION_HOSTNAME: String = "e-rickshaw-z32z.onrender.com"
+    const val CANONICAL_PRODUCTION_URL: String = NetworkEnvironmentManager.CANONICAL_PRODUCTION_URL
+    const val DEFAULT_PRODUCTION_URL: String = NetworkEnvironmentManager.CANONICAL_PRODUCTION_URL
+    const val PRODUCTION_HOSTNAME: String = NetworkEnvironmentManager.CANONICAL_PRODUCTION_HOSTNAME
 
     fun isEmulator(): Boolean {
-        val fingerprint = Build.FINGERPRINT.orEmpty()
-        val model = Build.MODEL.orEmpty()
-        val hardware = Build.HARDWARE.orEmpty()
-        val product = Build.PRODUCT.orEmpty()
+        return try {
+            val fingerprint = Build.FINGERPRINT.orEmpty()
+            val model = Build.MODEL.orEmpty()
+            val hardware = Build.HARDWARE.orEmpty()
+            val product = Build.PRODUCT.orEmpty()
 
-        return fingerprint.startsWith("generic")
-            || fingerprint.startsWith("unknown")
-            || model.contains("google_sdk")
-            || model.contains("Emulator")
-            || model.contains("Android SDK built for x86")
-            || hardware.contains("goldfish")
-            || hardware.contains("ranchu")
-            || product.contains("sdk_gphone")
-            || product.contains("google_sdk")
-    }
-
-    fun resolveDefaultBaseUrl(savedUrl: String? = null): String {
-        return when {
-            !savedUrl.isNullOrBlank() -> if (savedUrl.endsWith("/")) savedUrl else "$savedUrl/"
-            isEmulator() -> LOCAL_EMULATOR_BASE_URL
-            else -> DEFAULT_PRODUCTION_URL
+            fingerprint.startsWith("generic")
+                || fingerprint.startsWith("unknown")
+                || model.contains("google_sdk")
+                || model.contains("Emulator")
+                || model.contains("Android SDK built for x86")
+                || hardware.contains("goldfish")
+                || hardware.contains("ranchu")
+                || product.contains("sdk_gphone")
+                || product.contains("google_sdk")
+        } catch (t: Throwable) {
+            false
         }
     }
 
-    fun isLocalBackend(baseUrl: String): Boolean {
-        return baseUrl.contains("10.0.2.2") || baseUrl.contains("localhost") || baseUrl.contains("127.0.0.1")
+    fun resolveDefaultBaseUrl(
+        savedUrl: String? = null,
+        isRelease: Boolean = false
+    ): String {
+        return NetworkEnvironmentManager.resolveBaseUrl(
+            savedUrl = savedUrl,
+            isRelease = isRelease,
+            deviceIsEmulator = isEmulator()
+        )
     }
+
+    fun isLocalBackend(baseUrl: String): Boolean = false
 
     fun getWebSocketUrl(baseUrl: String, path: String): String {
         val cleanBase = baseUrl.removeSuffix("/")
@@ -70,10 +75,10 @@ object CoreNetworkClient {
         baseUrlProvider: () -> String = { DEFAULT_PRODUCTION_URL },
         clientRole: String = "mobile",
         isDebug: Boolean = true,
-        connectTimeoutSeconds: Long = 60,
-        readTimeoutSeconds: Long = 90,
-        writeTimeoutSeconds: Long = 60,
-        callTimeoutSeconds: Long = 90,
+        connectTimeoutSeconds: Long = 20,
+        readTimeoutSeconds: Long = 30,
+        writeTimeoutSeconds: Long = 30,
+        callTimeoutSeconds: Long = 45,
         certificatePinner: CertificatePinner? = null
     ): OkHttpClient {
         val authInterceptor = Interceptor { chain ->
@@ -82,7 +87,17 @@ object CoreNetworkClient {
                 .header("X-Client-Platform", "Android")
                 .header("X-Client-Role", clientRole)
                 .header("Accept", "application/json")
-                .header("Content-Type", "application/json")
+
+            val existingContentType = originalRequest.header("Content-Type")
+            val bodyContentType = originalRequest.body?.contentType()
+            val isMultipartOrBinary = bodyContentType?.type?.equals("multipart", ignoreCase = true) == true ||
+                    (bodyContentType != null && !bodyContentType.subtype.contains("json", ignoreCase = true)) ||
+                    (existingContentType != null && !existingContentType.contains("json", ignoreCase = true))
+
+            // Do not override Content-Type if already present or if request is multipart/binary upload
+            if (existingContentType == null && !isMultipartOrBinary) {
+                requestBuilder.header("Content-Type", "application/json")
+            }
 
             val token = tokenManager?.getToken()
             if (!token.isNullOrBlank()) {
@@ -150,6 +165,7 @@ object CoreNetworkClient {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(45, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)

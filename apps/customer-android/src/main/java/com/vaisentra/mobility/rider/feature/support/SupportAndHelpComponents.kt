@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.support
+package com.vaisentra.mobility.rider.feature.support
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility

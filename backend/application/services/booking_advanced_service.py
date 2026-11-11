@@ -257,6 +257,14 @@ class BookingAdvancedService:
         await self.db.commit()
         await self.db.refresh(ride)
 
+        # Trigger Smart Dispatch Engine immediately for on-demand ride booking
+        if not is_scheduled:
+            try:
+                import asyncio
+                asyncio.create_task(RideService._background_dispatch(ride.id))
+            except Exception as dispatch_exc:
+                logger.warning(f"Failed to dispatch ride {ride.id}: {dispatch_exc}")
+
         return {
             "ride_id": ride.id,
             "status": ride.status,

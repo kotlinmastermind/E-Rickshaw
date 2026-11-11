@@ -264,6 +264,8 @@ async def test_payment_webhook_duplicate_idempotency_acknowledged():
     from backend.domain.models import Payment
 
     mock_db = AsyncMock()
+    # In SQLAlchemy, AsyncSession.add() is strictly synchronous
+    mock_db.add = MagicMock()
     mock_payment = MagicMock(spec=Payment)
     mock_payment.id = "pay_rec_123"
     mock_payment.status = "CAPTURED"
@@ -283,5 +285,38 @@ async def test_payment_webhook_duplicate_idempotency_acknowledged():
     res = await service.process_webhook(body, "valid_sig")
     assert res["status"] == "ALREADY_PROCESSED"
     assert res["payment_id"] == "pay_rec_123"
+
+
+@pytest.mark.asyncio
+async def test_admin_demo_session_endpoint_deleted_returns_404():
+    """Verify that unauthenticated admin demo backdoor does not exist and returns 404/405."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/v1/auth/admin/demo-session", json={})
+        assert resp.status_code in (404, 405)
+
+
+@pytest.mark.asyncio
+async def test_anonymous_and_customer_cannot_access_admin_endpoints():
+    """Verify RBAC: Anonymous or non-admin cannot access administrative endpoints."""
+    from backend.infrastructure.security.crypto import create_jwt_token
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Anonymous request rejected
+        resp_anon = await client.get("/api/v1/admin/dashboard/stats")
+        assert resp_anon.status_code in (401, 403)
+
+        # 2. Customer token rejected from administrative endpoints
+        customer_token = create_jwt_token(
+            user_id="cust-user-1",
+            role="customer",
+            session_id="sess-cust-123",
+            expires_delta=timedelta(minutes=15)
+        )
+        resp_cust = await client.get(
+            "/api/v1/admin/dashboard/stats",
+            headers={"Authorization": f"Bearer {customer_token}"}
+        )
+        assert resp_cust.status_code in (401, 403)
 
 

@@ -304,7 +304,7 @@ async def log_expense(
 
 
 @router.get("/export/csv")
-@router.get("/export-csv")
+@router.get("/export-csv", operation_id="export_earnings_csv_alias")
 async def export_earnings_csv(
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)

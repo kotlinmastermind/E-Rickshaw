@@ -3,6 +3,7 @@ package com.vaisentra.mobility.rider
 import android.app.ActivityManager
 import android.app.Application
 import android.os.Build
+import android.os.Looper
 import android.util.Log
 import android.webkit.WebView
 import com.mapbox.common.MapboxOptions
@@ -89,72 +90,62 @@ class CustomerApplication : Application() {
 
     private fun setupUncaughtExceptionHandler() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        val crashObserver = com.vaisentra.mobility.core.error.GlobalCrashHandler(this, "customer-android", defaultHandler)
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             if (isPlayServicesOrNativeMapException(thread, throwable)) {
-                Log.w("CustomerApplication", "Caught non-fatal Play Services / Location exception on thread [${thread.name}]: ${throwable.message}")
+                Log.w("CustomerApplication", "Caught non-fatal background Map/Play Services exception on thread [${thread.name}]: ${throwable.message}")
                 return@setDefaultUncaughtExceptionHandler
             }
-            defaultHandler?.uncaughtException(thread, throwable)
+            crashObserver.uncaughtException(thread, throwable)
         }
     }
 
-    private fun isPlayServicesOrNativeMapException(thread: Thread, throwable: Throwable?): Boolean {
-        if (throwable == null) return false
-        val fullTrace = buildString {
-            append(thread.name)
-            append(" ")
-            append(throwable.javaClass.name)
-            append(" ")
-            append(throwable.message.orEmpty())
-            append(" ")
-            append(Log.getStackTraceString(throwable))
-            var cause = throwable.cause
-            var depth = 0
-            while (cause != null && depth < 10) {
-                append(" ")
-                append(cause.javaClass.name)
-                append(" ")
-                append(cause.message.orEmpty())
-                cause = cause.cause
-                depth++
+    companion object {
+        fun isPlayServicesOrNativeMapException(thread: Thread, throwable: Throwable?): Boolean {
+            if (throwable == null) return false
+
+            // NEVER swallow exceptions on the main UI thread
+            val mainThread = try { Looper.getMainLooper()?.thread } catch (_: Throwable) { null }
+            if (mainThread != null && thread == mainThread) {
+                return false
             }
+
+            // Inspect exception chain for typed fatal exceptions that must NEVER be swallowed
+            var curr: Throwable? = throwable
+            while (curr != null) {
+                if (curr is SecurityException) return false
+                if (curr is java.io.IOException) return false
+                if (curr is NullPointerException || curr is IllegalArgumentException) return false
+
+                val className = curr.javaClass.name
+                if (className.contains("SecurityException", ignoreCase = true) ||
+                    className.contains("Parcel", ignoreCase = true) ||
+                    className.contains("RemoteException", ignoreCase = true)
+                ) {
+                    return false
+                }
+                curr = curr.cause
+            }
+
+            // Only swallow specific, known non-fatal background Google Play Services Dynamite module
+            // loader failures or native Mapbox sqlite disk cache lock contention
+            val fullTrace = buildString {
+                append(thread.name).append(" ")
+                append(throwable.javaClass.name).append(" ")
+                append(throwable.message.orEmpty()).append(" ")
+                append(throwable.stackTraceToString())
+            }
+
+            val isDynamiteModuleFailure = (fullTrace.contains("com.google.android.gms.dynamite", ignoreCase = true) ||
+                    fullTrace.contains("policy_maps_core_dynamite", ignoreCase = true) ||
+                    fullTrace.contains("maps_dynamite", ignoreCase = true)) &&
+                    fullTrace.contains("No acceptable module", ignoreCase = true)
+
+            val isNativeDiskCacheLock = fullTrace.contains("NativeSqliteDiskCacheImpl", ignoreCase = true) &&
+                    fullTrace.contains("Database lock unavailable", ignoreCase = true)
+
+            return isDynamiteModuleFailure || isNativeDiskCacheLock
         }
-
-        val nonFatalKeywords = listOf(
-            "FlagStore",
-            "policy_maps_core_dynamite",
-            "maps_dynamite",
-            "DynamiteModule",
-            "No acceptable module",
-            "pre-Chimera",
-            "com.google.android.gms.dynamite",
-            "zzcc",
-            "LoadingException",
-            "m140.cpq",
-            "m140.cps",
-            "cpq.u",
-            "cpq.f",
-            "cpq.j",
-            "cps.run",
-            "NativeSqliteDiskCacheImpl",
-            "Database lock unavailable",
-            "mapcore",
-            "CronetException",
-            "NO_CONNECTIVITY",
-            "REQUEST_TIMEOUT",
-            "Unknown calling package name",
-            "Failed to get service from broker",
-            "GoogleApiManager",
-            "IGmsServiceBroker",
-            "SecurityException",
-            "Parcel.createException",
-            "Parcel.readException",
-            "Phenotype",
-            "Unable to update local snapshot",
-            "com.google.android.gms"
-        )
-
-        return nonFatalKeywords.any { fullTrace.contains(it, ignoreCase = true) }
     }
 
     private fun initializeMapboxSdk() {

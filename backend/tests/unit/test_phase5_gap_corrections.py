@@ -8,6 +8,7 @@ Covers:
 import asyncio
 import time
 import uuid
+import os
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, AsyncMock
@@ -233,11 +234,6 @@ def test_android_and_web_clients_no_jwt_query_params():
         content = f.read()
     assert "api/v1/ws/location?token=" not in content
     assert 'addHeader("Authorization", "Bearer $token")' in content
-
-    catalog_path = "C:/androidAi/apps/customer-android/src/main/java/com/vaisentra/mobility/rider/feature/luxury/CustomerMasterCatalogFlow.kt"
-    with open(catalog_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    assert "tracking?token=" not in content
 
     tracking_path = "C:/androidAi/apps/customer-android/src/main/java/com/vaisentra/mobility/rider/feature/tracking/LiveTrackingScreen.kt"
     with open(tracking_path, "r", encoding="utf-8") as f:

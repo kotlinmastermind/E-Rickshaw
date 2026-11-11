@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy import delete, desc, func, or_, select, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import settings
@@ -82,16 +82,45 @@ class AdminGovernanceService:
         return {"changed_ids": changed, "skipped": skipped, "changed_count": len(changed), "skipped_count": len(skipped)}
 
     async def list_drivers(self, approval_status: str = "") -> List[Dict[str, Any]]:
+        status_canonical_map = {
+            "APPROVED": "APPROVED",
+            "APPROVE": "APPROVED",
+            "YES": "APPROVED",
+            "TRUE": "APPROVED",
+            "1": "APPROVED",
+            "REJECTED": "REJECTED",
+            "REJECT": "REJECTED",
+            "NO": "REJECTED",
+            "SUSPENDED": "SUSPENDED",
+            "PENDING": "PENDING"
+        }
         stmt = select(DriverProfile, User).join(User, User.id == DriverProfile.user_id)
         if approval_status:
-            stmt = stmt.where(DriverProfile.approval_status == approval_status.upper())
+            normalized_filter = status_canonical_map.get(approval_status.strip().upper(), approval_status.strip().upper())
+            variants = [k for k, v in status_canonical_map.items() if v == normalized_filter] or [normalized_filter]
+            stmt = stmt.where(or_(DriverProfile.approval_status.in_(variants), func.upper(DriverProfile.approval_status).in_(variants)))
+        
         rows = (await self.db.execute(stmt.order_by(DriverProfile.created_at.asc()))).all()
+
+        # Batch-aggregate document counts to eliminate N+1 query loop
+        doc_stats_stmt = (
+            select(
+                DriverDocument.driver_id,
+                func.count(DriverDocument.id).label("total"),
+                func.sum(case((DriverDocument.verification_status == "PENDING", 1), else_=0)).label("pending")
+            )
+            .group_by(DriverDocument.driver_id)
+        )
+        doc_stats_rows = (await self.db.execute(doc_stats_stmt)).all()
+        doc_stats = {r.driver_id: (int(r.total or 0), int(r.pending or 0)) for r in doc_stats_rows}
+
         result = []
         for driver, user in rows:
-            count = int((await self.db.execute(select(func.count(DriverDocument.id)).where(DriverDocument.driver_id == driver.id))).scalar_one())
-            pending = int((await self.db.execute(select(func.count(DriverDocument.id)).where(DriverDocument.driver_id == driver.id, DriverDocument.verification_status == "PENDING"))).scalar_one())
+            count, pending = doc_stats.get(driver.id, (0, 0))
+            raw_st = str(driver.approval_status or "PENDING").strip().upper()
+            canonical_status = status_canonical_map.get(raw_st, "PENDING")
             result.append({"id": driver.id, "user_id": user.id, "full_name": user.full_name, "email": user.email,
-                           "license_number": driver.license_number, "approval_status": driver.approval_status,
+                           "license_number": driver.license_number, "approval_status": canonical_status,
                            "rating_average": driver.rating_average, "total_trips": driver.total_trips,
                            "documents_count": count, "pending_documents": pending})
         return result

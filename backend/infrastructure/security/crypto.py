@@ -44,8 +44,8 @@ def create_jwt_token(
         "jti": str(uuid.uuid4()),
         "iat": int(now.timestamp()),
         "exp": int(expire.timestamp()),
-        "iss": "luxury-ride-platform",
-        "aud": "luxury-ride-clients"
+        "iss": "vaisentra-mobility",
+        "aud": "vaisentra-mobility-clients"
     }
     encoded_jwt = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
@@ -55,8 +55,8 @@ def decode_jwt_token(token: str) -> Dict[str, Any]:
         token,
         settings.SECRET_KEY,
         algorithms=[settings.ALGORITHM],
-        issuer="luxury-ride-platform",
-        audience="luxury-ride-clients"
+        issuer=["vaisentra-mobility", "luxury-ride-platform"],
+        audience=["vaisentra-mobility-clients", "luxury-ride-clients"]
     )
 
 def verify_hmac_signature(payload_bytes: bytes, signature: str, secret: str) -> bool:

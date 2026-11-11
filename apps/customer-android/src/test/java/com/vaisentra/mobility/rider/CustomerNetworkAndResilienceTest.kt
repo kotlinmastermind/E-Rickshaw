@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider
+package com.vaisentra.mobility.rider
 
 import com.vaisentra.mobility.core.network.ResilientDns
 import com.vaisentra.mobility.rider.core.network.ApiClient

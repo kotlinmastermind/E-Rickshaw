@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.trip
+package com.vaisentra.mobility.driver.feature.trip
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable

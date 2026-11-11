@@ -32,7 +32,9 @@ open class BaseTokenManager(
         const val KEY_LANGUAGE = "preferred_language"
         const val KEY_CURRENCY = "currency_code"
         const val KEY_ACTIVE_RIDE_ID = "active_ride_id"
+        const val KEY_ACTIVE_RIDE_OTP = "active_ride_otp"
         const val KEY_SERVER_URL = "custom_server_url"
+        const val KEY_ENVIRONMENT = "app_environment"
     }
 
     protected fun resolveKey(key: String): String {
@@ -159,19 +161,65 @@ open class BaseTokenManager(
 
     open fun getActiveRideId(): String? = getStringCompat(KEY_ACTIVE_RIDE_ID)
 
-    open fun clearActiveRideId() {
-        prefs.edit().remove(resolveKey(KEY_ACTIVE_RIDE_ID)).remove(KEY_ACTIVE_RIDE_ID).apply()
+    open fun saveActiveRideOtp(otp: String?) {
+        if (otp.isNullOrBlank()) {
+            prefs.edit().remove(resolveKey(KEY_ACTIVE_RIDE_OTP)).remove(KEY_ACTIVE_RIDE_OTP).apply()
+        } else {
+            prefs.edit().putString(resolveKey(KEY_ACTIVE_RIDE_OTP), otp).apply()
+        }
     }
 
-    open fun getServerUrl(): String? = getStringCompat(KEY_SERVER_URL)
+    open fun getActiveRideOtp(): String? = getStringCompat(KEY_ACTIVE_RIDE_OTP)
+
+    open fun clearActiveRideId() {
+        prefs.edit()
+            .remove(resolveKey(KEY_ACTIVE_RIDE_ID)).remove(KEY_ACTIVE_RIDE_ID)
+            .remove(resolveKey(KEY_ACTIVE_RIDE_OTP)).remove(KEY_ACTIVE_RIDE_OTP)
+            .apply()
+    }
+
+    init {
+        cleanLegacyEnvironmentSettings()
+    }
+
+    /**
+     * Safely purges any legacy environment or custom server URLs stored in SharedPreferences
+     * to guarantee strict production-only network resolution.
+     */
+    fun cleanLegacyEnvironmentSettings() {
+        val editor = prefs.edit()
+        var hasChanges = false
+        if (prefs.contains(resolveKey(KEY_SERVER_URL))) {
+            editor.remove(resolveKey(KEY_SERVER_URL))
+            hasChanges = true
+        }
+        if (prefs.contains(KEY_SERVER_URL)) {
+            editor.remove(KEY_SERVER_URL)
+            hasChanges = true
+        }
+        if (prefs.contains(resolveKey(KEY_ENVIRONMENT))) {
+            editor.remove(resolveKey(KEY_ENVIRONMENT))
+            hasChanges = true
+        }
+        if (prefs.contains(KEY_ENVIRONMENT)) {
+            editor.remove(KEY_ENVIRONMENT)
+            hasChanges = true
+        }
+        if (hasChanges) {
+            editor.apply()
+        }
+    }
+
+    open fun getServerUrl(): String? = null
 
     open fun setServerUrl(url: String?) {
-        if (url.isNullOrBlank()) {
-            prefs.edit().remove(resolveKey(KEY_SERVER_URL)).remove(KEY_SERVER_URL).apply()
-        } else {
-            val formatted = if (url.endsWith("/")) url else "$url/"
-            prefs.edit().putString(resolveKey(KEY_SERVER_URL), formatted).apply()
-        }
+        cleanLegacyEnvironmentSettings()
+    }
+
+    open fun getEnvironment(): String = "Production"
+
+    open fun setEnvironment(env: String?) {
+        cleanLegacyEnvironmentSettings()
     }
 
     open fun clear() {

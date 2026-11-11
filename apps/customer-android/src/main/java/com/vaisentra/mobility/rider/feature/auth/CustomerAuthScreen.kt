@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -17,23 +18,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.core.designsystem.MobilityColors
+import com.vaisentra.mobility.core.designsystem.SharedDesignTokens
 import com.vaisentra.mobility.rider.core.network.ApiClient
+import com.vaisentra.mobility.rider.core.network.CustomerOtpRequestPayload
+import com.vaisentra.mobility.rider.core.network.CustomerOtpVerifyPayload
 import com.vaisentra.mobility.rider.core.network.CustomerSignupRequestPayload
 import com.vaisentra.mobility.rider.core.network.UnifiedLoginRequestPayload
-import com.vaisentra.mobility.rider.core.security.TokenManager
+import com.vaisentra.mobility.core.security.TokenManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val BrandGold = Color(0xFFD4AF37)
-
+private val BrandGold = SharedDesignTokens.BrandGold
 
 enum class AuthTab {
-    SIGN_IN,
-    SIGN_UP
+    OTP_SIGN_IN,      // Primary / Default OTP Authentication via Twilio
+    PASSWORD_SIGN_IN, // Password Sign In
+    SIGN_UP           // Standard Registration
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,13 +51,21 @@ fun CustomerAuthScreen(
     val scope = rememberCoroutineScope()
     val tokenManager = remember { TokenManager.getInstance(context) }
 
-    var selectedTab by remember { mutableStateOf(AuthTab.SIGN_IN) }
+    // Primary Default Tab: OTP Login
+    var selectedTab by remember { mutableStateOf(AuthTab.OTP_SIGN_IN) }
 
-    // Sign In states
+    // OTP Login States
+    var otpPhone by remember { mutableStateOf("") }
+    var otpCode by remember { mutableStateOf("") }
+    var otpNewUserName by remember { mutableStateOf("") }
+    var isOtpSent by remember { mutableStateOf(false) }
+    var otpResendCountdown by remember { mutableIntStateOf(0) }
+
+    // Password Sign In States
     var signInIdentifier by remember { mutableStateOf("") }
     var signInPassword by remember { mutableStateOf("") }
 
-    // Sign Up states
+    // Sign Up States
     var signUpName by remember { mutableStateOf("") }
     var signUpPhone by remember { mutableStateOf("") }
     var signUpEmail by remember { mutableStateOf("") }
@@ -61,11 +75,20 @@ fun CustomerAuthScreen(
     // UI state
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var successMessage by remember { mutableStateOf<String?>(null) }
     var showPassword by remember { mutableStateOf(false) }
 
     fun normalizePhone(raw: String): String {
         val clean = raw.trim().replace(" ", "").replace("-", "")
         return if (clean.startsWith("+")) clean else if (clean.length == 10) "+91$clean" else clean
+    }
+
+    // Resend countdown timer
+    LaunchedEffect(otpResendCountdown) {
+        if (otpResendCountdown > 0) {
+            delay(1000L)
+            otpResendCountdown -= 1
+        }
     }
 
     Box(
@@ -96,65 +119,54 @@ fun CustomerAuthScreen(
                 color = Color.LightGray
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            // Tab Selector: Sign In / Sign Up
+            // Navigation Tabs (OTP Sign In is Primary)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color(0xFF1E293B), RoundedCornerShape(12.dp))
                     .padding(4.dp)
             ) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (selectedTab == AuthTab.SIGN_IN) BrandGold else Color.Transparent,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable {
-                            selectedTab = AuthTab.SIGN_IN
-                            errorMessage = null
-                        }
-                ) {
-                    Text(
-                        text = "Sign In",
-                        color = if (selectedTab == AuthTab.SIGN_IN) Color.Black else Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(vertical = 10.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (selectedTab == AuthTab.SIGN_UP) BrandGold else Color.Transparent,
-                    modifier = Modifier
-                        .weight(1f)
-                        .clickable {
-                            selectedTab = AuthTab.SIGN_UP
-                            errorMessage = null
-                        }
-                ) {
-                    Text(
-                        text = "Sign Up",
-                        color = if (selectedTab == AuthTab.SIGN_UP) Color.Black else Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(vertical = 10.dp),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
+                listOf(
+                    AuthTab.OTP_SIGN_IN to "OTP Sign In",
+                    AuthTab.PASSWORD_SIGN_IN to "Password",
+                    AuthTab.SIGN_UP to "Sign Up"
+                ).forEach { (tab, label) ->
+                    val isSelected = selectedTab == tab
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) BrandGold else Color.Transparent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable {
+                                selectedTab = tab
+                                errorMessage = null
+                                successMessage = null
+                            }
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Error Display
             if (!errorMessage.isNullOrBlank()) {
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFFEF4444).copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, Color(0xFFEF4444)),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                    color = SharedDesignTokens.Red.copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, SharedDesignTokens.Red),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp)
                 ) {
                     Text(
                         text = errorMessage ?: "",
@@ -165,8 +177,273 @@ fun CustomerAuthScreen(
                 }
             }
 
-            if (selectedTab == AuthTab.SIGN_IN) {
-                // SIGN IN FORM (Email or Mobile + Password)
+            // Success Display
+            if (!successMessage.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF10B981).copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, Color(0xFF10B981)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp)
+                ) {
+                    Text(
+                        text = successMessage ?: "",
+                        color = Color(0xFF6EE7B7),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+
+            // -------------------------------------------------------------
+            // TAB 1: PRIMARY OTP SIGN IN (Twilio Telecom SMS Delivery)
+            // -------------------------------------------------------------
+            if (selectedTab == AuthTab.OTP_SIGN_IN) {
+                if (!isOtpSent) {
+                    // STEP 1: Enter Mobile Number
+                    Text(
+                        text = "Instant Sign In with Mobile OTP",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = "We will send a 6-digit verification code to your phone via Twilio.",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = otpPhone,
+                        onValueChange = { otpPhone = it.filter { char -> char.isDigit() || char == '+' } },
+                        label = { Text("Mobile Number (e.g. 9876543210)", color = Color.Gray) },
+                        prefix = { Text("+91 ", color = BrandGold, fontWeight = FontWeight.Bold) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = BrandGold,
+                            unfocusedBorderColor = Color.DarkGray
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Button(
+                        onClick = {
+                            val clean = otpPhone.trim()
+                            if (clean.length < 10) {
+                                errorMessage = "Please enter a valid 10-digit mobile phone number."
+                                return@Button
+                            }
+                            val formatted = normalizePhone(clean)
+                            isLoading = true
+                            errorMessage = null
+                            successMessage = null
+                            scope.launch {
+                                try {
+                                    val res = ApiClient.getService().requestOtp(
+                                        CustomerOtpRequestPayload(
+                                            phoneNumber = formatted,
+                                            role = "customer"
+                                        )
+                                    )
+                                    if (res.isSuccessful) {
+                                        isOtpSent = true
+                                        otpResendCountdown = 60
+                                        successMessage = "OTP sent successfully via Twilio!"
+                                    } else {
+                                        val err = res.errorBody()?.string() ?: "Failed to dispatch OTP."
+                                        errorMessage = if (err.contains("detail")) err else "Could not send OTP. Please verify your mobile number."
+                                    }
+                                } catch (e: Exception) {
+                                    errorMessage = "Network error: ${e.localizedMessage ?: "Could not reach server"}"
+                                } finally {
+                                    isLoading = false
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandGold, contentColor = Color.Black),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        enabled = !isLoading
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
+                        } else {
+                            Text("GET OTP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                    }
+
+                } else {
+                    // STEP 2: Enter OTP Code & Optional Name for New Users
+                    Text(
+                        text = "Enter Verification Code",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = "Enter the 6-digit code sent to ${normalizePhone(otpPhone)}",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = otpCode,
+                        onValueChange = { if (it.length <= 6) otpCode = it.filter { c -> c.isDigit() } },
+                        label = { Text("6-Digit OTP Code", color = Color.Gray) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = BrandGold,
+                            unfocusedBorderColor = Color.DarkGray
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = otpNewUserName,
+                        onValueChange = { otpNewUserName = it },
+                        label = { Text("Full Name (Optional for new riders)", color = Color.Gray) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = BrandGold,
+                            unfocusedBorderColor = Color.DarkGray
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Button(
+                        onClick = {
+                            if (otpCode.trim().length < 4) {
+                                errorMessage = "Please enter the 6-digit OTP passcode."
+                                return@Button
+                            }
+                            val formatted = normalizePhone(otpPhone)
+                            val code = otpCode.trim()
+                            val name = otpNewUserName.trim().ifBlank { null }
+
+                            isLoading = true
+                            errorMessage = null
+                            scope.launch {
+                                try {
+                                    val res = ApiClient.getService().verifyOtp(
+                                        CustomerOtpVerifyPayload(
+                                            phoneNumber = formatted,
+                                            otpCode = code,
+                                            role = "customer",
+                                            fullName = name
+                                        )
+                                    )
+
+                                    if (res.isSuccessful && res.body()?.accessToken != null) {
+                                        val token = res.body()!!.accessToken
+                                        val uid = res.body()?.user?.id ?: "usr_customer"
+                                        val uName = res.body()?.user?.fullName ?: name ?: "Rider"
+                                        tokenManager.saveAuth(token, uid, formatted, "customer")
+                                        Toast.makeText(context, "Welcome, $uName!", Toast.LENGTH_SHORT).show()
+                                        onAuthSuccess()
+                                    } else {
+                                        val err = res.errorBody()?.string() ?: "Invalid OTP."
+                                        errorMessage = if (err.contains("detail")) err else "Invalid or expired OTP passcode. Please try again."
+                                    }
+                                } catch (e: Exception) {
+                                    errorMessage = "Verification error: ${e.localizedMessage ?: "Could not contact server"}"
+                                } finally {
+                                    isLoading = false
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandGold, contentColor = Color.Black),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        enabled = !isLoading
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
+                        } else {
+                            Text("VERIFY & SIGN IN", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = {
+                                isOtpSent = false
+                                otpCode = ""
+                                errorMessage = null
+                                successMessage = null
+                            }
+                        ) {
+                            Text("Change Number", color = BrandGold, fontSize = 12.sp)
+                        }
+
+                        TextButton(
+                            onClick = {
+                                if (otpResendCountdown == 0) {
+                                    val formatted = normalizePhone(otpPhone)
+                                    isLoading = true
+                                    errorMessage = null
+                                    scope.launch {
+                                        try {
+                                            val res = ApiClient.getService().requestOtp(
+                                                CustomerOtpRequestPayload(
+                                                    phoneNumber = formatted,
+                                                    role = "customer"
+                                                )
+                                            )
+                                            if (res.isSuccessful) {
+                                                otpResendCountdown = 60
+                                                successMessage = "New OTP sent via Twilio!"
+                                            } else {
+                                                errorMessage = "Please wait before resending OTP."
+                                            }
+                                        } catch (e: Exception) {
+                                            errorMessage = "Error resending OTP: ${e.localizedMessage}"
+                                        } finally {
+                                            isLoading = false
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = otpResendCountdown == 0 && !isLoading
+                        ) {
+                            Text(
+                                text = if (otpResendCountdown > 0) "Resend in ${otpResendCountdown}s" else "Resend OTP",
+                                color = if (otpResendCountdown > 0) Color.Gray else BrandGold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+            // -------------------------------------------------------------
+            // TAB 2: PASSWORD SIGN IN
+            // -------------------------------------------------------------
+            } else if (selectedTab == AuthTab.PASSWORD_SIGN_IN) {
                 OutlinedTextField(
                     value = signInIdentifier,
                     onValueChange = { signInIdentifier = it },
@@ -223,7 +500,6 @@ fun CustomerAuthScreen(
                             normalizePhone(signInIdentifier)
                         }
                         val pwd = signInPassword
-                        // Clear inputs immediately on submit
                         signInIdentifier = ""
                         signInPassword = ""
                         isLoading = true
@@ -267,8 +543,10 @@ fun CustomerAuthScreen(
                     }
                 }
 
+            // -------------------------------------------------------------
+            // TAB 3: SIGN UP
+            // -------------------------------------------------------------
             } else {
-                // SIGN UP FORM (Full Name, Mobile, Email, Password)
                 OutlinedTextField(
                     value = signUpName,
                     onValueChange = { signUpName = it },
@@ -380,7 +658,6 @@ fun CustomerAuthScreen(
                         val emailClean = if (signUpEmail.isNotBlank()) signUpEmail.trim().lowercase() else null
                         val pwd = signUpPassword
 
-                        // Clear inputs immediately on submit
                         signUpName = ""
                         signUpPhone = ""
                         signUpEmail = ""
@@ -430,6 +707,15 @@ fun CustomerAuthScreen(
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "Twilio Verified Secure SMS Authentication Active",
+                color = Color(0xFF64748B),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(4.dp)
+            )
         }
     }
 }

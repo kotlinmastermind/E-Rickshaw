@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.security
+package com.vaisentra.mobility.rider.feature.security
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.core.designsystem.*
 import com.vaisentra.mobility.rider.core.network.ApiClient
 import com.vaisentra.mobility.rider.core.network.AppLockPinPayload
-import com.vaisentra.mobility.rider.core.security.TokenManager
+import com.vaisentra.mobility.core.security.TokenManager
 import kotlinx.coroutines.launch
 
 @Composable

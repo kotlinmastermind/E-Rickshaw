@@ -226,7 +226,8 @@ async def test_signed_document_urls_ownership_and_tamper_verification(db_session
         assert res_tampered.status_code == 403
 
         # E. Expired token rejected -> 403
-        expired_url = signed_url.replace(f"expires={int(time.time())+300}", f"expires={int(time.time())-300}")
+        import re
+        expired_url = re.sub(r"expires=\d+", "expires=1000", signed_url)
         res_expired = await ac.get(expired_url)
         assert res_expired.status_code == 403
 

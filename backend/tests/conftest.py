@@ -14,6 +14,9 @@ from sqlalchemy import select
 from backend.domain.models import VehicleCategory, FareRule
 from backend.infrastructure.database.session import async_session_maker, init_db
 
+import sqlite3
+_persistent_sqlite_conn = sqlite3.connect("file:testdb?mode=memory&cache=shared&uri=true", uri=True)
+
 _db_initialized = False
 
 async def _seed_test_data(session):
@@ -37,7 +40,7 @@ async def _seed_test_data(session):
         session.add_all(rules)
         await session.commit()
 
-@pytest_asyncio.fixture(scope="function", autouse=True)
+@pytest_asyncio.fixture(scope="function", loop_scope="function", autouse=True)
 async def db_session():
     global _db_initialized
     import asyncio
@@ -61,7 +64,7 @@ async def db_session():
     async with async_session_maker() as session:
         yield session
 
-@pytest_asyncio.fixture(scope="function", autouse=True)
+@pytest_asyncio.fixture(scope="function", loop_scope="function", autouse=True)
 async def flush_cache_isolation():
     from backend.infrastructure.cache.redis_client import redis_client
     await redis_client.flushdb()

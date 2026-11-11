@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.designsystem
+package com.vaisentra.mobility.driver.core.designsystem
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -18,13 +18,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
+import com.vaisentra.mobility.core.designsystem.SharedDesignTokens
 
 /**
  * Premium dark color scheme — gold/champagne accent on deep midnight surfaces.
  * Maps existing [DriverColors] values into proper Material 3 color roles.
  */
 private val LuxuryDarkColorScheme = darkColorScheme(
-    primary = Color(0xFFD4AF37),
+    primary = SharedDesignTokens.BrandGold,
     onPrimary = Color(0xFF090A0F),
     primaryContainer = Color(0xFF3D3117),
     onPrimaryContainer = Color(0xFFEDD9A3),
@@ -32,11 +33,11 @@ private val LuxuryDarkColorScheme = darkColorScheme(
     onSecondary = Color(0xFF383016),
     secondaryContainer = Color(0xFF4F472B),
     onSecondaryContainer = Color(0xFFF1E1BA),
-    tertiary = Color(0xFF10B981),
+    tertiary = SharedDesignTokens.Emerald,
     onTertiary = Color(0xFF003822),
     tertiaryContainer = Color(0xFF005234),
     onTertiaryContainer = Color(0xFF6FF7BC),
-    error = Color(0xFFEF4444),
+    error = SharedDesignTokens.Red,
     onError = Color(0xFFFFFFFF),
     errorContainer = Color(0xFF93000A),
     onErrorContainer = Color(0xFFFFDAD6),
@@ -51,7 +52,7 @@ private val LuxuryDarkColorScheme = darkColorScheme(
     inverseSurface = Color(0xFFE4E2DB),
     inverseOnSurface = Color(0xFF1B1C17),
     inversePrimary = Color(0xFF7B6B2D),
-    surfaceTint = Color(0xFFD4AF37)
+    surfaceTint = SharedDesignTokens.BrandGold
 )
 
 /** Light color scheme for optional light-mode support. */

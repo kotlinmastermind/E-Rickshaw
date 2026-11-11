@@ -75,16 +75,38 @@ async def test_driver_signup_and_login_with_mobile(db_session):
         assert login_res.json()["user"]["role"] == "driver"
 
 @pytest.mark.asyncio
-async def test_otp_and_forgot_password_endpoints_decommissioned(db_session):
+async def test_otp_endpoints_active_and_bypass_deleted(db_session, monkeypatch):
+    """
+    Verifies that:
+    1. /api/v1/auth/otp/request and /api/v1/auth/otp/verify endpoints are active.
+    2. Old hardcoded OTP bypass (123456) is completely deleted (returns 401 unauthorized).
+    3. Proper Twilio verification check works seamlessly.
+    """
+    from unittest.mock import AsyncMock
+    from backend.integrations.sms.provider import get_sms_provider
+
+    provider = get_sms_provider()
+    # Mock Twilio Verify response
+    monkeypatch.setattr(provider, "send_verification_otp", AsyncMock(return_value={"success": True, "status": "pending"}))
+    monkeypatch.setattr(provider, "verify_otp", AsyncMock(return_value=False))
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        # Request OTP
         r1 = await ac.post("/api/v1/auth/otp/request", json={"phone_number": "+919876543210"})
-        assert r1.status_code in (404, 405)
+        assert r1.status_code == 200, r1.text
+        assert "Verification passcode dispatched" in r1.json()["message"]
+
+        # Verify that hardcoded bypass 123456 FAILS (verify_otp returns False)
         r2 = await ac.post("/api/v1/auth/otp/verify", json={"phone_number": "+919876543210", "otp_code": "123456"})
-        assert r2.status_code in (404, 405)
-        r3 = await ac.post("/api/v1/auth/forgot-password/request-otp", json={"phone_number": "+919876543210"})
-        assert r3.status_code in (404, 405)
-        r4 = await ac.post("/api/v1/auth/forgot-password/reset", json={"phone_number": "+919876543210", "passcode": "123456", "new_password": "NewPassword123!"})
-        assert r4.status_code in (404, 405)
+        assert r2.status_code == 401, "Expected 401 Unauthorized because hardcoded 123456 bypass must be deleted!"
+
+        # Now mock successful Twilio approval
+        monkeypatch.setattr(provider, "verify_otp", AsyncMock(return_value=True))
+        r3 = await ac.post("/api/v1/auth/otp/verify", json={"phone_number": "+919876543210", "otp_code": "981240", "full_name": "Test Twilio Rider"})
+        assert r3.status_code == 200, r3.text
+        data = r3.json()
+        assert "access_token" in data
+        assert data["user"]["full_name"] == "Test Twilio Rider"
 
 

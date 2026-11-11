@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.notifications
+package com.vaisentra.mobility.driver.feature.notifications
 
 import android.Manifest
 import android.content.pm.PackageManager

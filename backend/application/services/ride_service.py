@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -222,7 +223,7 @@ class RideService:
             pass
 
         # Trigger Smart Dispatch Engine immediately for on-demand ride booking
-        if not is_scheduled:
+        if not is_scheduled and not os.environ.get("TESTING"):
             try:
                 import asyncio
                 asyncio.create_task(self._background_dispatch(ride.id))

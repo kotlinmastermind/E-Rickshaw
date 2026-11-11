@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.dispatch
+package com.vaisentra.mobility.driver.core.dispatch
 
 /**
  * Server-authoritative ride dispatch offer model.

@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.core.map
+package com.vaisentra.mobility.core.map
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

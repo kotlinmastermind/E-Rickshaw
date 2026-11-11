@@ -82,23 +82,16 @@ const GLOBAL_METROPOLITAN_HUBS = [
   { label: 'San Francisco (Market St)', coords: [-122.4194, 37.7749] as [number, number] }
 ];
 
-// Default public mapbox token assembled to prevent secret push scanner false alerts
-const DEFAULT_MAPBOX_PK = [
-  'pk',
-  'eyJ1Ijoia290bGlubWFzdGVybWluZCIsImEiOiJjbXZ5c205bWswZnV4MnhzOXNzdm02bDB0In0',
-  'XZPhcU3_Et2F5raRUkVtxQ'
-].join('.');
-
-const RAW_TOKEN = (import.meta as any).env?.VITE_MAPBOX_PUBLIC_TOKEN;
+// Read runtime public Mapbox access token from Vite environment configuration
+const RAW_TOKEN = (import.meta as any).env?.VITE_MAPBOX_PUBLIC_TOKEN || (import.meta as any).env?.VITE_MAPBOX_ACCESS_TOKEN;
 const MAPBOX_PUBLIC_KEY =
   typeof RAW_TOKEN === 'string' && RAW_TOKEN.trim().length > 10
     ? RAW_TOKEN.trim()
-    : DEFAULT_MAPBOX_PK;
+    : '';
 
-const isValidMapboxToken =
+export const isValidMapboxToken =
   typeof MAPBOX_PUBLIC_KEY === 'string' &&
   MAPBOX_PUBLIC_KEY.startsWith('pk.') &&
-  !MAPBOX_PUBLIC_KEY.includes('MapboxPublicDemo') &&
   !MAPBOX_PUBLIC_KEY.includes('example_public_token');
 
 // Disable Mapbox telemetry events to prevent net::ERR_BLOCKED_BY_CLIENT errors when browser adblockers are active
@@ -217,7 +210,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
   selectedScreenTitle = 'Mission Control Map',
   onPolygonCreated,
   className = '',
-  rideId = 'RIDE-DEL-8801'
+  rideId = ''
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<mapboxgl.Map | null>(null);
@@ -354,6 +347,9 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
   const [isLooping, setIsLooping] = useState<boolean>(true);
   const [tripSummary, setTripSummary] = useState<any>(null);
   const [tripSource, setTripSource] = useState<{ isSynthetic: boolean; source: string } | null>(null);
+  const [availableRides, setAvailableRides] = useState<Array<{ id: string; status: string; pickup_address: string; destination_address: string }>>([]);
+  const [customRideInput, setCustomRideInput] = useState<string>('');
+  const [isLoadingBreadcrumbs, setIsLoadingBreadcrumbs] = useState<boolean>(false);
 
   // Prevent overlapping background polling fetches
   const isFetchingFleetRef = useRef(false);
@@ -533,12 +529,19 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
 
   // Fetch Trip Breadcrumbs when in Playback mode or ride changes
   const fetchTripBreadcrumbs = useCallback(async (targetRideId: string) => {
+    if (!targetRideId || !targetRideId.trim()) {
+      setBreadcrumbs([]);
+      setTripSummary(null);
+      setTripSource(null);
+      return;
+    }
+    setIsLoadingBreadcrumbs(true);
     try {
-      const data = await fetchWithAuth<any>(`/api/v1/location/trip-history/${targetRideId}`);
+      const data = await fetchWithAuth<any>(`/api/v1/location/trip-history/${encodeURIComponent(targetRideId.trim())}`);
       if (data) {
         setTripSource({
           isSynthetic: Boolean(data?.is_synthetic),
-          source: data?.source || 'sample_demonstration_trajectory'
+          source: data?.source || 'database_records'
         });
         if (Array.isArray(data?.breadcrumbs) && data.breadcrumbs.length > 0) {
           setBreadcrumbs(data.breadcrumbs);
@@ -547,13 +550,42 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
           return;
         }
       }
+      setBreadcrumbs([]);
+      setTripSummary(null);
     } catch {
-      // Offline fallback
+      setBreadcrumbs([]);
+      setTripSummary(null);
+    } finally {
+      setIsLoadingBreadcrumbs(false);
     }
   }, []);
 
+  // Fetch available real rides from Backend for Trip Playback selector
   useEffect(() => {
     if (activeMode === 'trip_playback') {
+      const fetchRides = async () => {
+        try {
+          const res = await fetchWithAuth<any>('/api/v1/admin/rides?limit=50');
+          if (res && Array.isArray(res?.rides) && res.rides.length > 0) {
+            setAvailableRides(res.rides);
+            setSelectedRideId(prev => {
+              if (prev && prev.trim()) return prev;
+              const firstId = res.rides[0].id;
+              setCustomRideInput(firstId);
+              fetchTripBreadcrumbs(firstId);
+              return firstId;
+            });
+          }
+        } catch {
+          // If rides fetch fails, admin can still input custom ride ID
+        }
+      };
+      fetchRides();
+    }
+  }, [activeMode, fetchTripBreadcrumbs]);
+
+  useEffect(() => {
+    if (activeMode === 'trip_playback' && selectedRideId) {
       fetchTripBreadcrumbs(selectedRideId);
     }
   }, [activeMode, selectedRideId, fetchTripBreadcrumbs]);
@@ -908,125 +940,138 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
       // 5. RIDE ROUTE INSPECTOR
       if (activeMode === 'ride_route') {
         const topVehicle = vehicles.length > 0 ? vehicles[0] : null;
-        const pickup: [number, number] = topVehicle
+        const pickup: [number, number] | null = topVehicle
           ? [topVehicle.lng, topVehicle.lat]
           : liveAdminGps
           ? [liveAdminGps.lng, liveAdminGps.lat]
-          : [77.2195, 28.6328];
-        const drop: [number, number] = [pickup[0] + 0.015, pickup[1] + 0.012];
-        const routeCoords: [number, number][] = [
-          pickup,
-          [pickup[0] + 0.005, pickup[1] + 0.004],
-          [pickup[0] + 0.009, pickup[1] + 0.008],
-          drop
-        ];
+          : null;
 
-        if (map.getSource('ride-route-src')) {
-          (map.getSource('ride-route-src') as mapboxgl.GeoJSONSource).setData({
-            type: 'Feature',
-            properties: {},
-            geometry: {
-              type: 'LineString',
-              coordinates: routeCoords
-            }
-          });
-        } else {
-          map.addSource('ride-route-src', {
-            type: 'geojson',
-            data: {
+        if (pickup) {
+          const drop: [number, number] = [pickup[0] + 0.015, pickup[1] + 0.012];
+          const routeCoords: [number, number][] = [
+            pickup,
+            [pickup[0] + 0.005, pickup[1] + 0.004],
+            [pickup[0] + 0.009, pickup[1] + 0.008],
+            drop
+          ];
+
+          if (map.getSource('ride-route-src')) {
+            (map.getSource('ride-route-src') as mapboxgl.GeoJSONSource).setData({
               type: 'Feature',
               properties: {},
               geometry: {
                 type: 'LineString',
                 coordinates: routeCoords
               }
-            }
-          });
+            });
+          } else {
+            map.addSource('ride-route-src', {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'LineString',
+                  coordinates: routeCoords
+                }
+              }
+            });
 
-          map.addLayer({
-            id: 'ride-route-casing',
-            type: 'line',
-            source: 'ride-route-src',
-            paint: {
-              'line-color': '#0f172a',
-              'line-width': 10
-            }
-          });
+            map.addLayer({
+              id: 'ride-route-casing',
+              type: 'line',
+              source: 'ride-route-src',
+              paint: {
+                'line-color': '#0f172a',
+                'line-width': 10
+              }
+            });
 
-          map.addLayer({
-            id: 'ride-route-line',
-            type: 'line',
-            source: 'ride-route-src',
-            paint: {
-              'line-color': '#d4af37',
-              'line-width': 5
-            }
-          });
+            map.addLayer({
+              id: 'ride-route-line',
+              type: 'line',
+              source: 'ride-route-src',
+              paint: {
+                'line-color': '#d4af37',
+                'line-width': 5
+              }
+            });
+          }
+
+          const pEl = document.createElement('div');
+          pEl.style.background = '#10b981';
+          pEl.style.color = '#000';
+          pEl.style.fontWeight = '900';
+          pEl.style.fontSize = '9px';
+          pEl.style.padding = '3px 8px';
+          pEl.style.borderRadius = '5px';
+          pEl.innerText = 'PICKUP';
+          const pM = new mapboxgl.Marker({ element: pEl }).setLngLat(pickup).addTo(map);
+          markersRef.current.push(pM);
+
+          const dEl = document.createElement('div');
+          dEl.style.background = '#d4af37';
+          dEl.style.color = '#000';
+          dEl.style.fontWeight = '900';
+          dEl.style.fontSize = '9px';
+          dEl.style.padding = '3px 8px';
+          dEl.style.borderRadius = '5px';
+          dEl.innerText = 'DROPOFF';
+          const dM = new mapboxgl.Marker({ element: dEl }).setLngLat(drop).addTo(map);
+          markersRef.current.push(dM);
+        } else {
+          if (map.getSource('ride-route-src')) {
+            (map.getSource('ride-route-src') as mapboxgl.GeoJSONSource).setData({
+              type: 'FeatureCollection',
+              features: []
+            });
+          }
         }
-
-        const pEl = document.createElement('div');
-        pEl.style.background = '#10b981';
-        pEl.style.color = '#000';
-        pEl.style.fontWeight = '900';
-        pEl.style.fontSize = '9px';
-        pEl.style.padding = '3px 8px';
-        pEl.style.borderRadius = '5px';
-        pEl.innerText = 'PICKUP';
-        const pM = new mapboxgl.Marker({ element: pEl }).setLngLat(pickup).addTo(map);
-        markersRef.current.push(pM);
-
-        const dEl = document.createElement('div');
-        dEl.style.background = '#d4af37';
-        dEl.style.color = '#000';
-        dEl.style.fontWeight = '900';
-        dEl.style.fontSize = '9px';
-        dEl.style.padding = '3px 8px';
-        dEl.style.borderRadius = '5px';
-        dEl.innerText = 'DROPOFF';
-        const dM = new mapboxgl.Marker({ element: dEl }).setLngLat(drop).addTo(map);
-        markersRef.current.push(dM);
       }
 
       // 6. SOS INCIDENT BEACON
       if (activeMode === 'sos_incident') {
         const topVehicle = vehicles.length > 0 ? vehicles[0] : null;
-        const incidentCoords: [number, number] = topVehicle
+        const incidentCoords: [number, number] | null = topVehicle
           ? [topVehicle.lng, topVehicle.lat]
           : liveAdminGps
           ? [liveAdminGps.lng + 0.005, liveAdminGps.lat + 0.004]
-          : [77.2230, 28.6385];
-        const sosEl = document.createElement('div');
-        sosEl.style.position = 'relative';
-        sosEl.style.width = '48px';
-        sosEl.style.height = '48px';
-        sosEl.style.display = 'flex';
-        sosEl.style.alignItems = 'center';
-        sosEl.style.justifyContent = 'center';
-        sosEl.innerHTML = `
-          <div style="position:absolute; width:48px; height:48px; border-radius:50%; background:rgba(239,68,68,0.4); animation:ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
-          <div style="width:30px; height:30px; border-radius:50%; background:#ef4444; color:#fff; font-weight:900; font-size:12px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 16px #ef4444; border:2px solid #fff;">
-            SOS
-          </div>
-        `;
+          : null;
 
-        const driverInfo = topVehicle
-          ? `Chauffeur: ${topVehicle.driver} (${topVehicle.plate})`
-          : 'Chauffeur: Active Partner Unit';
+        if (incidentCoords) {
+          const sosEl = document.createElement('div');
+          sosEl.style.position = 'relative';
+          sosEl.style.width = '48px';
+          sosEl.style.height = '48px';
+          sosEl.style.display = 'flex';
+          sosEl.style.alignItems = 'center';
+          sosEl.style.justifyContent = 'center';
+          sosEl.innerHTML = `
+            <div style="position:absolute; width:48px; height:48px; border-radius:50%; background:rgba(239,68,68,0.4); animation:ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+            <div style="width:30px; height:30px; border-radius:50%; background:#ef4444; color:#fff; font-weight:900; font-size:12px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 16px #ef4444; border:2px solid #fff;">
+              SOS
+            </div>
+          `;
 
-        const sosPopup = new mapboxgl.Popup({ offset: 16 }).setHTML(`
-          <div style="font-family:system-ui; background:#16161a; color:#fff; padding:10px; border-radius:8px; border: 1px solid #ef4444;">
-            <b style="color:#ef4444; font-size:13px;">🚨 CRITICAL SOS BEACON ACTIVE</b>
-            <div style="font-size:11px; margin-top:4px;">${driverInfo}</div>
-            <div style="font-size:11px; color:#f59e0b; margin-top:2px;">Location: ${incidentCoords[1].toFixed(4)}° N, ${incidentCoords[0].toFixed(4)}° E</div>
-            <div style="font-size:10px; color:#10b981; margin-top:4px;">● Emergency Services Connected · Local Police Dispatch Engaged</div>
-          </div>
-        `);
+          const driverInfo = topVehicle
+            ? `Chauffeur: ${topVehicle.driver} (${topVehicle.plate})`
+            : 'Chauffeur: Active Partner Unit';
 
-        const sMarker = new mapboxgl.Marker({ element: sosEl })
-          .setLngLat(incidentCoords)
-          .setPopup(sosPopup)
-          .addTo(map);
-        markersRef.current.push(sMarker);
+          const sosPopup = new mapboxgl.Popup({ offset: 16 }).setHTML(`
+            <div style="font-family:system-ui; background:#16161a; color:#fff; padding:10px; border-radius:8px; border: 1px solid #ef4444;">
+              <b style="color:#ef4444; font-size:13px;">🚨 CRITICAL SOS BEACON ACTIVE</b>
+              <div style="font-size:11px; margin-top:4px;">${driverInfo}</div>
+              <div style="font-size:11px; color:#f59e0b; margin-top:2px;">Location: ${incidentCoords[1].toFixed(4)}° N, ${incidentCoords[0].toFixed(4)}° E</div>
+              <div style="font-size:10px; color:#10b981; margin-top:4px;">● Emergency Services Connected · Local Police Dispatch Engaged</div>
+            </div>
+          `);
+
+          const sMarker = new mapboxgl.Marker({ element: sosEl })
+            .setLngLat(incidentCoords)
+            .setPopup(sosPopup)
+            .addTo(map);
+          markersRef.current.push(sMarker);
+        }
       }
     },
     [
@@ -1065,16 +1110,20 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
         lastModeCameraRef.current = activeMode;
         if (activeMode === 'ride_route') {
           const topVehicle = vehicles.length > 0 ? vehicles[0] : null;
-          const pickup: [number, number] = topVehicle ? [topVehicle.lng, topVehicle.lat] : [77.2195, 28.6328];
-          const drop: [number, number] = [pickup[0] + 0.015, pickup[1] + 0.012];
-          const bounds = new mapboxgl.LngLatBounds();
-          bounds.extend(pickup);
-          bounds.extend(drop);
-          map.fitBounds(bounds, { padding: 80, duration: 1000 });
+          const pickup: [number, number] | null = topVehicle ? [topVehicle.lng, topVehicle.lat] : liveAdminGps ? [liveAdminGps.lng, liveAdminGps.lat] : null;
+          if (pickup) {
+            const drop: [number, number] = [pickup[0] + 0.015, pickup[1] + 0.012];
+            const bounds = new mapboxgl.LngLatBounds();
+            bounds.extend(pickup);
+            bounds.extend(drop);
+            map.fitBounds(bounds, { padding: 80, duration: 1000 });
+          }
         } else if (activeMode === 'sos_incident') {
           const topVehicle = vehicles.length > 0 ? vehicles[0] : null;
-          const incidentCoords: [number, number] = topVehicle ? [topVehicle.lng, topVehicle.lat] : [77.2230, 28.6385];
-          map.flyTo({ center: incidentCoords, zoom: 16, duration: 1200 });
+          const incidentCoords: [number, number] | null = topVehicle ? [topVehicle.lng, topVehicle.lat] : liveAdminGps ? [liveAdminGps.lng + 0.005, liveAdminGps.lat + 0.004] : null;
+          if (incidentCoords) {
+            map.flyTo({ center: incidentCoords, zoom: 16, duration: 1200 });
+          }
         } else if (activeMode === 'trip_playback' && breadcrumbs.length > 0) {
           const bounds = new mapboxgl.LngLatBounds();
           breadcrumbs.forEach(b => bounds.extend([b.longitude, b.latitude]));
@@ -2172,12 +2221,13 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
         >
           {/* Top Scrubber Row: Trip Selector & Telemetry Metrics */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={{ color: '#d4af37', fontWeight: 800, fontSize: 11 }}>⏱️ TRIP PLAYBACK:</span>
               <select
                 value={selectedRideId}
                 onChange={e => {
                   setSelectedRideId(e.target.value);
+                  setCustomRideInput(e.target.value);
                   fetchTripBreadcrumbs(e.target.value);
                 }}
                 style={{
@@ -2187,13 +2237,68 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
                   borderRadius: 6,
                   padding: '2px 8px',
                   fontSize: 10,
-                  fontWeight: 700
+                  fontWeight: 700,
+                  maxWidth: 260
                 }}
               >
-                <option value="RIDE-DEL-8801">RIDE-DEL-8801 (CP → India Gate) [Sample Fixture]</option>
-                <option value="RIDE-DEL-9923">RIDE-DEL-9923 (NDLS → Chandni Chowk) [Sample Fixture]</option>
-                <option value="RIDE-DEL-7714">RIDE-DEL-7714 (Karol Bagh → Janpath) [Sample Fixture]</option>
+                {availableRides.length > 0 ? (
+                  availableRides.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {r.id.length > 20 ? `${r.id.slice(0, 18)}...` : r.id} ({r.status})
+                    </option>
+                  ))
+                ) : (
+                  <option value={selectedRideId || ''}>
+                    {selectedRideId ? `Ride: ${selectedRideId}` : 'No Rides in System'}
+                  </option>
+                )}
               </select>
+
+              {/* Direct Custom Ride ID Input */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="text"
+                  placeholder="Ride UUID or ID..."
+                  value={customRideInput}
+                  onChange={e => setCustomRideInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && customRideInput.trim()) {
+                      setSelectedRideId(customRideInput.trim());
+                      fetchTripBreadcrumbs(customRideInput.trim());
+                    }
+                  }}
+                  style={{
+                    background: '#0a0a0c',
+                    border: '1px solid #333',
+                    color: '#f2ead3',
+                    borderRadius: 6,
+                    padding: '2px 6px',
+                    fontSize: 10,
+                    width: 140
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    if (customRideInput.trim()) {
+                      setSelectedRideId(customRideInput.trim());
+                      fetchTripBreadcrumbs(customRideInput.trim());
+                    }
+                  }}
+                  style={{
+                    background: '#222',
+                    border: '1px solid #d4af37',
+                    color: '#d4af37',
+                    borderRadius: 6,
+                    padding: '2px 8px',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Load
+                </button>
+              </div>
+
               {tripSource && (
                 <span
                   style={{
@@ -2201,12 +2306,12 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
                     fontWeight: 800,
                     padding: '2px 6px',
                     borderRadius: 4,
-                    background: tripSource.isSynthetic ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                    color: tripSource.isSynthetic ? '#f59e0b' : '#10b981',
-                    border: `1px solid ${tripSource.isSynthetic ? '#f59e0b' : '#10b981'}`
+                    background: tripSource.isSynthetic ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                    color: tripSource.isSynthetic ? '#ef4444' : '#10b981',
+                    border: `1px solid ${tripSource.isSynthetic ? '#ef4444' : '#10b981'}`
                   }}
                 >
-                  {tripSource.isSynthetic ? '● DEMONSTRATION SAMPLE TRAJECTORY' : '● VERIFIED PERSISTED GPS BREADCRUMBS'}
+                  {tripSource.isSynthetic ? '● SYNTHETIC DATA DETECTED' : '● VERIFIED PERSISTED GPS BREADCRUMBS'}
                 </span>
               )}
               {tripSummary && (
@@ -2217,7 +2322,7 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
             </div>
 
             {/* Current Step Telemetry Gauges */}
-            {currentCrumb && (
+            {currentCrumb && breadcrumbs.length > 0 && (
               <div style={{ display: 'flex', gap: 12, fontSize: 10, color: '#f2ead3' }}>
                 <span>Speed: <b style={{ color: '#10b981' }}>{currentCrumb.speed_kmh} km/h</b></span>
                 <span>Heading: <b style={{ color: '#d4af37' }}>{currentCrumb.heading}°</b></span>
@@ -2229,110 +2334,153 @@ export const AdminRealMap: React.FC<AdminRealMapProps> = ({
             )}
           </div>
 
-          {/* Scrubber Slider */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-            <button
-              onClick={() => setIsPlaying(!isPlaying)}
-              style={{
-                background: isPlaying ? '#ef4444' : '#d4af37',
-                color: isPlaying ? '#fff' : '#000',
-                border: 'none',
-                borderRadius: 6,
-                padding: '4px 10px',
-                cursor: 'pointer',
-                fontWeight: 800,
-                fontSize: 11,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4
-              }}
-            >
-              {isPlaying ? <Pause size={12} /> : <Play size={12} />}
-              {isPlaying ? 'Pause' : 'Play'}
-            </button>
+          {/* If Breadcrumbs exist: Show playback slider controls */}
+          {breadcrumbs.length > 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+              <button
+                onClick={() => setIsPlaying(!isPlaying)}
+                style={{
+                  background: isPlaying ? '#ef4444' : '#d4af37',
+                  color: isPlaying ? '#fff' : '#000',
+                  border: 'none',
+                  borderRadius: 6,
+                  padding: '4px 10px',
+                  cursor: 'pointer',
+                  fontWeight: 800,
+                  fontSize: 11,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}
+              >
+                {isPlaying ? <Pause size={12} /> : <Play size={12} />}
+                {isPlaying ? 'Pause' : 'Play'}
+              </button>
 
-            <button
-              onClick={() => {
-                setPlaybackIndex(0);
-                setIsPlaying(false);
-              }}
-              title="Reset to Start"
-              style={{
-                background: '#222',
-                border: '1px solid #444',
-                color: '#8d8672',
-                borderRadius: 6,
-                padding: '4px 8px',
-                fontSize: 10,
-                cursor: 'pointer'
-              }}
-            >
-              <RotateCcw size={11} />
-            </button>
+              <button
+                onClick={() => {
+                  setPlaybackIndex(0);
+                  setIsPlaying(false);
+                }}
+                title="Reset to Start"
+                style={{
+                  background: '#222',
+                  border: '1px solid #444',
+                  color: '#8d8672',
+                  borderRadius: 6,
+                  padding: '4px 8px',
+                  fontSize: 10,
+                  cursor: 'pointer'
+                }}
+              >
+                <RotateCcw size={11} />
+              </button>
 
-            {/* Range Slider */}
-            <input
-              type="range"
-              min={0}
-              max={Math.max(0, breadcrumbs.length - 1)}
-              value={playbackIndex}
-              onChange={e => {
-                setPlaybackIndex(parseInt(e.target.value, 10));
-              }}
-              style={{
-                flex: 1,
-                accentColor: '#d4af37',
-                cursor: 'pointer'
-              }}
-            />
+              {/* Range Slider */}
+              <input
+                type="range"
+                min={0}
+                max={Math.max(0, breadcrumbs.length - 1)}
+                value={playbackIndex}
+                onChange={e => {
+                  setPlaybackIndex(parseInt(e.target.value, 10));
+                }}
+                style={{
+                  flex: 1,
+                  accentColor: '#d4af37',
+                  cursor: 'pointer'
+                }}
+              />
 
-            {/* Playback Speed Multipliers */}
+              {/* Playback Speed Multipliers */}
+              <div
+                style={{
+                  background: '#16161a',
+                  border: '1px solid #333',
+                  borderRadius: 6,
+                  padding: '1px',
+                  display: 'flex',
+                  gap: 2
+                }}
+              >
+                {[1, 2, 4].map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setPlaybackSpeed(s)}
+                    style={{
+                      background: playbackSpeed === s ? '#d4af37' : 'transparent',
+                      color: playbackSpeed === s ? '#000' : '#8d8672',
+                      border: 'none',
+                      borderRadius: 4,
+                      padding: '2px 6px',
+                      fontSize: 9,
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {s}x
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setIsLooping(!isLooping)}
+                style={{
+                  background: isLooping ? '#d4af3733' : 'transparent',
+                  border: '1px solid #333',
+                  color: isLooping ? '#d4af37' : '#8d8672',
+                  borderRadius: 6,
+                  padding: '3px 7px',
+                  fontSize: 9,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Loop: {isLooping ? 'ON' : 'OFF'}
+              </button>
+            </div>
+          ) : (
+            /* Explicit Case B UI: NO GPS HISTORY AVAILABLE */
             <div
               style={{
-                background: '#16161a',
-                border: '1px solid #333',
-                borderRadius: 6,
-                padding: '1px',
+                marginTop: 8,
+                padding: '8px 12px',
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px dashed rgba(239, 68, 68, 0.4)',
+                borderRadius: 8,
                 display: 'flex',
-                gap: 2
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 8
               }}
             >
-              {[1, 2, 4].map(s => (
-                <button
-                  key={s}
-                  onClick={() => setPlaybackSpeed(s)}
-                  style={{
-                    background: playbackSpeed === s ? '#d4af37' : 'transparent',
-                    color: playbackSpeed === s ? '#000' : '#8d8672',
-                    border: 'none',
-                    borderRadius: 4,
-                    padding: '2px 6px',
-                    fontSize: 9,
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                >
-                  {s}x
-                </button>
-              ))}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: '#ef4444', fontSize: 11, fontWeight: 700 }}>
+                  ⚠️ NO GPS HISTORY AVAILABLE
+                </span>
+                <span style={{ color: '#8d8672', fontSize: 10 }}>
+                  {isLoadingBreadcrumbs
+                    ? 'Querying database for verified GPS records...'
+                    : selectedRideId
+                    ? `No recorded GPS breadcrumbs exist in database for ride ${selectedRideId}.`
+                    : 'Select or enter a Ride ID above to inspect verified trip trajectory.'}
+                </span>
+              </div>
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  color: '#64748b',
+                  background: '#16161a',
+                  padding: '2px 6px',
+                  borderRadius: 4
+                }}
+              >
+                GENUINE SERVER TELEMETRY ONLY
+              </span>
             </div>
-
-            <button
-              onClick={() => setIsLooping(!isLooping)}
-              style={{
-                background: isLooping ? '#d4af3733' : 'transparent',
-                border: '1px solid #333',
-                color: isLooping ? '#d4af37' : '#8d8672',
-                borderRadius: 6,
-                padding: '3px 7px',
-                fontSize: 9,
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}
-            >
-              Loop: {isLooping ? 'ON' : 'OFF'}
-            </button>
-          </div>
+          )}
         </div>
       )}
 

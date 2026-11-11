@@ -85,9 +85,6 @@ class MapsProvider(ABC):
         route = await self.get_route(origin_lat, origin_lng, dest_lat, dest_lng)
         return [{**route.to_dict(), "route_index": 0, "provider_mode": "APPROXIMATE_NOT_LIVE"}]
 
-    async def get_place_details(self, place_id: str) -> Dict[str, Any]:
-        return await self.fallback.get_place_details(place_id)
-
     async def snap_to_road(self, latitude: float, longitude: float) -> Dict[str, Any]:
         return {"available": False, "provider_verified": False, "message": "Road snapping requires a configured Roads API provider; the selected pin is unchanged."}
 
@@ -717,6 +714,9 @@ class MapboxProvider(MapsProvider):
                     pass
 
         return {"snapped": False, "latitude": latitude, "longitude": longitude, "provider": "RAW_GPS"}
+
+    async def get_place_details(self, place_id: str) -> Dict[str, Any]:
+        return await self.fallback.get_place_details(place_id)
 
 _maps_instance: Optional[MapsProvider] = None
 

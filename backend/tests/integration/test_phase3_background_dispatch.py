@@ -1,4 +1,5 @@
 import pytest
+import pytest_asyncio
 import uuid
 import json
 import asyncio
@@ -18,8 +19,10 @@ from backend.application.services.ride_service import RideService
 from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
 from backend.api.routes.ws import ws_manager
 
+pytestmark = pytest.mark.asyncio(loop_scope="function")
 
-@pytest.fixture
+
+@pytest_asyncio.fixture(loop_scope="function")
 async def setup_dispatch_environment(db_session):
     """
     Sets up a deterministic testing environment with a vehicle category,

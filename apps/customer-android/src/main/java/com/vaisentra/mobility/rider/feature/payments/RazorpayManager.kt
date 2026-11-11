@@ -131,7 +131,7 @@ object RazorpayCheckoutHelper {
 
             // Only attach order_id if it's a real order created on Razorpay's servers
             if (orderId.isNotBlank() && orderId.startsWith("order_") &&
-                !orderId.startsWith("order_live_") && !orderId.startsWith("order_fake") && !orderId.startsWith("rcpt_")
+                !orderId.startsWith("order_live_") && !orderId.startsWith("order_sim_") && !orderId.startsWith("rcpt_")
             ) {
                 options.put("order_id", orderId)
             }

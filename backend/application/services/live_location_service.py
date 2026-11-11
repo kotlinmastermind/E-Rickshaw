@@ -88,17 +88,39 @@ class LiveLocationService:
             try:
                 ws_payload = {
                     "event": "DRIVER_LOCATION_UPDATE",
+                    "event_type": "DRIVER_LOCATION_UPDATE",
                     "driver_id": driver_id,
                     "ride_id": active_ride_id,
+                    "driver_latitude": location_payload["latitude"],
+                    "driver_longitude": location_payload["longitude"],
                     "latitude": location_payload["latitude"],
                     "longitude": location_payload["longitude"],
                     "heading": location_payload["heading"],
                     "speed_mps": location_payload["speed_mps"],
-                    "timestamp": location_payload["recorded_at"]
+                    "timestamp": location_payload["recorded_at"],
+                    "payload": location_payload
                 }
                 await ws_manager.broadcast_to_ride(active_ride_id, ws_payload)
             except Exception as ws_err:
                 logger.debug(f"Failed to broadcast location update to ride {active_ride_id}: {ws_err}")
+
+        # Broadcast real-time location to Admin Mission Control telemetry subscribers
+        try:
+            admin_payload = {
+                "event_type": "DRIVER_LOCATION_UPDATE",
+                "payload": {
+                    "id": driver_id,
+                    "driver_id": driver_id,
+                    "latitude": location_payload["latitude"],
+                    "longitude": location_payload["longitude"],
+                    "heading": location_payload["heading"],
+                    "speed": location_payload["speed_mps"],
+                    "last_seen": location_payload["recorded_at"]
+                }
+            }
+            await ws_manager.broadcast_admin(admin_payload)
+        except Exception as admin_ws_err:
+            logger.debug(f"Failed to broadcast location update to admin telemetry: {admin_ws_err}")
 
         # 4. Optional asynchronous persistence in PostgreSQL
         if self.db:

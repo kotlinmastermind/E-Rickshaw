@@ -21,7 +21,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.vaisentra.mobility.driver.core.designsystem.*
 import com.vaisentra.mobility.driver.core.network.*
-import com.vaisentra.mobility.driver.core.security.DriverTokenManager
+import com.vaisentra.mobility.core.security.TokenManager
+import com.vaisentra.mobility.core.ui.normalizePhoneNumber
 import kotlinx.coroutines.launch
 
 @Composable
@@ -29,10 +30,31 @@ fun DriverAuthenticationDialog(
     onDismiss: () -> Unit,
     onAuthenticationSuccess: (String) -> Unit
 ) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        DriverAuthenticationContent(
+            onAuthenticationSuccess = onAuthenticationSuccess,
+            onDismiss = onDismiss
+        )
+    }
+}
+
+@Composable
+fun DriverAuthenticationContent(
+    onAuthenticationSuccess: (String) -> Unit,
+    onDismiss: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var authTab by remember { mutableStateOf("SIGNIN") } // SIGNIN, SIGNUP, FORGOT_PASSWORD
+    var authTab by remember { mutableStateOf("OTP_SIGNIN") } // OTP_SIGNIN (Primary), SIGNIN, SIGNUP
+
+    // OTP Form States
+    var otpPhone by remember { mutableStateOf("") }
+    var isOtpSent by remember { mutableStateOf(false) }
 
     // Driver Form States
     var fullName by remember { mutableStateOf("") }
@@ -47,81 +69,62 @@ fun DriverAuthenticationDialog(
     var vehicleName by remember { mutableStateOf("") }
     var vehicleNo by remember { mutableStateOf("") }
 
-    // Forgot Password States
-    var forgotIdentifier by remember { mutableStateOf("") }
-    var forgotOtpCode by remember { mutableStateOf("") }
-    var newPassword by remember { mutableStateOf("") }
-
-        var isSubmitting by remember { mutableStateOf(false) }
+    var isSubmitting by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    fun normalizePhoneNumber(input: String): String {
-        val clean = input.trim().replace(" ", "").replace("-", "")
-        if (clean.isBlank()) return ""
-        val digitsOnly = clean.filter { it.isDigit() }
-        return when {
-            clean.startsWith("+") -> clean
-            digitsOnly.length == 10 -> "+91$digitsOnly"
-            digitsOnly.length == 12 && digitsOnly.startsWith("91") -> "+$digitsOnly"
-            digitsOnly.length > 10 && digitsOnly.startsWith("91") -> "+$digitsOnly"
-            digitsOnly.length > 10 -> "+91${digitsOnly.take(10)}"
-            else -> "+91$digitsOnly"
-        }
-    }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth(0.95f)
+            .fillMaxHeight(0.92f)
+            .clip(RoundedCornerShape(16.dp)),
+        color = DriverColors.MidnightBlack,
+        border = BorderStroke(1.5.dp, DriverColors.ChauffeurGold)
     ) {
-        Surface(
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.92f)
-                .clip(RoundedCornerShape(16.dp)),
-            color = DriverColors.MidnightBlack,
-            border = BorderStroke(1.5.dp, DriverColors.ChauffeurGold)
+                .fillMaxSize()
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState())
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp)
-                    .verticalScroll(rememberScrollState())
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "CHAUFFEUR COCKPIT AUTHENTICATION",
-                            style = DriverTypography.Title.copy(
-                                color = DriverColors.ChauffeurGold,
-                                fontSize = 16.sp
-                            )
+                Column {
+                    Text(
+                        text = "CHAUFFEUR COCKPIT AUTHENTICATION",
+                        style = DriverTypography.Title.copy(
+                            color = DriverColors.ChauffeurGold,
+                            fontSize = 16.sp
                         )
-                        Text(
-                            text = "Chauffeur & Vehicle Registration Portal",
-                            style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 11.sp)
-                        )
-                    }
+                    )
+                    Text(
+                        text = "Chauffeur & Vehicle Registration Portal",
+                        style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 11.sp)
+                    )
+                }
+                if (onDismiss != null) {
                     Text(
                         text = "✕",
                         style = DriverTypography.Subtitle.copy(fontSize = 18.sp),
                         modifier = Modifier.clickable { onDismiss() }
                     )
                 }
+            }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Navigation Tabs
+                // Navigation Tabs (OTP Sign In is Primary)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf("SIGNIN" to "Sign In", "SIGNUP" to "Driver & Vehicle Sign Up", "FORGOT_PASSWORD" to "Forgot Pass").forEach { (key, label) ->
+                    listOf("OTP_SIGNIN" to "Pilot OTP Sign In", "SIGNIN" to "Password Login", "SIGNUP" to "Driver Sign Up").forEach { (key, label) ->
                         val isSelected = authTab == key
                         Surface(
                             shape = RoundedCornerShape(8.dp),
@@ -189,6 +192,183 @@ fun DriverAuthenticationDialog(
                 }
 
                 when (authTab) {
+                    "OTP_SIGNIN" -> {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = DriverColors.SurfaceCard,
+                            border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text("PILOT TELECOM OTP AUTHENTICATION", style = DriverTypography.Subtitle.copy(fontSize = 13.sp, color = DriverColors.ChauffeurGold))
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                if (!isOtpSent) {
+                                    Text("Enter your registered driver mobile number. An OTP will be dispatched via Twilio.", color = DriverColors.TextMuted, fontSize = 11.sp)
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    OutlinedTextField(
+                                        value = otpPhone,
+                                        onValueChange = { otpPhone = it.filter { c -> c.isDigit() || c == '+' } },
+                                        label = { Text("Driver Mobile (+91...)", color = DriverColors.TextMuted) },
+                                        textStyle = DriverTypography.Body,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = DriverColors.ChauffeurGold,
+                                            unfocusedBorderColor = DriverColors.SurfaceBorder,
+                                            focusedTextColor = DriverColors.TextPure,
+                                            unfocusedTextColor = DriverColors.TextPure
+                                        ),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    Button(
+                                        onClick = {
+                                            val clean = otpPhone.trim()
+                                            if (clean.length < 10) {
+                                                errorMessage = "Please enter a valid 10-digit mobile phone number."
+                                                return@Button
+                                            }
+                                            val formatted = if (clean.startsWith("+")) clean else if (clean.length == 10) "+91$clean" else clean
+                                            isSubmitting = true
+                                            errorMessage = null
+                                            statusMessage = null
+                                            scope.launch {
+                                                try {
+                                                    val res = DriverApiClient.getService().requestOtp(
+                                                        DriverOtpRequestPayload(
+                                                            phoneNumber = formatted,
+                                                            role = "driver"
+                                                        )
+                                                    )
+                                                    if (res.isSuccessful) {
+                                                        isOtpSent = true
+                                                        statusMessage = "OTP sent successfully via Twilio!"
+                                                    } else {
+                                                        errorMessage = "Could not dispatch OTP. Please check mobile number."
+                                                    }
+                                                } catch (e: Exception) {
+                                                    errorMessage = "Network Error: ${e.localizedMessage}"
+                                                } finally {
+                                                    isSubmitting = false
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = DriverColors.ChauffeurGold,
+                                            contentColor = DriverColors.MidnightBlack
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        enabled = !isSubmitting
+                                    ) {
+                                        Text(if (isSubmitting) "Dispatching OTP..." else "Send OTP via Twilio", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                } else {
+                                    Text("Enter 6-digit OTP code sent to $otpPhone", color = DriverColors.TextMuted, fontSize = 11.sp)
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    OutlinedTextField(
+                                        value = otpCode,
+                                        onValueChange = { if (it.length <= 6) otpCode = it.filter { c -> c.isDigit() } },
+                                        label = { Text("6-Digit OTP Code", color = DriverColors.TextMuted) },
+                                        textStyle = DriverTypography.Body,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = DriverColors.ChauffeurGold,
+                                            unfocusedBorderColor = DriverColors.SurfaceBorder,
+                                            focusedTextColor = DriverColors.TextPure,
+                                            unfocusedTextColor = DriverColors.TextPure
+                                        ),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    OutlinedTextField(
+                                        value = fullName,
+                                        onValueChange = { fullName = it },
+                                        label = { Text("Chauffeur Full Name (Optional for new pilots)", color = DriverColors.TextMuted) },
+                                        textStyle = DriverTypography.Body,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = DriverColors.ChauffeurGold,
+                                            unfocusedBorderColor = DriverColors.SurfaceBorder,
+                                            focusedTextColor = DriverColors.TextPure,
+                                            unfocusedTextColor = DriverColors.TextPure
+                                        ),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = true
+                                    )
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    Button(
+                                        onClick = {
+                                            val cleanCode = otpCode.trim()
+                                            if (cleanCode.length < 4) {
+                                                errorMessage = "Please enter 6-digit OTP passcode."
+                                                return@Button
+                                            }
+                                            val formatted = if (otpPhone.startsWith("+")) otpPhone else if (otpPhone.length == 10) "+91$otpPhone" else otpPhone
+                                            val name = fullName.trim().ifBlank { null }
+
+                                            isSubmitting = true
+                                            errorMessage = null
+                                            scope.launch {
+                                                try {
+                                                    val res = DriverApiClient.getService().verifyOtp(
+                                                        DriverOtpVerifyPayload(
+                                                            phoneNumber = formatted,
+                                                            otpCode = cleanCode,
+                                                            role = "driver",
+                                                            fullName = name
+                                                        )
+                                                    )
+                                                    if (res.isSuccessful && res.body() != null) {
+                                                        val token = res.body()!!["access_token"] as? String ?: ""
+                                                        Toast.makeText(context, "Welcome Chauffeur!", Toast.LENGTH_SHORT).show()
+                                                        onAuthenticationSuccess(token)
+                                                        onDismiss?.invoke()
+                                                    } else {
+                                                        errorMessage = "Invalid or expired OTP passcode. Please check and try again."
+                                                    }
+                                                } catch (e: Exception) {
+                                                    errorMessage = "Verification Error: ${e.localizedMessage}"
+                                                } finally {
+                                                    isSubmitting = false
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = DriverColors.ChauffeurGold,
+                                            contentColor = DriverColors.MidnightBlack
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.fillMaxWidth(),
+                                        enabled = !isSubmitting
+                                    ) {
+                                        Text(if (isSubmitting) "Verifying..." else "Verify & Open Cockpit", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    TextButton(
+                                        onClick = {
+                                            isOtpSent = false
+                                            otpCode = ""
+                                            errorMessage = null
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Change Phone Number", color = DriverColors.ChauffeurGold, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     "SIGNIN" -> {
                         Surface(
                             shape = RoundedCornerShape(12.dp),
@@ -268,7 +448,7 @@ fun DriverAuthenticationDialog(
                                                     val token = res.body()!!["access_token"] as? String ?: ""
                                                     Toast.makeText(context, "Welcome Chauffeur!", Toast.LENGTH_SHORT).show()
                                                     onAuthenticationSuccess(token)
-                                                    onDismiss()
+                                                    onDismiss?.invoke()
                                                 } else {
                                                     errorMessage = "Login Failed: Invalid credentials or account not found."
                                                 }
@@ -498,7 +678,7 @@ fun DriverAuthenticationDialog(
                                                     val token = res.body()!!["access_token"] as? String ?: ""
                                                     Toast.makeText(context, "Driver & Vehicle Registered Successfully!", Toast.LENGTH_SHORT).show()
                                                     onAuthenticationSuccess(token)
-                                                    onDismiss()
+                                                    onDismiss?.invoke()
                                                 } else {
                                                     errorMessage = "Registration Failed. Check if username or vehicle plate already exists."
                                                 }
@@ -554,7 +734,15 @@ fun DriverAuthenticationDialog(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Production Network Active",
+                    color = DriverColors.TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(4.dp)
+                )
             }
         }
     }
-}

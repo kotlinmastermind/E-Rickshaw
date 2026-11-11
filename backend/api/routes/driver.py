@@ -53,14 +53,16 @@ class LocationPingPayload(BaseModel):
 class DriverProfileUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
+    phone_number: Optional[str] = None
 
 @router.get("/profile")
 async def get_driver_profile(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
     service = DriverService(db)
     driver = await service.get_or_create_profile(user.id)
     return {
-        "user_id": user.id,
+        "id": driver.id,
         "driver_id": driver.id,
+        "user_id": user.id,
         "full_name": user.full_name,
         "phone_number": user.phone_number,
         "license_number": driver.license_number,
@@ -81,6 +83,8 @@ async def update_driver_profile(
         user.full_name = payload.full_name
     if payload.email is not None:
         user.email = payload.email
+    if payload.phone_number is not None:
+        user.phone_number = payload.phone_number
     await db.commit()
     return {"message": "Chauffeur profile updated."}
 
@@ -98,6 +102,11 @@ async def upload_document(
 async def get_documents(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
     service = DriverService(db)
     return await service.get_documents(user.id)
+
+@router.get("/availability")
+async def get_driver_availability(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
+    service = DriverService(db)
+    return await service.get_availability(user.id)
 
 @router.post("/availability")
 async def toggle_availability(

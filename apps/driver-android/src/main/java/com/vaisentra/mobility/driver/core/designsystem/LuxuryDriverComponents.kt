@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.designsystem
+package com.vaisentra.mobility.driver.core.designsystem
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable

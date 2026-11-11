@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.localization
+package com.vaisentra.mobility.driver.core.localization
 
 import androidx.compose.runtime.*
 import com.vaisentra.mobility.driver.core.network.DriverApiClient

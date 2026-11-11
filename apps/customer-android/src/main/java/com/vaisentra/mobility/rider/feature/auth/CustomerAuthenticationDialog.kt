@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.auth
+package com.vaisentra.mobility.rider.feature.auth
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
@@ -21,7 +21,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.vaisentra.mobility.rider.core.designsystem.*
 import com.vaisentra.mobility.rider.core.network.*
-import com.vaisentra.mobility.rider.core.security.TokenManager
+import com.vaisentra.mobility.core.security.TokenManager
+import com.vaisentra.mobility.core.ui.normalizePhoneNumber
 import kotlinx.coroutines.launch
 
 @Composable
@@ -45,19 +46,7 @@ fun CustomerAuthenticationDialog(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    fun normalizePhoneNumber(input: String): String {
-        val clean = input.trim().replace(" ", "").replace("-", "")
-        if (clean.isBlank()) return ""
-        val digitsOnly = clean.filter { it.isDigit() }
-        return when {
-            clean.startsWith("+") -> clean
-            digitsOnly.length == 10 -> "+91$digitsOnly"
-            digitsOnly.length == 12 && digitsOnly.startsWith("91") -> "+$digitsOnly"
-            digitsOnly.length > 10 && digitsOnly.startsWith("91") -> "+$digitsOnly"
-            digitsOnly.length > 10 -> "+91${digitsOnly.take(10)}"
-            else -> "+91$digitsOnly"
-        }
-    }
+
 
     Dialog(
         onDismissRequest = onDismiss,

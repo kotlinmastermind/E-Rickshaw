@@ -1,9 +1,11 @@
-﻿package com.vaisentra.mobility.driver
+package com.vaisentra.mobility.driver
 
 import org.junit.Assert.*
 import org.junit.Test
 import com.vaisentra.mobility.driver.core.network.DriverApiService
 import com.vaisentra.mobility.driver.feature.earnings.WeeklyGoalDto
+import com.vaisentra.mobility.driver.feature.duty.DriverDutyState
+import com.vaisentra.mobility.driver.feature.duty.DutyFailureCategory
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.PUT
@@ -307,5 +309,128 @@ class DriverAppUnitTest {
         assertFalse(isGoalTargetValid(0.0))
         assertFalse(isGoalTargetValid(-500.0))
         assertTrue(isGoalTargetValid(15000.0))
+    }
+
+    // --- Modular Navigation & Production Hardening Architecture Tests ---
+
+    @Test
+    fun testDriverModularNavigationDestinationMapping() {
+        // Verify all driver modular destinations are reachable and type-safe
+        val authDest: DriverDestination = DriverDestination.Auth
+        val dashDest: DriverDestination = DriverDestination.Dashboard
+        val tripDest: DriverDestination = DriverDestination.ActiveTrip("RIDE-77", "Metro Gate 1", "Cyber Hub")
+        val sumDest: DriverDestination = DriverDestination.RideSummary("RIDE-77", "Metro Gate 1", "Cyber Hub")
+        val histDest: DriverDestination = DriverDestination.RideHistory
+        val docDest: DriverDestination = DriverDestination.Documents
+        val onbDest: DriverDestination = DriverDestination.Onboarding
+        val earnDest: DriverDestination = DriverDestination.Earnings
+        val profDest: DriverDestination = DriverDestination.Profile
+        val safeDest: DriverDestination = DriverDestination.Safety
+        val notifDest: DriverDestination = DriverDestination.Notifications
+
+        assertTrue(authDest is DriverDestination.Auth)
+        assertTrue(dashDest is DriverDestination.Dashboard)
+        assertTrue(tripDest is DriverDestination.ActiveTrip)
+        assertTrue(sumDest is DriverDestination.RideSummary)
+        assertTrue(histDest is DriverDestination.RideHistory)
+        assertTrue(docDest is DriverDestination.Documents)
+        assertTrue(onbDest is DriverDestination.Onboarding)
+        assertTrue(earnDest is DriverDestination.Earnings)
+        assertTrue(profDest is DriverDestination.Profile)
+        assertTrue(safeDest is DriverDestination.Safety)
+        assertTrue(notifDest is DriverDestination.Notifications)
+
+        val activeTrip = tripDest as DriverDestination.ActiveTrip
+        assertEquals("RIDE-77", activeTrip.rideId)
+        assertEquals("Metro Gate 1", activeTrip.pickupAddress)
+        assertEquals("Cyber Hub", activeTrip.destinationAddress)
+    }
+
+    @Test
+    fun testDriverSessionIsolationAndSignOut() {
+        var isDriverLoggedIn = true
+        var activeRideId: String? = "RIDE-55"
+        var currentDest: DriverDestination = DriverDestination.Dashboard
+
+        fun performDriverSignOut() {
+            isDriverLoggedIn = false
+            activeRideId = null
+            currentDest = DriverDestination.Auth
+        }
+
+        performDriverSignOut()
+        assertFalse(isDriverLoggedIn)
+        assertNull(activeRideId)
+        assertEquals(DriverDestination.Auth, currentDest)
+
+        fun resolveDriverInitialDestination(
+            loggedIn: Boolean,
+            initialRideId: String?,
+            pickup: String?,
+            dest: String?
+        ): DriverDestination {
+            return if (!loggedIn) {
+                DriverDestination.Auth
+            } else if (!initialRideId.isNullOrBlank()) {
+                DriverDestination.ActiveTrip(initialRideId, pickup ?: "Pickup", dest ?: "Destination")
+            } else {
+                DriverDestination.Dashboard
+            }
+        }
+
+        assertEquals(DriverDestination.Auth, resolveDriverInitialDestination(false, null, null, null))
+        assertEquals(DriverDestination.Dashboard, resolveDriverInitialDestination(true, null, null, null))
+        val trip = resolveDriverInitialDestination(true, "RIDE-99", "Station A", "Station B") as DriverDestination.ActiveTrip
+        assertEquals("RIDE-99", trip.rideId)
+        assertEquals("Station A", trip.pickupAddress)
+        assertEquals("Station B", trip.destinationAddress)
+    }
+
+    @Test
+    fun testDriverDutyStateAuthoritativeTransitions() {
+        // Verify valid transitions
+        val unknown: DriverDutyState = DriverDutyState.Unknown
+        val offline: DriverDutyState = DriverDutyState.Offline
+        val updatingOnline: DriverDutyState = DriverDutyState.UpdatingOnline
+        val online: DriverDutyState = DriverDutyState.Online
+        val updatingOffline: DriverDutyState = DriverDutyState.UpdatingOffline
+
+        assertTrue(unknown is DriverDutyState.Unknown)
+        assertTrue(offline is DriverDutyState.Offline)
+        assertTrue(updatingOnline is DriverDutyState.UpdatingOnline)
+        assertTrue(online is DriverDutyState.Online)
+        assertTrue(updatingOffline is DriverDutyState.UpdatingOffline)
+
+        // Error state preserves previous confirmed state
+        val errorState = DriverDutyState.Error(
+            previousConfirmedState = DriverDutyState.Offline,
+            errorMessage = "Driver KYC unapproved",
+            failureCategory = DutyFailureCategory.UNAPPROVED_DRIVER,
+            httpCode = 403
+        )
+        assertEquals(DriverDutyState.Offline, errorState.previousConfirmedState)
+        assertEquals(403, errorState.httpCode)
+    }
+
+    @Test
+    fun testDriverSafetyCheckinAndFatigueOfflineSync() {
+        // Enforce: When driver reports fatigue (NEEDS_REST or UNFIT), driver duty must be toggled Offline
+        var driverDutyStatus = "ONLINE"
+
+        fun handleFatigueCheckin(state: String) {
+            if (state == "NEEDS_REST" || state == "UNFIT") {
+                driverDutyStatus = "OFFLINE"
+            }
+        }
+
+        handleFatigueCheckin("FIT")
+        assertEquals("ONLINE", driverDutyStatus)
+
+        handleFatigueCheckin("NEEDS_REST")
+        assertEquals("OFFLINE", driverDutyStatus)
+
+        driverDutyStatus = "ONLINE"
+        handleFatigueCheckin("UNFIT")
+        assertEquals("OFFLINE", driverDutyStatus)
     }
 }

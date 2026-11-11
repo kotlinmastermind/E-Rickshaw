@@ -376,16 +376,22 @@ class TripHistoryService:
         stmt = select(RideLocationHistory).where(RideLocationHistory.ride_id == ride_id).order_by(RideLocationHistory.recorded_at.asc())
         res = await db.execute(stmt)
         crumbs = res.scalars().all()
-        return [
-            {
+        results = []
+        cumulative_km = 0.0
+        for i, c in enumerate(crumbs):
+            if i > 0:
+                step_dist = haversine_km(crumbs[i - 1].latitude, crumbs[i - 1].longitude, c.latitude, c.longitude)
+                cumulative_km += step_dist
+            results.append({
                 "latitude": c.latitude,
                 "longitude": c.longitude,
                 "speed_kmh": c.speed_kmh,
                 "heading": c.heading,
-                "recorded_at": c.recorded_at.isoformat()
-            }
-            for c in crumbs
-        ]
+                "accuracy_meters": c.accuracy_meters,
+                "distance_km": round(cumulative_km, 2),
+                "recorded_at": c.recorded_at.isoformat() if c.recorded_at else None
+            })
+        return results
 
 
 class EmergencyLocationService:

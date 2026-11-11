@@ -1,5 +1,8 @@
-﻿package com.vaisentra.mobility.rider.feature.profile
+package com.vaisentra.mobility.rider.feature.profile
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -20,13 +23,19 @@ import com.vaisentra.mobility.rider.feature.loyalty.*
 import com.vaisentra.mobility.rider.feature.auth.CustomerAuthenticationDialog
 import com.vaisentra.mobility.rider.feature.vehicles.BespokeSanctuaryCustomizationSheet
 import com.vaisentra.mobility.rider.core.localization.localizedString
+import com.vaisentra.mobility.core.security.TokenManager
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 
 @Composable
 fun ProfileEditScreen(
     onNavigateBack: () -> Unit,
-    onNavigateGovernance: () -> Unit = {}
+    onNavigateGovernance: () -> Unit = {},
+    onSignOut: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showWalletConsole by remember { mutableStateOf(false) }
     var showLoyaltyHub by remember { mutableStateOf(false) }
@@ -51,6 +60,38 @@ fun ProfileEditScreen(
     var isSaving by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var isSuccess by remember { mutableStateOf(true) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                statusMessage = "Uploading profile photo..."
+                try {
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        val reqFile = bytes.toRequestBody("image/*".toMediaTypeOrNull())
+                        val body = okhttp3.MultipartBody.Part.createFormData("file", "avatar_${System.currentTimeMillis()}.jpg", reqFile)
+                        val res = ApiClient.getService().uploadAvatar(body)
+                        if (res.isSuccessful && res.body() != null) {
+                            avatarUrl = res.body()!!["avatar_url"] as? String
+                            statusMessage = "Profile photo updated successfully!"
+                            isSuccess = true
+                        } else {
+                            statusMessage = "Failed to upload photo (${res.code()})"
+                            isSuccess = false
+                        }
+                    } else {
+                        statusMessage = "Failed to read selected image."
+                        isSuccess = false
+                    }
+                } catch (e: Exception) {
+                    statusMessage = "Photo upload error: ${e.localizedMessage}"
+                    isSuccess = false
+                }
+            }
+        }
+    }
 
     // Load real profile from backend
     LaunchedEffect(Unit) {
@@ -215,27 +256,7 @@ fun ProfileEditScreen(
                             ) {
                                 Button(
                                     onClick = {
-                                        scope.launch {
-                                            statusMessage = "Uploading sample avatar photo..."
-                                            try {
-                                                // Create multipart sample file
-                                                val dummyBytes = "JPEG_SIMULATED_AVATAR_HEADER".toByteArray()
-                                                val reqFile = okhttp3.RequestBody.create(null, dummyBytes)
-                                                val body = okhttp3.MultipartBody.Part.createFormData("file", "avatar.jpg", reqFile)
-                                                val res = ApiClient.getService().uploadAvatar(body)
-                                                if (res.isSuccessful && res.body() != null) {
-                                                    avatarUrl = res.body()!!["avatar_url"] as? String
-                                                    statusMessage = "Profile photo updated successfully!"
-                                                    isSuccess = true
-                                                } else {
-                                                    statusMessage = "Failed to upload photo (${res.code()})"
-                                                    isSuccess = false
-                                                }
-                                            } catch (e: Exception) {
-                                                statusMessage = "Photo upload error: ${e.localizedMessage}"
-                                                isSuccess = false
-                                            }
-                                        }
+                                        photoPickerLauncher.launch("image/*")
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = LuxuryColors.ChampagneGold, contentColor = LuxuryColors.ObsidianBlack),
                                     shape = RoundedCornerShape(LuxuryDimensions.RadiusSmall),
@@ -547,6 +568,15 @@ fun ProfileEditScreen(
                         text = "BACK TO JOURNEY",
                         isSecondary = true,
                         onClick = onNavigateBack
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LuxuryButton(
+                        text = "SIGN OUT OF ACCOUNT",
+                        isSecondary = true,
+                        onClick = {
+                            TokenManager.getInstance(context).clear()
+                            onSignOut()
+                        }
                     )
                 }
             }

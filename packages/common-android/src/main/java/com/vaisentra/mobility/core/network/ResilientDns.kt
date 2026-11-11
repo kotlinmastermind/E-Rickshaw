@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.core.network
+package com.vaisentra.mobility.core.network
 
 import okhttp3.Dns
 import java.net.InetAddress

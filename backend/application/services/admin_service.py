@@ -1,8 +1,8 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, desc
+from sqlalchemy import select, update, func, desc, or_
 from fastapi import HTTPException, status
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverDocument,
@@ -29,30 +29,56 @@ class AdminService:
         )
         completed_rides = completed_rides_res.scalar_one()
 
-        # Gross booking value
+        # Gross booking value (coalescing final_fare_cents with estimated_fare_cents for completed rides)
         gbv_res = await self.db.execute(
-            select(func.sum(Ride.final_fare_cents)).where(Ride.status == "COMPLETED")
+            select(func.sum(func.coalesce(Ride.final_fare_cents, Ride.estimated_fare_cents, 0))).where(Ride.status == "COMPLETED")
         )
         gross_booking_cents = gbv_res.scalar_one() or 0
 
-        # Drivers online
+        # Drivers online (fresh heartbeat within 15 minutes)
+        now = datetime.now(timezone.utc)
+        heartbeat_cutoff = now - timedelta(minutes=15)
         online_drivers_res = await self.db.execute(
-            select(func.count(DriverAvailability.id)).where(DriverAvailability.is_online == True)
+            select(func.count(DriverAvailability.id)).where(
+                DriverAvailability.is_online == True,
+                or_(
+                    DriverAvailability.last_heartbeat >= heartbeat_cutoff,
+                    DriverAvailability.updated_at >= heartbeat_cutoff,
+                    DriverAvailability.last_heartbeat.is_(None)
+                )
+            )
         )
         online_drivers = online_drivers_res.scalar_one()
 
-        # Total registered users
+        # Total registered users and role breakdowns
         total_users_res = await self.db.execute(select(func.count(User.id)))
         total_users = total_users_res.scalar_one()
+
+        customers_res = await self.db.execute(select(func.count(User.id)).where(User.role == "customer"))
+        total_customers = customers_res.scalar_one()
+
+        drivers_res = await self.db.execute(select(func.count(User.id)).where(User.role == "driver"))
+        total_drivers = drivers_res.scalar_one()
+
+        admins_res = await self.db.execute(select(func.count(User.id)).where(User.role.in_(["admin", "superadmin"])))
+        total_admins = admins_res.scalar_one()
+
+        active_users_res = await self.db.execute(select(func.count(User.id)).where(User.is_active == True))
+        active_users = active_users_res.scalar_one()
 
         return {
             "total_rides": total_rides,
             "active_rides": active_rides,
             "completed_rides": completed_rides,
             "gross_booking_cents": gross_booking_cents,
+            "gross_booking_inr": round(gross_booking_cents / 100.0, 2),
             "currency": "INR",
             "online_drivers": online_drivers,
             "total_users": total_users,
+            "total_customers": total_customers,
+            "total_drivers": total_drivers,
+            "total_admins": total_admins,
+            "active_users": active_users,
             "platform_status": "OPERATIONAL"
         }
 

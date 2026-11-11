@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.dispatch
+package com.vaisentra.mobility.driver.core.dispatch
 
 import android.app.NotificationChannel
 import android.app.NotificationManager

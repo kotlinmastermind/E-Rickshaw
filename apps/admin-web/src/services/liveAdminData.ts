@@ -249,12 +249,22 @@ export async function createLiveCategory(payload: Partial<LiveCategory>): Promis
 
 export async function fetchLiveFareRules(): Promise<LiveFareRule[]> {
   try {
-    const data = await requestApi<any[]>('/fares/rules', {}, false);
+    const [data, categories] = await Promise.all([
+      requestApi<any[]>('/fares/rules', {}, false).catch(() => []),
+      fetchLiveCategories().catch(() => [])
+    ]);
+
+    const catMap = new Map<string, string>();
+    categories.forEach(c => {
+      if (c.id) catMap.set(c.id, c.name);
+      if (c.code) catMap.set(c.code, c.name);
+    });
+
     if (Array.isArray(data) && data.length > 0) {
       return data.map((r, idx) => ({
         id: r.id || `fare-${idx + 1}`,
         category_id: r.category_id,
-        category_name: idx === 0 ? 'Standard E-Rickshaw' : (idx === 1 ? 'Shared E-Rickshaw' : (idx === 2 ? 'High-Speed Electric Auto' : 'E-Loader Cargo')),
+        category_name: r.category_name || (r.category_id ? catMap.get(r.category_id) : null) || r.category_code || `Category ${idx + 1}`,
         version: r.version || 1,
         base_fare_rupees: r.base_fare_rupees || (r.base_fare_cents ? r.base_fare_cents / 100 : 20),
         per_km_rupees: r.per_km_rupees || (r.per_km_cents ? r.per_km_cents / 100 : 10),
@@ -271,6 +281,63 @@ export async function fetchLiveFareRules(): Promise<LiveFareRule[]> {
     console.error('Live fare rules fetch error:', err);
   }
   return [];
+}
+
+export async function createOrUpdateLiveFareRule(payload: {
+  category_id?: string;
+  base_fare_rupees: number;
+  per_km_rupees: number;
+  per_minute_rupees: number;
+  minimum_fare_rupees: number;
+  surge_multiplier?: number;
+}): Promise<boolean> {
+  try {
+    let catId = payload.category_id;
+    if (!catId) {
+      const cats = await fetchLiveCategories();
+      catId = cats[0]?.id || 'cat_standard';
+    }
+    await requestApi('/admin/fares', {
+      method: 'POST',
+      body: JSON.stringify({
+        category_id: catId,
+        base_fare_cents: Math.round(payload.base_fare_rupees * 100),
+        per_km_cents: Math.round(payload.per_km_rupees * 100),
+        per_minute_cents: Math.round(payload.per_minute_rupees * 100),
+        minimum_fare_cents: Math.round(payload.minimum_fare_rupees * 100),
+        surge_multiplier: payload.surge_multiplier || 1.0
+      })
+    });
+    return true;
+  } catch (err) {
+    console.warn('Save fare rule failed:', err);
+    return false;
+  }
+}
+
+export async function forceDriverOffline(driverId: string): Promise<boolean> {
+  try {
+    await requestApi(`/admin/drivers/${driverId}/duty`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_online: false, reason: 'Admin operational desk control' })
+    });
+    return true;
+  } catch (err) {
+    console.warn('Force driver offline failed:', err);
+    return false;
+  }
+}
+
+export function exportCSVData(filename: string, headers: string[], rows: (string | number)[][]): void {
+  const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  link.setAttribute('download', `${filename}_${new Date().toISOString().slice(0, 10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 export async function fetchLiveSystemMetrics(): Promise<LiveSystemMetrics> {
@@ -798,5 +865,26 @@ export async function createLiveSurgeRule(payload: { multiplier: number; reason:
     return false;
   }
 }
+
+export async function fetchLiveRoles(): Promise<Array<{ id: string; name: string; description: string; is_superuser: boolean }>> {
+  try {
+    const data = await requestApi<any[]>('/admin/roles', {}, true);
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.error('Fetch admin roles error:', err);
+    return [];
+  }
+}
+
+export async function fetchLivePermissions(): Promise<Array<{ id: string; permission_key: string; description: string; category: string }>> {
+  try {
+    const data = await requestApi<any[]>('/admin/permissions', {}, true);
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.error('Fetch admin permissions error:', err);
+    return [];
+  }
+}
+
 
 

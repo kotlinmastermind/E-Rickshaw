@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider
+package com.vaisentra.mobility.rider
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity

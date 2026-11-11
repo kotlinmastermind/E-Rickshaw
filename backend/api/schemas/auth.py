@@ -18,6 +18,18 @@ class PasswordRegisterPayload(BaseModel):
     phone_number: str = Field(..., min_length=10)
     role: str = Field(default="customer")
 
+class OtpRequestPayload(BaseModel):
+    """Payload to request Twilio SMS OTP."""
+    phone_number: str = Field(..., description="Mobile number in E.164 or 10-digit format", json_schema_extra={"example": "+919876543210"})
+    role: Optional[str] = Field(default="customer", description="customer or driver")
+
+class OtpVerifyPayload(BaseModel):
+    """Payload to verify Twilio SMS OTP and authenticate/login user."""
+    phone_number: str = Field(..., description="Mobile number in E.164 or 10-digit format", json_schema_extra={"example": "+919876543210"})
+    otp_code: str = Field(..., min_length=4, max_length=8, description="6-digit OTP passcode received via SMS")
+    role: Optional[str] = Field(default="customer", description="customer or driver")
+    full_name: Optional[str] = Field(default=None, description="Optional full name for new user registration")
+
 class PasswordLoginPayload(BaseModel):
     """Payload for password-based authentication."""
     email: str = Field(..., json_schema_extra={"example": "guest@erickshaw.in"})

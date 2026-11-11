@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.core.dispatch
+package com.vaisentra.mobility.driver.core.dispatch
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -6,7 +6,7 @@ import android.content.Intent
 import android.util.Log
 import com.vaisentra.mobility.driver.MainActivity
 import com.vaisentra.mobility.driver.core.network.DriverApiClient
-import com.vaisentra.mobility.driver.core.security.DriverTokenManager
+import com.vaisentra.mobility.core.security.TokenManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -40,7 +40,7 @@ class DriverDispatchActionReceiver : BroadcastReceiver() {
                             val res = DriverApiClient.getService().acceptRide(rideId)
                             if (res.isSuccessful) {
                                 Log.i(TAG, "Ride $rideId accepted successfully by backend")
-                                DriverTokenManager.getInstance(context).saveActiveRideId(rideId)
+                                TokenManager.getDriverInstance(context).saveActiveRideId(rideId)
                                 DriverDispatchManager.onOfferAccepted(rideId)
                                 DriverDispatchNotificationManager.cancelOfferNotification(context, rideId)
 

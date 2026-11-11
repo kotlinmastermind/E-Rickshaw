@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver
+package com.vaisentra.mobility.driver
 
 import com.vaisentra.mobility.core.network.ResilientDns
 import com.vaisentra.mobility.driver.core.network.DriverApiClient

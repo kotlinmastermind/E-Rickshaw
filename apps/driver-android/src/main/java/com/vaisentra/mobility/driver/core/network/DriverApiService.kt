@@ -1,24 +1,12 @@
 package com.vaisentra.mobility.driver.core.network
 
 import com.google.gson.annotations.SerializedName
+import com.vaisentra.mobility.core.model.*
 import retrofit2.Response
 import retrofit2.http.*
 
-data class DriverTokenResponse(
-    @SerializedName("access_token") val accessToken: String,
-    @SerializedName("token_type") val tokenType: String,
-    @SerializedName("refresh_token") val refreshToken: String? = null,
-    @SerializedName("user") val user: DriverUserDto
-)
-
-data class DriverUserDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("phone_number") val phoneNumber: String,
-    @SerializedName("full_name") val fullName: String?,
-    @SerializedName("role") val role: String
-)
-
 data class DriverProfileDto(
+    @SerializedName("id") val id: String? = null,
     @SerializedName("user_id") val userId: String,
     @SerializedName("driver_id") val driverId: String,
     @SerializedName("full_name") val fullName: String?,
@@ -28,7 +16,9 @@ data class DriverProfileDto(
     @SerializedName("rating_average") val ratingAverage: Double,
     @SerializedName("total_trips") val totalTrips: Int,
     @SerializedName("wallet_balance_cents") val walletBalanceCents: Int
-)
+) {
+    val canonicalId: String get() = id ?: driverId
+}
 
 data class DriverAvailabilityPayload(
     @SerializedName("is_online") val isOnline: Boolean
@@ -80,6 +70,12 @@ interface DriverApiService {
     @Multipart @POST("api/v1/drivers/safety/incidents/{ticketNumber}/evidence") suspend fun uploadIncidentEvidence(@Path("ticketNumber") ticketNumber: String, @Part file: okhttp3.MultipartBody.Part): Response<Map<String, Any>>
     @GET("api/v1/drivers/profile")
     suspend fun getProfile(): Response<DriverProfileDto>
+
+    @PUT("api/v1/drivers/profile")
+    suspend fun updateProfile(@Body payload: Map<String, String>): Response<Map<String, Any>>
+
+    @GET("api/v1/drivers/availability")
+    suspend fun getAvailability(): Response<Map<String, Any>>
 
     @POST("api/v1/drivers/availability")
     suspend fun setAvailability(@Body payload: DriverAvailabilityPayload): Response<Map<String, Any>>
@@ -160,6 +156,14 @@ interface DriverApiService {
         @Part file: okhttp3.MultipartBody.Part
     ): Response<Map<String, Any>>
 
+    @Multipart
+    @POST("api/v1/drivers/vehicles/{vehicleId}/documents")
+    suspend fun uploadVehicleDocument(
+        @Path("vehicleId") vehicleId: String,
+        @Part("document_type") documentType: okhttp3.RequestBody,
+        @Part file: okhttp3.MultipartBody.Part
+    ): Response<Map<String, Any>>
+
     @GET("api/v1/auth/me")
     suspend fun getMe(): Response<Map<String, Any>>
 
@@ -171,10 +175,10 @@ interface DriverApiService {
     suspend fun deleteAvatar(): Response<Map<String, Any>>
 
     @POST("api/v1/safety/sos")
-    suspend fun triggerEmergencySos(@Body payload: DriverSosPayload): Response<Map<String, Any>>
+    suspend fun triggerEmergencySos(@Body payload: SosTriggerRequest): Response<Map<String, Any>>
 
     @POST("api/v1/safety/incidents")
-    suspend fun reportIncident(@Body payload: DriverIncidentReportPayload): Response<Map<String, Any>>
+    suspend fun reportIncident(@Body payload: IncidentReportRequest): Response<Map<String, Any>>
 
     @GET("api/v1/driver-onboarding/overview") suspend fun getOnboardingOverview(): Response<Map<String, Any>>
     @GET("api/v1/driver-onboarding/identity") suspend fun getIdentityStatus(): Response<Map<String, Any>>
@@ -229,7 +233,7 @@ interface DriverApiService {
     @POST("api/v1/drivers/financials/support-requests") suspend fun submitFinancialSupportRequest(@Body payload: Map<String, Any>): Response<Map<String, Any>>
 
     // Part 16: DPDP & GDPR DSAR Privacy Rights
-    @POST("api/v1/privacy/dsar-requests") suspend fun submitPrivacyDsar(@Body payload: DriverPrivacyDsarPayload): Response<Map<String, Any>>
+    @POST("api/v1/privacy/dsar-requests") suspend fun submitPrivacyDsar(@Body payload: PrivacyDsarSubmissionDto): Response<Map<String, Any>>
 
     @GET("api/v1/localization/translations/{locale}")
     suspend fun getLocalizationTranslations(@Path("locale") locale: String = "en"): Response<Map<String, Any>>
@@ -239,6 +243,12 @@ interface DriverApiService {
 
     @POST("api/v1/auth/login/unified")
     suspend fun unifiedLogin(@Body payload: DriverUnifiedLoginRequestPayload): Response<Map<String, Any>>
+
+    @POST("api/v1/auth/otp/request")
+    suspend fun requestOtp(@Body payload: DriverOtpRequestPayload): Response<Map<String, Any>>
+
+    @POST("api/v1/auth/otp/verify")
+    suspend fun verifyOtp(@Body payload: DriverOtpVerifyPayload): Response<Map<String, Any>>
 
     // Part 19: Infrastructure, Resilience & Developer Platform (Features 451-475)
     @GET("api/v1/infra/openapi-client-spec")
@@ -265,26 +275,14 @@ interface DriverApiService {
     @GET("api/v1/rides/{ride_id}/chat/messages")
     suspend fun getRideChatMessages(
         @Path("ride_id") rideId: String
-    ): Response<List<DriverChatMessageDto>>
+    ): Response<List<RideChatMessageDto>>
 
     @POST("api/v1/rides/{ride_id}/chat/messages")
     suspend fun sendRideChatMessage(
         @Path("ride_id") rideId: String,
-        @Body payload: DriverSendChatMessageRequest
-    ): Response<DriverChatMessageDto>
+        @Body payload: SendChatMessageRequest
+    ): Response<RideChatMessageDto>
 }
-
-data class DriverSendChatMessageRequest(
-    @SerializedName("message_text") val messageText: String
-)
-
-data class DriverChatMessageDto(
-    @SerializedName("id") val id: String? = null,
-    @SerializedName("sender_role") val senderRole: String? = null,
-    @SerializedName("message") val message: String? = null,
-    @SerializedName("message_text") val messageText: String? = null,
-    @SerializedName("sent_at") val sentAt: String? = null
-)
 
 data class DriverSignupRequestPayload(
     @SerializedName("phone_number") val phoneNumber: String,
@@ -303,9 +301,16 @@ data class DriverUnifiedLoginRequestPayload(
     @SerializedName("password") val password: String? = null
 )
 
-data class DriverPrivacyDsarPayload(
-    @SerializedName("request_type") val requestType: String,
-    @SerializedName("reason") val reason: String
+data class DriverOtpRequestPayload(
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("role") val role: String = "driver"
+)
+
+data class DriverOtpVerifyPayload(
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("otp_code") val otpCode: String,
+    @SerializedName("role") val role: String = "driver",
+    @SerializedName("full_name") val fullName: String? = null
 )
 
 data class IdentityVerificationPayload(val id_type: String, val id_number: String, val selfie_notes: String? = null)
@@ -324,20 +329,4 @@ data class DriverDocumentDto(
     @SerializedName("verification_status") val verificationStatus: String,
     @SerializedName("rejection_reason") val rejectionReason: String?,
     @SerializedName("created_at") val createdAt: String
-)
-
-data class DriverSosPayload(
-    @SerializedName("ride_id") val rideId: String,
-    @SerializedName("latitude") val latitude: Double,
-    @SerializedName("longitude") val longitude: Double,
-    @SerializedName("alert_type") val alertType: String = "DRIVER_SOS",
-    @SerializedName("notes") val notes: String? = null
-)
-
-data class DriverIncidentReportPayload(
-    @SerializedName("ride_id") val rideId: String,
-    @SerializedName("category") val category: String,
-    @SerializedName("severity") val severity: String = "MEDIUM",
-    @SerializedName("description") val description: String,
-    @SerializedName("involved_party_role") val involvedPartyRole: String = "DRIVER"
 )

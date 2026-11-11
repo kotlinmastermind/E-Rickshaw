@@ -69,6 +69,63 @@ async def test_fcm_provider_rejects_empty_token():
     assert provider.last_error_code == "INVALID_TOKEN"
 
 
+@pytest.mark.asyncio
+async def test_fcm_provider_returns_unconfigured_when_no_credentials():
+    provider = get_notification_provider()
+    with patch.object(provider, "_get_fcm_credentials", return_value=(None, None)):
+        res = await provider.send_push_notification("valid_token_12345", "Title", "Body")
+        assert res is False
+        assert provider.last_error_code == "PROVIDER_NOT_CONFIGURED"
+        assert provider.last_message_id is None
+
+
+@pytest.mark.asyncio
+async def test_fcm_provider_success_flow():
+    from unittest.mock import MagicMock
+    provider = get_notification_provider()
+    mock_creds = MagicMock()
+    mock_creds.token = "mock_oauth_token"
+    mock_creds.project_id = "erickshaw-prod"
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"name": "projects/erickshaw-prod/messages/fcm_live_msg_987654"}
+
+    with patch.object(provider, "_get_fcm_credentials", return_value=(mock_creds, "erickshaw-prod")), \
+         patch("httpx.AsyncClient.post", return_value=mock_resp):
+        res = await provider.send_push_notification("valid_token_12345", "Title", "Body")
+        assert res is True
+        assert provider.last_message_id == "projects/erickshaw-prod/messages/fcm_live_msg_987654"
+        assert provider.last_error_code == ""
+
+
+@pytest.mark.asyncio
+async def test_fcm_provider_unregistered_and_timeout_errors():
+    from unittest.mock import MagicMock
+    import httpx
+    provider = get_notification_provider()
+    mock_creds = MagicMock()
+    mock_creds.token = "mock_oauth_token"
+
+    # 1. Unregistered token
+    mock_resp_404 = MagicMock()
+    mock_resp_404.status_code = 404
+    mock_resp_404.text = '{"error": {"status": "NOT_FOUND", "message": "UNREGISTERED"}}'
+
+    with patch.object(provider, "_get_fcm_credentials", return_value=(mock_creds, "erickshaw-prod")), \
+         patch("httpx.AsyncClient.post", return_value=mock_resp_404):
+        res = await provider.send_push_notification("stale_token_12345", "Title", "Body")
+        assert res is False
+        assert provider.last_error_code == "UNREGISTERED"
+
+    # 2. Timeout
+    with patch.object(provider, "_get_fcm_credentials", return_value=(mock_creds, "erickshaw-prod")), \
+         patch("httpx.AsyncClient.post", side_effect=httpx.TimeoutException("timeout")):
+        res = await provider.send_push_notification("token_12345", "Title", "Body")
+        assert res is False
+        assert provider.last_error_code == "TIMEOUT"
+
+
 # ===========================================================================
 # Task 067: Transactional Email Delivery Service with Fallback Logging
 # ===========================================================================

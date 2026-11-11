@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.dispatch
+package com.vaisentra.mobility.driver.feature.dispatch
 
 import android.content.Context
 import android.media.AudioAttributes

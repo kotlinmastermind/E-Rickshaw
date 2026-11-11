@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.safety
+package com.vaisentra.mobility.rider.feature.safety
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -36,10 +36,10 @@ import com.vaisentra.mobility.rider.core.designsystem.*
 import com.vaisentra.mobility.rider.core.network.*
 import kotlinx.coroutines.launch
 
-val SosRed = Color(0xFFEF4444)
+val SosRed = com.vaisentra.mobility.core.designsystem.SharedDesignTokens.Red
 val SosRedDark = Color(0xFF991B1B)
-val SafetyEmerald = Color(0xFF10B981)
-val SafetyGold = Color(0xFFD4AF37)
+val SafetyEmerald = com.vaisentra.mobility.core.designsystem.SharedDesignTokens.Emerald
+val SafetyGold = com.vaisentra.mobility.core.designsystem.SharedDesignTokens.BrandGold
 val SafetySurfaceDark = Color(0xFF16161E)
 val SafetySurfaceCard = Color(0xFF1F1F2C)
 
@@ -203,7 +203,7 @@ fun EmergencySosDialog(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = result.message,
+                                text = result.message ?: "Emergency alert dispatched",
                                 color = LuxuryIvory.copy(alpha = 0.8f),
                                 fontSize = 12.sp
                             )

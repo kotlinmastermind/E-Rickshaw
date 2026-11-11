@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver
+package com.vaisentra.mobility.driver
 
 import com.vaisentra.mobility.driver.core.location.DriverLocationForegroundService
 import com.vaisentra.mobility.driver.core.network.DriverLocationPayload

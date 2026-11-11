@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.profile
+package com.vaisentra.mobility.driver.feature.profile
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -14,16 +14,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.vaisentra.mobility.driver.core.designsystem.*
 import com.vaisentra.mobility.driver.core.localization.driverLocalizedString
 import com.vaisentra.mobility.driver.core.network.DriverApiClient
+import com.vaisentra.mobility.core.security.TokenManager
+import com.vaisentra.mobility.driver.feature.auth.DriverAuthenticationDialog
+import com.vaisentra.mobility.driver.feature.duty.DriverDutyRepository
 import kotlinx.coroutines.launch
 
 @Composable
 fun DriverProfileScreen(
     onNavigateBack: () -> Unit,
-    onNavigateRideHistory: () -> Unit = {}
+    onNavigateRideHistory: () -> Unit = {},
+    onSignOut: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var fullName by remember { mutableStateOf("") }
     var phoneNumber by remember { mutableStateOf("") }
@@ -37,6 +43,8 @@ fun DriverProfileScreen(
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showVehicleChangeDialog by remember { mutableStateOf(false) }
+    var showReauthDialog by remember { mutableStateOf(false) }
+    var isSavingProfile by remember { mutableStateOf(false) }
 
     // Load real driver profile and vehicle from backend API
     LaunchedEffect(Unit) {
@@ -168,6 +176,18 @@ fun DriverProfileScreen(
                                 Text("Ride History", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedButton(
+                            onClick = { showReauthDialog = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = DriverColors.TextMuted),
+                            border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().height(36.dp)
+                        ) {
+                            Text("VERIFY CREDENTIALS / RE-AUTH", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
 
@@ -205,6 +225,21 @@ fun DriverProfileScreen(
             PrimaryButton(
                 text = driverLocalizedString("back_to_cockpit", "BACK TO COCKPIT"),
                 onClick = onNavigateBack
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            SecondaryButton(
+                text = driverLocalizedString("sign_out", "SIGN OUT"),
+                onClick = {
+                    scope.launch {
+                        runCatching {
+                            DriverDutyRepository.getInstance(context).setDutyOffline()
+                        }
+                        TokenManager.getDriverInstance(context).clear()
+                        onSignOut()
+                    }
+                }
             )
         }
     }
@@ -258,13 +293,31 @@ fun DriverProfileScreen(
             },
             confirmButton = {
                 PrimaryButton(
-                    text = "SAVE CHANGES",
+                    text = if (isSavingProfile) "SAVING..." else "SAVE CHANGES",
+                    enabled = !isSavingProfile,
                     onClick = {
-                        fullName = editName
-                        city = editCity
-                        phoneNumber = editPhone
-                        showEditProfileDialog = false
-                        statusMessage = "Profile updated successfully!"
+                        isSavingProfile = true
+                        scope.launch {
+                            try {
+                                val payload = mutableMapOf<String, String>()
+                                if (editName.isNotBlank()) payload["full_name"] = editName.trim()
+                                if (editPhone.isNotBlank()) payload["phone_number"] = editPhone.trim()
+                                val res = DriverApiClient.getService().updateProfile(payload)
+                                if (res.isSuccessful) {
+                                    fullName = editName
+                                    city = editCity
+                                    phoneNumber = editPhone
+                                    showEditProfileDialog = false
+                                    statusMessage = "Profile updated successfully on server!"
+                                } else {
+                                    statusMessage = "Failed to update profile: HTTP ${res.code()}"
+                                }
+                            } catch (e: Exception) {
+                                statusMessage = "Network error updating profile: ${e.localizedMessage ?: "Connection error"}"
+                            } finally {
+                                isSavingProfile = false
+                            }
+                        }
                     }
                 )
             },
@@ -273,6 +326,27 @@ fun DriverProfileScreen(
                     text = "CANCEL",
                     onClick = { showEditProfileDialog = false }
                 )
+            }
+        )
+    }
+
+    if (showReauthDialog) {
+        DriverAuthenticationDialog(
+            onDismiss = { showReauthDialog = false },
+            onAuthenticationSuccess = { _ ->
+                showReauthDialog = false
+                statusMessage = "Credentials verified successfully!"
+                scope.launch {
+                    try {
+                        val res = DriverApiClient.getService().getMe()
+                        if (res.isSuccessful && res.body() != null) {
+                            val me = res.body()!!
+                            fullName = (me["full_name"] as? String)?.ifBlank { null } ?: fullName
+                            phoneNumber = me["phone_number"] as? String ?: phoneNumber
+                            email = me["email"] as? String ?: email
+                        }
+                    } catch (_: Exception) {}
+                }
             }
         )
     }

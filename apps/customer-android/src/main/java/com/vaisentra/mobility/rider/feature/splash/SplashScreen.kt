@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider.feature.splash
+package com.vaisentra.mobility.rider.feature.splash
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background

@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.earnings
+package com.vaisentra.mobility.driver.feature.earnings
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background

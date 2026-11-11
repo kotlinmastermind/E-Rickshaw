@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.driver.feature.map
+package com.vaisentra.mobility.driver.feature.map
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -67,7 +67,7 @@ object NavigationHelper {
 @Composable
 fun DriverMapView(
     modifier: Modifier = Modifier,
-    driverLatLng: LatLng = LatLng(25.6858, 85.2146),
+    driverLatLng: LatLng? = null,
     pickupLatLng: LatLng? = null,
     pickupTitle: String = "Pickup Location",
     destLatLng: LatLng? = null,
@@ -83,6 +83,9 @@ fun DriverMapView(
     onMapClick: ((LatLng) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val effectiveDriverLoc = driverLatLng 
+        ?: com.vaisentra.mobility.core.map.DeviceLocationProvider.getLastKnownLocation(context)?.let { LatLng(it.latitude, it.longitude) }
+        ?: LatLng(0.0, 0.0)
     var is3DCameraMode by remember { mutableStateOf(true) }
     var isTrafficEnabled by remember { mutableStateOf(true) }
     var isVoiceMuted by remember { mutableStateOf(false) }
@@ -104,7 +107,7 @@ fun DriverMapView(
         // 1. Native Mapbox Driver Cockpit View
         MapboxDriverMapView(
             modifier = Modifier.fillMaxSize(),
-            driverLatLng = driverLatLng,
+            driverLatLng = effectiveDriverLoc,
             bearing = bearing,
             currentSpeedKmh = currentSpeedKmh,
             pickupLatLng = pickupLatLng,

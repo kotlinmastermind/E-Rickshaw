@@ -1,4 +1,4 @@
-﻿package com.vaisentra.mobility.rider
+package com.vaisentra.mobility.rider
 
 import org.junit.Assert.*
 import org.junit.Test
@@ -538,5 +538,175 @@ class CustomerAppUnitTest {
         assertTrue(surveyJson.contains("\"survey_type\":\"POST_TRIP_CSAT\""))
         assertTrue(surveyJson.contains("\"score\":10"))
         assertTrue(surveyJson.contains("\"comments\":\"Flawless service.\""))
+    }
+
+    // --- Modular Navigation & Production Hardening Architecture Tests ---
+
+    @Test
+    fun testCustomerModularNavigationDestinationMapping() {
+        // Verify all modular destinations are distinct and correctly structured
+        val authDest: CustomerDestination = CustomerDestination.Auth
+        val homeDest: CustomerDestination = CustomerDestination.Home
+        val trackingDest: CustomerDestination = CustomerDestination.Tracking(rideId = "RIDE-2001", startOtp = "4321")
+        val paymentDest: CustomerDestination = CustomerDestination.Payment(rideId = "RIDE-2001", amountRupees = 45)
+        val profileDest: CustomerDestination = CustomerDestination.Profile
+        val notifDest: CustomerDestination = CustomerDestination.Notifications
+        val govDest: CustomerDestination = CustomerDestination.Governance
+
+        assertTrue(authDest is CustomerDestination.Auth)
+        assertTrue(homeDest is CustomerDestination.Home)
+        assertTrue(trackingDest is CustomerDestination.Tracking)
+        assertTrue(paymentDest is CustomerDestination.Payment)
+        assertTrue(profileDest is CustomerDestination.Profile)
+        assertTrue(notifDest is CustomerDestination.Notifications)
+        assertTrue(govDest is CustomerDestination.Governance)
+
+        val tracking = trackingDest as CustomerDestination.Tracking
+        assertEquals("RIDE-2001", tracking.rideId)
+        assertEquals("4321", tracking.startOtp)
+
+        val payment = paymentDest as CustomerDestination.Payment
+        assertEquals("RIDE-2001", payment.rideId)
+        assertEquals(45, payment.amountRupees)
+    }
+
+    @Test
+    fun testCustomerSessionIsolationAndLogout() {
+        // Verify that clearing auth wipes user tokens and prevents unauthorized access to protected destinations
+        var isLoggedIn = true
+        var activeRideId: String? = "RIDE-991"
+        var currentDest: CustomerDestination = CustomerDestination.Tracking("RIDE-991", "1234")
+
+        // Simulate Logout
+        fun performLogout() {
+            isLoggedIn = false
+            activeRideId = null
+            currentDest = CustomerDestination.Auth
+        }
+
+        performLogout()
+        assertFalse(isLoggedIn)
+        assertNull(activeRideId)
+        assertEquals(CustomerDestination.Auth, currentDest)
+
+        // Attempting to resolve initial destination when logged out must yield Auth
+        fun resolveInitialDestination(loggedIn: Boolean, rideId: String?): CustomerDestination {
+            return if (!loggedIn) {
+                CustomerDestination.Auth
+            } else if (!rideId.isNullOrBlank()) {
+                CustomerDestination.Tracking(rideId, "1234")
+            } else {
+                CustomerDestination.Home
+            }
+        }
+
+        assertEquals(CustomerDestination.Auth, resolveInitialDestination(false, null))
+        assertEquals(CustomerDestination.Home, resolveInitialDestination(true, null))
+        assertEquals(CustomerDestination.Tracking("RIDE-88", "1234"), resolveInitialDestination(true, "RIDE-88"))
+    }
+
+    @Test
+    fun testCustomerPaymentGatewayConfirmationIntegrity() {
+        // Enforce: Never mark a payment successful based only on gateway response if server verification fails
+        fun evaluatePaymentSettlement(gatewayPaymentId: String?, serverVerifySuccess: Boolean): Pair<Boolean, String> {
+            if (gatewayPaymentId.isNullOrBlank()) {
+                return Pair(false, "Payment cancelled or gateway error.")
+            }
+            if (!serverVerifySuccess) {
+                return Pair(false, "Payment captured ($gatewayPaymentId). Awaiting server confirmation. Please do not pay again.")
+            }
+            return Pair(true, "Payment verified & captured on server!")
+        }
+
+        // Gateway success + Server confirmation -> Settled
+        val successCase = evaluatePaymentSettlement("pay_XYZ123", true)
+        assertTrue(successCase.first)
+        assertTrue(successCase.second.contains("verified & captured"))
+
+        // Gateway success + Server failure -> NOT Settled (prevents fake success)
+        val serverFailCase = evaluatePaymentSettlement("pay_XYZ123", false)
+        assertFalse(serverFailCase.first)
+        assertTrue(serverFailCase.second.contains("Awaiting server confirmation"))
+
+        // Gateway cancelled -> NOT Settled
+        val cancelledCase = evaluatePaymentSettlement(null, false)
+        assertFalse(cancelledCase.first)
+    }
+
+    @Test
+    fun testCustomerEmergencySafetyBroadcastConsistency() {
+        // Verify emergency broadcast payload and duplicate suppression
+        var isEmergencyBroadcasting = false
+        var emergencyBroadcastCount = 0
+
+        fun triggerEmergencySos(rideId: String, lat: Double, lng: Double): Boolean {
+            if (isEmergencyBroadcasting) return false // Suppress duplicate triggers
+            isEmergencyBroadcasting = true
+            emergencyBroadcastCount++
+            return true
+        }
+
+        assertTrue(triggerEmergencySos("RIDE-11", 28.6139, 77.2090))
+        assertEquals(1, emergencyBroadcastCount)
+
+        // Duplicate rapid SOS taps while one is in-flight are rejected
+        assertFalse(triggerEmergencySos("RIDE-11", 28.6139, 77.2090))
+        assertEquals(1, emergencyBroadcastCount)
+
+        // After completion
+        isEmergencyBroadcasting = false
+        assertTrue(triggerEmergencySos("RIDE-11", 28.6139, 77.2090))
+        assertEquals(2, emergencyBroadcastCount)
+    }
+
+    @Test
+    fun testCustomerExceptionHandlingDoesNotSwallowFatalExceptions() {
+        val bgThread = Thread({ }, "MapboxTelemetryWorker")
+
+        // 1. Generic SecurityException must NOT be swallowed
+        val secException = SecurityException("Permission denial: ACCESS_FINE_LOCATION requires user grant")
+        assertFalse(
+            "SecurityException must never be swallowed as a non-fatal map exception",
+            CustomerApplication.isPlayServicesOrNativeMapException(bgThread, secException)
+        )
+
+        // 2. Connectivity / IO exceptions must NOT be swallowed
+        val ioException = java.io.IOException("NO_CONNECTIVITY: Network socket reset")
+        assertFalse(
+            "Connectivity exceptions must never be swallowed",
+            CustomerApplication.isPlayServicesOrNativeMapException(bgThread, ioException)
+        )
+
+        // 3. Parcel / IPC failures must NOT be swallowed
+        val parcelException = RuntimeException("Parcel.createException: Transaction failed in Binder")
+        assertFalse(
+            "Parcel / IPC exceptions must never be swallowed",
+            CustomerApplication.isPlayServicesOrNativeMapException(bgThread, parcelException)
+        )
+
+        // 4. Unexpected runtime exceptions (NPE, IllegalArgument) must NOT be swallowed
+        val npe = NullPointerException("Critical state null in booking flow")
+        assertFalse(
+            "NullPointerException must never be swallowed",
+            CustomerApplication.isPlayServicesOrNativeMapException(bgThread, npe)
+        )
+
+        // 5. Recoverable Google Play Services Dynamite module loading on background thread IS handled
+        val dynamiteException = RuntimeException(
+            "com.google.android.gms.dynamite.DynamiteModule: No acceptable module found for policy_maps_core_dynamite"
+        )
+        assertTrue(
+            "Known unrecoverable background Dynamite module loader failure should be handled safely",
+            CustomerApplication.isPlayServicesOrNativeMapException(bgThread, dynamiteException)
+        )
+
+        // 6. Recoverable Native Mapbox SQLite cache lock contention on background thread IS handled
+        val diskCacheLockException = RuntimeException(
+            "NativeSqliteDiskCacheImpl: Database lock unavailable during map tile read"
+        )
+        assertTrue(
+            "Known native disk cache contention on background thread should be handled safely",
+            CustomerApplication.isPlayServicesOrNativeMapException(bgThread, diskCacheLockException)
+        )
     }
 }

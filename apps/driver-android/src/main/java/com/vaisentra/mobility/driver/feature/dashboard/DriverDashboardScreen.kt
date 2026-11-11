@@ -19,6 +19,9 @@ import com.vaisentra.mobility.driver.core.designsystem.*
 import com.vaisentra.mobility.driver.core.dispatch.DriverDispatchManager
 import com.vaisentra.mobility.driver.core.network.DriverApiClient
 import com.vaisentra.mobility.driver.core.network.DriverAvailabilityPayload
+import com.vaisentra.mobility.driver.feature.duty.DriverDutyRepository
+import com.vaisentra.mobility.driver.feature.duty.DriverDutyState
+import com.vaisentra.mobility.driver.feature.duty.DutyFailureCategory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
@@ -54,7 +57,7 @@ import android.os.PowerManager
 import android.annotation.SuppressLint
 import android.provider.Settings
 import com.vaisentra.mobility.driver.core.location.DriverLocationForegroundService
-import com.vaisentra.mobility.driver.feature.dispatch.IncomingRideDispatchDialog
+import com.vaisentra.mobility.driver.feature.dispatch.IncomingRideModal
 
 @SuppressLint("MissingPermission")
 @Composable
@@ -74,7 +77,9 @@ fun DriverDashboardScreen(
 
     var driverLatLng by remember { mutableStateOf(LatLng(25.6858, 85.2146)) }
     var recenterTrigger by remember { mutableIntStateOf(0) }
-    var isOnline by remember { mutableStateOf(false) }
+    val dutyRepository = remember { DriverDutyRepository.getInstance(context) }
+    val dutyState by dutyRepository.dutyState.collectAsState()
+    val isOnline = (dutyState is DriverDutyState.Online)
     var incomingRideOffer by remember { mutableStateOf<Map<String, String>?>(null) }
     var offerCountdown by remember { mutableIntStateOf(15) }
     var isWsConnected by remember { mutableStateOf(false) }
@@ -98,10 +103,14 @@ fun DriverDashboardScreen(
         val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] ?: false
         val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
         if (fineGranted || coarseGranted) {
-            if (!isKycApproved) {
-                showKycBlockedDialog = true
-            } else {
-                isOnline = true
+            scope.launch {
+                val res = dutyRepository.toggleDuty(targetOnline = true)
+                if (res is DriverDutyState.Error) {
+                    offersError = res.errorMessage
+                    if (res.failureCategory == DutyFailureCategory.UNAPPROVED_DRIVER) {
+                        showKycBlockedDialog = true
+                    }
+                }
             }
         } else {
             offersError = "Location permission is required to receive trip dispatches."
@@ -127,7 +136,7 @@ fun DriverDashboardScreen(
                         kycApprovalStatus = p.approvalStatus
                         isKycApproved = p.approvalStatus.equals("APPROVED", ignoreCase = true) || p.approvalStatus.equals("VERIFIED", ignoreCase = true)
                         if (!isKycApproved) {
-                            isOnline = false
+                            scope.launch { dutyRepository.setDutyOffline() }
                         }
                     }
                 }
@@ -209,32 +218,13 @@ fun DriverDashboardScreen(
         fetchDriverLocation()
     }
 
-    // Availability toggle with backend sync and foreground GPS service control
-    LaunchedEffect(isOnline) {
-        withContext(Dispatchers.IO) {
-            try {
-                DriverApiClient.getService().setAvailability(DriverAvailabilityPayload(isOnline))
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {}
-        }
-        if (isOnline) {
-            val hasLoc = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                         ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-            if (hasLoc) {
-                try {
-                    DriverLocationForegroundService.start(context)
-                } catch (_: Exception) {}
-            }
-        } else {
-            try {
-                DriverLocationForegroundService.stop(context)
-            } catch (_: Exception) {}
-            incomingRideOffer = null
-        }
+    // Authoritative availability reconciliation with backend on screen entry
+    LaunchedEffect(Unit) {
+        dutyRepository.reconcileAvailability()
     }
 
     // Real-time dispatch is primarily handled via WebSocket (/api/v1/ws/driver/dispatch).
+    // Secure WebSocket transport uses header-based authorization: addHeader("Authorization", "Bearer $token")
     // Polling provides a fallback safety net with a gentle 15s interval.
     LaunchedEffect(isOnline) {
         while (isOnline) {
@@ -262,7 +252,7 @@ fun DriverDashboardScreen(
                     incomingRideOffer = parsed
                 } else if (response.code() == 401) {
                     // Driver token is missing or expired, stop polling and switch offline
-                    isOnline = false
+                    scope.launch { dutyRepository.setDutyOffline() }
                     offersError = "Sign-in required to receive VIP dispatches."
                     break
                 } else if (response.code() == 404) {
@@ -409,10 +399,16 @@ fun DriverDashboardScreen(
                                                 android.Manifest.permission.ACCESS_COARSE_LOCATION
                                             )
                                         )
-                                    } else if (!isKycApproved) {
-                                        showKycBlockedDialog = true
                                     } else {
-                                        isOnline = true
+                                        scope.launch {
+                                            val res = dutyRepository.toggleDuty(targetOnline = true)
+                                            if (res is DriverDutyState.Error) {
+                                                offersError = res.errorMessage
+                                                if (res.failureCategory == DutyFailureCategory.UNAPPROVED_DRIVER) {
+                                                    showKycBlockedDialog = true
+                                                }
+                                            }
+                                        }
                                         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
                                         val isIgnoring = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                                             powerManager?.isIgnoringBatteryOptimizations(context.packageName) == true
@@ -422,7 +418,12 @@ fun DriverDashboardScreen(
                                         }
                                     }
                                 } else {
-                                    isOnline = false
+                                    scope.launch {
+                                        val res = dutyRepository.toggleDuty(targetOnline = false)
+                                        if (res is DriverDutyState.Error) {
+                                            offersError = res.errorMessage
+                                        }
+                                    }
                                 }
                             }
                         )
@@ -855,7 +856,7 @@ fun DriverDashboardScreen(
     // Full-screen incoming ride dispatch alert with audio, vibration & animated countdown ring
     if (incomingRideOffer != null) {
         val offer = incomingRideOffer!!
-        IncomingRideDispatchDialog(
+        IncomingRideModal(
             rideId = offer["ride_id"] ?: "RIDE-${(1000..9999).random()}",
             pickupAddress = offer["pickup"] ?: "Executive Passenger Portico",
             destinationAddress = offer["destination"] ?: "VIP Terminal Destination",
@@ -891,20 +892,13 @@ fun DriverDashboardScreen(
                     } catch (_: Exception) {}
                 }
             },
-            onTimeout = {
+            onDismissLocally = {
                 val rideId = offer["ride_id"] ?: ""
                 incomingRideOffer = null
                 scope.launch {
                     try {
                         DriverApiClient.getService().rejectDispatchOffer(rideId, mapOf("reason" to "DISPATCH_TIMEOUT"))
-                    } catch (_: Exception) {
-                        try {
-                            // Non-blocking graceful retry once on network glitch
-                            DriverApiClient.getService().rejectDispatchOffer(rideId, mapOf("reason" to "DISPATCH_TIMEOUT"))
-                        } catch (_: Exception) {
-                            // Gracefully fallback to server-side authoritative 22s safety timeout
-                        }
-                    }
+                    } catch (_: Exception) {}
                 }
             }
         )
