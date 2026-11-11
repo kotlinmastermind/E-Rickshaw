@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: e-rickshaw-api
+    name: e-rickshaw-mobility-platform
     runtime: python
     region: singapore
     plan: free
@@ -14,26 +14,32 @@ services:
         value: production
       - key: DEBUG
         value: "False"
+      - key: PROJECT_NAME
+        value: "VAISENTRA MOBILITY"
+      - key: API_V1_STR
+        value: /api/v1
       - key: DATABASE_URL
         sync: false
       - key: DATABASE_URL_SYNC
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
       - key: REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
         sync: false
       - key: SECRET_KEY
         generateValue: true
-      - key: API_V1_STR
-        value: /api/v1
-      - key: SMS_PROVIDER
-        value: twilio
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: TWILIO_VERIFY_SERVICE_SID
-        sync: false
-      - key: FIREBASE_SERVICE_ACCOUNT_JSON
-        sync: false
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "10080"
       - key: MAPBOX_SECRET_TOKEN
         sync: false
       - key: MAPBOX_PUBLIC_TOKEN
@@ -44,17 +50,13 @@ services:
         sync: false
       - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
-
-  - type: web
-    name: e-rickshaw-admin
-    runtime: static
-    rootDir: apps/admin-web
-    buildCommand: npm install && npm run build
-    staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: VITE_API_BASE_URL
-        value: https://e-rickshaw-z32z.onrender.com/api/v1
+      - key: SMS_PROVIDER
+        value: twilio
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_VERIFY_SERVICE_SID
+        sync: false
+      - key: TWILIO_API_KEY
+        sync: false

@@ -1,115 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="false" />
-
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-
-    <queries>
-        <package android:name="com.google.android.gms" />
-        <package android:name="com.android.vending" />
-        <intent>
-            <action android:name="com.google.android.gms.api.service.START" />
-        </intent>
-        <intent>
-            <action android:name="com.google.android.gms.common.internal.service.START" />
-        </intent>
-        <intent>
-            <action android:name="com.google.android.gms.location.service.START" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="geo" />
-        </intent>
-
-        <!-- UPI Intent Apps Package Visibility (Android 11+) -->
-        <package android:name="com.google.android.apps.nbu.paisa.user" />
-        <package android:name="com.phonepe.app" />
-        <package android:name="net.one97.paytm" />
-        <package android:name="in.org.npci.upiapp" />
-        <package android:name="com.dreamplug.androidapp" />
-        <package android:name="com.myairtelapp" />
-        <package android:name="com.whatsapp" />
-        <package android:name="com.axis.mobile" />
-        <package android:name="com.csam.icici.bank.imobile" />
-        <package android:name="com.sbi.upi" />
-        <package android:name="com.mobikwik_new" />
-        <package android:name="in.amazon.mShop.android.shopping" />
-        <package android:name="com.amazon.mShop.android.shopping" />
-        <package android:name="com.freecharge.android" />
-        <package android:name="com.jupiter.money" />
-        <package android:name="com.bankofbaroda.upi" />
-        <package android:name="com.hdfcbank.payzapp" />
-        <package android:name="com.kotak.kaypay" />
-
-        <!-- UPI Protocol Scheme Intent Filters for Direct UPI -->
-        <intent>
-            <action android:name="android.intent.action.VIEW" />
-            <data android:scheme="upi" />
-        </intent>
-        <intent>
-            <action android:name="android.intent.action.SENDTO" />
-            <data android:scheme="upi" />
-        </intent>
-    </queries>
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <application
         android:name=".DriverApplication"
-        android:allowBackup="false"
+        android:allowBackup="true"
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="@string/app_name"
         android:roundIcon="@android:drawable/sym_def_app_icon"
         android:supportsRtl="true"
-        android:networkSecurityConfig="@xml/network_security_config"
-        android:enableOnBackInvokedCallback="true"
-        android:theme="@style/Theme.RideGo">
+        android:theme="@style/Theme.DriverGo"
+        android:usesCleartextTraffic="true">
         
-        <!-- Mapbox Maps & Navigation SDK Public Token -->
-        <meta-data
-            android:name="com.mapbox.token"
-            android:value="${MAPBOX_PUBLIC_TOKEN}" />
-
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:showOnLockScreen="true"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:theme="@style/Theme.RideGo">
+            android:label="@string/app_name"
+            android:theme="@style/Theme.DriverGo"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        
-
-        <service
-            android:name=".core.location.DriverLocationForegroundService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="location" />
-
-        <receiver
-            android:name=".core.dispatch.DriverDispatchActionReceiver"
-            android:enabled="true"
-            android:exported="false" />
     </application>
+
 </manifest>
+

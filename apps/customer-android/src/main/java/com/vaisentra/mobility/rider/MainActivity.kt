@@ -3,26 +3,27 @@ package com.vaisentra.mobility.rider
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
-import androidx.compose.ui.graphics.Color
-import com.vaisentra.mobility.rider.core.network.ApiClient
-import com.vaisentra.mobility.rider.feature.payments.RazorpayCheckoutHelper
+import androidx.compose.ui.Modifier
+import com.vaisentra.mobility.rider.navigation.RiderAppNavigation
+import com.vaisentra.mobility.rider.theme.CanvasBlack
+import com.vaisentra.mobility.rider.theme.RiderGoTheme
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        try {
-            ApiClient.initialize(this)
-        } catch (_: Throwable) {}
-
-        try {
-            RazorpayCheckoutHelper.initialize(this)
-        } catch (_: Throwable) {}
-
         setContent {
-            Surface(color = Color(0xFF0F172A)) {
-                CustomerAppNavigation()
+            RiderGoTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = CanvasBlack
+                ) {
+                    RiderAppNavigation()
+                }
             }
         }
     }
 }
+

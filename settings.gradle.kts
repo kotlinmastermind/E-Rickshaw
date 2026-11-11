@@ -26,6 +26,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "androidAi"
-include(":packages:common-android")
 include(":apps:customer-android")
 include(":apps:driver-android")
