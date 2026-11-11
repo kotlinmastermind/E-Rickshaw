@@ -32,7 +32,19 @@ class NotificationService:
         row = (await self.db.execute(select(UserNotificationSettings).where(UserNotificationSettings.user_id == user_id))).scalar_one_or_none()
         if row: return row
         preferences = (await self.db.execute(select(UserPreferences).where(UserPreferences.user_id == user_id))).scalar_one_or_none()
-        row = UserNotificationSettings(user_id=user_id, language_code=(preferences.preferred_language if preferences else "en") or "en")
+        now = datetime.now(timezone.utc)
+        row = UserNotificationSettings(
+            user_id=user_id,
+            push_enabled=True,
+            email_enabled=True,
+            sms_enabled=True,
+            quiet_hours_enabled=False,
+            quiet_start="22:00",
+            quiet_end="07:00",
+            timezone_name="Asia/Kolkata",
+            language_code=(preferences.preferred_language if preferences else "en") or "en",
+            updated_at=now
+        )
         self.db.add(row)
         await self.db.flush()
         return row

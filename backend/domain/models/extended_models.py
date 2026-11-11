@@ -890,16 +890,16 @@ class UserNotificationSettings(Base):
     __tablename__ = "user_notification_settings"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    user_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    push_enabled: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    email_enabled: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    sms_enabled: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    quiet_hours_enabled: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    quiet_start: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
-    quiet_end: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
-    timezone_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    language_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    push_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    quiet_hours_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    quiet_start: Mapped[str] = mapped_column(String(5), default="22:00", nullable=False)
+    quiet_end: Mapped[str] = mapped_column(String(5), default="07:00", nullable=False)
+    timezone_name: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata", nullable=False)
+    language_code: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
 
 class WhiteLabelTenantConfig(Base):
