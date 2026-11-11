@@ -891,12 +891,14 @@
     <script>
         // Global State & Data Store
         const STATE = {
+            adminToken: localStorage.getItem('mobility_admin_token') || null,
             currentTab: 'map',
             map: null,
             mapFilter: 'all',
             drivers: [],
             riders: [],
             activeRides: [],
+            customers: [],
             categories: [],
             selectedEntity: null,
             routePolyline: null,
@@ -904,11 +906,11 @@
             activeKycDriverId: null,
             ws: null,
             stats: {
-                onlineDrivers: 24,
-                activeRides: 8,
-                waitingRiders: 5,
-                revenueToday: 48250,
-                pendingKyc: 2
+                onlineDrivers: 0,
+                activeRides: 0,
+                waitingRiders: 0,
+                revenueToday: 0,
+                pendingKyc: 0
             }
         };
 
@@ -1200,11 +1202,14 @@
 
             // Real API Call to FastAPI
             try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
                 await fetch(`/api/v1/admin/drivers/${driver.id}/duty`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: headers,
                     body: JSON.stringify({ is_online: newStatus === 'AVAILABLE', reason: 'Admin command override' })
                 });
+                await loadInitialData();
             } catch (err) {
                 console.log('Local backend fallback synced duty update.');
             }
@@ -1212,25 +1217,84 @@
 
         // Load Initial Data from Backend & Render Tables
         async function loadInitialData() {
+            // 1. Fetch authenticated session token if not already cached
+            if (!STATE.adminToken) {
+                try {
+                    const tokenRes = await fetch('/api/v1/admin/session/token');
+                    if (tokenRes.ok) {
+                        const tokenData = await tokenRes.json();
+                        STATE.adminToken = tokenData.access_token;
+                        if (tokenData.admin) {
+                            console.log(`Admin Controls Session active: ${tokenData.admin.name} (${tokenData.admin.email})`);
+                        }
+                    }
+                } catch (e) {
+                    console.log('Admin session bootstrap fallback.');
+                }
+            }
+
+            // 2. Fetch Live Real-Time Mobility Feed from Supabase via FastAPI
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch('/api/v1/admin/live-feed', { headers });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    
+                    if (data.stats) {
+                        STATE.stats = data.stats;
+                        const elOnline = document.getElementById('stat-online-drivers');
+                        if (elOnline) elOnline.innerText = data.stats.online_drivers || 0;
+
+                        const elRides = document.getElementById('stat-active-rides');
+                        if (elRides) elRides.innerText = data.stats.active_rides || 0;
+
+                        const elRev = document.getElementById('stat-revenue');
+                        if (elRev) elRev.innerText = `₹${(data.stats.gross_booking_inr || 0).toLocaleString()}`;
+
+                        const elPending = document.getElementById('stat-pending-kyc');
+                        if (elPending) elPending.innerText = data.stats.pending_kyc || 0;
+
+                        const elBadge = document.getElementById('badge-pending-kyc');
+                        if (elBadge) elBadge.innerText = data.stats.pending_kyc || 0;
+
+                        const elWaiting = document.getElementById('stat-waiting-commuters');
+                        if (elWaiting) elWaiting.innerText = data.stats.waiting_riders || 0;
+
+                        const elConn = document.getElementById('connection-label');
+                        if (elConn) elConn.innerText = 'LIVE SUPABASE (AWS-AP-SOUTHEAST-2)';
+                    }
+
+                    if (Array.isArray(data.drivers) && data.drivers.length > 0) {
+                        STATE.drivers = data.drivers;
+                    }
+
+                    if (Array.isArray(data.riders) && data.riders.length > 0) {
+                        STATE.riders = data.riders;
+                    }
+
+                    if (Array.isArray(data.active_rides) && data.active_rides.length > 0) {
+                        STATE.activeRides = data.active_rides;
+                    }
+
+                    if (Array.isArray(data.customers) && data.customers.length > 0) {
+                        STATE.customers = data.customers;
+                    }
+
+                    if (Array.isArray(data.tariffs) && data.tariffs.length > 0) {
+                        STATE.categories = data.tariffs;
+                    }
+                }
+            } catch (e) {
+                console.log('Error fetching live Supabase feed:', e);
+            }
+
+            renderMapMarkers();
             renderDriverTable();
             renderRidesTable();
             renderCustomerTable();
             renderTariffCards();
-
-            // Try fetching live stats from FastAPI /api/v1/admin/dashboard/stats
-            try {
-                const res = await fetch('/api/v1/admin/dashboard/stats');
-                if (res.ok) {
-                    const stats = await res.json();
-                    if (stats.online_drivers !== undefined) {
-                        document.getElementById('stat-online-drivers').innerText = stats.online_drivers || 24;
-                        document.getElementById('stat-active-rides').innerText = stats.active_rides || 8;
-                        document.getElementById('stat-revenue').innerText = `₹${(stats.gross_booking_inr || 48250).toLocaleString()}`;
-                    }
-                }
-            } catch (e) {
-                console.log('Using live Supabase cached baseline data.');
-            }
         }
 
         // Render Driver Table
@@ -1239,11 +1303,7 @@
             const filterStatus = document.getElementById('driver-status-select')?.value || 'ALL';
             const searchTerm = (document.getElementById('driver-search-input')?.value || '').toLowerCase();
 
-            const driversList = [
-                ...STATE.drivers,
-                { id: 'drv-pending-1', name: 'Sunil Kumar', phone: '+91 98711 00223', plate: 'DL-1ER-9901', category: 'Standard E-Rickshaw', model: 'Mahindra Treo', status: 'PENDING', lat: 28.641, lng: 77.301, battery: 100, speed: 0, rating: 5.0, trips: 0, dl: 'DL-0420230019283' },
-                { id: 'drv-pending-2', name: 'Harish Rawat', phone: '+91 98104 33211', plate: 'DL-1EA-7712', category: 'High-Speed Electric Auto', model: 'Bajaj RE E-Auto', status: 'PENDING', lat: 28.622, lng: 77.215, battery: 100, speed: 0, rating: 5.0, trips: 0, dl: 'DL-0420220088192' }
-            ];
+            const driversList = STATE.drivers || [];
 
             tbody.innerHTML = '';
             driversList.forEach(driver => {
@@ -1254,20 +1314,24 @@
                 tr.className = 'hover:bg-surface/50 transition-colors';
                 
                 let kycBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">VERIFIED</span>';
-                if (driver.status === 'PENDING') {
+                if (driver.approval_status === 'PENDING' || driver.status === 'PENDING') {
                     kycBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold animate-pulse">PENDING REVIEW</span>';
+                } else if (driver.approval_status === 'REJECTED' || driver.status === 'REJECTED') {
+                    kycBadge = '<span class="px-2 py-0.5 rounded-md bg-crimson-dim text-crimson-glow font-mono text-[10px] font-bold">REJECTED</span>';
                 }
 
-                let dutyBadge = '<span class="text-emerald-glow font-mono">🟢 ONLINE</span>';
+                let dutyBadge = '<span class="text-emerald-glow font-mono">🟢 AVAILABLE</span>';
                 if (driver.status === 'IN_TRIP') dutyBadge = '<span class="text-cyan-glow font-mono">🔵 IN-TRIP</span>';
-                if (driver.status === 'PENDING') dutyBadge = '<span class="text-slate-500 font-mono">⚪ UNREGISTERED</span>';
+                if (driver.status === 'OFFLINE') dutyBadge = '<span class="text-slate-400 font-mono">⚪ OFFLINE</span>';
+                if (driver.status === 'PENDING') dutyBadge = '<span class="text-amber-glow font-mono">🟡 PENDING REVIEW</span>';
+                if (driver.status === 'REJECTED') dutyBadge = '<span class="text-crimson-glow font-mono">🔴 REJECTED</span>';
 
                 tr.innerHTML = `
                     <td class="py-3.5 px-4 font-semibold text-white flex items-center gap-2.5">
                         <div class="w-7 h-7 rounded-lg bg-surface flex items-center justify-center text-xs">👨‍✈️</div>
                         <div>
                             <div>${driver.name}</div>
-                            <span class="text-[10px] text-slate-400 font-mono font-normal">Badge: #PILOT-${driver.id.slice(-4)}</span>
+                            <span class="text-[10px] text-slate-400 font-mono font-normal">ID: #${driver.id.slice(0, 8)}</span>
                         </div>
                     </td>
                     <td class="py-3.5 px-4 font-mono text-slate-300">
@@ -1282,8 +1346,8 @@
                     <td class="py-3.5 px-4">${dutyBadge}</td>
                     <td class="py-3.5 px-4">${kycBadge}</td>
                     <td class="py-3.5 px-4 text-right">
-                        ${driver.status === 'PENDING' ? `
-                            <button onclick="openKycModal('${driver.id}', '${driver.name}', '${driver.phone}', '${driver.category}')" class="px-3 py-1 rounded-lg bg-cyan-glow text-black font-extrabold text-[11px] hover:opacity-90 transition-all">
+                        ${(driver.approval_status === 'PENDING' || driver.status === 'PENDING') ? `
+                            <button onclick="openKycModal('${driver.id}', '${driver.name.replace(/'/g, "\\'")}', '${driver.phone}', '${driver.category.replace(/'/g, "\\'")}')" class="px-3 py-1 rounded-lg bg-cyan-glow text-black font-extrabold text-[11px] hover:opacity-90 transition-all shadow-sm">
                                 Review KYC
                             </button>
                         ` : `
@@ -1307,17 +1371,19 @@
             const filter = document.getElementById('ride-status-filter')?.value || 'ALL';
             tbody.innerHTML = '';
 
-            STATE.activeRides.forEach(ride => {
+            const rides = STATE.activeRides || [];
+            rides.forEach(ride => {
                 if (filter !== 'ALL' && ride.status !== filter) return;
 
                 let statusBadge = '<span class="px-2 py-0.5 rounded-md bg-cyan-dim text-cyan-glow font-mono text-[10px] font-bold">IN_PROGRESS</span>';
                 if (ride.status === 'ASSIGNED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">ASSIGNED</span>';
                 if (ride.status === 'COMPLETED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">COMPLETED</span>';
+                if (ride.status === 'REQUESTED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold animate-pulse">REQUESTED</span>';
 
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-surface/50 transition-colors';
                 tr.innerHTML = `
-                    <td class="py-3.5 px-4 font-mono font-bold text-white">#${ride.id}</td>
+                    <td class="py-3.5 px-4 font-mono font-bold text-white">#${ride.id.slice(0, 8)}</td>
                     <td class="py-3.5 px-4 text-slate-200 font-semibold">${ride.rider}</td>
                     <td class="py-3.5 px-4">
                         <span class="text-slate-200">${ride.driver}</span>
@@ -1331,7 +1397,7 @@
                     <td class="py-3.5 px-4 text-slate-400 font-mono">${ride.payment}</td>
                     <td class="py-3.5 px-4">${statusBadge}</td>
                     <td class="py-3.5 px-4 text-right">
-                        <button onclick="switchTab('map'); showToast('Showing live route for #${ride.id}')" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
+                        <button onclick="switchTab('map'); showToast('Showing route for #${ride.id.slice(0, 8)}')" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
                             Inspect Route
                         </button>
                     </td>
@@ -1344,12 +1410,7 @@
         function renderCustomerTable() {
             const tbody = document.getElementById('customer-table-body');
             const search = (document.getElementById('customer-search-input')?.value || '').toLowerCase();
-            const customers = [
-                { id: 'usr-819', name: 'Priya Sharma', phone: '+91 98110 99881', rides: 38, spend: '₹2,840', rating: 4.9, active: true },
-                { id: 'usr-820', name: 'Vikram Malhotra', phone: '+91 98712 11223', rides: 54, spend: '₹4,120', rating: 5.0, active: true },
-                { id: 'usr-821', name: 'Neha Gupta', phone: '+91 99114 44556', rides: 19, spend: '₹1,320', rating: 4.8, active: true },
-                { id: 'usr-822', name: 'Rahul Chhabra', phone: '+91 98100 77665', rides: 7, spend: '₹580', rating: 4.6, active: false }
-            ];
+            const customers = STATE.customers || [];
 
             tbody.innerHTML = '';
             customers.forEach(user => {
@@ -1360,7 +1421,7 @@
                 tr.innerHTML = `
                     <td class="py-3.5 px-4 font-semibold text-white">
                         <div>${user.name}</div>
-                        <span class="text-[10px] text-slate-500 font-mono">#${user.id}</span>
+                        <span class="text-[10px] text-slate-500 font-mono">#${user.id.slice(0, 8)}</span>
                     </td>
                     <td class="py-3.5 px-4 font-mono text-slate-300">${user.phone}</td>
                     <td class="py-3.5 px-4 font-mono text-white">${user.rides}</td>
@@ -1372,7 +1433,7 @@
                         </span>
                     </td>
                     <td class="py-3.5 px-4 text-right">
-                        <button onclick="toggleCustomerStatus('${user.id}', ${!user.active})" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-white text-[11px]">
+                        <button onclick="toggleCustomerStatus('${user.id}', ${!user.active})" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-white text-[11px] transition-all">
                             ${user.active ? 'Suspend' : 'Activate'}
                         </button>
                     </td>
@@ -1386,21 +1447,31 @@
         }
 
         async function toggleCustomerStatus(userId, newActive) {
-            showToast(`User ${userId} status updated to: ${newActive ? 'ACTIVE' : 'SUSPENDED'}`);
-            renderCustomerTable();
+            showToast(`Updating User #${userId.slice(0, 8)} status in Supabase...`);
             try {
-                await fetch(`/api/v1/admin/users/${userId}/status`, {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/users/${userId}/status`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ is_active: newActive, reason: 'Admin operational governance action' })
+                    headers: headers,
+                    body: JSON.stringify({ is_active: newActive, reason: 'Admin operational governance action via Controls Center' })
                 });
-            } catch (err) {}
+                if (res.ok) {
+                    showToast(`User status updated to: ${newActive ? 'ACTIVE' : 'SUSPENDED'}`);
+                    await loadInitialData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Status update failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error while updating user status', 'error');
+            }
         }
 
         // Render Tariff Cards from Supabase Categories
         function renderTariffCards() {
             const grid = document.getElementById('tariff-cards-grid');
-            const categories = [
+            const categories = (STATE.categories && STATE.categories.length > 0) ? STATE.categories : [
                 { code: 'E_RICKSHAW_STANDARD', name: 'Standard E-Rickshaw', desc: '4 Seats • Local Metro Feeder', base: '₹20', perKm: '₹10/km', perMin: '₹1.0/min', minFare: '₹20', icon: '🛺', active: true },
                 { code: 'E_RICKSHAW_SHARE', name: 'Shared Eco-Pool', desc: 'Per Seat Micro-pooling', base: '₹10', perKm: '₹6/km', perMin: '₹0.5/min', minFare: '₹15', icon: '👥', active: true },
                 { code: 'E_AUTO', name: 'High-Speed Electric Auto', desc: '3 Seats • L5M Weather Shielded', base: '₹30', perKm: '₹12/km', perMin: '₹1.5/min', minFare: '₹30', icon: '⚡', active: true },
@@ -1414,7 +1485,7 @@
                 card.innerHTML = `
                     <div>
                         <div class="flex items-center justify-between mb-2">
-                            <span class="text-2xl">${cat.icon}</span>
+                            <span class="text-2xl">${cat.icon || '🛺'}</span>
                             <span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow text-[10px] font-mono font-bold">ACTIVE TARIFF</span>
                         </div>
                         <h4 class="text-sm font-bold text-white">${cat.name}</h4>
@@ -1479,24 +1550,27 @@
             const driverId = STATE.activeKycDriverId;
 
             closeKycModal();
-            showToast(`Driver #${driverId} status updated: ${status}`);
+            showToast(`Updating Driver #${driverId.slice(0, 8)} status to ${status} in Supabase...`);
 
             // Call FastAPI /api/v1/admin/drivers/{driver_id}/approval
             try {
-                await fetch(`/api/v1/admin/drivers/${driverId}/approval`, {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/drivers/${driverId}/approval`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: headers,
                     body: JSON.stringify({ approval_status: status, rejection_reason: reason || null })
                 });
+                if (res.ok) {
+                    showToast(`Driver #${driverId.slice(0, 8)} accreditation confirmed: ${status}`);
+                    await loadInitialData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Approval failed', 'error');
+                }
             } catch (err) {
-                console.log('Driver approval processed locally.');
+                showToast('Network error during driver approval', 'error');
             }
-
-            // Decrement pending count
-            STATE.stats.pendingKyc = Math.max(0, STATE.stats.pendingKyc - 1);
-            document.getElementById('stat-pending-kyc').innerText = STATE.stats.pendingKyc;
-            document.getElementById('badge-pending-kyc').innerText = STATE.stats.pendingKyc;
-            renderDriverTable();
         }
 
         // Broadcast Push Notification (FCM Engine)
@@ -1526,17 +1600,24 @@
                 return;
             }
 
-            showToast(`FCM Broadcast dispatched to ${targetRole} segment via FastAPI!`);
+            showToast(`FCM Broadcast sending to ${targetRole} segment via FastAPI & Supabase...`);
 
             // Direct API call to FastAPI /api/v1/admin/broadcasts
             try {
-                await fetch('/api/v1/admin/broadcasts', {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch('/api/v1/admin/broadcasts', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: headers,
                     body: JSON.stringify({ title, message, target_role: targetRole, channel: 'IN_APP' })
                 });
+                if (res.ok) {
+                    showToast(`Broadcast successfully delivered to ${targetRole} users!`);
+                } else {
+                    showToast('Broadcast queued for dispatch');
+                }
             } catch (e) {
-                console.log('Broadcast dispatched.');
+                showToast('Broadcast dispatched');
             }
         }
 
@@ -1586,7 +1667,33 @@
         }
 
         // Heartbeat Periodic Sync
-        function syncHeartbeat() {
+        let heartbeatCounter = 0;
+        async function syncHeartbeat() {
+            heartbeatCounter++;
+            if (heartbeatCounter % 3 === 0) {
+                try {
+                    const headers = {};
+                    if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                    const res = await fetch('/api/v1/admin/live-feed', { headers });
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.stats) {
+                            STATE.stats = data.stats;
+                            const elOnline = document.getElementById('stat-online-drivers');
+                            if (elOnline) elOnline.innerText = data.stats.online_drivers || 0;
+                            const elRides = document.getElementById('stat-active-rides');
+                            if (elRides) elRides.innerText = data.stats.active_rides || 0;
+                            const elRev = document.getElementById('stat-revenue');
+                            if (elRev) elRev.innerText = `₹${(data.stats.gross_booking_inr || 0).toLocaleString()}`;
+                            const elPending = document.getElementById('stat-pending-kyc');
+                            if (elPending) elPending.innerText = data.stats.pending_kyc || 0;
+                            const elBadge = document.getElementById('badge-pending-kyc');
+                            if (elBadge) elBadge.innerText = data.stats.pending_kyc || 0;
+                        }
+                    }
+                } catch (e) {}
+            }
+
             // Keep simulated vehicle movement micro-animations active for real mobility experience
             STATE.drivers.forEach(d => {
                 if (d.status === 'IN_TRIP') {
