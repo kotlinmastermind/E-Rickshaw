@@ -34,7 +34,12 @@ import com.vaisentra.mobility.core.security.TokenManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val BrandGold = SharedDesignTokens.BrandGold
+private val M3Primary = SharedDesignTokens.M3PrimaryDark
+private val M3OnPrimary = Color(0xFF041E49)
+private val M3Surface = SharedDesignTokens.M3SurfaceDark
+private val M3SurfaceContainer = SharedDesignTokens.M3SurfaceContainerDark
+private val M3SurfaceContainerHigh = SharedDesignTokens.M3SurfaceContainerHighDark
+private val M3Outline = SharedDesignTokens.M3OutlineDark
 
 enum class AuthTab {
     OTP_SIGN_IN,      // Primary / Default OTP Authentication via Twilio
@@ -94,102 +99,131 @@ fun CustomerAuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0F172A))
+            .background(M3Surface)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp)
+                .padding(horizontal = 24.dp, vertical = 32.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Header
-            Text("🚖", fontSize = 48.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "RideGo",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Black,
-                color = BrandGold
-            )
-            Text(
-                text = "Smart, Clean & Affordable Electric Commute",
-                fontSize = 13.sp,
-                color = Color.LightGray
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Navigation Tabs (OTP Sign In is Primary)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF1E293B), RoundedCornerShape(12.dp))
-                    .padding(4.dp)
+            // Material 3 Expressive Header
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = M3SurfaceContainerHigh,
+                modifier = Modifier.size(72.dp)
             ) {
-                listOf(
-                    AuthTab.OTP_SIGN_IN to "OTP Sign In",
-                    AuthTab.PASSWORD_SIGN_IN to "Password",
-                    AuthTab.SIGN_UP to "Sign Up"
-                ).forEach { (tab, label) ->
-                    val isSelected = selectedTab == tab
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) BrandGold else Color.Transparent,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable {
-                                selectedTab = tab
-                                errorMessage = null
-                                successMessage = null
-                            }
-                    ) {
-                        Text(
-                            text = label,
-                            color = if (isSelected) Color.Black else Color.White,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            maxLines = 1
-                        )
-                    }
+                Box(contentAlignment = Alignment.Center) {
+                    Text("🚖", fontSize = 36.sp)
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Error Display
-            if (!errorMessage.isNullOrBlank()) {
+            Text(
+                text = "RideGo",
+                fontSize = 32.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White,
+                letterSpacing = (-0.5).sp
+            )
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(top = 4.dp)
+            ) {
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = SharedDesignTokens.Red.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, SharedDesignTokens.Red),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp)
+                    shape = RoundedCornerShape(999.dp),
+                    color = SharedDesignTokens.M3EcoGreen.copy(alpha = 0.2f),
+                    border = BorderStroke(1.dp, SharedDesignTokens.M3EcoGreen.copy(alpha = 0.5f))
                 ) {
                     Text(
-                        text = errorMessage ?: "",
-                        color = Color(0xFFFCA5A5),
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(12.dp)
+                        text = "⚡ 100% Clean EV Mobility",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF6EE7B7),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                     )
                 }
             }
 
-            // Success Display
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // Material 3 Expressive Pill Tabs
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = M3SurfaceContainer,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(4.dp)
+                ) {
+                    listOf(
+                        AuthTab.OTP_SIGN_IN to "OTP Sign In",
+                        AuthTab.PASSWORD_SIGN_IN to "Password",
+                        AuthTab.SIGN_UP to "Sign Up"
+                    ).forEach { (tab, label) ->
+                        val isSelected = selectedTab == tab
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (isSelected) M3Primary else Color.Transparent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    selectedTab = tab
+                                    errorMessage = null
+                                    successMessage = null
+                                }
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSelected) M3OnPrimary else Color(0xFFC4C6D0),
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(vertical = 11.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Error Display (Material 3 Error Card)
+            if (!errorMessage.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = SharedDesignTokens.Red.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, SharedDesignTokens.Red.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                ) {
+                    Text(
+                        text = errorMessage ?: "",
+                        color = Color(0xFFFCA5A5),
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(14.dp)
+                    )
+                }
+            }
+
+            // Success Display (Material 3 Success Card)
             if (!successMessage.isNullOrBlank()) {
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF10B981).copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, Color(0xFF10B981)),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    color = SharedDesignTokens.M3EcoGreen.copy(alpha = 0.15f),
+                    border = BorderStroke(1.dp, SharedDesignTokens.M3EcoGreen.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                 ) {
                     Text(
                         text = successMessage ?: "",
                         color = Color(0xFF6EE7B7),
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(12.dp)
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(14.dp)
                     )
                 }
             }
@@ -203,35 +237,37 @@ fun CustomerAuthScreen(
                     Text(
                         text = "Instant Sign In with Mobile OTP",
                         color = Color.White,
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
                         text = "We will send a 6-digit verification code to your phone via Twilio.",
-                        color = Color.Gray,
-                        fontSize = 12.sp,
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp)
+                        color = Color(0xFF94A3B8),
+                        fontSize = 13.sp,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 18.dp)
                     )
 
                     OutlinedTextField(
                         value = otpPhone,
                         onValueChange = { otpPhone = it.filter { char -> char.isDigit() || char == '+' } },
-                        label = { Text("Mobile Number (e.g. 9876543210)", color = Color.Gray) },
-                        prefix = { Text("+91 ", color = BrandGold, fontWeight = FontWeight.Bold) },
+                        label = { Text("Mobile Number (e.g. 9876543210)", color = Color(0xFF94A3B8)) },
+                        prefix = { Text("+91 ", color = M3Primary, fontWeight = FontWeight.Bold) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
-                            focusedBorderColor = BrandGold,
-                            unfocusedBorderColor = Color.DarkGray
+                            focusedBorderColor = M3Primary,
+                            unfocusedBorderColor = M3Outline,
+                            focusedContainerColor = M3SurfaceContainer,
+                            unfocusedContainerColor = M3SurfaceContainer
                         ),
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(20.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
                     Button(
                         onClick = {
@@ -267,15 +303,15 @@ fun CustomerAuthScreen(
                                 }
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandGold, contentColor = Color.Black),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = M3Primary, contentColor = M3OnPrimary),
+                        shape = RoundedCornerShape(999.dp),
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
                         enabled = !isLoading
                     ) {
                         if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
+                            CircularProgressIndicator(modifier = Modifier.size(22.dp), color = M3OnPrimary, strokeWidth = 2.5.dp)
                         } else {
-                            Text("GET OTP", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("GET OTP", fontWeight = FontWeight.Bold, fontSize = 15.sp, letterSpacing = 0.5.sp)
                         }
                     }
 
@@ -284,51 +320,55 @@ fun CustomerAuthScreen(
                     Text(
                         text = "Enter Verification Code",
                         color = Color.White,
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
                         text = "Enter the 6-digit code sent to ${normalizePhone(otpPhone)}",
-                        color = Color.Gray,
-                        fontSize = 12.sp,
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 14.dp)
+                        color = Color(0xFF94A3B8),
+                        fontSize = 13.sp,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 18.dp)
                     )
 
                     OutlinedTextField(
                         value = otpCode,
                         onValueChange = { if (it.length <= 6) otpCode = it.filter { c -> c.isDigit() } },
-                        label = { Text("6-Digit OTP Code", color = Color.Gray) },
+                        label = { Text("6-Digit OTP Code", color = Color(0xFF94A3B8)) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
-                            focusedBorderColor = BrandGold,
-                            unfocusedBorderColor = Color.DarkGray
+                            focusedBorderColor = M3Primary,
+                            unfocusedBorderColor = M3Outline,
+                            focusedContainerColor = M3SurfaceContainer,
+                            unfocusedContainerColor = M3SurfaceContainer
                         ),
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(20.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     OutlinedTextField(
                         value = otpNewUserName,
                         onValueChange = { otpNewUserName = it },
-                        label = { Text("Full Name (Optional for new riders)", color = Color.Gray) },
+                        label = { Text("Full Name (Optional for new riders)", color = Color(0xFF94A3B8)) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
-                            focusedBorderColor = BrandGold,
-                            unfocusedBorderColor = Color.DarkGray
+                            focusedBorderColor = M3Primary,
+                            unfocusedBorderColor = M3Outline,
+                            focusedContainerColor = M3SurfaceContainer,
+                            unfocusedContainerColor = M3SurfaceContainer
                         ),
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(20.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
                     Button(
                         onClick = {
@@ -371,15 +411,15 @@ fun CustomerAuthScreen(
                                 }
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandGold, contentColor = Color.Black),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = M3Primary, contentColor = M3OnPrimary),
+                        shape = RoundedCornerShape(999.dp),
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
                         enabled = !isLoading
                     ) {
                         if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
+                            CircularProgressIndicator(modifier = Modifier.size(22.dp), color = M3OnPrimary, strokeWidth = 2.5.dp)
                         } else {
-                            Text("VERIFY & SIGN IN", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("VERIFY & SIGN IN", fontWeight = FontWeight.Bold, fontSize = 15.sp, letterSpacing = 0.5.sp)
                         }
                     }
 
@@ -398,7 +438,7 @@ fun CustomerAuthScreen(
                                 successMessage = null
                             }
                         ) {
-                            Text("Change Number", color = BrandGold, fontSize = 12.sp)
+                            Text("Change Number", color = M3Primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
 
                         TextButton(
@@ -433,8 +473,9 @@ fun CustomerAuthScreen(
                         ) {
                             Text(
                                 text = if (otpResendCountdown > 0) "Resend in ${otpResendCountdown}s" else "Resend OTP",
-                                color = if (otpResendCountdown > 0) Color.Gray else BrandGold,
-                                fontSize = 12.sp
+                                color = if (otpResendCountdown > 0) Color(0xFF64748B) else M3Primary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -447,16 +488,18 @@ fun CustomerAuthScreen(
                 OutlinedTextField(
                     value = signInIdentifier,
                     onValueChange = { signInIdentifier = it },
-                    label = { Text("Email or Mobile Number", color = Color.Gray) },
+                    label = { Text("Email or Mobile Number", color = Color(0xFF94A3B8)) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = BrandGold,
-                        unfocusedBorderColor = Color.DarkGray
+                        focusedBorderColor = M3Primary,
+                        unfocusedBorderColor = M3Outline,
+                        focusedContainerColor = M3SurfaceContainer,
+                        unfocusedContainerColor = M3SurfaceContainer
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(20.dp)
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -464,7 +507,7 @@ fun CustomerAuthScreen(
                 OutlinedTextField(
                     value = signInPassword,
                     onValueChange = { signInPassword = it },
-                    label = { Text("Password", color = Color.Gray) },
+                    label = { Text("Password", color = Color(0xFF94A3B8)) },
                     singleLine = true,
                     visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
@@ -472,18 +515,20 @@ fun CustomerAuthScreen(
                             Icon(
                                 imageVector = if (showPassword) Icons.Default.Check else Icons.Default.Lock,
                                 contentDescription = "Toggle password",
-                                tint = Color.Gray
+                                tint = Color(0xFF94A3B8)
                             )
                         }
                     },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = BrandGold,
-                        unfocusedBorderColor = Color.DarkGray
+                        focusedBorderColor = M3Primary,
+                        unfocusedBorderColor = M3Outline,
+                        focusedContainerColor = M3SurfaceContainer,
+                        unfocusedContainerColor = M3SurfaceContainer
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(20.dp)
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -531,15 +576,15 @@ fun CustomerAuthScreen(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = BrandGold, contentColor = Color.Black),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = M3Primary, contentColor = M3OnPrimary),
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
                     enabled = !isLoading
                 ) {
                     if (isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), color = M3OnPrimary, strokeWidth = 2.5.dp)
                     } else {
-                        Text("SIGN IN", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("SIGN IN", fontWeight = FontWeight.Bold, fontSize = 15.sp, letterSpacing = 0.5.sp)
                     }
                 }
 
@@ -550,86 +595,96 @@ fun CustomerAuthScreen(
                 OutlinedTextField(
                     value = signUpName,
                     onValueChange = { signUpName = it },
-                    label = { Text("Full Name", color = Color.Gray) },
+                    label = { Text("Full Name", color = Color(0xFF94A3B8)) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = BrandGold,
-                        unfocusedBorderColor = Color.DarkGray
+                        focusedBorderColor = M3Primary,
+                        unfocusedBorderColor = M3Outline,
+                        focusedContainerColor = M3SurfaceContainer,
+                        unfocusedContainerColor = M3SurfaceContainer
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(20.dp)
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
                     value = signUpPhone,
                     onValueChange = { signUpPhone = it },
-                    label = { Text("Mobile Number (e.g. 9876543210)", color = Color.Gray) },
+                    label = { Text("Mobile Number (e.g. 9876543210)", color = Color(0xFF94A3B8)) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = BrandGold,
-                        unfocusedBorderColor = Color.DarkGray
+                        focusedBorderColor = M3Primary,
+                        unfocusedBorderColor = M3Outline,
+                        focusedContainerColor = M3SurfaceContainer,
+                        unfocusedContainerColor = M3SurfaceContainer
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(20.dp)
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
                     value = signUpEmail,
                     onValueChange = { signUpEmail = it },
-                    label = { Text("Email Address (Optional)", color = Color.Gray) },
+                    label = { Text("Email Address (Optional)", color = Color(0xFF94A3B8)) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = BrandGold,
-                        unfocusedBorderColor = Color.DarkGray
+                        focusedBorderColor = M3Primary,
+                        unfocusedBorderColor = M3Outline,
+                        focusedContainerColor = M3SurfaceContainer,
+                        unfocusedContainerColor = M3SurfaceContainer
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(20.dp)
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
                     value = signUpPassword,
                     onValueChange = { signUpPassword = it },
-                    label = { Text("Password (min 12 characters)", color = Color.Gray) },
+                    label = { Text("Password (min 12 characters)", color = Color(0xFF94A3B8)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = BrandGold,
-                        unfocusedBorderColor = Color.DarkGray
+                        focusedBorderColor = M3Primary,
+                        unfocusedBorderColor = M3Outline,
+                        focusedContainerColor = M3SurfaceContainer,
+                        unfocusedContainerColor = M3SurfaceContainer
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(20.dp)
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
                     value = signUpConfirmPassword,
                     onValueChange = { signUpConfirmPassword = it },
-                    label = { Text("Confirm Password", color = Color.Gray) },
+                    label = { Text("Confirm Password", color = Color(0xFF94A3B8)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = BrandGold,
-                        unfocusedBorderColor = Color.DarkGray
+                        focusedBorderColor = M3Primary,
+                        unfocusedBorderColor = M3Outline,
+                        focusedContainerColor = M3SurfaceContainer,
+                        unfocusedContainerColor = M3SurfaceContainer
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(20.dp)
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -695,27 +750,34 @@ fun CustomerAuthScreen(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = BrandGold, contentColor = Color.Black),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = M3Primary, contentColor = M3OnPrimary),
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
                     enabled = !isLoading
                 ) {
                     if (isLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), color = M3OnPrimary, strokeWidth = 2.5.dp)
                     } else {
-                        Text("CREATE ACCOUNT", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("CREATE ACCOUNT", fontWeight = FontWeight.Bold, fontSize = 15.sp, letterSpacing = 0.5.sp)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            Text(
-                text = "Twilio Verified Secure SMS Authentication Active",
-                color = Color(0xFF64748B),
-                fontSize = 11.sp,
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = M3SurfaceContainer,
                 modifier = Modifier.padding(4.dp)
-            )
+            ) {
+                Text(
+                    text = "🔒 Twilio Verified Secure SMS Authentication Active",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                )
+            }
         }
     }
 }

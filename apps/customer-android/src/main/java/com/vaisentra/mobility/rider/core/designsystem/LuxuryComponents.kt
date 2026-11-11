@@ -24,14 +24,14 @@ fun LuxuryButton(
     Button(
         onClick = onClick,
         enabled = enabled && !isLoading,
-        shape = RoundedCornerShape(LuxuryDimensions.RadiusMedium),
+        shape = RoundedCornerShape(LuxuryDimensions.RadiusPill),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (isSecondary) LuxuryColors.CardSurface else LuxuryColors.ChampagneGold,
             contentColor = if (isSecondary) LuxuryColors.ChampagneGold else LuxuryColors.ObsidianBlack,
             disabledContainerColor = LuxuryColors.CardSurface.copy(alpha = 0.5f),
             disabledContentColor = LuxuryColors.SubtleGray
         ),
-        border = if (isSecondary) BorderStroke(1.dp, LuxuryColors.ChampagneGold) else null,
+        border = if (isSecondary) BorderStroke(1.dp, LuxuryColors.ChampagneGold.copy(alpha = 0.6f)) else null,
         modifier = modifier
             .fillMaxWidth()
             .height(54.dp)
@@ -62,14 +62,14 @@ fun LuxuryCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(LuxuryDimensions.RadiusMedium),
+        shape = RoundedCornerShape(LuxuryDimensions.RadiusLarge),
         color = LuxuryColors.CardSurface,
         border = border,
         modifier = modifier,
         onClick = onClick ?: {}
     ) {
         Column(
-            modifier = Modifier.padding(LuxuryDimensions.PaddingMedium),
+            modifier = Modifier.padding(LuxuryDimensions.PaddingLarge),
             content = content
         )
     }

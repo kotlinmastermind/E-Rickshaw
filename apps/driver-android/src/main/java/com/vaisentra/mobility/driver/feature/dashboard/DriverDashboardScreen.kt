@@ -346,7 +346,7 @@ fun DriverDashboardScreen(
             Column {
                 // Online/Offline Availability Switch Card
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(28.dp),
                     color = DriverColors.SurfaceCard,
                     border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
                     modifier = Modifier.fillMaxWidth()
@@ -434,7 +434,7 @@ fun DriverDashboardScreen(
 
                 // Native Mapbox 3D Vector Cockpit Live View with GPS tracking
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(28.dp),
                     border = BorderStroke(1.dp, DriverColors.SurfaceBorder),
                     modifier = Modifier
                         .fillMaxWidth()

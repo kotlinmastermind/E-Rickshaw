@@ -9,24 +9,24 @@ import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.core.designsystem.SharedDesignTokens
 
 object LuxuryColors {
-    val ObsidianBlack = Color(0xFF0D0D11)
-    val DeepGraphite = Color(0xFF16161E)
+    val ObsidianBlack = SharedDesignTokens.M3SurfaceDark
+    val DeepGraphite = SharedDesignTokens.M3SurfaceContainerDark
     val DeepCharcoal = DeepGraphite
-    val CardSurface = Color(0xFF1F1F2B)
-    val CardBorder = Color(0xFF2C2C3E)
+    val CardSurface = SharedDesignTokens.M3SurfaceContainerHighDark
+    val CardBorder = SharedDesignTokens.M3OutlineDark
     
-    val ChampagneGold = SharedDesignTokens.ChampagneGold
+    val ChampagneGold = SharedDesignTokens.M3PrimaryDark
     val GoldMuted = SharedDesignTokens.GoldMuted
     val GoldLight = SharedDesignTokens.GoldLight
     
-    val PlatinumWhite = Color(0xFFF8F9FA)
-    val SubtleGray = Color(0xFF9CA3AF)
+    val PlatinumWhite = Color(0xFFE2E2E9)
+    val SubtleGray = SharedDesignTokens.Slate400
     val MutedSilver = SubtleGray
-    val BorderGray = Color(0xFF374151)
+    val BorderGray = SharedDesignTokens.M3OutlineDark
     
-    val LuxuryEmerald = SharedDesignTokens.Emerald
-    val EmeraldGreen = SharedDesignTokens.Emerald
-    val CharcoalSurface = Color(0xFF16161E)
+    val LuxuryEmerald = SharedDesignTokens.M3EcoGreen
+    val EmeraldGreen = SharedDesignTokens.M3EcoGreen
+    val CharcoalSurface = DeepGraphite
     val CrimsonAlert = SharedDesignTokens.Red
     val RoyalIndigo = SharedDesignTokens.RoyalIndigo
 }
@@ -70,11 +70,11 @@ object LuxuryDimensions {
 
 object LuxuryTypography {
     val HeadlineLarge = TextStyle(
-        fontFamily = FontFamily.Serif,
+        fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Bold,
         fontSize = 28.sp,
         color = LuxuryColors.PlatinumWhite,
-        letterSpacing = 0.5.sp
+        letterSpacing = 0.sp
     )
     val HeadlineMedium = TextStyle(
         fontFamily = FontFamily.Default,

@@ -5,18 +5,41 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Standardized Shared Design System Tokens for Vasantra Mobility applications.
- * Enforces DRY principles by centralizing identical brand, status, slate, and surface
- * color constants, standard layout dimensions, and typography scale factors.
+ * Standardized Shared Design System Tokens for Vaisentra Mobility applications.
+ * Enforces Material 3 Expressive (Google Pixel style) design principles:
+ * - Dynamic tonal palettes (Primary Blue, Eco Mint/Teal accents)
+ * - Tonal elevation surfaces (SurfaceContainer, OnSurface)
+ * - Expressive rounded shapes (28.dp cards, 999.dp pills)
+ * - High-contrast readable typography
  */
 object SharedDesignTokens {
-    // Brand & Accent Colors
-    val BrandGold = Color(0xFFD4AF37)
-    val ChampagneGold = BrandGold
-    val ChauffeurGold = BrandGold
-    val GoldMuted = Color(0xFFA68726)
-    val GoldLight = Color(0xFFF3E5AB)
-    val BackgroundDark = Color(0xFF0B0B0F)
+    // Material 3 Expressive - Primary Palette
+    val M3Primary = Color(0xFF0B57D0)          // Pixel Vibrant Blue
+    val M3PrimaryDark = Color(0xFFA8C7FA)      // Pixel Blue for dark surfaces
+    val M3PrimaryContainer = Color(0xFFD3E3FD) // Soft blue container
+    val M3OnPrimaryContainer = Color(0xFF041E49)
+
+    // Material 3 Expressive - Eco / EV Accent Palette
+    val M3EcoGreen = Color(0xFF00875A)         // Clean electric green
+    val M3EcoGreenLight = Color(0xFFC4EED0)
+    val M3EcoGreenDark = Color(0xFF004D34)
+
+    // Material 3 Expressive - Tonal Surfaces
+    val M3SurfaceDark = Color(0xFF111318)
+    val M3SurfaceContainerDark = Color(0xFF1D2024)
+    val M3SurfaceContainerHighDark = Color(0xFF282A2F)
+    val M3SurfaceLight = Color(0xFFF8F9FF)
+    val M3SurfaceContainerLight = Color(0xFFEEF0F8)
+    val M3OutlineDark = Color(0xFF44474E)
+    val M3OutlineLight = Color(0xFF74777F)
+
+    // Legacy Brand Aliases (smoothly adapted to M3 Expressive)
+    val BrandGold = Color(0xFF0B57D0)          // Mapped to M3 Primary Blue for unified modern theme
+    val ChampagneGold = Color(0xFFA8C7FA)
+    val ChauffeurGold = Color(0xFF0B57D0)
+    val GoldMuted = Color(0xFF7C8BA1)
+    val GoldLight = Color(0xFFD3E3FD)
+    val BackgroundDark = M3SurfaceDark
 
     // Status & Accent Palettes
     val Emerald = Color(0xFF10B981)
@@ -36,7 +59,7 @@ object SharedDesignTokens {
     val Blue = Color(0xFF3B82F6)
     val BlueAlpha = Color(0x263B82F6)
     val BlueBorder = Color(0x4D3B82F6)
-    val SelectedBlue = Color(0xFF1A56DB)
+    val SelectedBlue = Color(0xFF0B57D0)
 
     val Purple = Color(0xFFA855F7)
     val PurpleAlpha = Color(0x26A855F7)
@@ -44,34 +67,34 @@ object SharedDesignTokens {
     val RoyalIndigo = Color(0xFF6366F1)
 
     // Dark Neutral / Slate Surfaces
-    val Slate900 = Color(0xFF0F172A)
-    val Slate800 = Color(0xFF1E293B)
-    val Slate700 = Color(0xFF334155)
-    val Slate400 = Color(0xFF94A3B8)
+    val Slate900 = Color(0xFF111318)
+    val Slate800 = Color(0xFF1D2024)
+    val Slate700 = Color(0xFF282A2F)
+    val Slate400 = Color(0xFF8E9199)
     val White = Color(0xFFFFFFFF)
 
     // Mobility UI Colors
-    val PrimaryYellow = Color(0xFFF9C933)
-    val PrimaryYellowDark = Color(0xFFE5B422)
-    val EcoGreen = Color(0xFF0F8A4E)
-    val LightGreen = Color(0xFFE8F5E9)
+    val PrimaryYellow = Color(0xFF0B57D0)
+    val PrimaryYellowDark = Color(0xFF041E49)
+    val EcoGreen = M3EcoGreen
+    val LightGreen = M3EcoGreenLight
     val WarningYellow = Color(0xFFFEF9C3)
     val WarningBorder = Color(0xFFFDE047)
     val WarningText = Color(0xFF713F12)
     val BackgroundPure = Color(0xFFFFFFFF)
-    val SurfaceLight = Color(0xFFF7F8FA)
-    val BorderLight = Color(0xFFE5E7EB)
-    val TextDark = Color(0xFF1E2022)
-    val TextMuted = Color(0xFF6B7280)
-    val BadgeTeal = Color(0xFFD1FAE5)
-    val BadgeTealText = Color(0xFF065F46)
-    val DiscountGreen = Color(0xFF16A34A)
+    val SurfaceLight = Color(0xFFF8F9FA)
+    val BorderLight = Color(0xFFE0E2EC)
+    val TextDark = Color(0xFF1F1F1F)
+    val TextMuted = Color(0xFF74777F)
+    val BadgeTeal = Color(0xFFC4EED0)
+    val BadgeTealText = Color(0xFF004D34)
+    val DiscountGreen = Color(0xFF00875A)
 
-    // Standard Layout Dimensions
-    val RadiusSmall = 8.dp
-    val RadiusMedium = 16.dp
-    val RadiusLarge = 24.dp
-    val RadiusPill = 999.dp
+    // Standard Layout Dimensions (Material 3 Expressive Shapes)
+    val RadiusSmall = 12.dp
+    val RadiusMedium = 20.dp
+    val RadiusLarge = 28.dp                    // M3 Expressive Card Radius
+    val RadiusPill = 999.dp                    // M3 Pill Shape
 
     val PaddingSmall = 8.dp
     val PaddingMedium = 16.dp
@@ -79,6 +102,6 @@ object SharedDesignTokens {
     val PaddingXLarge = 32.dp
 
     val ElevationNone = 0.dp
-    val ElevationSubtle = 4.dp
-    val ElevationFloating = 12.dp
+    val ElevationSubtle = 2.dp
+    val ElevationFloating = 8.dp
 }

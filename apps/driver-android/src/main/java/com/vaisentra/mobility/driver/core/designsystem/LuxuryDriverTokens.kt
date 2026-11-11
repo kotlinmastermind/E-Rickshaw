@@ -10,20 +10,20 @@ import androidx.compose.foundation.layout.padding
 import com.vaisentra.mobility.core.designsystem.SharedDesignTokens
 
 object DriverColors {
-    val MidnightBlack = Color(0xFF090A0F)
-    val CockpitDark = Color(0xFF13151F)
-    val SurfaceCard = Color(0xFF1B1E2E)
-    val SurfaceBorder = Color(0xFF282C42)
+    val MidnightBlack = SharedDesignTokens.M3SurfaceDark
+    val CockpitDark = SharedDesignTokens.M3SurfaceContainerDark
+    val SurfaceCard = SharedDesignTokens.M3SurfaceContainerHighDark
+    val SurfaceBorder = SharedDesignTokens.M3OutlineDark
     
-    val ChauffeurGold = SharedDesignTokens.ChauffeurGold
-    val StatusOnline = SharedDesignTokens.Emerald
+    val ChauffeurGold = SharedDesignTokens.M3PrimaryDark
+    val StatusOnline = SharedDesignTokens.M3EcoGreen
     val StatusBusy = SharedDesignTokens.Amber
     val StatusOffline = Color(0xFF6B7280)
-    val AlertSuccess = SharedDesignTokens.Emerald
+    val AlertSuccess = SharedDesignTokens.M3EcoGreen
     val AlertDanger = SharedDesignTokens.Red
     
     val TextPure = SharedDesignTokens.White
-    val TextMuted = Color(0xFF9CA3AF)
+    val TextMuted = SharedDesignTokens.Slate400
 }
 
 object DriverMobilityColors {

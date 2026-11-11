@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -79,14 +80,14 @@ fun DriverAuthenticationContent(
         modifier = modifier
             .fillMaxWidth(0.95f)
             .fillMaxHeight(0.92f)
-            .clip(RoundedCornerShape(16.dp)),
+            .clip(RoundedCornerShape(28.dp)),
         color = DriverColors.MidnightBlack,
-        border = BorderStroke(1.5.dp, DriverColors.ChauffeurGold)
+        border = BorderStroke(1.dp, DriverColors.SurfaceBorder)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp)
+                .padding(22.dp)
                 .verticalScroll(rememberScrollState())
         ) {
             // Header
@@ -97,15 +98,16 @@ fun DriverAuthenticationContent(
             ) {
                 Column {
                     Text(
-                        text = "CHAUFFEUR COCKPIT AUTHENTICATION",
+                        text = "DriverGo Partner Portal",
                         style = DriverTypography.Title.copy(
-                            color = DriverColors.ChauffeurGold,
-                            fontSize = 16.sp
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold
                         )
                     )
                     Text(
-                        text = "Chauffeur & Vehicle Registration Portal",
-                        style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 11.sp)
+                        text = "⚡ 100% Clean Electric Fleet & Chauffeur Cockpit",
+                        style = DriverTypography.Body.copy(color = DriverColors.TextMuted, fontSize = 12.sp)
                     )
                 }
                 if (onDismiss != null) {
@@ -117,19 +119,23 @@ fun DriverAuthenticationContent(
                 }
             }
 
-                Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-                // Navigation Tabs (OTP Sign In is Primary)
+            // Navigation Tabs (OTP Sign In is Primary)
+            Surface(
+                shape = RoundedCornerShape(999.dp),
+                color = DriverColors.CockpitDark,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     listOf("OTP_SIGNIN" to "Pilot OTP Sign In", "SIGNIN" to "Password Login", "SIGNUP" to "Driver Sign Up").forEach { (key, label) ->
                         val isSelected = authTab == key
                         Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isSelected) DriverColors.ChauffeurGold else DriverColors.SurfaceCard,
-                            border = BorderStroke(1.dp, if (isSelected) DriverColors.ChauffeurGold else DriverColors.SurfaceBorder),
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (isSelected) DriverColors.ChauffeurGold else Color.Transparent,
                             modifier = Modifier
                                 .weight(1f)
                                 .clickable {
@@ -142,16 +148,17 @@ fun DriverAuthenticationContent(
                                 text = label,
                                 color = if (isSelected) DriverColors.MidnightBlack else DriverColors.TextPure,
                                 style = DriverTypography.Subtitle.copy(
-                                    fontSize = 10.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                 ),
-                                modifier = Modifier.padding(vertical = 8.dp),
+                                modifier = Modifier.padding(vertical = 10.dp),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                 maxLines = 1
                             )
                         }
                     }
                 }
+            }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
