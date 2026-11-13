@@ -53,6 +53,10 @@ fun RouteDeviationScreen(onNavigate: (String) -> Unit) {
             NeoButton(
                 text = "Yes, Driver Took Traffic Detour (I am Safe)",
                 onClick = {
+                    val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        RiderRepository.reportRouteAnomaly(rideId, 28.7041, 77.1025)
+                    }
                     DialogController.showToast("Safety acknowledgment logged. Detour cleared.")
                     onNavigate("telemetry_hud")
                 },
@@ -105,7 +109,13 @@ fun AudioSafetyScreen(onNavigate: (String) -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
             NeoButton(
                 text = if (isRecording) "Pause Safety Recording" else "Resume Audio Recording",
-                onClick = { isRecording = !isRecording },
+                onClick = {
+                    val nextState = !isRecording
+                    isRecording = nextState
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        RiderRepository.setAudioRecordingConsent(nextState)
+                    }
+                },
                 backgroundColor = SurfaceDark
             )
         }
@@ -134,7 +144,13 @@ fun ShareJourneyScreen(onNavigate: (String) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 NeoButton(
                     text = "WhatsApp",
-                    onClick = { DialogController.showToast("Link shared to WhatsApp contacts!") },
+                    onClick = {
+                        val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            RiderRepository.shareRide(rideId, "+91 98111 22334")
+                        }
+                        DialogController.showToast("Link shared to WhatsApp contacts!")
+                    },
                     modifier = Modifier.weight(1f),
                     backgroundColor = EmeraldGreen,
                     icon = "💬"

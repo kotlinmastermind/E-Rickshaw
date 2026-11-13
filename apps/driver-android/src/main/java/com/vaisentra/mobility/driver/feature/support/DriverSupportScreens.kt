@@ -161,8 +161,10 @@ fun FoundItemScreen(
                     text = "Report Found Item & Lock Ticket",
                     onClick = {
                         val currentRide = DriverRepository.currentRideId.value ?: "ride-latest"
+                        val cat = itemCategory
+                        val notes = itemNotes
                         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            DriverRepository.reportRouteDeviation(currentRide, 28.6289, 77.3710)
+                            DriverRepository.reportFoundItem(currentRide, cat, notes)
                         }
                         onShowToast("Lost property logged in Supabase. Commuter notified.")
                         onNavigateBack()

@@ -745,5 +745,123 @@ object RiderRepository {
             Result.failure(e)
         }
     }
+
+    suspend fun resetForgotPassword(recoveryCode: String, newPassword: String): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.resetForgotPassword(
+                mapOf("recovery_code" to recoveryCode, "new_password" to newPassword)
+            )
+            Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun lockPrice(categoryId: String, pickupLat: Double, pickupLng: Double, destLat: Double, destLng: Double): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.lockPrice(
+                mapOf(
+                    "category_id" to categoryId,
+                    "pickup_latitude" to pickupLat,
+                    "pickup_longitude" to pickupLng,
+                    "destination_latitude" to destLat,
+                    "destination_longitude" to destLng
+                )
+            )
+            Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun validatePromo(code: String, fareRupees: Int = 120): Result<Map<String, Any>?> {
+        return try {
+            val res = NetworkClient.apiService.validatePromo(
+                mapOf("code" to code, "fare_cents" to fareRupees * 100)
+            )
+            if (res.isSuccessful) Result.success(res.body()) else Result.failure(Exception("Invalid promo code"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun setAudioRecordingConsent(enabled: Boolean, rideId: String? = null): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.setAudioRecordingConsent(
+                mapOf("audio_consent" to enabled, "ride_id" to (rideId ?: activeRide.value?.id ?: "ride-latest"))
+            )
+            Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun reportRouteAnomaly(rideId: String, currentLat: Double, currentLng: Double): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.reportRouteAnomaly(
+                mapOf("ride_id" to rideId, "current_latitude" to currentLat, "current_longitude" to currentLng, "anomaly_type" to "ROUTE_DEVIATION")
+            )
+            Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun shareRide(rideId: String, recipientPhone: String): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.shareRide(
+                rideId,
+                mapOf("recipient_phone" to recipientPhone)
+            )
+            Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getTicketMessages(ticketId: String): Result<List<Map<String, Any>>> {
+        return try {
+            val res = NetworkClient.apiService.getTicketMessages(ticketId)
+            if (res.isSuccessful && res.body() != null) Result.success(res.body()!!) else Result.success(emptyList())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun sendTicketMessage(ticketId: String, message: String): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.sendTicketMessage(ticketId, mapOf("content" to message))
+            Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getVehicleCredentials(rideId: String): Result<Map<String, Any>?> {
+        return try {
+            val res = NetworkClient.apiService.getVehicleCredentials(rideId)
+            if (res.isSuccessful) Result.success(res.body()) else Result.failure(Exception("Credentials unavailable"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getInTripChatMessages(rideId: String): Result<List<Map<String, Any>>> {
+        return try {
+            val res = NetworkClient.apiService.getInTripChatMessages(rideId)
+            if (res.isSuccessful && res.body() != null) Result.success(res.body()!!) else Result.success(emptyList())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun sendInTripChatMessage(rideId: String, text: String): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.sendInTripChatMessage(rideId, mapOf("text" to text, "message" to text))
+            Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
 

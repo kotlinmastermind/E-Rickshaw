@@ -150,7 +150,10 @@ interface RiderApiService {
         @Path("ride_id") rideId: String
     ): Response<Map<String, Any>>
 
-    // --- User Governance & Security ---
+    // --- User Governance, Password Reset & Security ---
+    @POST("api/v1/auth/recovery/reset-password")
+    suspend fun resetForgotPassword(@Body body: Map<String, String>): Response<Map<String, Any>>
+
     @POST("api/v1/user/passkey/register")
     suspend fun registerPasskey(@Body body: Map<String, String>): Response<Map<String, Any>>
 
@@ -165,6 +168,37 @@ interface RiderApiService {
 
     @POST("api/v1/user/deletion/request")
     suspend fun requestAccountDeletion(@Body body: Map<String, String>): Response<Map<String, Any>>
+
+    // --- Disconnected Features API Hooks ---
+    @POST("api/v1/fares/price-lock")
+    suspend fun lockPrice(@Body body: Map<String, Any>): Response<Map<String, Any>>
+
+    @POST("api/v1/promos/validate")
+    suspend fun validatePromo(@Body body: Map<String, Any>): Response<Map<String, Any>>
+
+    @POST("api/v1/safety/recording/consent")
+    suspend fun setAudioRecordingConsent(@Body body: Map<String, Any>): Response<Map<String, Any>>
+
+    @POST("api/v1/safety/anomaly/route")
+    suspend fun reportRouteAnomaly(@Body body: Map<String, Any>): Response<Map<String, Any>>
+
+    @POST("api/v1/rides/{ride_id}/share")
+    suspend fun shareRide(@Path("ride_id") rideId: String, @Body body: Map<String, Any>): Response<Map<String, Any>>
+
+    @GET("api/v1/support/tickets/{ticket_id}/messages")
+    suspend fun getTicketMessages(@Path("ticket_id") ticketId: String): Response<List<Map<String, Any>>>
+
+    @POST("api/v1/support/tickets/{ticket_id}/messages")
+    suspend fun sendTicketMessage(@Path("ticket_id") ticketId: String, @Body body: Map<String, String>): Response<Map<String, Any>>
+
+    @GET("api/v1/safety/vehicle-credentials/{ride_id}")
+    suspend fun getVehicleCredentials(@Path("ride_id") rideId: String): Response<Map<String, Any>>
+
+    @GET("api/v1/chat/rides/{ride_id}/messages")
+    suspend fun getInTripChatMessages(@Path("ride_id") rideId: String): Response<List<Map<String, Any>>>
+
+    @POST("api/v1/chat/rides/{ride_id}/messages")
+    suspend fun sendInTripChatMessage(@Path("ride_id") rideId: String, @Body body: Map<String, String>): Response<Map<String, Any>>
 
     // --- Advanced Wallets & Fintech ---
     @POST("api/v1/wallets/auto-topup/config")

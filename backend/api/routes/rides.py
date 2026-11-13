@@ -1315,6 +1315,7 @@ async def get_ride_completion_receipt(
     return await service.get_completion_receipt(ride_id)
 
 @router.post("/{ride_id}/lost-item")
+@router.post("/{ride_id}/lost-property")
 async def report_lost_property(
     ride_id: str,
     payload: LostItemPayload,

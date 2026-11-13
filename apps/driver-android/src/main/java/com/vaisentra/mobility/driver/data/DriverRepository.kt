@@ -447,6 +447,18 @@ object DriverRepository {
         }
     }
 
+    suspend fun reportFoundItem(rideId: String, category: String, notes: String): Result<Boolean> {
+        return try {
+            val res = DriverNetworkClient.apiService.reportFoundItem(
+                rideId,
+                mapOf("item_type" to category, "description" to notes)
+            )
+            Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun submitVehicleInspectionCheck(
         vehicleId: String,
         tyrePressureOk: Boolean,

@@ -169,6 +169,16 @@ fun PilotAssignedScreen(onNavigate: (String) -> Unit) {
 // Screen 25: Driver En-Route & Vehicle RC
 @Composable
 fun VehicleRcDocumentScreen(onNavigate: (String) -> Unit) {
+    var vehicleData by remember { mutableStateOf<Map<String, Any>?>(null) }
+    val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+
+    LaunchedEffect(rideId) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            val res = RiderRepository.getVehicleCredentials(rideId)
+            res.getOrNull()?.let { vehicleData = it }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -183,8 +193,8 @@ fun VehicleRcDocumentScreen(onNavigate: (String) -> Unit) {
             Text(text = "Vehicle Registration Certificate", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(10.dp))
             val specs = listOf(
-                "Plate Number" to "DL-1ER-4921",
-                "Chassis Number" to "MA1TREO2026XX8291",
+                "Plate Number" to (vehicleData?.get("license_plate")?.toString() ?: "DL-1ER-4921"),
+                "Chassis Number" to (vehicleData?.get("chassis_number")?.toString() ?: "MA1TREO2026XX8291"),
                 "Fuel Category" to "100% Battery Electric (Zero Emission)",
                 "PUC Fitness Expiry" to "14-Dec-2027 (Active)",
                 "Commercial Permit" to "All Delhi NCR Micro-Transit",
@@ -416,8 +426,13 @@ fun InTripChatScreen(onNavigate: (String) -> Unit) {
                     .background(SapphirePrimary)
                     .clickable {
                         if (chatInput.isNotBlank()) {
-                            chatHistory.add(Pair("You", chatInput))
+                            val msgToSend = chatInput
+                            chatHistory.add(Pair("You", msgToSend))
                             chatInput = ""
+                            val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                RiderRepository.sendInTripChatMessage(rideId, msgToSend)
+                            }
                         }
                     },
                 contentAlignment = Alignment.Center

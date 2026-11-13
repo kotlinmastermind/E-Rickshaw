@@ -150,6 +150,7 @@ def _coaching(ratings):
     return [f"Focus on {labels[k]}: recent category average {averages[k]:.1f}/5." for k in weak[:2] if averages[k] < 4.5] or ["Recent feedback is consistently strong. Maintain your current service standards."]
 
 @router.post("/fatigue-check", status_code=201)
+@router.post("/fatigue", status_code=201)
 async def fatigue(payload: FatiguePayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     driver = await driver_for(user, db)
     if payload.ride_id:

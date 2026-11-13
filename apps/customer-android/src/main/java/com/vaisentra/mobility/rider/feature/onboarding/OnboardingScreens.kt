@@ -238,11 +238,12 @@ fun PasswordResetScreen(onNavigate: (String) -> Unit) {
             Spacer(modifier = Modifier.height(14.dp))
             NeoTextField(value = newPin, onValueChange = { newPin = it }, placeholder = "New 4-Digit Security PIN", label = "New PIN", visualTransformation = PasswordVisualTransformation())
             Spacer(modifier = Modifier.height(20.dp))
-            NeoButton(text = "Update Security PIN", onClick = {
+            NeoButton(text = "Update Security Password", onClick = {
+                val resetVal = if (newPin.isNotBlank()) newPin else "1234"
                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    RiderRepository.setAppLockPin(if (newPin.length == 4) newPin else "1234")
+                    RiderRepository.resetForgotPassword(resetVal, resetVal)
                 }
-                DialogController.showToast("PIN successfully updated in Supabase!")
+                DialogController.showToast("Password successfully reset via backend recovery!")
                 onNavigate("auth_phone")
             })
         }

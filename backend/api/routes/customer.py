@@ -46,6 +46,7 @@ async def get_profile(user: User = Depends(get_current_customer), db: AsyncSessi
     }
 
 @router.put("/profile")
+@router.post("/profile")
 async def update_profile(
     payload: CustomerProfileUpdate,
     user: User = Depends(get_current_customer),

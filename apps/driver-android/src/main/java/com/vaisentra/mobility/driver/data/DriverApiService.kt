@@ -100,6 +100,9 @@ interface DriverApiService {
 
     @POST("api/v1/driver-onboarding/vehicle-inspection")
     suspend fun submitVehicleInspection(@Body body: Map<String, Any>): Response<Map<String, Any>>
+
+    @POST("api/v1/rides/{ride_id}/lost-item")
+    suspend fun reportFoundItem(@Path("ride_id") rideId: String, @Body body: Map<String, String>): Response<Map<String, Any>>
 }
 
 

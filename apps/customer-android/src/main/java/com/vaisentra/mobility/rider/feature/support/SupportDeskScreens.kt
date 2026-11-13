@@ -195,8 +195,12 @@ fun LiveSupportChatScreen(onNavigate: (String) -> Unit) {
                     .background(SapphirePrimary)
                     .clickable {
                         if (msg.isNotBlank()) {
-                            chats.add(Pair("You", msg))
+                            val msgText = msg
+                            chats.add(Pair("You", msgText))
                             msg = ""
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                RiderRepository.sendTicketMessage("ticket-active", msgText)
+                            }
                         }
                     },
                 contentAlignment = Alignment.Center
