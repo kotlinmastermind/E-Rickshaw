@@ -18,7 +18,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.launch
 
 /**
  * Screen 34: Shift Summary & Daily Net Pay (gross fare, platform commission, net pay)
@@ -106,6 +108,12 @@ fun PilotEarningsScreen(
     onManageBanks: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val earnings by DriverRepository.earnings.collectAsState()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchEarningsSummary()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -127,10 +135,10 @@ fun PilotEarningsScreen(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text("AVAILABLE WITHDRAWABLE BALANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹3,450.00", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("₹${earnings.walletBalanceRupees.toInt()}.00", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Pending Clearance: ₹210.00", color = AmberWarning, fontSize = 12.sp)
+                            Text("Pending Clearance: ₹${earnings.pendingPayoutRupees.toInt()}.00", color = AmberWarning, fontSize = 12.sp)
                             Text("Auto-payout: Daily 23:00", color = CockpitTextMuted, fontSize = 12.sp)
                         }
                     }
@@ -245,7 +253,12 @@ fun PayoutAccountsScreen(
             item {
                 CockpitButton(
                     text = "+ Link New Bank Account",
-                    onClick = { onShowToast("Penny drop verification initiated") },
+                    onClick = {
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            DriverRepository.addPayoutBankAccount("98124912001", "HDFC0000288", "Ram Lal")
+                        }
+                        onShowToast("Penny drop verification initiated with Supabase!")
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     isOutlined = true
                 )
@@ -353,7 +366,13 @@ fun DriverLedgerScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val ledgerItems = listOf(
+    val liveLedger by DriverRepository.ledger.collectAsState()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchAccountLedger()
+    }
+
+    val defaultItems = listOf(
         LedgerEntry("Ride Fare #TRP-9812", "Trip to Anand Vihar ISBT", "+₹74.25", EmeraldPrimary, "Today 18:20"),
         LedgerEntry("Morning Target Incentive", "10 Peak rides completed", "+₹300.00", EmeraldPrimary, "Today 14:00"),
         LedgerEntry("TDS Deduction", "1% Section 194C", "-₹3.74", CrimsonAlert, "Today 18:20"),
@@ -377,19 +396,39 @@ fun DriverLedgerScreen(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(ledgerItems) { item ->
-                CockpitCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(item.title, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text(item.desc, color = CockpitTextSecondary, fontSize = 12.sp)
-                            Text(item.timestamp, color = CockpitTextMuted, fontSize = 10.sp)
+            if (liveLedger.isNotEmpty()) {
+                items(liveLedger) { item ->
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(item.title, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(item.timestamp, color = CockpitTextMuted, fontSize = 10.sp)
+                            }
+                            val amtColor = if (item.type == "CREDIT") EmeraldPrimary else CrimsonAlert
+                            val sign = if (item.type == "CREDIT") "+" else "-"
+                            Text("$sign₹${item.amountRupees}", color = amtColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
-                        Text(item.amount, color = item.color, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                }
+            } else {
+                items(defaultItems) { item ->
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(item.title, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(item.desc, color = CockpitTextSecondary, fontSize = 12.sp)
+                                Text(item.timestamp, color = CockpitTextMuted, fontSize = 10.sp)
+                            }
+                            Text(item.amount, color = item.color, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
                     }
                 }
             }

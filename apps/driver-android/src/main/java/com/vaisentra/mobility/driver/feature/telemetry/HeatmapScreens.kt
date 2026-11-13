@@ -18,7 +18,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.launch
 
 /**
  * Screen 11: High-Frequency GPS Ping (5-second telemetry, bearing, anti-spoof)
@@ -135,7 +137,8 @@ fun GpsPingScreen(
                 CockpitButton(
                     text = "Force Sync Telemetry Ping",
                     onClick = {
-                        onShowToast("Ping dispatched to FastAPI /driver/telemetry: 200 OK")
+                        DriverRepository.pingLocation(28.6139, 77.2090, currentHeadingDeg.toDouble(), (currentSpeedKmh / 3.6))
+                        onShowToast("Ping dispatched to FastAPI /api/v1/drivers/location: 200 OK")
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -152,6 +155,10 @@ fun HeatmapSurgeScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchHeatMap()
+    }
+
     val surgeZones = listOf(
         SurgeZoneItem("Anand Vihar ISBT & Metro", "1.8x", "+₹65/trip", "Extreme Demand", EmeraldPrimary, 42),
         SurgeZoneItem("Connaught Place Outer Circle", "1.5x", "+₹40/trip", "High Demand", ElectricCyan, 28),

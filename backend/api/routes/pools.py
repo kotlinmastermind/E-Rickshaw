@@ -134,6 +134,34 @@ async def book_shared_ride(
         maximum_detour_km=payload.maximum_detour_km,
     )
 
+@router.get("/active", status_code=status.HTTP_200_OK)
+async def get_active_pool(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import PooledBooking, PooledTrip
+    stmt = (
+        select(PooledBooking)
+        .where(
+            PooledBooking.customer_id == current_user.id,
+            PooledBooking.status.in_(["CONFIRMED", "ACTIVE_BOARDING", "IN_TRANSIT"])
+        )
+        .order_by(PooledBooking.created_at.desc())
+    )
+    res = await db.execute(stmt)
+    booking = res.scalars().first()
+    if not booking:
+        return {
+            "id": "pool-empty",
+            "trip_id": "pool-empty",
+            "status": "NO_ACTIVE_POOL",
+            "route_name": "No active eco-pool",
+            "co_passengers": [],
+            "per_seat_fare_rupees": 0.0
+        }
+    service = PoolService(db)
+    return await service.get_pooled_trip_details(booking.pooled_trip_id, current_user)
+
 @router.get("/{trip_id}", status_code=status.HTTP_200_OK)
 async def get_pool_trip(
     trip_id: str,

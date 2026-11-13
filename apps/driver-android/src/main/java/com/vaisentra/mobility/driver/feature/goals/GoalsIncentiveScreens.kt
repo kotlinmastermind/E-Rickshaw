@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
 
 /**
@@ -28,8 +29,14 @@ fun DailyTargetsScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    var completedRides by remember { mutableIntStateOf(7) }
-    val targetRides = 10
+    val dailyTarget by DriverRepository.dailyTarget.collectAsState()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchDailyTargets()
+    }
+
+    val completedRides = dailyTarget.completedRides
+    val targetRides = dailyTarget.targetRides
     val progress = completedRides.toFloat() / targetRides
 
     Column(
@@ -277,6 +284,12 @@ fun PerformanceScorecardScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val scorecard by DriverRepository.scorecard.collectAsState()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchPerformanceScorecard()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()

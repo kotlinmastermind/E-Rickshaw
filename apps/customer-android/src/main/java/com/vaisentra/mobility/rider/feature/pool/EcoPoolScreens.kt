@@ -17,7 +17,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
+import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.launch
 
 // Screen 21: Eco-Pool Shared Seat Booking
 @Composable
@@ -74,6 +76,20 @@ fun EcoPoolBookingScreen(onNavigate: (String) -> Unit) {
         }
         Spacer(modifier = Modifier.height(16.dp))
         NeoButton(text = "Confirm Shared Pool Seat", onClick = {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                RiderRepository.bookSharedPool(
+                    com.vaisentra.mobility.rider.data.PoolBookingRequest(
+                        categoryId = "9b1c4e58-78b3-4a0b-80bb-f625f2d6ea2a",
+                        pickupAddress = "Anand Vihar Metro",
+                        destinationAddress = "Connaught Place Gate 4",
+                        pickupLatitude = 28.6469,
+                        pickupLongitude = 77.3160,
+                        destinationLatitude = 28.6328,
+                        destinationLongitude = 77.2197,
+                        seatsReserved = seats
+                    )
+                )
+            }
             DialogController.showToast("$seats Shared seat(s) reserved on Eco-Pool corridor!")
             onNavigate("pool_chat")
         }, icon = "👥")
@@ -143,8 +159,12 @@ fun EcoPoolChatScreen(onNavigate: (String) -> Unit) {
                     .background(SapphirePrimary)
                     .clickable {
                         if (inputMessage.isNotBlank()) {
-                            messages.add(Triple("You", inputMessage, "Just now"))
+                            val text = inputMessage
+                            messages.add(Triple("You", text, "Just now"))
                             inputMessage = ""
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                RiderRepository.sendPoolChatMessage("trip-eco-1", text)
+                            }
                         }
                     },
                 contentAlignment = Alignment.Center

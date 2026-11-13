@@ -119,20 +119,20 @@ data class RideBookingRequest(
 )
 
 data class ActiveRideDto(
-    @SerializedName("id") val id: String,
+    @SerializedName("id", alternate = ["ride_id"]) val id: String,
     @SerializedName("status") val status: String,
     @SerializedName("pickup_address") val pickupAddress: String,
     @SerializedName("destination_address") val destinationAddress: String,
-    @SerializedName("total_fare_cents") val totalFareCents: Int? = null,
-    @SerializedName("otp_code") val otpCode: String? = "4921",
-    @SerializedName("driver_name") val driverName: String? = "Bhishma Chauffeur",
-    @SerializedName("driver_phone") val driverPhone: String? = "+91 75620 84184",
-    @SerializedName("driver_rating") val driverRating: Double? = 4.95,
-    @SerializedName("vehicle_plate") val vehiclePlate: String? = "DL-1ER-2026",
-    @SerializedName("vehicle_model") val vehicleModel: String? = "Mahindra Treo Plus (Electric)",
+    @SerializedName("total_fare_cents", alternate = ["estimated_fare_cents", "final_fare_cents"]) val totalFareCents: Int? = null,
+    @SerializedName("otp_code", alternate = ["start_otp"]) val otpCode: String? = null,
+    @SerializedName("driver_name") val driverName: String? = null,
+    @SerializedName("driver_phone") val driverPhone: String? = null,
+    @SerializedName("driver_rating") val driverRating: Double? = null,
+    @SerializedName("vehicle_plate") val vehiclePlate: String? = null,
+    @SerializedName("vehicle_model") val vehicleModel: String? = null,
     @SerializedName("driver_lat") val driverLat: Double? = null,
     @SerializedName("driver_lng") val driverLng: Double? = null,
-    @SerializedName("speed_kmh") val speedKmh: Double? = 28.0,
+    @SerializedName("speed_kmh") val speedKmh: Double? = null,
     @SerializedName("created_at") val createdAt: String? = null
 )
 
@@ -181,18 +181,32 @@ data class PoolMessageDto(
 // --- Wallet & Fintech (Supabase: wallets, wallet_transactions, payments) ---
 data class WalletBalanceDto(
     @SerializedName("wallet_id") val walletId: String,
-    @SerializedName("balance_cents") val balanceCents: Int,
-    @SerializedName("balance_rupees") val balanceRupees: Double,
+    @SerializedName("balance_cents") val balanceCents: Int = 0,
+    @SerializedName("balance_rupees") val balanceRupees: Double = (balanceCents / 100.0),
     @SerializedName("currency") val currency: String = "INR",
     @SerializedName("auto_topup_enabled") val autoTopupEnabled: Boolean = false,
     @SerializedName("auto_topup_threshold") val autoTopupThreshold: Double = 100.0,
     @SerializedName("auto_topup_amount") val autoTopupAmount: Double = 500.0
-)
+) {
+    val displayBalanceRupees: Double
+        get() = if (balanceRupees > 0.0) balanceRupees else (balanceCents / 100.0)
+}
 
 data class TopupRequest(
-    @SerializedName("amount_rupees") val amountRupees: Double,
-    @SerializedName("payment_method") val paymentMethod: String = "UPI"
-)
+    @SerializedName("amount_cents", alternate = ["amount_rupees"]) val amountCents: Int,
+    @SerializedName("payment_method") val paymentMethod: String = "UPI",
+    @SerializedName("idempotency_key") val idempotencyKey: String? = null
+) {
+    companion object {
+        fun fromRupees(amountRupees: Double, paymentMethod: String = "UPI", idempotencyKey: String? = null): TopupRequest {
+            return TopupRequest(
+                amountCents = (amountRupees * 100).toInt(),
+                paymentMethod = paymentMethod,
+                idempotencyKey = idempotencyKey
+            )
+        }
+    }
+}
 
 data class SplitFareRequest(
     @SerializedName("ride_id") val rideId: String,

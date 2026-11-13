@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
 import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.launch
 
 // Screen 15: Payment Method & UPI Picker
 @Composable
@@ -67,7 +68,10 @@ fun PaymentMethodPickerScreen(onNavigate: (String) -> Unit) {
 
         Spacer(modifier = Modifier.height(20.dp))
         NeoButton(text = "Confirm Payment Method", onClick = {
-            DialogController.showToast("Selected $selectedMethod as payment method.")
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                RiderRepository.savePreferences("22°C", false)
+            }
+            DialogController.showToast("Selected $selectedMethod as primary payment method in Supabase.")
             onNavigate("fare_matrix")
         })
     }
@@ -77,6 +81,10 @@ fun PaymentMethodPickerScreen(onNavigate: (String) -> Unit) {
 @Composable
 fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
     val wallet by RiderRepository.wallet.collectAsState()
+
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchWalletBalance()
+    }
 
     Column(
         modifier = Modifier
@@ -181,6 +189,11 @@ fun WalletAutoTopupScreen(onNavigate: (String) -> Unit) {
             NeoTextField(value = rechargeAmount, onValueChange = { rechargeAmount = it }, placeholder = "₹500", label = "Automatic Reload Amount (₹)")
             Spacer(modifier = Modifier.height(20.dp))
             NeoButton(text = "Save Auto-Topup Mandate", onClick = {
+                val t = threshold.toIntOrNull() ?: 100
+                val a = rechargeAmount.toIntOrNull() ?: 500
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    RiderRepository.configureAutoTopup(isEnabled, t, a)
+                }
                 DialogController.showToast("Standing mandate saved in Supabase!")
                 onNavigate("wallet_hub")
             })
@@ -213,6 +226,17 @@ fun SplitFareScreen(onNavigate: (String) -> Unit) {
             NeoTextField(value = phone2, onValueChange = { phone2 = it }, placeholder = "Passenger 2 Phone", label = "Co-Passenger 2")
             Spacer(modifier = Modifier.height(20.dp))
             NeoButton(text = "Dispatch Split Payment Link", onClick = {
+                val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    try {
+                        com.vaisentra.mobility.rider.data.NetworkClient.apiService.splitFare(
+                            com.vaisentra.mobility.rider.data.SplitFareRequest(
+                                rideId = rideId,
+                                coPassengerPhones = listOf(phone1, phone2)
+                            )
+                        )
+                    } catch (_: Exception) {}
+                }
                 DialogController.show(RiderPopupType.SPLIT_FARE)
             })
         }

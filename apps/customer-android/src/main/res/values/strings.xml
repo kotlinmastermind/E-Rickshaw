@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">RiderGo</string>
     <string name="brand_subtitle">Electric Mobility &amp; Urban Transit</string>
+    <string name="mapbox_access_token">pk.eyJ1Ijoia290bGlubWFzdGVybWluZCIsImEiOiJjbXZ5c205bWswZnV4MnhzOXNzdm02bDB0In0.XZPhcU3_Et2F5raRUkVtxQ</string>
 </resources>
 

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Header, HTTPException, status
 from pydantic import BaseModel, Field
@@ -363,6 +363,7 @@ async def delete_saved_payment_method(
     return await service.delete_saved_method(method_id, user.id)
 
 # ----------------- Part 4 UPI Deep-Link & Retries (Features 87 & 88) -----------------
+@router.post("/upi-checkout")
 @router.post("/upi-intent")
 async def generate_upi_checkout(
     payload: UpiIntentRequest,
@@ -433,4 +434,25 @@ async def list_my_refunds(
 ):
     service = SettlementAdvancedService(db)
     return await service.list_customer_refunds(user.id)
+
+class SplitPaymentRequest(BaseModel):
+    ride_id: str
+    co_passenger_phones: List[str]
+    split_type: str = "EQUAL"
+
+@router.post("/split")
+async def split_payment(
+    payload: SplitPaymentRequest,
+    user: User = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.ride_service import RideService
+    from backend.api.routes.rides import SplitFareInitiatePayload
+    service = RideService(db)
+    return await service.initiate_split_fare(
+        ride_id=payload.ride_id,
+        initiator_user_id=user.id,
+        participant_phones=payload.co_passenger_phones
+    )
+
 

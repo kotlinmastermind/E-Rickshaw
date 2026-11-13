@@ -19,11 +19,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
+import com.vaisentra.mobility.rider.data.ActiveRideDto
+import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.launch
 
 // Screen 36: Ride Completed & Digital Receipt
 @Composable
 fun RideReceiptScreen(onNavigate: (String) -> Unit) {
+    val receipt by RiderRepository.rideReceipt.collectAsState()
+
+    LaunchedEffect(Unit) {
+        val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+        RiderRepository.fetchRideReceipt(rideId)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -144,7 +154,14 @@ fun DriverRatingScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
         NeoButton(
             text = "Submit Rating & Tip Driver →",
-            onClick = { onNavigate("tip_driver") },
+            onClick = {
+                val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    RiderRepository.submitRating(rideId, rating, selectedCompliments.joinToString(", "))
+                }
+                DialogController.showToast("Rating submitted to pilot ledger!")
+                onNavigate("tip_driver")
+            },
             backgroundColor = SapphirePrimary
         )
     }
@@ -185,6 +202,10 @@ fun DriverTipScreen(onNavigate: (String) -> Unit) {
         }
         Spacer(modifier = Modifier.height(20.dp))
         NeoButton(text = "Pay ₹$tipAmt Tip via UPI", onClick = {
+            val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                RiderRepository.submitTip(rideId, tipAmt)
+            }
             DialogController.showToast("₹$tipAmt tip credited to Pilot Ram Lal!")
             onNavigate("past_trips")
         }, icon = "💵")
@@ -194,7 +215,13 @@ fun DriverTipScreen(onNavigate: (String) -> Unit) {
 // Screen 39: Past Trips & Activity History (Supabase: rides)
 @Composable
 fun PastTripsHistoryScreen(onNavigate: (String) -> Unit) {
-    val trips = listOf(
+    val liveTrips by RiderRepository.rideHistory.collectAsState()
+
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchRideHistory()
+    }
+
+    val defaultTrips = listOf(
         Triple("Sector 62, Noida ➔ Connaught Place", "₹129.04 • 14 Mins • Completed", "Today, 08:30 AM"),
         Triple("Anand Vihar Hub ➔ Rajiv Chowk Metro", "₹95.00 • Eco-Pool • Completed", "Yesterday, 06:15 PM"),
         Triple("Indira Gandhi Airport T3 ➔ Cyber Hub", "₹450.00 • E-Auto • Completed", "08-Nov, 10:20 PM")
@@ -210,16 +237,36 @@ fun PastTripsHistoryScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(trips) { (route, detail, time) ->
-                NeoCard(
-                    modifier = Modifier.clickable { onNavigate("ride_receipt") },
-                    cornerRadius = 14.dp
-                ) {
-                    Text(text = time, color = TextDim, fontSize = 11.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = route, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = detail, color = ElectricCyan, fontSize = 12.sp)
+            if (liveTrips.isNotEmpty()) {
+                items(liveTrips) { ride ->
+                    val fareStr = if (ride.totalFareCents != null) "₹${ride.totalFareCents / 100}.00" else "₹129.00"
+                    val routeStr = "${ride.pickupAddress} ➔ ${ride.destinationAddress}"
+                    val detailStr = "$fareStr • ${ride.vehicleModel ?: "EV Rickshaw"} • ${ride.status}"
+                    val timeStr = ride.createdAt?.take(16)?.replace("T", " ") ?: "Recent Trip"
+
+                    NeoCard(
+                        modifier = Modifier.clickable { onNavigate("ride_receipt") },
+                        cornerRadius = 14.dp
+                    ) {
+                        Text(text = timeStr, color = TextDim, fontSize = 11.sp)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = routeStr, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = detailStr, color = ElectricCyan, fontSize = 12.sp)
+                    }
+                }
+            } else {
+                items(defaultTrips) { (route, detail, time) ->
+                    NeoCard(
+                        modifier = Modifier.clickable { onNavigate("ride_receipt") },
+                        cornerRadius = 14.dp
+                    ) {
+                        Text(text = time, color = TextDim, fontSize = 11.sp)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = route, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = detail, color = ElectricCyan, fontSize = 12.sp)
+                    }
                 }
             }
         }
@@ -266,7 +313,11 @@ fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
         }
         Spacer(modifier = Modifier.height(16.dp))
         NeoButton(text = "Download PDF Tax Invoice", onClick = {
-            DialogController.showToast("Tax Invoice downloaded to device downloads folder!")
+            val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                RiderRepository.fetchTaxInvoice(rideId)
+            }
+            DialogController.showToast("Tax Invoice fetched from FastAPI /rides/$rideId/tax-invoice")
         }, icon = "📥")
     }
 }

@@ -54,6 +54,8 @@ async def update_notification_preferences(payload: PreferencesPayload, user: Use
     return await NotificationService(db).update_settings(user.id, payload.model_dump(exclude_unset=True), source="MOBILE_APP")
 
 
+@router.get("")
+@router.get("/")
 @router.get("/inbox")
 async def get_notification_inbox(
     unread_only: bool = False,

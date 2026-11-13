@@ -504,6 +504,7 @@ async def accept_ride(
     service = RideService(db)
     return await service.accept_ride_atomic(driver_user_id=user.id, ride_id=ride_id)
 
+@router.post("/{ride_id}/arrived")
 @router.post("/{ride_id}/arrive")
 async def driver_arrived(
     ride_id: str,
@@ -646,6 +647,7 @@ async def rate_driver(
         feedback=payload.feedback
     )
 
+@router.get("/active")
 @router.get("/active/current")
 async def get_current_active_ride(
     user: User = Depends(get_current_user),
@@ -720,6 +722,68 @@ async def get_current_active_ride(
             "created_at": ride.requested_at.isoformat() if ride.requested_at else None
         }
     }
+
+@router.get("/history")
+async def get_ride_history(
+    limit: int = 50,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(CustomerProfile).where(CustomerProfile.user_id == user.id)
+    res = await db.execute(stmt)
+    customer = res.scalar_one_or_none()
+    
+    if not customer:
+        return []
+
+    stmt_rides = (
+        select(Ride)
+        .where(Ride.customer_id == customer.id)
+        .order_by(Ride.requested_at.desc())
+        .limit(limit)
+    )
+    res_rides = await db.execute(stmt_rides)
+    rides = res_rides.scalars().all()
+
+    items = []
+    for r in rides:
+        driver_name = "EV Pilot"
+        driver_phone = "+91 98112 34567"
+        driver_rating = 4.9
+        vehicle_plate = "DL-1ER-4921"
+        vehicle_model = "Standard E-Rickshaw"
+
+        if r.assigned_driver_id:
+            d_res = await db.execute(
+                select(DriverProfile).where(DriverProfile.id == r.assigned_driver_id)
+            )
+            drv = d_res.scalar_one_or_none()
+            if drv:
+                driver_rating = drv.rating_average or 4.9
+                u_res = await db.execute(select(User).where(User.id == drv.user_id))
+                u_driver = u_res.scalar_one_or_none()
+                if u_driver:
+                    driver_name = u_driver.full_name or "EV Pilot"
+                    driver_phone = u_driver.phone_number or "+91 98112 34567"
+
+        items.append({
+            "id": r.id,
+            "status": r.status,
+            "pickup_address": r.pickup_address,
+            "destination_address": r.destination_address,
+            "total_fare_cents": r.final_fare_cents or r.estimated_fare_cents,
+            "otp_code": r.start_otp,
+            "driver_name": driver_name,
+            "driver_phone": driver_phone,
+            "driver_rating": driver_rating,
+            "vehicle_plate": vehicle_plate,
+            "vehicle_model": vehicle_model,
+            "driver_lat": r.pickup_latitude,
+            "driver_lng": r.pickup_longitude,
+            "speed_kmh": 0.0,
+            "created_at": r.requested_at.isoformat() if r.requested_at else None
+        })
+    return items
 
 @router.get("/{ride_id}")
 async def get_ride_details(

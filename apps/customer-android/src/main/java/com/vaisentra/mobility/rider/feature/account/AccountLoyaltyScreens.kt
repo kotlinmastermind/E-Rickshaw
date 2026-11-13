@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
 import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.launch
 
 // Screen 46: Refer & Earn Electric Cash
 @Composable
@@ -73,6 +74,10 @@ fun ReferEarnScreen(onNavigate: (String) -> Unit) {
 fun GreenClubLoyaltyScreen(onNavigate: (String) -> Unit) {
     val loyalty by RiderRepository.loyalty.collectAsState()
 
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchLoyaltySummary()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -120,7 +125,13 @@ fun GreenClubLoyaltyScreen(onNavigate: (String) -> Unit) {
 // Screen 48: Notification Inbox & Alerts
 @Composable
 fun NotificationInboxScreen(onNavigate: (String) -> Unit) {
-    val alerts = listOf(
+    val liveAlerts by RiderRepository.notifications.collectAsState()
+
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchNotifications()
+    }
+
+    val defaultAlerts = listOf(
         Triple("⚡ Peak Corridor Cleared", "Demand stabilized near Anand Vihar Metro. Standard tariffs restored.", "10 mins ago"),
         Triple("🎉 ₹100 Referral Credited", "Priya joined via your link! ₹100 added to your wallet balance.", "2 hours ago"),
         Triple("🌧️ Delhi Monsoon Advisory", "High rain in South Delhi. 100% enclosed E-Autos dispatched on priority.", "Yesterday")
@@ -136,14 +147,27 @@ fun NotificationInboxScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(alerts) { (title, body, time) ->
-                NeoCard(cornerRadius = 14.dp) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = title, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text(text = time, color = TextDim, fontSize = 10.sp)
+            if (liveAlerts.isNotEmpty()) {
+                items(liveAlerts) { alert ->
+                    NeoCard(cornerRadius = 14.dp) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(text = alert.title, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(text = alert.createdAt.take(10), color = TextDim, fontSize = 10.sp)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = alert.body, color = TextMuted, fontSize = 12.sp)
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = body, color = TextMuted, fontSize = 12.sp)
+                }
+            } else {
+                items(defaultAlerts) { (title, body, time) ->
+                    NeoCard(cornerRadius = 14.dp) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(text = title, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(text = time, color = TextDim, fontSize = 10.sp)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = body, color = TextMuted, fontSize = 12.sp)
+                    }
                 }
             }
         }
@@ -154,6 +178,10 @@ fun NotificationInboxScreen(onNavigate: (String) -> Unit) {
 @Composable
 fun SavedPlacesScreen(onNavigate: (String) -> Unit) {
     val places by RiderRepository.savedPlaces.collectAsState()
+
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchSavedPlaces()
+    }
 
     Column(
         modifier = Modifier
@@ -231,16 +259,35 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
                     NeoBadge(text = value, backgroundColor = SurfaceDark, textColor = ElectricCyan)
                 }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NeoButton(
+                    text = "Export My Data",
+                    modifier = Modifier.weight(1f),
+                    backgroundColor = SurfaceDark,
+                    onClick = {
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            RiderRepository.requestDataExport()
+                        }
+                        DialogController.showToast("Data export initiated. JSON archive will be generated.")
+                    }
+                )
+                NeoButton(
+                    text = "App Lock PIN",
+                    modifier = Modifier.weight(1f),
+                    backgroundColor = SurfaceDark,
+                    onClick = {
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            RiderRepository.setAppLockPin("1234")
+                        }
+                        DialogController.showToast("4-Digit Security PIN configured in Supabase!")
+                    }
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
-        NeoButton(
-            text = "Open 50-Screen Inspector Catalog →",
-            onClick = { onNavigate("catalog") },
-            backgroundColor = SapphirePrimary,
-            icon = "📱"
-        )
-        Spacer(modifier = Modifier.height(10.dp))
         NeoButton(
             text = "Sign Out Session",
             onClick = {

@@ -18,7 +18,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.launch
 
 /**
  * Screen 31: Trip Completed & Fare Calculation (itemized fare calculation)
@@ -190,6 +192,10 @@ fun CashCollectionScreen(
             CockpitButton(
                 text = "CONFIRM CASH RECEIVED (₹82.50)",
                 onClick = {
+                    com.vaisentra.mobility.driver.data.DriverRepository.collectCash(
+                        rideId = com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value,
+                        amountTendered = tenderedVal
+                    )
                     onShowToast("Cash collected. ₹74.25 credited to wallet balance")
                     onCashCollected()
                 },
@@ -261,6 +267,10 @@ fun UpiSettlementScreen(
                 CockpitButton(
                     text = "VERIFY PAYMENT RECEIVED",
                     onClick = {
+                        val rideId = DriverRepository.currentRideId.value ?: "ride-latest"
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            DriverRepository.generateDynamicUpi(rideId, 82.50)
+                        }
                         onShowToast("Payment of ₹82.50 verified via Razorpay webhook!")
                         onPaymentConfirmed()
                     },

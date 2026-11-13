@@ -597,9 +597,10 @@ async def driver_dispatch_websocket(
 
 
 # ---------------------------------------------------------------------------
-# WEBSOCKET ROUTE: /rides/{ride_id}/tracking
+# WEBSOCKET ROUTE: /rides/{ride_id} & /rides/{ride_id}/tracking
 # ---------------------------------------------------------------------------
 
+@router.websocket("/rides/{ride_id}")
 @router.websocket("/rides/{ride_id}/tracking")
 async def ride_tracking_websocket(
     websocket: WebSocket,

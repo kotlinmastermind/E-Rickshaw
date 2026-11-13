@@ -23,6 +23,7 @@ import com.vaisentra.mobility.rider.components.*
 import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // Screen 23: Dispatch Radar & Pilot Matching
 @Composable
@@ -132,20 +133,36 @@ fun PilotAssignedScreen(onNavigate: (String) -> Unit) {
         NeoCard {
             Text(text = "Boarding Security OTP", color = TextMuted, fontSize = 12.sp)
             Spacer(modifier = Modifier.height(6.dp))
-            Text(text = "Share this 4-digit code with your pilot upon boarding:", color = TextWhite, fontSize = 13.sp)
+            Text(text = "Share this 6-digit code with your pilot upon boarding:", color = TextWhite, fontSize = 13.sp)
             Spacer(modifier = Modifier.height(12.dp))
-            OtpDisplayBox(otp = activeRide?.otpCode ?: "4921")
+            OtpDisplayBox(otp = activeRide?.otpCode ?: "729481")
         }
 
         Spacer(modifier = Modifier.height(20.dp))
-        NeoButton(
-            text = "Pilot Arrived Simulator →",
-            onClick = {
-                RiderRepository.updateActiveRideStatus("ARRIVED")
-                onNavigate("pilot_arrived")
-            },
-            backgroundColor = SapphirePrimary
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            NeoButton(
+                text = "Cancel Ride",
+                onClick = {
+                    val rideId = activeRide?.id ?: "ride-latest"
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        RiderRepository.cancelActiveRide(rideId)
+                    }
+                    DialogController.showToast("Ride cancelled in Supabase.")
+                    onNavigate("map_home")
+                },
+                modifier = Modifier.weight(1f),
+                backgroundColor = CrimsonRed
+            )
+            NeoButton(
+                text = "Pilot Arrived →",
+                onClick = {
+                    RiderRepository.updateActiveRideStatus("ARRIVED")
+                    onNavigate("pilot_arrived")
+                },
+                modifier = Modifier.weight(1f),
+                backgroundColor = SapphirePrimary
+            )
+        }
     }
 }
 
@@ -246,7 +263,7 @@ fun BoardingOtpScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = "Tell this OTP to pilot to verify your identity and start trip meters:", color = TextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(24.dp))
-        OtpDisplayBox(otp = activeRide?.otpCode ?: "4921")
+        OtpDisplayBox(otp = activeRide?.otpCode ?: "729481")
         Spacer(modifier = Modifier.height(30.dp))
         NeoButton(text = "Trip Started → View Telemetry", onClick = { onNavigate("telemetry_hud") })
     }

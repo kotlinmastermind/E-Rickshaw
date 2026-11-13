@@ -102,15 +102,12 @@ enum class DriverScreen(val title: String, val category: String) {
     ACADEMY_TRAINING("44. Electric Academy", "Support & Academy"),
     FOUND_ITEM("46. Found Lost Item in Cab", "Support & Academy"),
     DRIVER_HELPDESK("47. Driver Helpdesk Tickets", "Support & Academy"),
-    NOTIFICATIONS_CENTER("49. Notifications Center", "Support & Academy"),
-
-    // Master Catalog Hub
-    MASTER_CATALOG("Master DriverGo Catalog", "Explorer Hub")
+    NOTIFICATIONS_CENTER("49. Notifications Center", "Support & Academy")
 }
 
 @Composable
 fun DriverAppNavigation() {
-    var currentScreen by remember { mutableStateOf(DriverScreen.MASTER_CATALOG) }
+    var currentScreen by remember { mutableStateOf(DriverScreen.PILOT_LOGIN) }
 
     fun triggerPopup(popupId: String) {
         try {
@@ -125,12 +122,6 @@ fun DriverAppNavigation() {
 
     Box(modifier = Modifier.fillMaxSize()) {
         when (currentScreen) {
-            DriverScreen.MASTER_CATALOG -> MasterDriverCatalogScreen(
-                onSelectScreen = { currentScreen = it },
-                onTriggerPopup = { triggerPopup(it) },
-                onShowToast = { showToast(it) }
-            )
-
             // 1. Auth & KYC
             DriverScreen.PILOT_LOGIN -> PilotLoginScreen(onNavigate = { route ->
                 when (route) {
@@ -142,156 +133,159 @@ fun DriverAppNavigation() {
             DriverScreen.PILOT_OTP -> PilotOtpScreen(onNavigate = { route ->
                 when (route) {
                     "home" -> currentScreen = DriverScreen.DUTY_DASHBOARD
-                    else -> currentScreen = DriverScreen.MASTER_CATALOG
+                    else -> currentScreen = DriverScreen.DUTY_DASHBOARD
                 }
             })
             DriverScreen.PILOT_PASSWORD_RECOVERY -> PilotPasswordRecoveryScreen(onNavigate = {
                 currentScreen = DriverScreen.PILOT_LOGIN
             })
             DriverScreen.PILOT_PROFILE -> PilotProfileScreen(onNavigate = {
-                currentScreen = DriverScreen.MASTER_CATALOG
+                currentScreen = DriverScreen.DUTY_DASHBOARD
             })
             DriverScreen.DOCUMENT_VAULT -> DocumentVaultScreen(onNavigate = {
-                currentScreen = DriverScreen.MASTER_CATALOG
+                currentScreen = DriverScreen.DUTY_DASHBOARD
             })
             DriverScreen.DOC_EXPIRY_WATCHDOG -> DocumentExpiryWatchdogScreen(onNavigate = {
-                currentScreen = DriverScreen.MASTER_CATALOG
+                currentScreen = DriverScreen.DUTY_DASHBOARD
             })
 
             // 2. Duty & Vehicle
             DriverScreen.VEHICLE_INSPECTION -> VehicleInspectionScreen(onNavigate = { route ->
                 if (route == "shift_start") currentScreen = DriverScreen.SHIFT_START
-                else currentScreen = DriverScreen.MASTER_CATALOG
+                else currentScreen = DriverScreen.DUTY_DASHBOARD
             })
             DriverScreen.VEHICLE_RC_STATUS -> VehicleRcStatusScreen(onNavigate = {
-                currentScreen = DriverScreen.MASTER_CATALOG
+                currentScreen = DriverScreen.DUTY_DASHBOARD
             })
             DriverScreen.SHIFT_START -> ShiftStartScreen(onNavigate = { route ->
                 if (route == "duty") currentScreen = DriverScreen.DUTY_DASHBOARD
-                else currentScreen = DriverScreen.MASTER_CATALOG
+                else currentScreen = DriverScreen.DUTY_DASHBOARD
             })
             DriverScreen.DUTY_DASHBOARD -> DutyDashboardScreen(onNavigate = { route ->
                 when (route) {
                     "offer" -> currentScreen = DriverScreen.INCOMING_OFFER
-                    "inspection" -> currentScreen = DriverScreen.VEHICLE_INSPECTION
+                    "pickup_nav" -> currentScreen = DriverScreen.PICKUP_NAV
+                    "inspection", "vehicle_inspect" -> currentScreen = DriverScreen.VEHICLE_INSPECTION
                     "earnings" -> currentScreen = DriverScreen.PILOT_EARNINGS
                     "heatmap" -> currentScreen = DriverScreen.HEATMAP_SURGE
-                    else -> currentScreen = DriverScreen.MASTER_CATALOG
+                    "catalog" -> currentScreen = DriverScreen.DUTY_DASHBOARD
+                    "pilot_profile" -> currentScreen = DriverScreen.PILOT_PROFILE
+                    else -> currentScreen = DriverScreen.DUTY_DASHBOARD
                 }
             })
             DriverScreen.FATIGUE_CHECK -> FatigueCheckScreen(onNavigate = {
-                currentScreen = DriverScreen.MASTER_CATALOG
+                currentScreen = DriverScreen.DUTY_DASHBOARD
             })
             DriverScreen.SHIFT_END -> ShiftEndScreen(onNavigate = { route ->
                 if (route == "summary") currentScreen = DriverScreen.SHIFT_SUMMARY
-                else currentScreen = DriverScreen.MASTER_CATALOG
+                else currentScreen = DriverScreen.DUTY_DASHBOARD
             })
             DriverScreen.DRIVER_PREFERENCES -> DriverPreferencesScreen(onNavigate = {
-                currentScreen = DriverScreen.MASTER_CATALOG
+                currentScreen = DriverScreen.DUTY_DASHBOARD
             })
 
             // 3. Telemetry & Maps
             DriverScreen.GPS_PING -> GpsPingScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.HEATMAP_SURGE -> HeatmapSurgeScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.ROAD_HAZARDS -> RoadHazardsScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
 
             // 4. Trip Ops
             DriverScreen.INCOMING_OFFER -> IncomingOfferScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onAcceptOffer = { currentScreen = DriverScreen.PICKUP_NAV },
                 onRejectOffer = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.OFFER_QUEUE -> OfferQueueScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.PICKUP_NAV -> PickupNavScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onArrived = { currentScreen = DriverScreen.ARRIVED_PICKUP },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.ARRIVED_PICKUP -> ArrivedPickupScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onStartWaitingTimer = { currentScreen = DriverScreen.WAITING_TIMER },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.WAITING_TIMER -> WaitingTimerScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onProceedToOtp = { currentScreen = DriverScreen.BOARDING_OTP },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.BOARDING_OTP -> BoardingOtpScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onTripStarted = { currentScreen = DriverScreen.IN_TRIP_NAV },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.IN_TRIP_NAV -> InTripNavScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onEndTrip = { currentScreen = DriverScreen.TRIP_COMPLETED_FARE },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.MULTI_STOP -> MultiStopScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
 
             // 5. Shared Pool
             DriverScreen.POOL_MANIFEST -> PoolManifestScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.CORRIDOR_WAYPOINTS -> CorridorWaypointsScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.CO_PASSENGER_BROADCAST -> CoPassengerBroadcastScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
 
             // 6. Safety Sentinel
             DriverScreen.ROUTE_DEVIATION -> RouteDeviationScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.SPEEDOMETER -> SpeedometerScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.AUDIO_SHIELD -> AudioShieldScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.EMERGENCY_SOS -> EmergencySosScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.BATTERY_SWAP_DEPOT -> BatterySwapDepotScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.DRIVER_INCIDENT -> DriverIncidentScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.EMERGENCY_CONTACTS -> EmergencyContactsScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
 
             // 7. Fare Settlement
             DriverScreen.TRIP_COMPLETED_FARE -> TripCompletedFareScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onCollectCash = { currentScreen = DriverScreen.CASH_COLLECTION },
                 onCollectUpi = { currentScreen = DriverScreen.UPI_SETTLEMENT },
                 onFinishTrip = { currentScreen = DriverScreen.DUTY_DASHBOARD },
@@ -310,18 +304,18 @@ fun DriverAppNavigation() {
 
             // 8. Earnings & Ledger
             DriverScreen.SHIFT_SUMMARY -> ShiftSummaryScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onGoToLedger = { currentScreen = DriverScreen.DRIVER_LEDGER },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.PILOT_EARNINGS -> PilotEarningsScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onInstantPayout = { currentScreen = DriverScreen.INSTANT_PAYOUT },
                 onManageBanks = { currentScreen = DriverScreen.PAYOUT_ACCOUNTS },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.PAYOUT_ACCOUNTS -> PayoutAccountsScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.INSTANT_PAYOUT -> InstantPayoutScreen(
@@ -330,43 +324,43 @@ fun DriverAppNavigation() {
                 onShowToast = { showToast(it) }
             )
             DriverScreen.DRIVER_LEDGER -> DriverLedgerScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
 
             // 9. Goals & Scorecard
             DriverScreen.DAILY_TARGETS -> DailyTargetsScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.WEEKLY_GOALS -> WeeklyGoalsScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.STREAK_MISSIONS -> StreakMissionsScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.PERFORMANCE_SCORECARD -> PerformanceScorecardScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
 
             // 10. Support & Academy
             DriverScreen.ACADEMY_TRAINING -> AcademyTrainingScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.FOUND_ITEM -> FoundItemScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.DRIVER_HELPDESK -> DriverHelpdeskScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.NOTIFICATIONS_CENTER -> NotificationsCenterScreen(
-                onNavigateBack = { currentScreen = DriverScreen.MASTER_CATALOG },
+                onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
             )
         }
@@ -375,211 +369,4 @@ fun DriverAppNavigation() {
         DriverGoDialogHost()
     }
 }
-
-/**
- * Master DriverGo Catalog Inspector:
- * Lists all 50 Driver Jetpack Compose screens + 15 Popups with 1-tap testing
- */
-@Composable
-fun MasterDriverCatalogScreen(
-    onSelectScreen: (DriverScreen) -> Unit,
-    onTriggerPopup: (String) -> Unit,
-    onShowToast: (String) -> Unit
-) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("50 Screens", "15 Popups & Alerts", "Live Supabase Status")
-
-    val allDriverScreens = DriverScreen.values().filter { it != DriverScreen.MASTER_CATALOG }
-    val categories = allDriverScreens.map { it.category }.distinct()
-
-    val driverPopups = listOf(
-        PopupMeta("INCOMING_OFFER", "16. Incoming Ride Offer", "15s countdown modal with trip fare", EmeraldPrimary),
-        PopupMeta("RIDER_CANCELLED", "17. Rider Cancelled", "₹25 compensation credit to driver", AmberWarning),
-        PopupMeta("LOW_BATTERY_SWAP", "18. Low Battery Swap", "Battery < 18% warning with reroute", CrimsonAlert),
-        PopupMeta("FATIGUE_BREAK", "19. Fatigue Break Cooldown", "4.5 hours continuous driving break", ElectricCyan),
-        PopupMeta("OVERSPEEDING_ALERT", "20. Overspeeding Warning", "Speed > 35 km/h urban limit alert", CrimsonAlert),
-        PopupMeta("CASH_COLLECT", "21. Cash Collection Prompt", "Cash tender and return change dialog", EmeraldPrimary),
-        PopupMeta("NO_SHOW_EXPIRY", "22. Rider No-Show Expiry", "5-min grace elapsed, ₹30 fee credit", AmberWarning),
-        PopupMeta("ROUTE_DEVIATION", "23. Route Deviation Alert", ">300m detour road obstacle reason", AmberWarning),
-        PopupMeta("DOC_EXPIRY", "24. Document Expiry Warning", "Commercial DL expiry warning in 14 days", AmberWarning),
-        PopupMeta("PILOT_SOS", "25. Pilot 112 SOS Trigger", "Delhi Police SOC emergency panic alert", CrimsonAlert),
-        PopupMeta("ODOMETER_CHECK", "26. Odometer Verification", "Pre-shift instrument cluster check", ElectricCyan),
-        PopupMeta("PEAK_BONUS", "27. Peak Hour Bonus", "10 morning rides bonus ₹300 unlocked", EmeraldPrimary),
-        PopupMeta("CSAT_ADVISORY", "28. Rating CSAT Advisory", "Customer satisfaction review prompt", AmberWarning),
-        PopupMeta("PAYOUT_SUCCESS", "29. Payout Success Slip", "IMPS settlement UTR transaction slip", EmeraldPrimary),
-        PopupMeta("TOLL_ENTRY", "30. Toll & Border Tax Add", "MCD toll adder to passenger invoice", ElectricCyan)
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CockpitBackground)
-            .statusBarsPadding()
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        "DriverGo Cockpit Studio",
-                        color = CockpitTextPrimary,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        "50 Material 3 Screens • 15 Dialogs • Live Supabase",
-                        color = EmeraldPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                CockpitBadge("PROD READY", EmeraldPrimary)
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = CockpitSurface,
-                contentColor = ElectricCyan,
-                divider = { HorizontalDivider(color = CockpitBorder) }
-            ) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        text = {
-                            Text(
-                                title,
-                                fontSize = 12.sp,
-                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selectedTab == index) ElectricCyan else CockpitTextSecondary
-                            )
-                        }
-                    )
-                }
-            }
-        }
-
-        when (selectedTab) {
-            0 -> {
-                // 50 Screens List grouped by Category
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    categories.forEach { category ->
-                        val screensInCategory = allDriverScreens.filter { it.category == category }
-                        item {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                category.uppercase(),
-                                color = ElectricCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        items(screensInCategory) { screen ->
-                            CockpitCard(
-                                modifier = Modifier.clickable { onSelectScreen(screen) }
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        screen.title,
-                                        color = CockpitTextPrimary,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = CockpitTextMuted)
-                                }
-                            }
-                        }
-                    }
-                    item { Spacer(Modifier.height(24.dp)) }
-                }
-            }
-
-            1 -> {
-                // 15 Popups & Dialogs
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    item {
-                        CockpitButton(
-                            text = "Test Cockpit Toast Banner",
-                            onClick = { onShowToast("⚡ 5s High-Frequency Telemetry Synced with Supabase") },
-                            modifier = Modifier.fillMaxWidth(),
-                            isOutlined = true
-                        )
-                        Spacer(Modifier.height(6.dp))
-                    }
-                    items(driverPopups) { popup ->
-                        CockpitCard(
-                            modifier = Modifier.clickable { onTriggerPopup(popup.id) }
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(popup.name, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    Text(popup.desc, color = CockpitTextSecondary, fontSize = 12.sp)
-                                }
-                                CockpitBadge("LAUNCH", popup.tint)
-                            }
-                        }
-                    }
-                    item { Spacer(Modifier.height(24.dp)) }
-                }
-            }
-
-            2 -> {
-                // Live Supabase Status
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    CockpitCard(glow = true) {
-                        Text("FASTAPI BACKEND & SUPABASE POSTGRES", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(6.dp))
-                        Text("Database: AWS ap-southeast-2 (Supabase PG 17.11)", color = EmeraldPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Total Connected Tables: 176 tables", color = CockpitTextPrimary, fontSize = 13.sp)
-                        Spacer(Modifier.height(6.dp))
-                        Text("Endpoint: http://10.0.2.2:8000/ (FastAPI asyncpg pool)", color = ElectricCyan, fontSize = 12.sp)
-                    }
-
-                    CockpitCard {
-                        Text("ACTIVE PILOT SUBSYSTEMS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(8.dp))
-                        Text("• driver_profiles & pilots_kyc table\n• driver_telemetry (5-sec high-freq ping)\n• dispatch_offers & auto_chain_queue\n• trip_manifests & seat_allocations\n• driver_wallets & imps_payouts\n• driver_safety_events (SOS 112, audio shield)", color = CockpitTextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
-                    }
-
-                    CockpitButton(
-                        text = "Ping FastAPI Healthcheck",
-                        onClick = { onShowToast("FastAPI /health: status=ok, db_pool=176_tables_connected") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-        }
-    }
-}
-
-private data class PopupMeta(
-    val id: String,
-    val name: String,
-    val desc: String,
-    val tint: Color
-)
 

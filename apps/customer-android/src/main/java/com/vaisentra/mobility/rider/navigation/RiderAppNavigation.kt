@@ -124,12 +124,19 @@ fun RiderAppNavigation() {
             "saved_places" -> SavedPlacesScreen { navigateTo(it) }
             "account_hub" -> AccountSettingsHubScreen { navigateTo(it) }
 
-            // Master 50-Screen Catalog & Popup Test Lab
-            "catalog" -> MasterScreenCatalogScreen { route ->
-                if (route == "back") navigateBack() else navigateTo(route)
-            }
-
             else -> MapHomeScreen { navigateTo(it) }
+        }
+
+        // Persistent Rapido-Style Bottom Navigation Bar
+        val showBottomBar = currentRoute in listOf(
+            "map_home", "wallet_hub", "pilot_assigned", "telemetry_hud", "emergency_sos", "account_hub", "past_trips"
+        )
+        if (showBottomBar) {
+            RiderBottomBar(
+                currentRoute = currentRoute,
+                onNavigate = { navigateTo(it) },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
 
         // Global Dialog and Toast Layer
@@ -137,194 +144,61 @@ fun RiderAppNavigation() {
     }
 }
 
-// Master 50-Screen & 15-Popup Explorer
 @Composable
-fun MasterScreenCatalogScreen(onNavigate: (String) -> Unit) {
-    var activeTab by remember { mutableStateOf(0) } // 0: Screens, 1: Popups
-
-    val screenCatalog = listOf(
-        // Onboarding
-        Triple("1. Brand Splash & Locale", "splash", "Onboarding"),
-        Triple("2. Phone & Cyber Auth", "auth_phone", "Onboarding"),
-        Triple("3. SMS OTP Quick Login", "auth_otp", "Onboarding"),
-        Triple("4. Password & PIN Reset", "auth_reset", "Onboarding"),
-        Triple("5. Customer Profile & KYC", "auth_kyc", "Onboarding"),
-        Triple("6. Biometric Passkey Enrol", "auth_biometric", "Onboarding"),
-
-        // Radar & Booking
-        Triple("7. Map Home & Live Radar", "map_home", "Radar & Booking"),
-        Triple("8. Destination Search & Places", "destination_search", "Radar & Booking"),
-        Triple("9. Multi-Stop Route Planner", "multi_stop", "Radar & Booking"),
-        Triple("10. Vehicle Tier & Fare Matrix", "fare_matrix", "Radar & Booking"),
-        Triple("18. Schedule Later & Airport Sync", "schedule_ride", "Radar & Booking"),
-        Triple("19. Book for Family / Guest", "book_guest", "Radar & Booking"),
-
-        // Preferences
-        Triple("11. Cabin Comfort & Climate AC", "cabin_comfort", "Preferences"),
-        Triple("12. Accessibility & EV Filter", "accessibility_filters", "Preferences"),
-        Triple("13. Price Lock & Tariff Breakdown", "price_lock", "Preferences"),
-        Triple("14. Promo Codes & Vouchers", "promo_vouchers", "Preferences"),
-        Triple("20. Corporate & Business Profile", "corporate_profile", "Preferences"),
-
-        // Carpool
-        Triple("21. Eco-Pool Shared Seat Booking", "eco_pool_booking", "Carpool"),
-        Triple("22. Shared Pool Group Chat", "pool_chat", "Carpool"),
-
-        // Wallet & Pay
-        Triple("15. Payment Method & UPI Picker", "payment_methods", "Wallet & Pay"),
-        Triple("16. Cashless Wallet Hub", "wallet_hub", "Wallet & Pay"),
-        Triple("17. Wallet Auto-Topup Rules", "wallet_auto_topup", "Wallet & Pay"),
-        Triple("35. Split Fare with Co-Riders", "split_fare", "Wallet & Pay"),
-
-        // In-Trip HUD
-        Triple("23. Dispatch Radar & Pilot Matching", "dispatch_matching", "In-Trip HUD"),
-        Triple("24. Pilot Assigned & ETA Tracker", "pilot_assigned", "In-Trip HUD"),
-        Triple("25. Driver En-Route & Vehicle RC", "driver_rc", "In-Trip HUD"),
-        Triple("26. Pilot Arrived & Meeting Buzzer", "pilot_arrived", "In-Trip HUD"),
-        Triple("27. Boarding 4-Digit Security OTP", "boarding_otp", "In-Trip HUD"),
-        Triple("28. Telemetry & Speedometer HUD", "telemetry_hud", "In-Trip HUD"),
-        Triple("34. In-Trip Pilot Chat & Translate", "in_trip_chat", "In-Trip HUD"),
-
-        // Safety & SOS
-        Triple("29. Route Deviation Watchdog", "safety_deviation", "Safety & SOS"),
-        Triple("30. Cabin Safety Audio Recording", "safety_audio", "Safety & SOS"),
-        Triple("31. Live Journey Link Sharing", "safety_share", "Safety & SOS"),
-        Triple("32. Emergency SOS & Police 112", "emergency_sos", "Safety & SOS"),
-        Triple("33. Emergency Contacts Manager", "emergency_contacts", "Safety & SOS"),
-
-        // Post-Trip
-        Triple("36. Ride Completed & Receipt", "ride_receipt", "Post-Trip"),
-        Triple("37. Driver Rating & Factor CSAT", "rate_driver", "Post-Trip"),
-        Triple("38. Driver Tip & Gratuity", "tip_driver", "Post-Trip"),
-        Triple("39. Past Trips Activity Ledger", "past_trips", "Post-Trip"),
-        Triple("40. GST Tax Invoice PDF", "gst_invoice", "Post-Trip"),
-
-        // Support
-        Triple("41. Fare Dispute & Refund Claim", "fare_dispute", "Support"),
-        Triple("42. Lost Item Concierge Desk", "lost_item", "Support"),
-        Triple("43. Support Ticket Helpdesk", "support_tickets", "Support"),
-        Triple("44. Live Support Executive Chat", "support_chat", "Support"),
-        Triple("45. Safety Incident Formal Report", "safety_incident", "Support"),
-
-        // Loyalty & Account
-        Triple("46. Refer & Earn Electric Cash", "refer_earn", "Loyalty & Account"),
-        Triple("47. Green Club Loyalty & CO2", "green_club", "Loyalty & Account"),
-        Triple("48. Notification Inbox & Alerts", "notifications", "Loyalty & Account"),
-        Triple("49. Saved Places & Favorite Pins", "saved_places", "Loyalty & Account"),
-        Triple("50. Account Settings & Privacy", "account_hub", "Loyalty & Account")
-    )
-
-    val popupCatalog = listOf(
-        Pair("1. Ride Cancellation Confirmation", RiderPopupType.CANCELLATION),
-        Pair("2. SOS 112 Emergency Panic Alert", RiderPopupType.SOS_112),
-        Pair("3. Promo Voucher Applied (₹65 Off)", RiderPopupType.PROMO_APPLIED),
-        Pair("4. Pilot Arrived at Gate Buzzer", RiderPopupType.PILOT_ARRIVED),
-        Pair("5. Low Wallet Balance Top-Up", RiderPopupType.LOW_WALLET),
-        Pair("6. Split Fare Request to Contacts", RiderPopupType.SPLIT_FARE),
-        Pair("7. Audio Recording Privacy Consent", RiderPopupType.AUDIO_CONSENT),
-        Pair("8. Lost Item Report Acknowledgment", RiderPopupType.LOST_ITEM),
-        Pair("9. Green Club Gold Tier Upgrade", RiderPopupType.TIER_UPGRADE),
-        Pair("10. Driver Rating & ₹20 Tip Sheet", RiderPopupType.RATING_TIP),
-        Pair("11. High Demand 1.35x Surge Notice", RiderPopupType.SURGE_NOTICE),
-        Pair("12. Outside Transit Geofence Warning", RiderPopupType.OUT_OF_GEOFENCE),
-        Pair("13. GPS Precision Calibration Prompt", RiderPopupType.GPS_CALIBRATION),
-        Pair("14. Biometric Passkey Enrolment", RiderPopupType.BIOMETRIC_PASSKEY),
-        Pair("15. Airport Flight Delay Reschedule", RiderPopupType.AIRPORT_DELAY)
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CanvasBlack)
-            .padding(16.dp)
+fun RiderBottomBar(
+    currentRoute: String,
+    onNavigate: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            .background(SurfaceElevated)
+            .border(1.dp, BorderSubtle, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
     ) {
-        NeoHeader(title = "RiderGo UI Inspector", subtitle = "50 Screens • 15 Popups • Material 3", onBack = { onNavigate("back") })
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Tab Selector
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(SurfaceElevated)
-                .padding(4.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (activeTab == 0) SapphirePrimary else Color.Transparent)
-                    .clickable { activeTab = 0 }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "50 Jetpack Screens", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (activeTab == 1) SapphirePrimary else Color.Transparent)
-                    .clickable { activeTab = 1 }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "15 Popups & Toasts", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
+            BottomNavItem("🗺️", "Explore", "map_home", currentRoute, onNavigate)
+            BottomNavItem("💳", "Wallet", "wallet_hub", currentRoute, onNavigate)
+            BottomNavItem("🚘", "Active", "pilot_assigned", currentRoute, onNavigate)
+            BottomNavItem("🚨", "Safety", "emergency_sos", currentRoute, onNavigate, isWarning = true)
+            BottomNavItem("👤", "Account", "account_hub", currentRoute, onNavigate)
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(14.dp))
-
-        if (activeTab == 0) {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(screenCatalog) { (title, route, category) ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SurfaceCard)
-                            .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
-                            .clickable { onNavigate(route) }
-                            .padding(14.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = title, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text(text = category, color = TextDim, fontSize = 11.sp)
-                            }
-                            Text(text = "Open →", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(popupCatalog) { (title, popupType) ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(SurfaceCard)
-                            .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
-                            .clickable { DialogController.show(popupType) }
-                            .padding(14.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = title, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            NeoBadge(text = "TEST MODAL", backgroundColor = SapphireGlow, textColor = ElectricCyan)
-                        }
-                    }
-                }
-            }
-        }
+@Composable
+private fun BottomNavItem(
+    icon: String,
+    label: String,
+    route: String,
+    currentRoute: String,
+    onNavigate: (String) -> Unit,
+    isWarning: Boolean = false
+) {
+    val isSelected = currentRoute == route
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onNavigate(route) }
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(text = icon, fontSize = 18.sp)
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            color = if (isSelected) {
+                if (isWarning) CrimsonRed else ElectricCyan
+            } else TextMuted
+        )
     }
 }
 

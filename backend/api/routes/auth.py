@@ -38,6 +38,7 @@ async def lookup_user_identity(payload: IdentityLookupPayload, db: AsyncSession 
     return await service.lookup_user_identity(payload.identifier, payload.role)
 
 @router.post("/otp/request", dependencies=[Depends(otp_rate_limiter)])
+@router.post("/otp/send", dependencies=[Depends(otp_rate_limiter)])
 async def request_otp(payload: OtpRequestPayload, db: AsyncSession = Depends(get_db)):
     """Dispatches a 6-digit OTP verification passcode to the user's mobile via Twilio Verify Service."""
     service = AuthService(db)

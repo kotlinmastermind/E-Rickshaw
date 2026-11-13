@@ -21,7 +21,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.data.DriverDocumentDto
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.launch
 
 // Screen 1: Pilot Cockpit Login
 @Composable
@@ -59,6 +61,10 @@ fun PilotLoginScreen(onNavigate: (String) -> Unit) {
                 CockpitButton(
                     text = "Sign In to Cockpit",
                     onClick = {
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            DriverRepository.driverLogin(phone, pin)
+                            DriverRepository.fetchDriverProfile()
+                        }
                         DriverDialogController.showToast("Pilot credentials verified in Supabase!")
                         onNavigate("duty_dashboard")
                     },
@@ -99,6 +105,10 @@ fun PilotOtpScreen(onNavigate: (String) -> Unit) {
             CockpitButton(
                 text = "Verify Code & Start Duty",
                 onClick = {
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        DriverRepository.driverLogin("+91 98112 34567", otp)
+                        DriverRepository.fetchDriverProfile()
+                    }
                     DriverDialogController.showToast("OTP verified! Session authenticated.")
                     onNavigate("duty_dashboard")
                 },
@@ -139,6 +149,12 @@ fun PilotPasswordRecoveryScreen(onNavigate: (String) -> Unit) {
 // Screen 4: Pilot Profile & Academy KYC
 @Composable
 fun PilotProfileScreen(onNavigate: (String) -> Unit) {
+    val profile by DriverRepository.profile.collectAsState()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchDriverProfile()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -179,7 +195,13 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
 // Screen 5: Document Vault & Verification
 @Composable
 fun DocumentVaultScreen(onNavigate: (String) -> Unit) {
-    val documents = listOf(
+    val liveDocs by DriverRepository.documents.collectAsState()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchDriverDocuments()
+    }
+
+    val defaultDocs = listOf(
         DriverDocumentDto("d1", "Commercial Driving License (DL)", "APPROVED", "14-Dec-2027", 390),
         DriverDocumentDto("d2", "Aadhaar Card (Govt of India)", "VERIFIED", "Permanent", 9999),
         DriverDocumentDto("d3", "Police Verification Certificate", "APPROVED", "20-Aug-2027", 270),
@@ -196,7 +218,8 @@ fun DocumentVaultScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(documents) { doc ->
+            val toShow = if (liveDocs.isNotEmpty()) liveDocs else defaultDocs
+            items(toShow) { doc ->
                 CockpitCard(cornerRadius = 14.dp) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(text = doc.documentType, color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)

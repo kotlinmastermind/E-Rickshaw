@@ -19,7 +19,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
+import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.launch
 
 // Screen 41: Fare Dispute & Refund Claim
 @Composable
@@ -41,6 +43,10 @@ fun FareDisputeScreen(onNavigate: (String) -> Unit) {
             NeoTextField(value = reason, onValueChange = { reason = it }, placeholder = "Describe route or fare discrepancy...", label = "Dispute Reason")
             Spacer(modifier = Modifier.height(20.dp))
             NeoButton(text = "Submit Dispute for Review", onClick = {
+                val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    RiderRepository.submitDispute(rideId, "FARE_DISPUTE", reason)
+                }
                 DialogController.showToast("Dispute ticket logged in Supabase! Under review.")
                 onNavigate("support_tickets")
             }, backgroundColor = AmberGold, textColor = CanvasBlack)
@@ -69,6 +75,10 @@ fun LostItemScreen(onNavigate: (String) -> Unit) {
             NeoTextField(value = seatLocation, onValueChange = { seatLocation = it }, placeholder = "Where was it left?", label = "Vehicle Cabin Location")
             Spacer(modifier = Modifier.height(20.dp))
             NeoButton(text = "Report Lost Item to Concierge", onClick = {
+                val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    RiderRepository.reportLostProperty(rideId, "CABIN_ITEM", "$itemDescription (Location: $seatLocation)")
+                }
                 DialogController.show(RiderPopupType.LOST_ITEM)
             }, icon = "🎒")
         }
@@ -78,7 +88,13 @@ fun LostItemScreen(onNavigate: (String) -> Unit) {
 // Screen 43: Support Ticket Helpdesk (Supabase: support_tickets)
 @Composable
 fun SupportTicketsScreen(onNavigate: (String) -> Unit) {
-    val tickets = listOf(
+    val liveTickets by RiderRepository.supportTickets.collectAsState()
+
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchSupportTickets()
+    }
+
+    val defaultTickets = listOf(
         Triple("#TKT-8219 • Fare Recalculation", "STATUS: RESOLVED (₹35 CREDITED)", "Yesterday"),
         Triple("#TKT-7104 • Driver Cleanliness Report", "STATUS: INVESTIGATING", "05-Nov"),
         Triple("#TKT-6920 • UPI Double Debit Check", "STATUS: REFUNDED TO BANK", "28-Oct")
@@ -94,14 +110,27 @@ fun SupportTicketsScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(tickets) { (title, status, date) ->
-                NeoCard(cornerRadius = 14.dp) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(text = title, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text(text = date, color = TextDim, fontSize = 11.sp)
+            if (liveTickets.isNotEmpty()) {
+                items(liveTickets) { tkt ->
+                    NeoCard(cornerRadius = 14.dp) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(text = "${tkt.subject} (${tkt.category})", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(text = tkt.createdAt.take(10), color = TextDim, fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = "STATUS: ${tkt.status}", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = status, color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                items(defaultTickets) { (title, status, date) ->
+                    NeoCard(cornerRadius = 14.dp) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(text = title, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(text = date, color = TextDim, fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = status, color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -199,6 +228,19 @@ fun SafetyIncidentReportScreen(onNavigate: (String) -> Unit) {
             NeoBadge(text = "EVIDENCE PHOTO ATTACHED (1 FILE)", backgroundColor = SapphireGlow, textColor = ElectricCyan)
             Spacer(modifier = Modifier.height(20.dp))
             NeoButton(text = "Submit Formal Safety Complaint", onClick = {
+                val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    try {
+                        com.vaisentra.mobility.rider.data.NetworkClient.apiService.reportIncident(
+                            com.vaisentra.mobility.rider.data.IncidentReportRequest(
+                                rideId = rideId,
+                                category = "SAFETY_VIOLATION",
+                                severity = severity,
+                                description = description
+                            )
+                        )
+                    } catch (_: Exception) {}
+                }
                 DialogController.showToast("Formal safety incident logged in Supabase! SOC alerted.")
                 onNavigate("map_home")
             }, backgroundColor = CrimsonRed)

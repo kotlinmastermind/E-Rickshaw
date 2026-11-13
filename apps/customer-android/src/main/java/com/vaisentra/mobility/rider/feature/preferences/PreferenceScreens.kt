@@ -17,7 +17,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
+import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.launch
 
 // Screen 11: Ride Comfort & Cabin Preferences
 @Composable
@@ -86,6 +88,9 @@ fun CabinComfortScreen(onNavigate: (String) -> Unit) {
         }
         Spacer(modifier = Modifier.height(20.dp))
         NeoButton(text = "Save Cabin Comfort Preferences", onClick = {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                RiderRepository.savePreferences("$acTemp°C", quietCabin)
+            }
             DialogController.showToast("Cabin preferences sent to pilot!")
             onNavigate("fare_matrix")
         })
@@ -138,7 +143,10 @@ fun AccessibilityFilterScreen(onNavigate: (String) -> Unit) {
         }
         Spacer(modifier = Modifier.height(20.dp))
         NeoButton(text = "Apply Filters", onClick = {
-            DialogController.showToast("Fleet filters updated.")
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                RiderRepository.savePreferences("22°C", extraLegroom)
+            }
+            DialogController.showToast("Fleet filters synced with Supabase.")
             onNavigate("fare_matrix")
         })
     }
@@ -236,6 +244,9 @@ fun CorporateProfileScreen(onNavigate: (String) -> Unit) {
             NeoTextField(value = expCode, onValueChange = { expCode = it }, placeholder = "Project Code", label = "Expense Project Code")
             Spacer(modifier = Modifier.height(20.dp))
             NeoButton(text = "Link Corporate Account", onClick = {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    RiderRepository.savePreferences("22°C", true)
+                }
                 DialogController.showToast("Corporate GSTIN & profile linked in Supabase!")
                 onNavigate("map_home")
             })

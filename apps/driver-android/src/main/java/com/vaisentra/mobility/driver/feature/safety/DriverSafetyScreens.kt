@@ -19,7 +19,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.launch
 
 /**
  * Screen 23: Route Deviation & Anomaly Alarm (unexpected detours & delay detection)
@@ -93,6 +95,10 @@ fun RouteDeviationScreen(
                 CockpitButton(
                     text = "CONFIRM DETOUR REASON & UPDATE ROUTE",
                     onClick = {
+                        val rideId = DriverRepository.currentRideId.value ?: "ride-latest"
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            DriverRepository.reportRouteDeviation(rideId, 28.6289, 77.3710)
+                        }
                         onShowToast("Detour reason logged in Supabase trips_audit")
                         onNavigateBack()
                     },
@@ -346,6 +352,10 @@ fun BatterySwapDepotScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchHeatMap()
+    }
+
     val depots = listOf(
         SwapDepotItem("Sun Mobility Hub - Anand Vihar ISBT", "0.8 km", "12 Charged Packs Ready", EmeraldPrimary),
         SwapDepotItem("Battery Smart Depot - Preet Vihar Gate 1", "2.1 km", "7 Charged Packs Ready", EmeraldPrimary),

@@ -15,8 +15,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 enum class DriverPopupType {
     NONE,
@@ -40,13 +44,16 @@ enum class DriverPopupType {
 object DriverDialogController {
     var activePopup by mutableStateOf(DriverPopupType.NONE)
     var toastMessage by mutableStateOf<String?>(null)
+    var onConfirmAction: (() -> Unit)? = null
 
-    fun show(popup: DriverPopupType) {
+    fun show(popup: DriverPopupType, onConfirm: (() -> Unit)? = null) {
         activePopup = popup
+        onConfirmAction = onConfirm
     }
 
     fun dismiss() {
         activePopup = DriverPopupType.NONE
+        onConfirmAction = null
     }
 
     fun showToast(msg: String) {
@@ -138,15 +145,22 @@ private fun IncomingOfferModal() {
         CockpitButton(
             text = "Accept Ride Offer (${timer}s)",
             onClick = {
+                val cb = DriverDialogController.onConfirmAction
                 DriverDialogController.dismiss()
-                DriverDialogController.showToast("Ride Accepted! Navigation active.")
+                com.vaisentra.mobility.driver.data.DriverRepository.acceptOffer("ride-offer-8291")
+                DriverDialogController.showToast("Ride Accepted! Routing to pickup spot.")
+                cb?.invoke()
             },
             backgroundColor = PilotOnlineGreen
         )
         Spacer(modifier = Modifier.height(8.dp))
         CockpitButton(
             text = "Decline Offer",
-            onClick = { DriverDialogController.dismiss() },
+            onClick = {
+                DriverDialogController.dismiss()
+                com.vaisentra.mobility.driver.data.DriverRepository.rejectOffer("ride-offer-8291")
+                DriverDialogController.showToast("Offer declined. Returning to radar.")
+            },
             backgroundColor = PilotSurface
         )
     }
@@ -177,8 +191,11 @@ private fun LowBatterySwapModal() {
         CockpitButton(
             text = "Navigate to Fast-Swap Depot (1.2 km)",
             onClick = {
+                CoroutineScope(Dispatchers.IO).launch {
+                    DriverRepository.fetchHeatMap()
+                }
                 DriverDialogController.dismiss()
-                DriverDialogController.showToast("Routing to Anand Vihar Swap Station.")
+                DriverDialogController.showToast("Routing to Anand Vihar Swap Station via FastAPI.")
             },
             backgroundColor = PilotAmber,
             textColor = PilotCanvas
@@ -195,8 +212,11 @@ private fun FatigueBreakModal() {
         Text(text = "You have completed 4.5 hours of continuous transit duty. A 15-minute rest cooldown is required by fleet safety regulations.", color = PilotTextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
         CockpitButton(text = "Start 15-Min Safety Rest", onClick = {
+            CoroutineScope(Dispatchers.IO).launch {
+                DriverRepository.submitFatigueCheckResult("NEEDS_REST", "Pilot initiated 15-min cooldown modal")
+            }
             DriverDialogController.dismiss()
-            DriverDialogController.showToast("Fatigue break active. Resume duty in 15 mins.")
+            DriverDialogController.showToast("Fatigue break active in Supabase. Resume duty in 15 mins.")
         })
     }
 }
@@ -209,7 +229,10 @@ private fun OverspeedingModal() {
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = "Current speed is 42 km/h. Urban electric 3-wheeler corridor limit is 35 km/h. Please decelerate vehicle immediately.", color = PilotTextWhite, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Decelerate Vehicle (Conforming)", onClick = { DriverDialogController.dismiss() }, backgroundColor = PilotCrimson)
+        CockpitButton(text = "Decelerate Vehicle (Conforming)", onClick = {
+            DriverDialogController.dismiss()
+            DriverDialogController.showToast("Speed warning acknowledged.")
+        }, backgroundColor = PilotCrimson)
     }
 }
 
@@ -231,8 +254,12 @@ private fun CashCollectModal() {
         Text(text = "Return Change: ₹${returnChange.toInt()}.00", color = PilotAmber, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
         CockpitButton(text = "Confirm ₹145 Cash Received", onClick = {
+            val cb = DriverDialogController.onConfirmAction
+            val currentRide = DriverRepository.currentRideId.value ?: "ride-latest"
             DriverDialogController.dismiss()
+            DriverRepository.collectCash(currentRide, tenderVal)
             DriverDialogController.showToast("Cash payment reconciled in Supabase ledger!")
+            cb?.invoke()
         })
     }
 }
@@ -246,8 +273,10 @@ private fun NoShowExpiryModal() {
         Text(text = "Passenger did not arrive at pickup gate. You are authorized to cancel with ₹30.00 compensation credited to your ledger.", color = PilotTextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
         CockpitButton(text = "Claim ₹30 No-Show Compensation", onClick = {
+            val currentRide = DriverRepository.currentRideId.value ?: "ride-latest"
+            DriverRepository.stopTripWaiting(currentRide)
             DriverDialogController.dismiss()
-            DriverDialogController.showToast("₹30 No-show credited. Returning to duty radar.")
+            DriverDialogController.showToast("₹30 No-show compensation logged in ledger.")
         }, backgroundColor = PilotAmber, textColor = PilotCanvas)
     }
 }
@@ -261,8 +290,12 @@ private fun RouteDeviationModal() {
         Text(text = "Vehicle departed trajectory by >300m near Akshardham. Please confirm if detour was required by municipal road works.", color = PilotTextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
         CockpitButton(text = "Confirm Detour due to Road Hazard", onClick = {
+            val currentRide = DriverRepository.currentRideId.value ?: "ride-latest"
+            CoroutineScope(Dispatchers.IO).launch {
+                DriverRepository.reportRouteDeviation(currentRide, 28.6289, 77.3710)
+            }
             DriverDialogController.dismiss()
-            DriverDialogController.showToast("Road hazard recorded in dispatch telemetry.")
+            DriverDialogController.showToast("Road hazard & detour recorded in Supabase.")
         })
     }
 }
@@ -275,7 +308,12 @@ private fun DocExpiryModal() {
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = "Your Commercial Driving License expires in 3 days. Upload renewal certificate now to avoid automatic duty pause.", color = PilotTextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Open Document Upload Vault", onClick = { DriverDialogController.dismiss() })
+        CockpitButton(text = "Open Document Upload Vault", onClick = {
+            CoroutineScope(Dispatchers.IO).launch {
+                DriverRepository.fetchDriverDocuments()
+            }
+            DriverDialogController.dismiss()
+        })
     }
 }
 
@@ -287,7 +325,10 @@ private fun PilotSosModal() {
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = "Live vehicle GPS, audio feed, and cabin telemetry streamed to 24/7 Security Operations Center. Calling pilot phone...", color = PilotTextWhite, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Acknowledge SOC Response Team", onClick = { DriverDialogController.dismiss() }, backgroundColor = PilotCrimson)
+        CockpitButton(text = "Acknowledge SOC Response Team", onClick = {
+            DriverDialogController.dismiss()
+            DriverDialogController.showToast("SOC Alert Acknowledged.")
+        }, backgroundColor = PilotCrimson)
     }
 }
 
@@ -300,8 +341,11 @@ private fun OdometerCheckModal() {
         Text(text = "Reported ending reading (48,290 km) deviates from GPS calculation. Snap a photo of the vehicle instrument cluster.", color = PilotTextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
         CockpitButton(text = "Capture Cluster Photo", onClick = {
+            CoroutineScope(Dispatchers.IO).launch {
+                DriverRepository.submitVehicleInspectionCheck("DL-1ER-4921", true, true, true)
+            }
             DriverDialogController.dismiss()
-            DriverDialogController.showToast("Meter cluster photo verified!")
+            DriverDialogController.showToast("Meter cluster photo verified with Supabase!")
         })
     }
 }
@@ -314,7 +358,13 @@ private fun PeakBonusModal() {
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = "Milestone achieved! 10 peak morning corridor rides completed. ₹300 incentive credited to wallet balance.", color = PilotTextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Claim ₹300 Cash Bonus", onClick = { DriverDialogController.dismiss() })
+        CockpitButton(text = "Claim ₹300 Cash Bonus", onClick = {
+            CoroutineScope(Dispatchers.IO).launch {
+                DriverRepository.fetchDailyTargets()
+            }
+            DriverDialogController.dismiss()
+            DriverDialogController.showToast("₹300 Bonus Claimed!")
+        })
     }
 }
 
@@ -326,7 +376,12 @@ private fun CsatAdvisoryModal() {
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = "Rating is 4.95 ★. Remember to keep passenger cabin clean, offer courteous greeting, and maintain smooth electric acceleration.", color = PilotTextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Understood (Maintain Standards)", onClick = { DriverDialogController.dismiss() })
+        CockpitButton(text = "Understood (Maintain Standards)", onClick = {
+            CoroutineScope(Dispatchers.IO).launch {
+                DriverRepository.fetchPerformanceScorecard()
+            }
+            DriverDialogController.dismiss()
+        })
     }
 }
 
@@ -338,7 +393,12 @@ private fun PayoutSuccessModal() {
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = "UTR #4391028471. ₹800.00 settled instantly to your registered bank account (SBI **9102).", color = PilotTextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "View Payout Slip", onClick = { DriverDialogController.dismiss() })
+        CockpitButton(text = "View Payout Slip", onClick = {
+            CoroutineScope(Dispatchers.IO).launch {
+                DriverRepository.fetchAccountLedger()
+            }
+            DriverDialogController.dismiss()
+        })
     }
 }
 

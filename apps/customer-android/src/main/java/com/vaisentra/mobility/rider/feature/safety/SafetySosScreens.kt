@@ -23,6 +23,7 @@ import com.vaisentra.mobility.rider.components.*
 import com.vaisentra.mobility.rider.data.EmergencyContactDto
 import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.launch
 
 // Screen 29: Route Deviations & Unplanned Stops
 @Composable
@@ -170,7 +171,12 @@ fun EmergencySosScreen(onNavigate: (String) -> Unit) {
                     .clip(CircleShape)
                     .background(CrimsonGlow)
                     .border(2.dp, CrimsonRed, CircleShape)
-                    .clickable { DialogController.show(RiderPopupType.SOS_112) },
+                    .clickable {
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            RiderRepository.triggerSos(28.6289, 77.3710)
+                        }
+                        DialogController.show(RiderPopupType.SOS_112)
+                    },
                 contentAlignment = Alignment.Center
             ) { Text(text = "🚨", fontSize = 54.sp) }
             Spacer(modifier = Modifier.height(20.dp))
@@ -201,6 +207,10 @@ fun EmergencyContactsScreen(onNavigate: (String) -> Unit) {
     val contacts by RiderRepository.emergencyContacts.collectAsState()
     var newName by remember { mutableStateOf("") }
     var newPhone by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchEmergencyContacts()
+    }
 
     Column(
         modifier = Modifier

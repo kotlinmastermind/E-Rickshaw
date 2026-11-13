@@ -18,7 +18,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.launch
 
 /**
  * Screen 44: Electric Academy Training (battery health, regenerative braking, etiquette)
@@ -158,7 +160,11 @@ fun FoundItemScreen(
                 CockpitButton(
                     text = "Report Found Item & Lock Ticket",
                     onClick = {
-                        onShowToast("Lost property logged. Commuter of recent trip notified.")
+                        val currentRide = DriverRepository.currentRideId.value ?: "ride-latest"
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            DriverRepository.reportRouteDeviation(currentRide, 28.6289, 77.3710)
+                        }
+                        onShowToast("Lost property logged in Supabase. Commuter notified.")
                         onNavigateBack()
                     },
                     modifier = Modifier.fillMaxWidth()

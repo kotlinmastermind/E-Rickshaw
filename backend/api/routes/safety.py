@@ -253,6 +253,7 @@ async def get_recording_status(
 
 
 # Feature 138 & 139: Incident Reporting (Customer & Driver)
+@router.post("/incident", status_code=status.HTTP_201_CREATED)
 @router.post("/incidents", status_code=status.HTTP_201_CREATED)
 async def lodge_incident_report(
     payload: IncidentReportPayload,

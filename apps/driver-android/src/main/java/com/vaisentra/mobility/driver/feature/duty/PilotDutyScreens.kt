@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.launch
 
 // Screen 10: Duty Dashboard & Auto-Accept Radar (Main Cockpit Home)
 @Composable
@@ -151,7 +152,11 @@ fun DutyDashboardScreen(onNavigate: (String) -> Unit) {
                 )
                 CockpitButton(
                     text = "Test Incoming Offer",
-                    onClick = { DriverDialogController.show(DriverPopupType.INCOMING_OFFER) },
+                    onClick = {
+                        DriverDialogController.show(DriverPopupType.INCOMING_OFFER, onConfirm = {
+                            onNavigate("pickup_nav")
+                        })
+                    },
                     modifier = Modifier.weight(1f),
                     backgroundColor = PilotOnlineGreen,
                     textColor = PilotCanvas,
@@ -198,7 +203,16 @@ fun VehicleInspectionScreen(onNavigate: (String) -> Unit) {
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Sign-Off Inspection & Log Odometer →", onClick = { onNavigate("shift_start") })
+        CockpitButton(
+            text = "Sign-Off Inspection & Log Odometer →",
+            onClick = {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    DriverRepository.submitVehicleInspectionCheck("DL-1ER-4921", tyrePressureOk, lightsOk, brakeBuzzerOk)
+                }
+                DriverDialogController.showToast("Vehicle inspection checklist logged in Supabase!")
+                onNavigate("shift_start")
+            }
+        )
     }
 }
 
@@ -255,8 +269,12 @@ fun ShiftStartScreen(onNavigate: (String) -> Unit) {
             CockpitButton(
                 text = "Unlock Shift & Go Online",
                 onClick = {
+                    val odo = odoReading.toDoubleOrNull() ?: 48210.0
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        DriverRepository.startShiftOdometer(odo)
+                    }
                     DriverRepository.setDutyStatus(true)
-                    DriverDialogController.showToast("Shift started! Odometer 48,210 km recorded in Supabase.")
+                    DriverDialogController.showToast("Shift started! Odometer $odo km recorded in Supabase.")
                     onNavigate("duty_dashboard")
                 },
                 backgroundColor = PilotOnlineGreen
@@ -283,6 +301,9 @@ fun FatigueCheckScreen(onNavigate: (String) -> Unit) {
             Text(text = "To guarantee high passenger alertness, pilots must take a 15-minute rest pause after every 4.5 hours of continuous transit.", color = PilotTextMuted, fontSize = 13.sp)
             Spacer(modifier = Modifier.height(16.dp))
             CockpitButton(text = "Start 15-Min Break Now", onClick = {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    DriverRepository.submitFatigueCheckResult("NEEDS_REST", "Driver initiated 15-min hydration & rest break")
+                }
                 DriverDialogController.show(DriverPopupType.FATIGUE_BREAK)
             }, backgroundColor = PilotAmber, textColor = PilotCanvas)
         }
@@ -311,6 +332,10 @@ fun ShiftEndScreen(onNavigate: (String) -> Unit) {
             CockpitButton(
                 text = "Close Shift & Submit Handover",
                 onClick = {
+                    val odo = closingOdo.toDoubleOrNull() ?: 48292.0
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        DriverRepository.endShiftOdometer(odo)
+                    }
                     DriverRepository.setDutyStatus(false)
                     DriverDialogController.showToast("Shift ended! Handover report submitted.")
                     onNavigate("shift_summary")

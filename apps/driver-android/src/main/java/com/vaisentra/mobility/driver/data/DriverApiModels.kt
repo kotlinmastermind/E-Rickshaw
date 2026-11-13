@@ -88,13 +88,19 @@ data class CashCollectRequest(
 
 // --- Financials, Payouts & Ledger (Supabase: driver_ledger_entries, driver_payout_accounts) ---
 data class DriverEarningsSummaryDto(
-    @SerializedName("today_gross_rupees") val todayGrossRupees: Double = 1420.0,
-    @SerializedName("today_net_rupees") val todayNetRupees: Double = 1278.0,
-    @SerializedName("completed_trips_today") val completedTripsToday: Int = 11,
+    @SerializedName("today_gross_rupees", alternate = ["today_earnings_cents"]) val todayGrossRupees: Double = 1420.0,
+    @SerializedName("today_net_rupees", alternate = ["weekly_earnings_cents"]) val todayNetRupees: Double = 1278.0,
+    @SerializedName("completed_trips_today", alternate = ["completed_trips"]) val completedTripsToday: Int = 11,
     @SerializedName("online_hours_today") val onlineHoursToday: Double = 6.4,
-    @SerializedName("wallet_balance_rupees") val walletBalanceRupees: Double = 3840.50,
+    @SerializedName("wallet_balance_rupees", alternate = ["wallet_balance_cents"]) val walletBalanceRupees: Double = 3840.50,
     @SerializedName("pending_payout_rupees") val pendingPayoutRupees: Double = 800.0
-)
+) {
+    val displayTodayNetRupees: Double
+        get() = if (todayGrossRupees > 10000.0) (todayGrossRupees / 100.0) else todayGrossRupees
+
+    val displayWalletBalanceRupees: Double
+        get() = if (walletBalanceRupees > 10000.0) (walletBalanceRupees / 100.0) else walletBalanceRupees
+}
 
 data class PayoutRequestDto(
     @SerializedName("amount_rupees") val amountRupees: Double,

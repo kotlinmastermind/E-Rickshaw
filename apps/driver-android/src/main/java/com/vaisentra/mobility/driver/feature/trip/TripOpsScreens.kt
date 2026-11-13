@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
 
 /**
@@ -309,6 +310,9 @@ fun PickupNavScreen(
             CockpitButton(
                 text = "ARRIVED AT PICKUP POINT",
                 onClick = {
+                    com.vaisentra.mobility.driver.data.DriverRepository.markArrived(
+                        com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value
+                    )
                     onShowToast("Status updated to ARRIVED")
                     onArrived()
                 },
@@ -460,6 +464,8 @@ fun WaitingTimerScreen(
                 CockpitButton(
                     text = "PASSENGER BOARDED (ENTER OTP)",
                     onClick = {
+                        val rideId = DriverRepository.currentRideId.value ?: "ride-latest"
+                        DriverRepository.stopTripWaiting(rideId)
                         onProceedToOtp()
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -484,7 +490,7 @@ fun BoardingOtpScreen(
     onTripStarted: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    var otpDigits by remember { mutableStateOf(listOf("", "", "", "")) }
+    var otpDigits by remember { mutableStateOf(listOf("", "", "", "", "", "")) }
     var isVerifying by remember { mutableStateOf(false) }
 
     Column(
@@ -495,7 +501,7 @@ fun BoardingOtpScreen(
     ) {
         CockpitHeader(
             title = "Start Trip OTP",
-            subtitle = "Verify 4-digit ride unlock code from commuter",
+            subtitle = "Verify 6-digit ride unlock code from commuter",
             onBack = onNavigateBack
         )
 
@@ -507,7 +513,7 @@ fun BoardingOtpScreen(
         ) {
             CockpitCard(glow = true) {
                 Text(
-                    "ASK COMMUTER FOR START OTP",
+                    "ASK COMMUTER FOR 6-DIGIT START OTP",
                     color = CockpitTextMuted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -518,12 +524,12 @@ fun BoardingOtpScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
                 ) {
                     otpDigits.forEachIndexed { index, digit ->
                         Box(
                             modifier = Modifier
-                                .size(56.dp)
+                                .size(46.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(CockpitSurfaceHighlight),
                             contentAlignment = Alignment.Center
@@ -531,7 +537,7 @@ fun BoardingOtpScreen(
                             Text(
                                 text = digit.ifEmpty { "•" },
                                 color = if (digit.isNotEmpty()) ElectricCyan else CockpitTextMuted,
-                                fontSize = 24.sp,
+                                fontSize = 22.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -554,7 +560,7 @@ fun BoardingOtpScreen(
                                 Button(
                                     onClick = {
                                         when (key) {
-                                            "C" -> otpDigits = listOf("", "", "", "")
+                                            "C" -> otpDigits = listOf("", "", "", "", "", "")
                                             "⌫" -> {
                                                 val lastIdx = otpDigits.indexOfLast { it.isNotEmpty() }
                                                 if (lastIdx >= 0) {
@@ -585,12 +591,23 @@ fun BoardingOtpScreen(
                 text = if (isVerifying) "VERIFYING OTP..." else "START RIDE",
                 onClick = {
                     val code = otpDigits.joinToString("")
-                    if (code.length == 4) {
+                    if (code.length == 6) {
                         isVerifying = true
-                        onShowToast("OTP $code verified! Meter is LIVE")
-                        onTripStarted()
+                        com.vaisentra.mobility.driver.data.DriverRepository.verifyStartOtp(
+                            rideId = com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value,
+                            otp = code,
+                            onSuccess = {
+                                isVerifying = false
+                                onShowToast("OTP $code verified! Meter is LIVE")
+                                onTripStarted()
+                            },
+                            onFailure = {
+                                isVerifying = false
+                                onShowToast("Invalid Start OTP. Please ask commuter.")
+                            }
+                        )
                     } else {
-                        onShowToast("Please enter all 4 digits")
+                        onShowToast("Please enter all 6 digits")
                     }
                 },
                 enabled = otpDigits.all { it.isNotEmpty() } && !isVerifying,
@@ -674,6 +691,9 @@ fun InTripNavScreen(
             CockpitButton(
                 text = "COMPLETE TRIP & COLLECT FARE",
                 onClick = {
+                    com.vaisentra.mobility.driver.data.DriverRepository.finishTrip(
+                        com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value
+                    )
                     onShowToast("Trip ended. Calculating final fare...")
                     onEndTrip()
                 },
