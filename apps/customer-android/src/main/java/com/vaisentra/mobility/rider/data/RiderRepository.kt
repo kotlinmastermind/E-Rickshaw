@@ -73,15 +73,49 @@ object RiderRepository {
         }
     }
 
-    suspend fun verifyOtp(phone: String, otp: String): Result<TokenResponse?> {
+    suspend fun verifyOtp(
+        phone: String,
+        otp: String,
+        role: String = "customer"
+    ): Result<TokenResponse?> {
         return try {
-            val res = NetworkClient.apiService.verifyOtp(OtpVerifyRequest(phone, otp))
-            if (res.isSuccessful) Result.success(res.body()) else Result.failure(Exception("OTP invalid"))
+            val request = OtpVerifyRequest(
+                phoneNumber = phone,
+                otpCode = otp,
+                role = role
+            )
+
+            val response = NetworkClient.apiService.verifyOtp(request)
+
+            if (!response.isSuccessful) {
+                val errorMessage = response.errorBody()?.string()
+                    ?: "OTP verification failed: HTTP ${response.code()}"
+
+                return Result.failure(Exception(errorMessage))
+            }
+
+            val authResponse = response.body()
+                ?: return Result.failure(
+                    Exception("Authentication response is empty")
+                )
+
+            val token = authResponse.accessToken.trim()
+
+            if (token.isBlank()) {
+                return Result.failure(
+                    Exception("Backend returned an empty access token")
+                )
+            }
+
+            // Store token in NetworkClient memory.
+            NetworkClient.setAuthToken(token)
+
+            Result.success(authResponse)
+
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
-
     suspend fun cancelActiveRide(rideId: String, reason: String = "USER_CANCELLED"): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.cancelRide(rideId, mapOf("reason" to reason))

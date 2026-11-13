@@ -10,10 +10,22 @@ import java.util.concurrent.TimeUnit
 object DriverNetworkClient {
 
     @Volatile
-    var baseUrl: String = "http://10.0.2.2:8000/"
+    var baseUrl: String = "https://e-rickshaw-z32z.onrender.com/"
 
     @Volatile
     var authToken: String? = null
+        private set
+
+    fun setAuthToken(token: String) {
+        require(token.isNotBlank()) {
+            "Access token cannot be empty"
+        }
+        authToken = token
+    }
+
+    fun clearAuthToken() {
+        authToken = null
+    }
 
     private val authInterceptor = Interceptor { chain ->
         val original = chain.request()
@@ -30,7 +42,7 @@ object DriverNetworkClient {
     }
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        level = HttpLoggingInterceptor.Level.NONE
     }
 
     private val okHttpClient: OkHttpClient by lazy {

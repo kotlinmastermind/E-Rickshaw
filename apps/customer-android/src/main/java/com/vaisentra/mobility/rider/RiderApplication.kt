@@ -11,7 +11,7 @@ class RiderApplication : Application() {
         Log.i("RiderGo", "RiderGo Application initialized with Material 3 & FastAPI network client.")
         
         // Dynamic backend base URL configuration (can point to local FastAPI or Cloud Render deployment)
-        NetworkClient.baseUrl = "http://10.0.2.2:8000/"
+        NetworkClient.baseUrl = "https://e-rickshaw-z32z.onrender.com/"
     }
 }
 

@@ -20,7 +20,7 @@ class DriverApplication : Application() {
 
         // Configure default backend endpoint pointing to local FastAPI server
         // Android Emulator uses 10.0.2.2 for localhost:8000
-        DriverNetworkClient.baseUrl = "http://10.0.2.2:8000/"
+        DriverNetworkClient.baseUrl = "https://e-rickshaw-z32z.onrender.com/"
     }
 }
 

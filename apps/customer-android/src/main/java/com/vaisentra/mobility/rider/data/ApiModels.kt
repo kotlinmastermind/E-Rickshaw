@@ -8,8 +8,14 @@ data class OtpSendRequest(
 )
 
 data class OtpVerifyRequest(
-    @SerializedName("phone_number") val phoneNumber: String,
-    @SerializedName("code") val code: String
+    @SerializedName("phone_number")
+    val phoneNumber: String,
+
+    @SerializedName("otp_code")
+    val otpCode: String,
+
+    @SerializedName("role")
+    val role: String = "customer"
 )
 
 data class LoginRequest(
