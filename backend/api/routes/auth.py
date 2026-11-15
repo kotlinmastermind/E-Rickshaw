@@ -1,4 +1,5 @@
 from typing import Optional
+from sqlalchemy import update
 from fastapi import APIRouter, Depends, Request, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,6 +48,7 @@ class AvatarUpdatePayload(BaseModel):
 
 
 
+
 @router.put("/avatar")
 @router.post("/avatar")
 async def update_user_avatar(
@@ -54,12 +56,26 @@ async def update_user_avatar(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    current_user.avatar_url = payload.avatar_url.strip()
-    await db.commit()
-    return {
-        "message": "Profile photo updated successfully.",
-        "avatar_url": current_user.avatar_url
-    }
+    try:
+        clean_url = payload.avatar_url.strip()
+        await db.execute(
+            update(User)
+            .where(User.id == current_user.id)
+            .values(avatar_url=clean_url)
+        )
+        await db.commit()
+        return {
+            "message": "Profile photo updated successfully.",
+            "avatar_url": clean_url
+        }
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Avatar DB update failed: {str(exc)}"
+        )
+
+
 @router.post("/lookup", dependencies=[Depends(auth_rate_limiter)])
 async def lookup_user_identity(payload: IdentityLookupPayload, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)

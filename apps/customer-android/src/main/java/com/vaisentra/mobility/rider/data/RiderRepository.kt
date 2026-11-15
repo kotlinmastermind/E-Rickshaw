@@ -808,7 +808,6 @@ object RiderRepository {
                 return Result.failure(Exception("Invalid image format"))
             }
 
-            // Resize to max 256x256 for fast upload & DB storage
             val maxDim = 256
             val ratio = minOf(
                 maxDim.toFloat() / originalBitmap.width,
@@ -838,7 +837,6 @@ object RiderRepository {
             Result.failure(e)
         }
     }
-
 
 
     suspend fun lockPrice(categoryId: String, pickupLat: Double, pickupLng: Double, destLat: Double, destLng: Double): Result<Boolean> {
