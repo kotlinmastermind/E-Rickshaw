@@ -216,16 +216,20 @@ fun EmergencySosScreen(onNavigate: (String) -> Unit) {
         }
     }
 }
-
 // Screen 33: Emergency Contacts Manager (Synced with Supabase)
 @Composable
 fun EmergencyContactsScreen(onNavigate: (String) -> Unit) {
     val contacts by RiderRepository.emergencyContacts.collectAsState()
     var newName by remember { mutableStateOf("") }
     var newPhone by remember { mutableStateOf("") }
+    var newRelation by remember { mutableStateOf("Family") }
+    var isSaving by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        RiderRepository.fetchEmergencyContacts()
+        RiderRepository.fetchEmergencyContacts().onFailure { err ->
+            DialogController.showToast("Load failed: ${err.message}")
+        }
     }
 
     Column(
@@ -234,30 +238,61 @@ fun EmergencyContactsScreen(onNavigate: (String) -> Unit) {
             .background(CanvasBlack)
             .padding(16.dp)
     ) {
-        NeoHeader(title = "Trusted Contacts", subtitle = "Automatic SOS & trip broadcast", onBack = { onNavigate("map_home") })
+        NeoHeader(
+            title = "Trusted Contacts",
+            subtitle = "Automatic SOS & trip broadcast",
+            onBack = { onNavigate("map_home") }
+        )
         Spacer(modifier = Modifier.height(12.dp))
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(contacts) { c ->
-                NeoCard(cornerRadius = 14.dp) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(text = c.name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "${c.phoneNumber} (${c.relationship})", color = TextMuted, fontSize = 12.sp)
+        if (contacts.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No trusted contacts saved in Supabase yet.",
+                    color = TextMuted,
+                    fontSize = 13.sp
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(contacts, key = { it.id }) { c ->
+                    NeoCard(cornerRadius = 14.dp) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(text = c.name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text(text = "${c.phoneNumber} (${c.relationship})", color = TextMuted, fontSize = 12.sp)
+                            }
+                            Text(
+                                text = "Remove",
+                                color = CrimsonRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable {
+                                    coroutineScope.launch {
+                                        val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            RiderRepository.removeEmergencyContact(c.id)
+                                        }
+                                        res.onSuccess {
+                                            DialogController.showToast("Contact removed.")
+                                        }.onFailure { err ->
+                                            DialogController.showToast("Remove failed: ${err.message}")
+                                        }
+                                    }
+                                }
+                            )
                         }
-                        Text(
-                            text = "Remove",
-                            color = CrimsonRed,
-                            fontSize = 12.sp,
-                            modifier = Modifier.clickable { RiderRepository.removeEmergencyContact(c.id) }
-                        )
                     }
                 }
             }
@@ -270,15 +305,31 @@ fun EmergencyContactsScreen(onNavigate: (String) -> Unit) {
             NeoTextField(value = newName, onValueChange = { newName = it }, placeholder = "Contact Name", label = "Name")
             Spacer(modifier = Modifier.height(8.dp))
             NeoTextField(value = newPhone, onValueChange = { newPhone = it }, placeholder = "+91 XXXXX XXXXX", label = "Phone")
+            Spacer(modifier = Modifier.height(8.dp))
+            NeoTextField(value = newRelation, onValueChange = { newRelation = it }, placeholder = "Family / Friend / Colleague", label = "Relationship")
             Spacer(modifier = Modifier.height(12.dp))
             NeoButton(
-                text = "Save Contact to Supabase",
+                text = if (isSaving) "Saving..." else "Save Contact to Supabase",
                 onClick = {
-                    if (newName.isNotBlank() && newPhone.isNotBlank()) {
-                        RiderRepository.addEmergencyContact(EmergencyContactDto("c-" + System.currentTimeMillis(), newName, newPhone, "Family"))
-                        newName = ""
-                        newPhone = ""
-                        DialogController.showToast("Emergency contact saved in Supabase!")
+                    if (isSaving) return@NeoButton
+                    if (newName.isBlank() || newPhone.isBlank()) {
+                        DialogController.showToast("Please enter name and phone number")
+                        return@NeoButton
+                    }
+                    coroutineScope.launch {
+                        isSaving = true
+                        val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            RiderRepository.addEmergencyContact(newName, newPhone, newRelation)
+                        }
+                        isSaving = false
+
+                        res.onSuccess {
+                            newName = ""
+                            newPhone = ""
+                            DialogController.showToast("Emergency contact saved in Supabase!")
+                        }.onFailure { err ->
+                            DialogController.showToast("Save failed: ${err.message}")
+                        }
                     }
                 },
                 backgroundColor = SapphirePrimary
@@ -286,4 +337,3 @@ fun EmergencyContactsScreen(onNavigate: (String) -> Unit) {
         }
     }
 }
-

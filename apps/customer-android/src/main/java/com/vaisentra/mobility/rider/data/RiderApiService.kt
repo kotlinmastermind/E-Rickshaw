@@ -24,6 +24,9 @@ interface RiderApiService {
     @GET("api/v1/auth/me")
     suspend fun getCurrentUserMe(): Response<UserMeResponse>
 
+    @PUT("api/v1/auth/avatar")
+    suspend fun updateProfileAvatar(@Body body: Map<String, String>): Response<okhttp3.ResponseBody>
+
     // --- Vehicle Categories & Fares ---
     @GET("api/v1/vehicles/categories")
     suspend fun getVehicleCategories(): Response<List<VehicleCategoryDto>>
@@ -76,8 +79,7 @@ interface RiderApiService {
     suspend fun getEmergencyContacts(): Response<List<EmergencyContactDto>>
 
     @POST("api/v1/safety/contacts")
-    suspend fun addEmergencyContact(@Body contact: EmergencyContactDto): Response<EmergencyContactDto>
-
+    suspend fun addEmergencyContact(@Body contact: Map<String, String>): Response<EmergencyContactDto>
     @DELETE("api/v1/safety/contacts/{contact_id}")
     suspend fun deleteEmergencyContact(@Path("contact_id") contactId: String): Response<Map<String, Any>>
 

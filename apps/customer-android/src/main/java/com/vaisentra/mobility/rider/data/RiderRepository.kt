@@ -1,5 +1,6 @@
 package com.vaisentra.mobility.rider.data
 
+import android.graphics.Bitmap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,15 +37,9 @@ object RiderRepository {
     private val _loyalty = MutableStateFlow(LoyaltySummaryDto())
     val loyalty: StateFlow<LoyaltySummaryDto> = _loyalty.asStateFlow()
 
-    private val _emergencyContacts = MutableStateFlow<List<EmergencyContactDto>>(
-        listOf(
-            EmergencyContactDto("c1", "Pooja Sharma", "+91 98765 43210", "Sister"),
-            EmergencyContactDto("c2", "Vikram Malhotra", "+91 99887 76655", "Colleague"),
-            EmergencyContactDto("c3", "Delhi Police Women Helpline", "1091", "Emergency Service")
-        )
-    )
+    // 1. Dummy list hata kar emptyList() rakhein taaki asli Supabase data hi dikhe
+    private val _emergencyContacts = MutableStateFlow<List<EmergencyContactDto>>(emptyList())
     val emergencyContacts: StateFlow<List<EmergencyContactDto>> = _emergencyContacts.asStateFlow()
-
     private val _savedPlaces = MutableStateFlow<List<SavedPlaceDto>>(
         listOf(
             SavedPlaceDto("p1", "Home", "Flat 402, Cyber Heights, Sector 62, Noida", 28.6289, 77.3710, "HOME"),
@@ -379,43 +374,55 @@ object RiderRepository {
             val response = NetworkClient.apiService.getEmergencyContacts()
             if (response.isSuccessful && response.body() != null) {
                 val contacts = response.body()!!
-                if (contacts.isNotEmpty()) {
-                    _emergencyContacts.value = contacts
-                }
-                Result.success(_emergencyContacts.value)
+                _emergencyContacts.value = contacts
+                Result.success(contacts)
             } else {
-                Result.success(_emergencyContacts.value)
+                val err = response.errorBody()?.string() ?: "HTTP ${response.code()}"
+                Result.failure(Exception(err))
             }
         } catch (e: Exception) {
-            Result.success(_emergencyContacts.value)
+            Result.failure(e)
         }
     }
 
-    fun addEmergencyContact(contact: EmergencyContactDto) {
-        _emergencyContacts.value = _emergencyContacts.value + contact
-        scope.launch {
-            try {
-                val res = NetworkClient.apiService.addEmergencyContact(contact)
-                if (res.isSuccessful && res.body() != null) {
-                    fetchEmergencyContacts()
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("RiderRepository", "addEmergencyContact failed: ${e.message}")
+    suspend fun addEmergencyContact(
+        name: String,
+        phoneNumber: String,
+        relationship: String = "Family"
+    ): Result<EmergencyContactDto> {
+        return try {
+            val payload = mapOf(
+                "name" to name.trim(),
+                "phone_number" to phoneNumber.trim(),
+                "relationship" to relationship.trim()
+            )
+            val res = NetworkClient.apiService.addEmergencyContact(payload)
+            if (res.isSuccessful && res.body() != null) {
+                fetchEmergencyContacts() // Supabase se fresh list fetch karein
+                Result.success(res.body()!!)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(Exception(err))
             }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
-    fun removeEmergencyContact(contactId: String) {
-        _emergencyContacts.value = _emergencyContacts.value.filter { it.id != contactId }
-        scope.launch {
-            try {
-                NetworkClient.apiService.deleteEmergencyContact(contactId)
-            } catch (e: Exception) {
-                android.util.Log.e("RiderRepository", "removeEmergencyContact failed: ${e.message}")
+    suspend fun removeEmergencyContact(contactId: String): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.deleteEmergencyContact(contactId)
+            if (res.isSuccessful) {
+                _emergencyContacts.value = _emergencyContacts.value.filter { it.id != contactId }
+                Result.success(true)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(Exception(err))
             }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
-
     suspend fun fetchRideHistory(): Result<List<ActiveRideDto>> {
         return try {
             val response = NetworkClient.apiService.getRideHistory()
@@ -789,6 +796,49 @@ object RiderRepository {
             Result.failure(e)
         }
     }
+
+    suspend fun uploadProfilePhoto(context: android.content.Context, uri: android.net.Uri): Result<String> {
+        return try {
+            val inputStream = context.contentResolver.openInputStream(uri)
+                ?: return Result.failure(Exception("Unable to read selected image"))
+            val originalBitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+            inputStream.close()
+
+            if (originalBitmap == null) {
+                return Result.failure(Exception("Invalid image format"))
+            }
+
+            // Resize to max 256x256 for fast upload & DB storage
+            val maxDim = 256
+            val ratio = minOf(
+                maxDim.toFloat() / originalBitmap.width,
+                maxDim.toFloat() / originalBitmap.height,
+                1f
+            )
+            val width = (originalBitmap.width * ratio).toInt().coerceAtLeast(1)
+            val height = (originalBitmap.height * ratio).toInt().coerceAtLeast(1)
+            val scaled = Bitmap.createScaledBitmap(originalBitmap, width, height, true)
+
+            val outputStream = java.io.ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
+            val base64Str = android.util.Base64.encodeToString(
+                outputStream.toByteArray(),
+                android.util.Base64.NO_WRAP
+            )
+            val dataUri = "data:image/jpeg;base64,$base64Str"
+
+            val res = NetworkClient.apiService.updateProfileAvatar(mapOf("avatar_url" to dataUri))
+            if (res.isSuccessful) {
+                Result.success(dataUri)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
 
 
     suspend fun lockPrice(categoryId: String, pickupLat: Double, pickupLng: Double, destLat: Double, destLng: Double): Result<Boolean> {

@@ -41,6 +41,25 @@ class ChangePasswordPayload(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+
+class AvatarUpdatePayload(BaseModel):
+    avatar_url: str = Field(..., min_length=1)
+
+
+
+@router.put("/avatar")
+@router.post("/avatar")
+async def update_user_avatar(
+    payload: AvatarUpdatePayload,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    current_user.avatar_url = payload.avatar_url.strip()
+    await db.commit()
+    return {
+        "message": "Profile photo updated successfully.",
+        "avatar_url": current_user.avatar_url
+    }
 @router.post("/lookup", dependencies=[Depends(auth_rate_limiter)])
 async def lookup_user_identity(payload: IdentityLookupPayload, db: AsyncSession = Depends(get_db)):
     service = AuthService(db)

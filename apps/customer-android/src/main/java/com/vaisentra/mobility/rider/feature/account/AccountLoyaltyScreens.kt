@@ -35,6 +35,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import com.google.gson.GsonBuilder
 import java.io.File
+
+import android.graphics.BitmapFactory
+import android.util.Base64
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 // Screen 46: Refer & Earn Electric Cash
 @Composable
 fun ReferEarnScreen(onNavigate: (String) -> Unit) {
@@ -257,6 +263,9 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
     var userRole by remember { mutableStateOf("CUSTOMER") }
     var passkeyStatus by remember { mutableStateOf("CHECKING...") }
     var deviceCount by remember { mutableIntStateOf(1) }
+    var avatarUrl by remember { mutableStateOf<String?>(null) }
+    var isUploadingAvatar by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         RiderRepository.fetchEmergencyContacts()
         RiderRepository.fetchCurrentUserMe()?.let { user ->
@@ -266,6 +275,7 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
             emailId = user.email ?: "Not Linked"
             userRole = user.role.uppercase()
             passkeyStatus = if (user.hasPasskey) "ACTIVE ✓" else "NOT SET"
+            avatarUrl = user.avatarUrl
         }
         RiderRepository.fetchTrustedDevices().getOrNull()?.let { devices ->
             if (devices.isNotEmpty()) {
@@ -274,13 +284,25 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
         }
     }
 
-    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    val context = LocalContext.current
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        if (uri != null) {
-            selectedImageUri = uri
-            DialogController.showToast("Profile photo updated!")
+        if (uri != null && !isUploadingAvatar) {
+            coroutineScope.launch {
+                isUploadingAvatar = true
+                val res = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    RiderRepository.uploadProfilePhoto(context, uri)
+                }
+                isUploadingAvatar = false
+
+                res.onSuccess { newAvatarDataUri ->
+                    avatarUrl = newAvatarDataUri
+                    DialogController.showToast("Profile photo saved to backend!")
+                }.onFailure { err ->
+                    DialogController.showToast("Photo upload failed: ${err.message}")
+                }
+            }
         }
     }
 
@@ -312,6 +334,19 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Profile Image Avatar with Camera Badge
+                val decodedAvatarBitmap = remember(avatarUrl) {
+                    try {
+                        val raw = avatarUrl ?: return@remember null
+                        if (raw.startsWith("data:image")) {
+                            val base64Part = raw.substringAfter("base64,")
+                            val bytes = Base64.decode(base64Part, Base64.DEFAULT)
+                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                        } else null
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .size(72.dp)
@@ -321,9 +356,13 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
                         .clickable { imagePickerLauncher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (selectedImageUri != null) {
-                        // Agar Coil AsyncImage library hai toh yahan AsyncImage(model = selectedImageUri) use karein
-                        Text(text = "🖼️", fontSize = 32.sp)
+                    if (decodedAvatarBitmap != null) {
+                        Image(
+                            bitmap = decodedAvatarBitmap,
+                            contentDescription = "Profile Photo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     } else {
                         Text(
                             text = userName.take(2).uppercase(),
@@ -360,7 +399,7 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
                         Text(
-                            text = "📷 Change Profile Photo",
+                            text = if (isUploadingAvatar) "⏳ Uploading..." else "📷 Change Profile Photo",
                             color = ElectricCyan,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
