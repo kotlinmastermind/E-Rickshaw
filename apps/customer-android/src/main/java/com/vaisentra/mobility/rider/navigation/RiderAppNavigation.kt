@@ -33,6 +33,8 @@ import com.vaisentra.mobility.rider.theme.*
 fun RiderAppNavigation() {
     var currentRoute by remember { mutableStateOf("splash") }
     val backStack = remember { mutableStateListOf("splash") }
+    // Yeh state PhoneAuthScreen se OtpVerifyScreen tak phone number le jayegi
+    var authPhone by remember { mutableStateOf("") }
 
     fun navigateTo(route: String) {
         backStack.add(route)
@@ -56,8 +58,20 @@ fun RiderAppNavigation() {
         when (currentRoute) {
             // Category 1: Onboarding
             "splash" -> BrandSplashScreen { navigateTo(it) }
-            "auth_phone" -> PhoneAuthScreen { navigateTo(it) }
-            "auth_otp" -> OtpVerifyScreen { navigateTo(it) }
+            // Yahan se phone number save karke auth_otp par navigate karein
+            "auth_phone" -> PhoneAuthScreen(
+                onNavigate = { navigateTo(it) },
+                onOtpSent = { enteredPhone ->
+                    authPhone = enteredPhone
+                    navigateTo("auth_otp")
+                }
+            )
+
+            // Saved phone number ko OtpVerifyScreen mein pass karein
+            "auth_otp" -> OtpVerifyScreen(
+                phone = authPhone,
+                onNavigate = { navigateTo(it) }
+            )
             "auth_reset" -> PasswordResetScreen { navigateTo(it) }
             "auth_kyc" -> CustomerKycScreen { navigateTo(it) }
             "auth_biometric" -> BiometricEnrolScreen { navigateTo(it) }

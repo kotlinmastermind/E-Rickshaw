@@ -46,6 +46,16 @@ data class UserProfileDto(
     @SerializedName("is_verified") val isVerified: Boolean = true,
     @SerializedName("mfa_enabled") val mfaEnabled: Boolean = false
 )
+data class UserMeResponse(
+    @SerializedName("id") val id: String,
+    @SerializedName("phone_number") val phoneNumber: String?,
+    @SerializedName("email") val email: String?,
+    @SerializedName("full_name") val fullName: String?,
+    @SerializedName("role") val role: String = "customer",
+    @SerializedName("avatar_url") val avatarUrl: String? = null,
+    @SerializedName("has_passkey") val hasPasskey: Boolean = false,
+    @SerializedName("biometric_enabled") val biometricEnabled: Boolean = false
+)
 
 // --- Vehicle Categories & Fares (Supabase: vehicle_categories, fare_rules) ---
 data class VehicleCategoryDto(

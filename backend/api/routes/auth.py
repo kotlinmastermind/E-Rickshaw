@@ -8,7 +8,6 @@ from backend.application.services.user_governance_service import UserGovernanceS
 from backend.api.deps import get_current_user
 from backend.domain.models import User
 from backend.infrastructure.security.rate_limiter import auth_rate_limiter, otp_rate_limiter
-from backend.infrastructure.security.crypto import decode_jwt_token
 from backend.api.schemas.auth import (
     IdentityLookupPayload,
     OtpRequestPayload,
@@ -29,8 +28,18 @@ from backend.api.schemas.auth import (
     UserDto,
     AuthResponse
 )
-
+from backend.infrastructure.security.crypto import (
+    decode_jwt_token,
+    verify_password,
+    hash_password,
+    validate_password_strength,
+)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+class ChangePasswordPayload(BaseModel):
+    current_password: Optional[str] = None
+    new_password: str = Field(..., min_length=8)
+
 
 @router.post("/lookup", dependencies=[Depends(auth_rate_limiter)])
 async def lookup_user_identity(payload: IdentityLookupPayload, db: AsyncSession = Depends(get_db)):
@@ -210,6 +219,37 @@ async def recovery_reset_password(payload: PasswordResetPayload, db: AsyncSessio
         recovery_code=recovery_code,
         new_password=payload.new_password
     )
+
+
+# --- YAHAN PASTE KAREIN ---
+@router.post("/change-password", dependencies=[Depends(auth_rate_limiter)])
+@router.put("/change-password", dependencies=[Depends(auth_rate_limiter)])
+async def change_password_authenticated(
+    payload: ChangePasswordPayload,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # Agar user ne pehle se password set kar rakha hai aur current_password bheja hai toh verify karein
+    if payload.current_password and current_user.password_hash:
+        # OTP-only users ke default hash ko chhod kar baaki sabka purana password verify hoga
+        if not current_user.password_hash.startswith("OtpUserPass_"):
+            if not verify_password(payload.current_password, current_user.password_hash):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Current password is incorrect."
+                )
+
+    try:
+        validate_password_strength(payload.new_password)
+    except ValueError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(err)
+        )
+
+    current_user.password_hash = hash_password(payload.new_password)
+    await db.commit()
+    return {"message": "Password updated successfully."}
 
 @router.post("/token/refresh", dependencies=[Depends(auth_rate_limiter)])
 async def refresh_token(payload: TokenRefreshPayload, db: AsyncSession = Depends(get_db)):

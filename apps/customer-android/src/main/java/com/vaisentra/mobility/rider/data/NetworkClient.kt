@@ -6,9 +6,18 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
+import androidx.core.content.edit
+
 
 object NetworkClient {
+    private const val PREF_NAME = "ridergo_secure_prefs"
+    private const val KEY_TOKEN = "access_token"
+    private var sharedPrefs: android.content.SharedPreferences? = null
 
+    fun init(context: android.content.Context) {
+        sharedPrefs = context.applicationContext.getSharedPreferences(PREF_NAME, android.content.Context.MODE_PRIVATE)
+        authToken = sharedPrefs?.getString(KEY_TOKEN, null)
+    }
     // Default to Android Emulator host or local LAN server (configurable at runtime)
     @Volatile
     var baseUrl: String = "https://e-rickshaw-z32z.onrender.com/"
@@ -17,15 +26,17 @@ object NetworkClient {
     var authToken: String? = null
         private set
 
+    // setAuthToken ke andar:
     fun setAuthToken(token: String) {
-        require(token.isNotBlank()) {
-            "Access token cannot be empty"
-        }
+        require(token.isNotBlank()) { "Access token cannot be empty" }
         authToken = token
+        sharedPrefs?.edit { putString(KEY_TOKEN, token) }
     }
 
+    // clearAuthToken ke andar:
     fun clearAuthToken() {
         authToken = null
+        sharedPrefs?.edit { remove(KEY_TOKEN) }
     }
 
     private val authInterceptor = Interceptor { chain ->
@@ -48,9 +59,9 @@ object NetworkClient {
 
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(45, TimeUnit.SECONDS)
+            .readTimeout(40, TimeUnit.SECONDS)
+            .writeTimeout(45, TimeUnit.SECONDS)
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)
             .build()

@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-
+import kotlinx.coroutines.CancellationException
 object RiderRepository {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -114,6 +114,15 @@ object RiderRepository {
 
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    suspend fun fetchCurrentUserMe(): UserMeResponse? {
+        return try {
+            val res = NetworkClient.apiService.getCurrentUserMe()
+            if (res.isSuccessful) res.body() else null
+        } catch (e: Exception) {
+            null
         }
     }
     suspend fun cancelActiveRide(rideId: String, reason: String = "USER_CANCELLED"): Result<Boolean> {
@@ -674,15 +683,20 @@ object RiderRepository {
         }
     }
 
-    suspend fun requestDataExport(): Result<Boolean> {
+    suspend fun requestDataExport(): Result<Map<String, Any>> {
         return try {
             val res = NetworkClient.apiService.requestDataExport()
-            Result.success(res.isSuccessful)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("Server error: HTTP ${res.code()}"))
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
-
     suspend fun requestAccountDeletion(reason: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.requestAccountDeletion(mapOf("reason" to reason))
@@ -756,6 +770,26 @@ object RiderRepository {
             Result.failure(e)
         }
     }
+
+    suspend fun changeUserPassword(currentPass: String, newPass: String): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.changePassword(
+                mapOf(
+                    "current_password" to currentPass,
+                    "new_password" to newPass
+                )
+            )
+            if (res.isSuccessful) {
+                Result.success(true)
+            } else {
+                val errBody = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(Exception(errBody))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
 
     suspend fun lockPrice(categoryId: String, pickupLat: Double, pickupLng: Double, destLat: Double, destLng: Double): Result<Boolean> {
         return try {

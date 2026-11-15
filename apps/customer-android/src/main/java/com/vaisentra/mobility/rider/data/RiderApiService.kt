@@ -21,6 +21,9 @@ interface RiderApiService {
     @GET("api/v1/customers/profile")
     suspend fun getProfile(): Response<UserProfileDto>
 
+    @GET("api/v1/auth/me")
+    suspend fun getCurrentUserMe(): Response<UserMeResponse>
+
     // --- Vehicle Categories & Fares ---
     @GET("api/v1/vehicles/categories")
     suspend fun getVehicleCategories(): Response<List<VehicleCategoryDto>>
@@ -34,6 +37,7 @@ interface RiderApiService {
     // --- Rides & Active Booking ---
     @POST("api/v1/rides/request")
     suspend fun requestRide(@Body request: RideBookingRequest): Response<ActiveRideDto>
+
 
     @GET("api/v1/rides/active")
     suspend fun getActiveRide(): Response<ActiveRideDto>
@@ -153,6 +157,9 @@ interface RiderApiService {
     // --- User Governance, Password Reset & Security ---
     @POST("api/v1/auth/recovery/reset-password")
     suspend fun resetForgotPassword(@Body body: Map<String, String>): Response<Map<String, Any>>
+
+    @PUT("api/v1/auth/change-password")
+    suspend fun changePassword(@Body body: Map<String, String>): Response<Map<String, Any>>
 
     @POST("api/v1/user/passkey/register")
     suspend fun registerPasskey(@Body body: Map<String, String>): Response<Map<String, Any>>

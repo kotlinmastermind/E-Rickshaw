@@ -1,11 +1,13 @@
 package com.vaisentra.mobility.rider.components
 
+import android.widget.EditText
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -14,12 +16,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.theme.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun NeoCard(
@@ -229,10 +241,70 @@ fun OtpDisplayBox(otp: String) {
                     text = char.toString(),
                     color = ElectricCyan,
                     fontSize = 28.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
+                    fontWeight = FontWeight.ExtraBold,
+
+                    )
             }
         }
     }
+}
+
+@Composable
+fun OtpInputBox(
+    otp: String,
+    onOtpChange: (String) -> Unit,
+    otpLength: Int = 6 // Jitne digits ka OTP chahiye (e.g. 4 ya 6)
+) {
+    BasicTextField(
+        value = otp,
+        onValueChange = { newValue ->
+            // Sirf numbers allow karega aur max length tak limit rakhega
+            if (newValue.length <= otpLength && newValue.all { it.isDigit() }) {
+                onOtpChange(newValue)
+            }
+        },
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.NumberPassword // Number keypad open hoga
+        ),
+        cursorBrush = SolidColor(ElectricCyan),
+        // Default text ko invisible rakhne ke liye taaki sirf boxes dikhein
+        textStyle = TextStyle(fontSize = 0.sp),
+        decorationBox = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(otpLength) { index ->
+                    val char = otp.getOrNull(index)?.toString() ?: ""
+                    val isFocused = otp.length == index
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(64.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(SurfaceCard)
+                            .border(
+                                width = if (isFocused) 2.dp else 1.5.dp,
+                                // Active box ka border highlight hoga
+                                color = if (isFocused || char.isNotEmpty()) BorderFocus else BorderFocus.copy(
+                                    alpha = 0.4f
+                                ),
+                                shape = RoundedCornerShape(14.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = char,
+                            color = ElectricCyan,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        }
+    )
 }
 

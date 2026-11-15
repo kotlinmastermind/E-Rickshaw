@@ -1,5 +1,8 @@
 package com.vaisentra.mobility.rider.feature.account
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,20 +13,28 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
+import com.vaisentra.mobility.rider.data.NetworkClient
 import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-
+import android.content.Context
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
+import com.google.gson.GsonBuilder
+import java.io.File
 // Screen 46: Refer & Earn Electric Cash
 @Composable
 fun ReferEarnScreen(onNavigate: (String) -> Unit) {
@@ -228,6 +239,58 @@ fun SavedPlacesScreen(onNavigate: (String) -> Unit) {
 // Screen 50: Account Settings & Privacy Hub
 @Composable
 fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
+    val activeToken = NetworkClient.authToken
+    val tokenStatus = if (!activeToken.isNullOrBlank()) {
+        "ACTIVE (${activeToken.take(10)}...)"
+    } else {
+        "NOT LOGGED IN"
+    }
+
+    // Repository se live emergency contacts fetch karein
+    val emergencyContacts by RiderRepository.emergencyContacts.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+
+    var userName by remember { mutableStateOf("Loading...") }
+    var userId by remember { mutableStateOf("...") }
+    var mobileNo by remember { mutableStateOf("...") }
+    var emailId by remember { mutableStateOf("Not Linked") }
+    var userRole by remember { mutableStateOf("CUSTOMER") }
+    var passkeyStatus by remember { mutableStateOf("CHECKING...") }
+    var deviceCount by remember { mutableIntStateOf(1) }
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchEmergencyContacts()
+        RiderRepository.fetchCurrentUserMe()?.let { user ->
+            userName = user.fullName ?: "RiderGo User"
+            userId = user.id.take(12)
+            mobileNo = user.phoneNumber ?: "N/A"
+            emailId = user.email ?: "Not Linked"
+            userRole = user.role.uppercase()
+            passkeyStatus = if (user.hasPasskey) "ACTIVE ✓" else "NOT SET"
+        }
+        RiderRepository.fetchTrustedDevices().getOrNull()?.let { devices ->
+            if (devices.isNotEmpty()) {
+                deviceCount = devices.size
+            }
+        }
+    }
+
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            selectedImageUri = uri
+            DialogController.showToast("Profile photo updated!")
+        }
+    }
+
+    // Change Password Expandable Section States
+    var showChangePassword by remember { mutableStateOf(false) }
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var isUpdatingPassword by remember { mutableStateOf(false) }
+
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -235,17 +298,169 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        NeoHeader(title = "Account & Privacy Hub", subtitle = "User ID: bhishma-rider-75620", onBack = { onNavigate("map_home") })
+        NeoHeader(
+            title = "Account & Privacy Hub",
+            subtitle = "Manage profile, security & SOS contacts",
+            onBack = { onNavigate("map_home") }
+        )
         Spacer(modifier = Modifier.height(16.dp))
 
+        // 1. PROFILE CARD (Image, Name, User ID, Mobile, Email)
+        NeoCard(borderColor = ElectricCyan.copy(alpha = 0.4f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Profile Image Avatar with Camera Badge
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(SapphireGlow)
+                        .border(2.dp, ElectricCyan, CircleShape)
+                        .clickable { imagePickerLauncher.launch("image/*") },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (selectedImageUri != null) {
+                        // Agar Coil AsyncImage library hai toh yahan AsyncImage(model = selectedImageUri) use karein
+                        Text(text = "🖼️", fontSize = 32.sp)
+                    } else {
+                        Text(
+                            text = userName.take(2).uppercase(),
+                            color = ElectricCyan,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = userName,
+                        color = TextWhite,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "ID: $userId",
+                        color = TextDim,
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Change Profile Image Button
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SurfaceDark)
+                            .border(1.dp, ElectricCyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .clickable { imagePickerLauncher.launch("image/*") }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = "📷 Change Profile Photo",
+                            color = ElectricCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Contact Info Rows (Mobile & Email)
+            ProfileDetailRow(label = "Mobile Number", value = mobileNo)
+            ProfileDetailRow(label = "Email Address", value = emailId)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 2. EMERGENCY CONTACTS CARD
         NeoCard {
-            Text(text = "Security & FastApi Sessions", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "🚨 Emergency Contacts (SOS)",
+                    color = TextWhite,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "+ Manage",
+                    color = ElectricCyan,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onNavigate("emergency_contacts") }
+                )
+            }
             Spacer(modifier = Modifier.height(10.dp))
+
+            if (emergencyContacts.isEmpty()) {
+                Text(
+                    text = "No emergency contacts added yet.",
+                    color = TextMuted,
+                    fontSize = 12.sp
+                )
+            } else {
+                emergencyContacts.forEach { contact ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(SurfaceDark)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = contact.name,
+                                color = TextWhite,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = contact.phoneNumber, // Fixed: phone -> phoneNumber
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                        NeoBadge(
+                            text = contact.relationship.uppercase(), // Fixed: relation -> relationship
+                            backgroundColor = CrimsonRed.copy(alpha = 0.15f),
+                            textColor = CrimsonRed
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 3. SECURITY & CHANGE PASSWORD CARD
+        NeoCard {
+            Text(
+                text = "Security & FastApi Sessions",
+                color = TextWhite,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            val sessionText = if (deviceCount == 1) "1 Active Android Session" else "$deviceCount Active Sessions"
+
             val settingsItems = listOf(
-                "Biometric Passkey (Face ID / Fingerprint)" to "ACTIVE ✓",
-                "Data Privacy & Telemetry Export" to "REQUEST JSON",
-                "Connected Devices (1 Active Android Session)" to "DEVICE 1",
-                "Supabase Role" to "CUSTOMER"
+                "JWT Session Token" to tokenStatus,
+                "Biometric Passkey (Face ID / Fingerprint)" to passkeyStatus,
+                "Connected Devices ($sessionText)" to "DEVICE $deviceCount",
+                "Supabase Role" to userRole
             )
             settingsItems.forEach { (item, value) ->
                 Row(
@@ -256,21 +471,101 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(text = item, color = TextMuted, fontSize = 12.sp)
-                    NeoBadge(text = value, backgroundColor = SurfaceDark, textColor = ElectricCyan)
+                    NeoBadge(
+                        text = value,
+                        backgroundColor = SurfaceDark,
+                        textColor = if (item == "JWT Session Token" && activeToken.isNullOrBlank()) CrimsonRed else ElectricCyan
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            // Change Password Toggle Button
+            NeoButton(
+                text = if (showChangePassword) "Cancel Password Change" else "🔑 Change Password",
+                backgroundColor = SurfaceDark,
+                onClick = { showChangePassword = !showChangePassword }
+            )
+
+            // Expandable Change Password Form
+            if (showChangePassword) {
+                Spacer(modifier = Modifier.height(12.dp))
+                NeoTextField(
+                    value = currentPassword,
+                    onValueChange = { currentPassword = it },
+                    placeholder = "Current Password / Recovery Code",
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                NeoTextField(
+                    value = newPassword,
+                    onValueChange = { newPassword = it },
+                    placeholder = "New Password (min 8 chars)",
+                    visualTransformation = PasswordVisualTransformation()
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+
                 NeoButton(
-                    text = "Export My Data",
+                    text = if (isUpdatingPassword) "Updating..." else "Save New Password",
+                    backgroundColor = EmeraldGreen,
+                    onClick = {
+                        if (isUpdatingPassword) return@NeoButton
+                        if (currentPassword.isBlank()) {
+                            DialogController.showToast("Please enter current password")
+                            return@NeoButton
+                        }
+                        if (newPassword.length < 8) {
+                            DialogController.showToast("New password must be at least 8 characters")
+                            return@NeoButton
+                        }
+
+                        coroutineScope.launch {
+                            isUpdatingPassword = true
+                            val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                RiderRepository.changeUserPassword(currentPassword, newPassword)
+                            }
+                            isUpdatingPassword = false
+
+                            result.onSuccess {
+                                DialogController.showToast("Password updated successfully!")
+                                currentPassword = ""
+                                newPassword = ""
+                                showChangePassword = false
+                            }.onFailure { err ->
+                                DialogController.showToast("Failed: ${err.message}")
+                            }
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val context = LocalContext.current
+                var isExporting by remember { mutableStateOf(false) }
+
+                NeoButton(
+                    text = if (isExporting) "Exporting..." else "Export My Data",
                     modifier = Modifier.weight(1f),
                     backgroundColor = SurfaceDark,
                     onClick = {
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            RiderRepository.requestDataExport()
+                        if (isExporting) return@NeoButton
+                        coroutineScope.launch {
+                            isExporting = true
+                            val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                RiderRepository.requestDataExport()
+                            }
+                            isExporting = false
+
+                            result.onSuccess { exportedMap ->
+                                DialogController.showToast("Data ready! Choose where to save.")
+                                exportAndShareJsonFile(context, exportedMap)
+                            }.onFailure { err ->
+                                DialogController.showToast("Export failed: ${err.message}")
+                            }
                         }
-                        DialogController.showToast("Data export initiated. JSON archive will be generated.")
                     }
                 )
                 NeoButton(
@@ -278,7 +573,7 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
                     modifier = Modifier.weight(1f),
                     backgroundColor = SurfaceDark,
                     onClick = {
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        coroutineScope.launch(Dispatchers.IO) {
                             RiderRepository.setAppLockPin("1234")
                         }
                         DialogController.showToast("4-Digit Security PIN configured in Supabase!")
@@ -288,15 +583,81 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+
+        // 4. SIGN OUT BUTTON (Clears Token)
         NeoButton(
             text = "Sign Out Session",
             onClick = {
+                NetworkClient.clearAuthToken()
                 DialogController.showToast("Session safely terminated.")
                 onNavigate("splash")
             },
             backgroundColor = SurfaceDark,
             textColor = CrimsonRed
         )
+
+        // Bottom Navigation Bar se overlap bachane ke liye extra space
+        Spacer(modifier = Modifier.height(80.dp))
+    }
+}
+
+
+
+private fun exportAndShareJsonFile(context: Context, data: Map<String, Any>) {
+    try {
+        val gson = GsonBuilder().setPrettyPrinting().create()
+        val jsonString = gson.toJson(data)
+
+        // Cache folder mein file banayein
+        val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val fileName = "RiderGo_UserData_${System.currentTimeMillis()}.json"
+        val file = File(exportDir, fileName)
+        file.writeText(jsonString)
+
+        // FileProvider ke zariye secure URI banayein
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "RiderGo Account Data Export")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        context.startActivity(Intent.createChooser(shareIntent, "Save or Share Your Data (JSON)"))
+    } catch (e: Exception) {
+        DialogController.showToast("Export file error: ${e.message}")
+    }
+}
+
+@Composable
+private fun ProfileDetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, color = TextMuted, fontSize = 12.sp)
+        Text(
+            text = value,
+            color = TextWhite,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Preview
+@Composable
+fun AccountSettingsHubScreenPreview() {
+    RiderGoTheme {
+        AccountSettingsHubScreen(onNavigate = {})
     }
 }
 

@@ -1,3 +1,5 @@
+@file:Suppress("PreviewAnnotationInFunctionWithParameters")
+
 package com.vaisentra.mobility.rider.feature.onboarding
 
 import androidx.compose.foundation.background
@@ -17,16 +19,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
 import com.vaisentra.mobility.rider.data.RiderRepository
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Screen 1: Brand Splash & Locale Switcher
+
 @Composable
-fun BrandSplashScreen(onNavigate: (String) -> Unit) {
+fun BrandSplashScreen(onNavigate: (String) -> Unit = {}) {
     var selectedLocale by remember { mutableStateOf("en") }
 
     Column(
@@ -65,7 +71,7 @@ fun BrandSplashScreen(onNavigate: (String) -> Unit) {
             )
         }
 
-        NeoCard(modifier = Modifier.fillMaxWidth()) {
+       /* NeoCard(modifier = Modifier.fillMaxWidth()) {
             Text(text = "Select Preferred Language:", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(12.dp))
             val locales = listOf(
@@ -92,7 +98,7 @@ fun BrandSplashScreen(onNavigate: (String) -> Unit) {
                 }
             }
         }
-
+*/
         Column(modifier = Modifier.fillMaxWidth()) {
             NeoButton(
                 text = "Get Started",
@@ -105,9 +111,11 @@ fun BrandSplashScreen(onNavigate: (String) -> Unit) {
 }
 
 // Screen 2: Phone & Cyber Auth
+
 @Composable
-fun PhoneAuthScreen(onNavigate: (String) -> Unit) {
-    var phone by remember { mutableStateOf("+91 75620 84184") }
+fun PhoneAuthScreen(onNavigate: (String) -> Unit,onOtpSent: (String) -> Unit
+) {
+    var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
     Column(
@@ -145,11 +153,18 @@ fun PhoneAuthScreen(onNavigate: (String) -> Unit) {
             NeoButton(
                 text = "Send 6-Digit OTP",
                 onClick = {
+                    val cleanPhone = phone.trim()
+                    if (cleanPhone.length < 10) {
+                        DialogController.showToast("Please enter a valid 10-digit mobile number")
+                        return@NeoButton
+                    }
                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                         RiderRepository.requestOtp(phone)
                     }
-                    DialogController.showToast("OTP code requested via Twilio for $phone")
-                    onNavigate("auth_otp")
+                    DialogController.showToast("OTP code requested via Twilio for $cleanPhone")
+                    // Phone number ke saath OtpVerifyScreen par bhejein
+                    onOtpSent(cleanPhone)
+
                 },
                 icon = "📩"
             )
@@ -177,9 +192,15 @@ fun PhoneAuthScreen(onNavigate: (String) -> Unit) {
 }
 
 // Screen 3: SMS OTP Quick Login
+
 @Composable
-fun OtpVerifyScreen(onNavigate: (String) -> Unit) {
-    var otpCode by remember { mutableStateOf("7294") }
+fun OtpVerifyScreen(
+    phone: String ,
+    onNavigate: (String) -> Unit
+) {
+    var otpCode by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope() // Compose-safe coroutine scope
 
     Column(
         modifier = Modifier
@@ -187,26 +208,69 @@ fun OtpVerifyScreen(onNavigate: (String) -> Unit) {
             .background(CanvasBlack)
             .padding(24.dp)
     ) {
-        NeoHeader(title = "Verification Code", subtitle = "Enter 4-digit security code", onBack = { onNavigate("auth_phone") })
+        NeoHeader(
+            title = "Verification Code",
+            subtitle = "Enter 6-digit security code",
+            onBack = { onNavigate("auth_phone") }
+        )
         Spacer(modifier = Modifier.height(30.dp))
 
         NeoCard {
-            Text(text = "Code sent via Twilio / Supabase to +91 75620 84184", color = TextMuted, fontSize = 13.sp)
+            Text(
+                text = "Code sent via Twilio / Supabase to +91 $phone",
+                color = TextMuted,
+                fontSize = 13.sp
+            )
             Spacer(modifier = Modifier.height(20.dp))
-            OtpDisplayBox(otp = otpCode)
+
+            // 6-digit OTP ke liye otpLength = 6 set kiya hai
+            OtpInputBox(
+                otp = otpCode,
+                onOtpChange = { otpCode = it },
+                otpLength = 6
+            )
+
             Spacer(modifier = Modifier.height(24.dp))
+
             NeoButton(
-                text = "Verify & Access Fleet",
+                text = if (isLoading) "Verifying..." else "Verify & Access Fleet",
                 onClick = {
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        RiderRepository.verifyOtp("+91 75620 84184", otpCode)
+                    // 1. Pehle check karein ki 6 digits poore type hue hain ya nahi
+                    if (otpCode.length < 6) {
+                        DialogController.showToast("Please enter 6-digit OTP")
+                        return@NeoButton
                     }
-                    DialogController.showToast("Authentication Successful! Session issued.")
-                    onNavigate("map_home")
+
+                    if (isLoading) return@NeoButton // Double click rokne ke liye
+
+                    coroutineScope.launch {
+                        isLoading = true
+                        try {
+                            // 2. IO thread par OTP verify karein aur result ka wait karein
+                            val result = withContext(Dispatchers.IO) {
+                                RiderRepository.verifyOtp(phone, otpCode)
+                            }
+
+                            // 3. Agar OTP sahi hai tabhi navigate karein
+                            if (result.isSuccess) {
+                                DialogController.showToast("Authentication Successful! Session issued.")
+                                onNavigate("map_home")
+                            } else {
+                                val errorMsg = result.exceptionOrNull()?.message ?: "Invalid OTP! Please try again."
+                                DialogController.showToast(errorMsg)
+                                otpCode = "" // Galat hone par boxes khali kar dein
+                            }
+                        } catch (e: Exception) {
+                            DialogController.showToast("Error: ${e.message ?: "Verification failed"}")
+                        } finally {
+                            isLoading = false
+                        }
+                    }
                 },
                 backgroundColor = EmeraldGreen,
                 icon = "✓"
             )
+
             Spacer(modifier = Modifier.height(14.dp))
             Text(
                 text = "Resend Code in 28s",
@@ -221,7 +285,7 @@ fun OtpVerifyScreen(onNavigate: (String) -> Unit) {
 // Screen 4: Password & PIN Reset
 @Composable
 fun PasswordResetScreen(onNavigate: (String) -> Unit) {
-    var phone by remember { mutableStateOf("+91 75620 84184") }
+    var phone by remember { mutableStateOf("") }
     var newPin by remember { mutableStateOf("") }
 
     Column(
@@ -334,4 +398,17 @@ fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
         }
     }
 }
+
+@Preview
+@Composable
+fun PhoneAuthScreenPreview() {
+    RiderGoTheme {
+        PhoneAuthScreen(onNavigate = {},{})
+        BiometricEnrolScreen {  }
+        CustomerKycScreen {  }
+        PasswordResetScreen {  }
+        OtpVerifyScreen("7562084184") {  }
+    }
+}
+
 

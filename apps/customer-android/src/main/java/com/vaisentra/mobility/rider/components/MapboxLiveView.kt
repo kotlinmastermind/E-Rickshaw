@@ -18,7 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -44,6 +46,13 @@ fun MapboxLiveView(
     dropLabel: String = "Sector 62, Noida"
 ) {
     val mapboxToken = "pk.eyJ1Ijoia290bGlubWFzdGVybWluZCIsImEiOiJjbXZ5c205bWswZnV4MnhzOXNzdm02bDB0In0.XZPhcU3_Et2F5raRUkVtxQ"
+
+    if (LocalInspectionMode.current) {
+        Box(modifier = modifier.fillMaxSize().background(CanvasBlack), contentAlignment = Alignment.Center) {
+            Text(text = "🗺️ Mapbox Live Map ($pickupLabel)", color = TextMuted, fontSize = 14.sp)
+        }
+        return
+    }
 
     val mapHtml = remember(pickupLat, pickupLng, dropLat, dropLng, showRoute) {
         """
@@ -202,6 +211,14 @@ fun MapboxLiveView(
             },
             modifier = Modifier.fillMaxSize()
         )
+    }
+}
+
+@Preview
+@Composable
+fun MapboxLiveViewPreview() {
+    RiderGoTheme {
+        MapboxLiveView()
     }
 }
 

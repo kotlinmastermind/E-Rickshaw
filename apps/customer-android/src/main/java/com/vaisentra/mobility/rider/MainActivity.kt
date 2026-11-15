@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import com.vaisentra.mobility.rider.data.NetworkClient
 import com.vaisentra.mobility.rider.navigation.RiderAppNavigation
 import com.vaisentra.mobility.rider.theme.CanvasBlack
 import com.vaisentra.mobility.rider.theme.RiderGoTheme
@@ -14,6 +15,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NetworkClient.init(applicationContext)
         setContent {
             RiderGoTheme {
                 Surface(
