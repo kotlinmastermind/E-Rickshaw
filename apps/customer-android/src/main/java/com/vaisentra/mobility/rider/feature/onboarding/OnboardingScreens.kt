@@ -315,11 +315,36 @@ fun PasswordResetScreen(onNavigate: (String) -> Unit) {
 }
 
 // Screen 5: Customer Registration & KYC Profile
+
 @Composable
-fun CustomerKycScreen(onNavigate: (String) -> Unit) {
-    var fullName by remember { mutableStateOf("Bhishma Rider") }
-    var email by remember { mutableStateOf("kotlindeveloper75620@gmail.com") }
-    var aadhaarNumber by remember { mutableStateOf("•••• •••• 9102") }
+fun CustomerKycScreen(
+    prefilledPhone: String = "",
+    onNavigate: (String) -> Unit
+) {
+    var fullName by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf(prefilledPhone) }
+    var govtIdNumber by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    // Agar user pehle se logged in hai toh uska current data fetch karein
+    LaunchedEffect(Unit) {
+        val me = withContext(Dispatchers.IO) {
+            RiderRepository.fetchCurrentUserMe()
+        }
+        if (me != null) {
+            if (!me.fullName.isNullOrBlank() && me.fullName != "Valued Customer") {
+                fullName = me.fullName
+            }
+            if (!me.email.isNullOrBlank()) {
+                email = me.email
+            }
+            if (!me.phoneNumber.isNullOrBlank() && phone.isBlank()) {
+                phone = me.phoneNumber
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -328,27 +353,74 @@ fun CustomerKycScreen(onNavigate: (String) -> Unit) {
             .padding(24.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        NeoHeader(title = "Customer Profile & KYC", subtitle = "Aadhaar verified commuter account", onBack = { onNavigate("auth_phone") })
+        NeoHeader(
+            title = "Customer Profile & KYC",
+            subtitle = "Verified commuter account",
+            onBack = { onNavigate("auth_phone") }
+        )
         Spacer(modifier = Modifier.height(20.dp))
 
         NeoCard {
-            NeoTextField(value = fullName, onValueChange = { fullName = it }, placeholder = "Full Legal Name", label = "Full Name")
+            NeoTextField(
+                value = fullName,
+                onValueChange = { fullName = it },
+                placeholder = "Enter Full Legal Name",
+                label = "Full Name"
+            )
             Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(value = email, onValueChange = { email = it }, placeholder = "Email Address", label = "Email")
+            NeoTextField(
+                value = email,
+                onValueChange = { email = it },
+                placeholder = "Enter Email Address",
+                label = "Email"
+            )
             Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(value = aadhaarNumber, onValueChange = { aadhaarNumber = it }, placeholder = "Aadhaar Card Number", label = "Govt ID / Aadhaar", trailingText = "VERIFIED ✓")
+            NeoTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                placeholder = "+91 XXXXX XXXXX",
+                label = "Registered Mobile Number"
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            NeoTextField(
+                value = govtIdNumber,
+                onValueChange = { govtIdNumber = it },
+                placeholder = "Enter 12-Digit Govt ID",
+                label = "Govt ID / Aadhaar"
+            )
             Spacer(modifier = Modifier.height(20.dp))
-            NeoButton(text = "Save KYC & Continue", onClick = {
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    RiderRepository.registerCustomerProfile(fullName, email)
+            NeoButton(
+                text = if (isSaving) "Syncing KYC..." else "Save KYC & Continue",
+                onClick = {
+                    if (fullName.trim().length < 2) {
+                        DialogController.showToast("Please enter your full name")
+                        return@NeoButton
+                    }
+                    if (isSaving) return@NeoButton
+                    isSaving = true
+
+                    coroutineScope.launch(Dispatchers.IO) {
+                        val result = RiderRepository.registerCustomerProfile(
+                            name = fullName,
+                            email = email,
+                            phone = phone,
+                            govtId = govtIdNumber
+                        )
+                        withContext(Dispatchers.Main) {
+                            isSaving = false
+                            result.onSuccess {
+                                DialogController.showToast("Profile and KYC synced with Supabase!")
+                                onNavigate("auth_biometric")
+                            }.onFailure { err ->
+                                DialogController.showToast(err.message ?: "KYC update failed!")
+                            }
+                        }
+                    }
                 }
-                DialogController.showToast("Profile and KYC synced with Supabase!")
-                onNavigate("auth_biometric")
-            })
+            )
         }
     }
 }
-
 // Screen 6: Passkey & Hardware Biometric Enrolment
 @Composable
 fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
@@ -399,6 +471,102 @@ fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
     }
 }
 
+
+// Screen 7: App Lock PIN Verification Screen
+@Composable
+fun AppLockScreen(
+    onUnlocked: () -> Unit,
+    onForgotPinLogout: () -> Unit
+) {
+    var pinInput by remember { mutableStateOf("") }
+    var isVerifying by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(CanvasBlack)
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(84.dp)
+                .clip(CircleShape)
+                .background(SapphireGlow),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = "🔐", fontSize = 40.sp)
+        }
+        Spacer(modifier = Modifier.height(20.dp))
+        Text(
+            text = "RiderGo Security Lock",
+            color = TextWhite,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Enter your 4-digit App Lock PIN to continue",
+            color = TextMuted,
+            fontSize = 13.sp
+        )
+        Spacer(modifier = Modifier.height(28.dp))
+
+        NeoCard {
+            NeoTextField(
+                value = pinInput,
+                onValueChange = { input ->
+                    if (input.length <= 4) {
+                        pinInput = input.filter { it.isDigit() }
+                    }
+                },
+                placeholder = "••••",
+                label = "4-Digit Security PIN",
+                leadingIcon = "🔢",
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            NeoButton(
+                text = if (isVerifying) "Verifying PIN..." else "Unlock App",
+                backgroundColor = EmeraldGreen,
+                icon = "🔓",
+                onClick = {
+                    if (pinInput.length != 4) {
+                        DialogController.showToast("Please enter your 4-digit PIN")
+                        return@NeoButton
+                    }
+                    if (isVerifying) return@NeoButton
+                    isVerifying = true
+
+                    coroutineScope.launch(Dispatchers.IO) {
+                        val result = RiderRepository.verifyAppLockPin(pinInput)
+                        withContext(Dispatchers.Main) {
+                            isVerifying = false
+                            result.onSuccess {
+                                DialogController.showToast("App Unlocked!")
+                                onUnlocked()
+                            }.onFailure { err ->
+                                pinInput = ""
+                                DialogController.showToast(err.message ?: "Invalid Security PIN!")
+                            }
+                        }
+                    }
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Text(
+            text = "Forgot PIN? Sign in again via OTP",
+            color = ElectricCyan,
+            fontSize = 13.sp,
+            modifier = Modifier.clickable { onForgotPinLogout() }
+        )
+    }
+}
 @Preview
 @Composable
 fun PhoneAuthScreenPreview() {
@@ -410,5 +578,34 @@ fun PhoneAuthScreenPreview() {
         OtpVerifyScreen("7562084184") {  }
     }
 }
+
+
+@Preview
+@Composable
+fun PasswordResetScreenPreview() {
+    RiderGoTheme {
+        PasswordResetScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun AppLockScreenPreview() {
+    RiderGoTheme {
+        AppLockScreen(
+            onUnlocked = {},
+            onForgotPinLogout = {}
+        )
+    }
+}
+
+@Preview
+@Composable
+fun CustomerKycScreenPreview() {
+    RiderGoTheme {
+        CustomerKycScreen("",onNavigate = {})
+    }
+}
+
 
 

@@ -674,13 +674,39 @@ object RiderRepository {
 
     suspend fun setAppLockPin(pin: String): Result<Boolean> {
         return try {
-            val res = NetworkClient.apiService.setAppLockPin(mapOf("pin" to pin))
-            Result.success(res.isSuccessful)
+            val cleanPin = pin.trim()
+            if (cleanPin.length != 4 || !cleanPin.all { it.isDigit() }) {
+                return Result.failure(Exception("PIN sirf 4 digits ka hona chahiye."))
+            }
+            val res = NetworkClient.apiService.setAppLockPin(mapOf("pin" to cleanPin))
+            if (res.isSuccessful) {
+                Result.success(true)
+            } else {
+                val errBody = res.errorBody()?.string() ?: "Server error: HTTP ${res.code()}"
+                Result.failure(Exception(errBody))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
+    suspend fun verifyAppLockPin(pin: String): Result<Boolean> {
+        return try {
+            val cleanPin = pin.trim()
+            if (cleanPin.length != 4 || !cleanPin.all { it.isDigit() }) {
+                return Result.failure(Exception("4-digit PIN daalein."))
+            }
+            val res = NetworkClient.apiService.verifyAppLockPin(mapOf("pin" to cleanPin))
+            if (res.isSuccessful) {
+                Result.success(true)
+            } else {
+                val errBody = res.errorBody()?.string() ?: "Galat PIN (HTTP ${res.code()})"
+                Result.failure(Exception(errBody))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
     suspend fun fetchTrustedDevices(): Result<List<Map<String, Any>>> {
         return try {
             val res = NetworkClient.apiService.getTrustedDevices()
@@ -752,21 +778,31 @@ object RiderRepository {
         }
     }
 
-    suspend fun registerCustomerProfile(name: String, email: String, phone: String = "+91 75620 84184"): Result<Boolean> {
+    suspend fun registerCustomerProfile(
+        name: String,
+        email: String,
+        phone: String? = null,
+        govtId: String? = null
+    ): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.registerProfile(
                 RegisterCustomerRequest(
-                    phoneNumber = phone,
-                    fullName = name,
-                    email = email
+                    phoneNumber = phone?.trim(),
+                    fullName = name.trim(),
+                    email = email.trim(),
+                    govtIdNumber = govtId?.trim()
                 )
             )
-            Result.success(res.isSuccessful)
+            if (res.isSuccessful) {
+                Result.success(true)
+            } else {
+                val errBody = res.errorBody()?.string() ?: "KYC sync failed: HTTP ${res.code()}"
+                Result.failure(Exception(errBody))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
-
     suspend fun resetForgotPassword(recoveryCode: String, newPassword: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.resetForgotPassword(

@@ -41,6 +41,8 @@ import android.util.Base64
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 // Screen 46: Refer & Earn Electric Cash
 @Composable
 fun ReferEarnScreen(onNavigate: (String) -> Unit) {
@@ -607,17 +609,76 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
                         }
                     }
                 )
+                var showPinDialog by remember { mutableStateOf(false) }
+                var newAppPin by remember { mutableStateOf("") }
+                var isSavingPin by remember { mutableStateOf(false) }
+
                 NeoButton(
                     text = "App Lock PIN",
                     modifier = Modifier.weight(1f),
                     backgroundColor = SurfaceDark,
                     onClick = {
-                        coroutineScope.launch(Dispatchers.IO) {
-                            RiderRepository.setAppLockPin("1234")
-                        }
-                        DialogController.showToast("4-Digit Security PIN configured in Supabase!")
+                        newAppPin = ""
+                        showPinDialog = true
                     }
                 )
+
+                if (showPinDialog) {
+                    AlertDialog(
+                        onDismissRequest = { if (!isSavingPin) showPinDialog = false },
+                        title = { Text("Set 4-Digit App Lock PIN") },
+                        text = {
+                            Column {
+                                Text("App kholne ke liye 4-digit security PIN set karein:")
+                                Spacer(modifier = Modifier.height(12.dp))
+                                NeoTextField(
+                                    value = newAppPin,
+                                    onValueChange = { input ->
+                                        if (input.length <= 4) {
+                                            newAppPin = input.filter { it.isDigit() }
+                                        }
+                                    },
+                                    placeholder = "Enter 4-Digit PIN",
+                                    label = "4-Digit PIN",
+                                    visualTransformation = PasswordVisualTransformation()
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            NeoButton(
+                                text = if (isSavingPin) "Saving..." else "Save PIN",
+                                onClick = {
+                                    if (newAppPin.length != 4) {
+                                        DialogController.showToast("Kripya pura 4-digit PIN daalein.")
+                                        return@NeoButton
+                                    }
+                                    if (isSavingPin) return@NeoButton
+                                    isSavingPin = true
+
+                                    coroutineScope.launch(Dispatchers.IO) {
+                                        val result = RiderRepository.setAppLockPin(newAppPin)
+                                        kotlinx.coroutines.withContext(Dispatchers.Main) {
+                                            isSavingPin = false
+                                            result.onSuccess {
+                                                showPinDialog = false
+                                                DialogController.showToast("4-Digit App Lock PIN saved in Supabase!")
+                                            }.onFailure { err ->
+                                                DialogController.showToast(err.message ?: "PIN save failed!")
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                        },
+                        dismissButton = {
+                            TextButton(
+                                onClick = { if (!isSavingPin) showPinDialog = false }
+                            ) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
             }
         }
 

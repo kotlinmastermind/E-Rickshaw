@@ -24,9 +24,10 @@ data class LoginRequest(
 )
 
 data class RegisterCustomerRequest(
-    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("phone_number") val phoneNumber: String? = null,
     @SerializedName("full_name") val fullName: String,
     @SerializedName("email") val email: String? = null,
+    @SerializedName("govt_id_number") val govtIdNumber: String? = null,
     @SerializedName("preferred_language") val preferredLanguage: String = "en"
 )
 
@@ -53,6 +54,7 @@ data class UserMeResponse(
     @SerializedName("full_name") val fullName: String?,
     @SerializedName("role") val role: String = "customer",
     @SerializedName("avatar_url") val avatarUrl: String? = null,
+    @SerializedName("has_pin") val hasPin: Boolean = false,
     @SerializedName("has_passkey") val hasPasskey: Boolean = false,
     @SerializedName("biometric_enabled") val biometricEnabled: Boolean = false
 )

@@ -28,6 +28,10 @@ import com.vaisentra.mobility.rider.feature.support.*
 import com.vaisentra.mobility.rider.feature.trip.*
 import com.vaisentra.mobility.rider.feature.wallet.*
 import com.vaisentra.mobility.rider.theme.*
+import com.vaisentra.mobility.rider.data.NetworkClient
+import com.vaisentra.mobility.rider.data.RiderRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun RiderAppNavigation() {
@@ -35,6 +39,25 @@ fun RiderAppNavigation() {
     val backStack = remember { mutableStateListOf("splash") }
     // Yeh state PhoneAuthScreen se OtpVerifyScreen tak phone number le jayegi
     var authPhone by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        if (!NetworkClient.authToken.isNullOrBlank()) {
+            val userMe = withContext(Dispatchers.IO) {
+                RiderRepository.fetchCurrentUserMe()
+            }
+            if (userMe != null) {
+                if (userMe.hasPin) {
+                    backStack.clear()
+                    backStack.add("app_lock")
+                    currentRoute = "app_lock"
+                } else {
+                    backStack.clear()
+                    backStack.add("map_home")
+                    currentRoute = "map_home"
+                }
+            }
+        }
+    }
 
     fun navigateTo(route: String) {
         backStack.add(route)
@@ -58,6 +81,20 @@ fun RiderAppNavigation() {
         when (currentRoute) {
             // Category 1: Onboarding
             "splash" -> BrandSplashScreen { navigateTo(it) }
+
+            "app_lock" -> AppLockScreen(
+                onUnlocked = {
+                    backStack.clear()
+                    backStack.add("map_home")
+                    currentRoute = "map_home"
+                },
+                onForgotPinLogout = {
+                    NetworkClient.clearAuthToken()
+                    backStack.clear()
+                    backStack.add("auth_phone")
+                    currentRoute = "auth_phone"
+                }
+            )
             // Yahan se phone number save karke auth_otp par navigate karein
             "auth_phone" -> PhoneAuthScreen(
                 onNavigate = { navigateTo(it) },
@@ -73,7 +110,7 @@ fun RiderAppNavigation() {
                 onNavigate = { navigateTo(it) }
             )
             "auth_reset" -> PasswordResetScreen { navigateTo(it) }
-            "auth_kyc" -> CustomerKycScreen { navigateTo(it) }
+            "auth_kyc" -> CustomerKycScreen(prefilledPhone = authPhone) { navigateTo(it) }
             "auth_biometric" -> BiometricEnrolScreen { navigateTo(it) }
 
             // Category 2: Radar & Booking

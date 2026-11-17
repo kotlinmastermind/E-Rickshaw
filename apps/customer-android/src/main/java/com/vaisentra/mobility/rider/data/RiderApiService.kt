@@ -15,7 +15,10 @@ interface RiderApiService {
     @POST("api/v1/auth/login")
     suspend fun login(@Body request: LoginRequest): Response<TokenResponse>
 
-    @POST("api/v1/customers/profile")
+    //@POST("api/v1/customers/profile")
+    //suspend fun registerProfile(@Body request: RegisterCustomerRequest): Response<UserProfileDto>
+
+    @POST("api/v1/auth/kyc/customer")
     suspend fun registerProfile(@Body request: RegisterCustomerRequest): Response<UserProfileDto>
 
     @GET("api/v1/customers/profile")
@@ -168,6 +171,9 @@ interface RiderApiService {
 
     @POST("api/v1/user/app-lock/pin")
     suspend fun setAppLockPin(@Body body: Map<String, String>): Response<Map<String, Any>>
+
+    @POST("api/v1/user/app-lock/verify")
+    suspend fun verifyAppLockPin(@Body body: Map<String, String>): Response<Map<String, Any>>
 
     @GET("api/v1/user/trusted-devices")
     suspend fun getTrustedDevices(): Response<List<Map<String, Any>>>

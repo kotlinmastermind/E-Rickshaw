@@ -1,5 +1,7 @@
 from typing import Optional
 from sqlalchemy import update
+from sqlalchemy import select, or_
+from backend.domain.models import User, CustomerProfile
 from fastapi import APIRouter, Depends, Request, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,6 +49,76 @@ class AvatarUpdatePayload(BaseModel):
     avatar_url: str = Field(..., min_length=1)
 
 
+
+class CustomerKycUpdatePayload(BaseModel):
+    phone_number: Optional[str] = None
+    full_name: str = Field(..., min_length=2)
+    email: Optional[str] = None
+    govt_id_number: Optional[str] = None
+
+@router.post("/kyc/customer")
+@router.put("/kyc/customer")
+async def update_customer_kyc(
+    payload: CustomerKycUpdatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    user: Optional[User] = None
+
+    # 1. Pehle Bearer token se logged-in user ko dhundhein
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            token = auth_header.split(" ")[1]
+            decoded = decode_jwt_token(token)
+            user_id = decoded.get("sub")
+            if user_id:
+                res = await db.execute(select(User).where(User.id == user_id))
+                user = res.scalar_one_or_none()
+        except Exception:
+            pass
+
+    # 2. Agar token nahi hai toh phone_number se user dhundhein
+    if not user and payload.phone_number:
+        digits = "".join(filter(str.isdigit, payload.phone_number))
+        last_10 = digits[-10:] if len(digits) >= 10 else digits
+        res = await db.execute(
+            select(User).where(
+                or_(
+                    User.phone_number == payload.phone_number.strip(),
+                    User.phone_number.endswith(last_10)
+                )
+            )
+        )
+        user = res.scalars().first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account nahi mila. Kripya pehle phone number se OTP verify karein."
+        )
+
+    # 3. User details update karein
+    user.full_name = payload.full_name.strip()
+    if payload.email and payload.email.strip():
+        user.email = payload.email.strip().lower()
+    user.is_verified = True
+
+    # 4. CustomerProfile record ensure/update karein
+    prof_res = await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
+    profile = prof_res.scalar_one_or_none()
+    if not profile:
+        profile = CustomerProfile(user_id=user.id)
+        db.add(profile)
+
+    await db.commit()
+    return {
+        "message": "Customer profile and KYC saved successfully.",
+        "user_id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "is_verified": user.is_verified
+    }
 
 
 @router.put("/avatar")
