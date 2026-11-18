@@ -663,10 +663,23 @@ object RiderRepository {
     }
 
     // --- User Governance & Advanced Wallet Methods ---
+    // RiderRepository.kt
+
+    // RiderRepository.kt
+
     suspend fun registerPasskey(credId: String, pubKey: String): Result<Boolean> {
         return try {
-            val res = NetworkClient.apiService.registerPasskey(mapOf("credential_id" to credId, "public_key" to pubKey))
-            Result.success(res.isSuccessful)
+            val res = NetworkClient.apiService.registerPasskey(
+                mapOf("credential_id" to credId, "public_key" to pubKey)
+            )
+            if (res.isSuccessful) {
+                // Saath mein biometric flag bhi sync kar dein
+                NetworkClient.apiService.toggleBiometric(mapOf("enabled" to true))
+                Result.success(true)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(Exception(err))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -814,6 +827,8 @@ object RiderRepository {
         }
     }
 
+
+
     suspend fun changeUserPassword(currentPass: String, newPass: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.changePassword(
@@ -832,6 +847,8 @@ object RiderRepository {
             Result.failure(e)
         }
     }
+
+
 
     suspend fun uploadProfilePhoto(context: android.content.Context, uri: android.net.Uri): Result<String> {
         return try {

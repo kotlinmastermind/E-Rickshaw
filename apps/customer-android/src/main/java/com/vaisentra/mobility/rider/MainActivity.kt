@@ -1,17 +1,17 @@
 package com.vaisentra.mobility.rider
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.fragment.app.FragmentActivity
 import com.vaisentra.mobility.rider.data.NetworkClient
 import com.vaisentra.mobility.rider.navigation.RiderAppNavigation
 import com.vaisentra.mobility.rider.theme.CanvasBlack
 import com.vaisentra.mobility.rider.theme.RiderGoTheme
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,4 +28,3 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-

@@ -29,6 +29,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import android.os.Build
+import android.provider.Settings
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
+import kotlinx.coroutines.launch
+import java.util.UUID
+
 // Screen 1: Brand Splash & Locale Switcher
 
 @Composable
@@ -116,7 +127,7 @@ fun BrandSplashScreen(onNavigate: (String) -> Unit = {}) {
 fun PhoneAuthScreen(onNavigate: (String) -> Unit,onOtpSent: (String) -> Unit
 ) {
     var phone by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+
 
     Column(
         modifier = Modifier
@@ -139,17 +150,7 @@ fun PhoneAuthScreen(onNavigate: (String) -> Unit,onOtpSent: (String) -> Unit
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
             )
             Spacer(modifier = Modifier.height(16.dp))
-            Text(text = "Password (Optional for OTP)", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            NeoTextField(
-                value = password,
-                onValueChange = { password = it },
-                placeholder = "••••••••",
-                leadingIcon = "🔒",
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
-            )
-            Spacer(modifier = Modifier.height(20.dp))
+
             NeoButton(
                 text = "Send 6-Digit OTP",
                 onClick = {
@@ -181,12 +182,7 @@ fun PhoneAuthScreen(onNavigate: (String) -> Unit,onOtpSent: (String) -> Unit
                 fontSize = 13.sp,
                 modifier = Modifier.clickable { onNavigate("auth_reset") }
             )
-            Text(
-                text = "New User KYC?",
-                color = ElectricCyan,
-                fontSize = 13.sp,
-                modifier = Modifier.clickable { onNavigate("auth_kyc") }
-            )
+
         }
     }
 }
@@ -253,8 +249,25 @@ fun OtpVerifyScreen(
 
                             // 3. Agar OTP sahi hai tabhi navigate karein
                             if (result.isSuccess) {
-                                DialogController.showToast("Authentication Successful! Session issued.")
-                                onNavigate("map_home")
+                                val tokenResponse = result.getOrNull()
+                                val isBackendNewUser = tokenResponse?.isNewUser == true
+                                
+                                val userMe = withContext(Dispatchers.IO) { RiderRepository.fetchCurrentUserMe() }
+                                val hasCustomName = userMe != null && 
+                                    !userMe.fullName.isNullOrBlank() && 
+                                    userMe.fullName != "Valued Customer" && 
+                                    userMe.fullName != "Distinguished Guest" &&
+                                    userMe.fullName != "Driver Partner"
+
+                                val isExistingUser = !isBackendNewUser && hasCustomName
+
+                                if (isExistingUser) {
+                                    DialogController.showToast("Welcome back!")
+                                    onNavigate("map_home")
+                                } else {
+                                    DialogController.showToast("Welcome! Please complete your profile KYC.")
+                                    onNavigate("auth_kyc")
+                                }
                             } else {
                                 val errorMsg = result.exceptionOrNull()?.message ?: "Invalid OTP! Please try again."
                                 DialogController.showToast(errorMsg)
@@ -422,8 +435,82 @@ fun CustomerKycScreen(
     }
 }
 // Screen 6: Passkey & Hardware Biometric Enrolment
+
+
 @Composable
 fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isLoading by remember { mutableStateOf(false) }
+
+    fun enrollWithSystemBiometric() {
+        val activity = context as? FragmentActivity
+        if (activity == null) {
+            DialogController.showToast("Activity context error: FragmentActivity required")
+            return
+        }
+
+        val biometricManager = BiometricManager.from(context)
+        val canAuth = biometricManager.canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                    BiometricManager.Authenticators.BIOMETRIC_WEAK
+        )
+
+        if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
+            DialogController.showToast("Device mein Fingerprint ya Face Lock set nahi hai.")
+            return
+        }
+
+        val executor = ContextCompat.getMainExecutor(context)
+        val biometricPrompt = BiometricPrompt(
+            activity,
+            executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    scope.launch {
+                        isLoading = true
+                        val deviceId = Settings.Secure.getString(
+                            context.contentResolver,
+                            Settings.Secure.ANDROID_ID
+                        ) ?: UUID.randomUUID().toString()
+
+                        val credId = "passkey-$deviceId"
+                        val pubKey = "android-keystore-${Build.MODEL}-${System.currentTimeMillis()}"
+
+                        val apiResult = RiderRepository.registerPasskey(credId, pubKey)
+                        isLoading = false
+
+                        apiResult.onSuccess {
+                            DialogController.showToast("Biometric Passkey Supabase se link ho gaya!")
+                            onNavigate("map_home")
+                        }.onFailure { err ->
+                            DialogController.showToast("Server Error: ${err.message}")
+                        }
+                    }
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    DialogController.showToast("Biometric cancelled: $errString")
+                }
+
+                override fun onAuthenticationFailed() {
+                    super.onAuthenticationFailed()
+                    DialogController.showToast("Fingerprint/Face match nahi hua, dubara try karein.")
+                }
+            }
+        )
+
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Vaisentra Hardware Passkey")
+            .setSubtitle("Apna Fingerprint ya Face ID verify karein")
+            .setNegativeButtonText("Cancel")
+            .build()
+
+        biometricPrompt.authenticate(promptInfo)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -432,7 +519,11 @@ fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        NeoHeader(title = "Hardware Passkey", subtitle = "Biometric 1-Tap Authorization", onBack = { onNavigate("auth_kyc") })
+        NeoHeader(
+            title = "Hardware Passkey",
+            subtitle = "Biometric 1-Tap Authorization",
+            onBack = { onNavigate("auth_kyc") }
+        )
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
@@ -445,7 +536,12 @@ fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
                 Text(text = "🛡️", fontSize = 54.sp)
             }
             Spacer(modifier = Modifier.height(24.dp))
-            Text(text = "Biometric Face ID / Fingerprint", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = "Biometric Face ID / Fingerprint",
+                color = TextWhite,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Encrypt ride tokens in Android Keystore with zero SMS delays.",
@@ -457,15 +553,16 @@ fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
         }
 
         Column(modifier = Modifier.fillMaxWidth()) {
-            NeoButton(text = "Enrol Biometric Passkey", onClick = {
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    RiderRepository.registerPasskey("passkey-hw-cred-01", "secp256r1-public-key-blob")
-                }
-                DialogController.showToast("Biometric Passkey registered with Supabase & Android Keystore!")
-                onNavigate("map_home")
-            })
+            NeoButton(
+                text = if (isLoading) "Syncing with Server..." else "Enrol Biometric Passkey",
+                onClick = { if (!isLoading) enrollWithSystemBiometric() }
+            )
             Spacer(modifier = Modifier.height(10.dp))
-            NeoButton(text = "Skip to Home", backgroundColor = SurfaceDark, onClick = { onNavigate("map_home") })
+            NeoButton(
+                text = "Skip to Home",
+                backgroundColor = SurfaceDark,
+                onClick = { onNavigate("map_home") }
+            )
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
@@ -606,6 +703,15 @@ fun CustomerKycScreenPreview() {
         CustomerKycScreen("",onNavigate = {})
     }
 }
+
+@Preview
+@Composable
+fun BiometricEnrolScreenPreview() {
+    RiderGoTheme {
+        BiometricEnrolScreen(onNavigate = {})
+    }
+}
+
 
 
 

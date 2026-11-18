@@ -15,6 +15,10 @@ interface RiderApiService {
     @POST("api/v1/auth/login")
     suspend fun login(@Body request: LoginRequest): Response<TokenResponse>
 
+    // RiderApiService.kt mein add karein:
+    @POST("api/v1/user/biometric/toggle")
+    suspend fun toggleBiometric(@Body body: Map<String, Boolean>): Response<Boolean>
+
     //@POST("api/v1/customers/profile")
     //suspend fun registerProfile(@Body request: RegisterCustomerRequest): Response<UserProfileDto>
 

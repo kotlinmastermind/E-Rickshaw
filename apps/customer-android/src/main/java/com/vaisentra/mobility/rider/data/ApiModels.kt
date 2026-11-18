@@ -35,7 +35,8 @@ data class TokenResponse(
     @SerializedName("access_token") val accessToken: String,
     @SerializedName("refresh_token") val refreshToken: String? = null,
     @SerializedName("token_type") val tokenType: String = "bearer",
-    @SerializedName("user_id") val userId: String? = null
+    @SerializedName("user_id") val userId: String? = null,
+    @SerializedName("is_new_user") val isNewUser: Boolean? = null
 )
 
 data class UserProfileDto(
