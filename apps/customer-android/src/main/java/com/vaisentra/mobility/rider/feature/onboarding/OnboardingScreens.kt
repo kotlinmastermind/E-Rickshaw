@@ -439,6 +439,7 @@ fun CustomerKycScreen(
 
 @Composable
 fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
@@ -446,7 +447,7 @@ fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
     fun enrollWithSystemBiometric() {
         val activity = context as? FragmentActivity
         if (activity == null) {
-            DialogController.showToast("Activity context error: FragmentActivity required")
+            DialogController.showToast("MainActivity must extend FragmentActivity")
             return
         }
 
@@ -457,7 +458,7 @@ fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
         )
 
         if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
-            DialogController.showToast("Device mein Fingerprint ya Face Lock set nahi hai.")
+            DialogController.showToast("Please enable Fingerprint or Face Unlock in device settings.")
             return
         }
 
@@ -470,19 +471,14 @@ fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
                     super.onAuthenticationSucceeded(result)
                     scope.launch {
                         isLoading = true
-                        val deviceId = Settings.Secure.getString(
-                            context.contentResolver,
-                            Settings.Secure.ANDROID_ID
-                        ) ?: UUID.randomUUID().toString()
-
-                        val credId = "passkey-$deviceId"
-                        val pubKey = "android-keystore-${Build.MODEL}-${System.currentTimeMillis()}"
+                        val credId = "passkey-${java.util.UUID.randomUUID()}"
+                        val pubKey = "android-keystore-${android.os.Build.MODEL}-${System.currentTimeMillis()}"
 
                         val apiResult = RiderRepository.registerPasskey(credId, pubKey)
                         isLoading = false
 
                         apiResult.onSuccess {
-                            DialogController.showToast("Biometric Passkey Supabase se link ho gaya!")
+                            DialogController.showToast("Biometric Passkey registered successfully!")
                             onNavigate("map_home")
                         }.onFailure { err ->
                             DialogController.showToast("Server Error: ${err.message}")
@@ -492,19 +488,19 @@ fun BiometricEnrolScreen(onNavigate: (String) -> Unit) {
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
-                    DialogController.showToast("Biometric cancelled: $errString")
+                    DialogController.showToast("Cancelled: $errString")
                 }
 
                 override fun onAuthenticationFailed() {
                     super.onAuthenticationFailed()
-                    DialogController.showToast("Fingerprint/Face match nahi hua, dubara try karein.")
+                    DialogController.showToast("Biometric not recognized. Try again.")
                 }
             }
         )
 
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Vaisentra Hardware Passkey")
-            .setSubtitle("Apna Fingerprint ya Face ID verify karein")
+            .setTitle("Hardware Passkey")
+            .setSubtitle("Verify Fingerprint or Face ID")
             .setNegativeButtonText("Cancel")
             .build()
 

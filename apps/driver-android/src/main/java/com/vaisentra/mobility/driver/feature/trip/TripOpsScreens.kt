@@ -262,62 +262,81 @@ fun PickupNavScreen(
             onBack = onNavigateBack
         )
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .weight(1f)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Navigation instruction card
-                CockpitCard(glow = true) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.TurnRight, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(36.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("In 120 meters", color = ElectricCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Text("Turn right onto Metro Feeder Corridor Road", color = CockpitTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("ETA: 3 mins • 700m remaining", color = CockpitTextSecondary, fontSize = 12.sp)
-                        Text("Target: Gate 2", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                // Passenger details card
-                CockpitCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("Rider: Ankit Verma", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text("Pickup: Metro Gate 2 Pillar 28", color = CockpitTextSecondary, fontSize = 12.sp)
-                        }
-                        IconButton(
-                            onClick = { onShowToast("Dialing passenger via masked proxy...") },
-                            modifier = Modifier.clip(CircleShape).background(EmeraldPrimary.copy(alpha = 0.2f))
-                        ) {
-                            Icon(Icons.Default.Phone, contentDescription = "Call", tint = EmeraldPrimary)
-                        }
-                    }
-                }
-            }
-
-            CockpitButton(
-                text = "ARRIVED AT PICKUP POINT",
-                onClick = {
-                    com.vaisentra.mobility.driver.data.DriverRepository.markArrived(
-                        com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value
-                    )
-                    onShowToast("Status updated to ARRIVED")
-                    onArrived()
-                },
-                modifier = Modifier.fillMaxWidth()
+            // Native Mapbox Navigation Map
+            DriverMapboxLiveView(
+                modifier = Modifier.fillMaxSize(),
+                driverLat = 28.6139,
+                driverLng = 77.2090,
+                targetLat = 28.6289,
+                targetLng = 77.3712,
+                targetLabel = "Metro Gate 2 Pillar 28",
+                isNavigating = true,
+                headingDegrees = 45.0
             )
+
+            // Floating Navigation HUD Cards
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Navigation instruction card
+                    CockpitCard(glow = true) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.TurnRight, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(36.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text("In 120 meters", color = ElectricCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("Turn right onto Metro Feeder Corridor Road", color = CockpitTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("ETA: 3 mins • 700m remaining", color = CockpitTextSecondary, fontSize = 12.sp)
+                            Text("Target: Gate 2", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Passenger details card
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("Rider: Ankit Verma", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Text("Pickup: Metro Gate 2 Pillar 28", color = CockpitTextSecondary, fontSize = 12.sp)
+                            }
+                            IconButton(
+                                onClick = { onShowToast("Dialing passenger via masked proxy...") },
+                                modifier = Modifier.clip(CircleShape).background(EmeraldPrimary.copy(alpha = 0.2f))
+                            ) {
+                                Icon(Icons.Default.Phone, contentDescription = "Call", tint = EmeraldPrimary)
+                            }
+                        }
+                    }
+                }
+
+                CockpitButton(
+                    text = "ARRIVED AT PICKUP POINT",
+                    onClick = {
+                        com.vaisentra.mobility.driver.data.DriverRepository.markArrived(
+                            com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value
+                        )
+                        onShowToast("Status updated to ARRIVED")
+                        onArrived()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }

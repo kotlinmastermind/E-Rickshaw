@@ -1,38 +1,48 @@
 package com.vaisentra.mobility.rider.components
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.webkit.WebChromeClient
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GpsFixed
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
+import com.mapbox.geojson.Point
+import com.mapbox.maps.CameraOptions
+import com.mapbox.maps.Style
+import com.mapbox.maps.extension.compose.MapboxMap
+import com.mapbox.maps.extension.compose.animation.viewport.rememberMapViewportState
+import com.mapbox.maps.extension.compose.annotation.ViewAnnotation
+import com.mapbox.maps.extension.compose.annotation.generated.PolylineAnnotation
+import com.mapbox.maps.extension.compose.style.MapStyle
+import com.mapbox.maps.viewannotation.geometry
+import com.mapbox.maps.viewannotation.viewAnnotationOptions
+import com.vaisentra.mobility.rider.data.NearbyVehicleDto
 import com.vaisentra.mobility.rider.theme.*
 
 /**
- * Premium Mapbox GL Live Map component using Mapbox GL JS Vector Engine:
- * - Mapbox Dark Style (mapbox://styles/mapbox/dark-v11)
- * - Mapbox Public Token: pk.eyJ1Ijoia290bGlubWFzdGVybWluZCIsImEiOiJjbXZ5c205bWswZnV4MnhzOXNzdm02bDB0In0.XZPhcU3_Et2F5raRUkVtxQ
- * - Real-time Cyan Route Polyline with Direction Arrows
- * - 3D 60° Pitch View (Rapido / Uber Navigation Camera Mode)
- * - 🟢 3D Pickup Marker + 🔴 Destination Marker + 🛺 Live EV Driver Pins
+ * Native Android Mapbox SDK (Kotlin + Jetpack Compose) Implementation.
+ * Replaces the legacy WebView HTML map with 60 FPS hardware-accelerated native rendering.
+ * Preserves all backend coordinates, nearby vehicle telemetry, and route polylines.
  */
 @Composable
 fun MapboxLiveView(
@@ -42,175 +52,355 @@ fun MapboxLiveView(
     dropLat: Double = 28.6289,
     dropLng: Double = 77.3712,
     showRoute: Boolean = true,
-    pickupLabel: String = "Connaught Place",
-    dropLabel: String = "Sector 62, Noida"
+    pickupLabel: String = "Current Location",
+    dropLabel: String = "Destination",
+    nearbyVehicles: List<NearbyVehicleDto> = emptyList(),
+    onRecenterClicked: (() -> Unit)? = null
 ) {
-    val mapboxToken = "pk.eyJ1Ijoia290bGlubWFzdGVybWluZCIsImEiOiJjbXZ5c205bWswZnV4MnhzOXNzdm02bDB0In0.XZPhcU3_Et2F5raRUkVtxQ"
-
     if (LocalInspectionMode.current) {
-        Box(modifier = modifier.fillMaxSize().background(CanvasBlack), contentAlignment = Alignment.Center) {
-            Text(text = "🗺️ Mapbox Live Map ($pickupLabel)", color = TextMuted, fontSize = 14.sp)
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(CanvasBlack),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = "🗺️ Native Mapbox Map ($pickupLabel)", color = TextMuted, fontSize = 14.sp)
         }
         return
     }
 
-    val mapHtml = remember(pickupLat, pickupLng, dropLat, dropLng, showRoute) {
-        """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
-            <script src="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.js"></script>
-            <link href="https://api.mapbox.com/mapbox-gl-js/v3.4.0/mapbox-gl.css" rel="stylesheet" />
-            <style>
-                body { margin: 0; padding: 0; background-color: #090B10; overflow: hidden; }
-                #map { position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }
-                .marker-pickup {
-                    width: 22px; height: 22px; border-radius: 50%;
-                    background: #10B981; border: 3px solid #FFFFFF;
-                    box-shadow: 0 0 15px rgba(16, 185, 129, 0.9);
-                }
-                .marker-drop {
-                    width: 22px; height: 22px; border-radius: 50%;
-                    background: #EF4444; border: 3px solid #FFFFFF;
-                    box-shadow: 0 0 15px rgba(239, 68, 68, 0.9);
-                }
-                .marker-driver {
-                    font-size: 20px;
-                    filter: drop-shadow(0 2px 8px rgba(0,0,0,0.8));
-                }
-                .mapboxgl-ctrl-bottom-left, .mapboxgl-ctrl-bottom-right { display: none !important; }
-            </style>
-        </head>
-        <body>
-            <div id="map"></div>
-            <script>
-                mapboxgl.accessToken = '$mapboxToken';
-                
-                const map = new mapboxgl.Map({
-                    container: 'map',
-                    style: 'mapbox://styles/mapbox/dark-v11',
-                    center: [$pickupLng, $pickupLat],
-                    zoom: 13.5,
-                    pitch: 50,
-                    bearing: -17.6,
-                    attributionControl: false
-                });
-
-                map.on('load', () => {
-                    // 1. Pickup Marker
-                    const elPickup = document.createElement('div');
-                    elPickup.className = 'marker-pickup';
-                    new mapboxgl.Marker(elPickup)
-                        .setLngLat([$pickupLng, $pickupLat])
-                        .addTo(map);
-
-                    // 2. Drop Marker & Polyline Route
-                    if ($showRoute) {
-                        const elDrop = document.createElement('div');
-                        elDrop.className = 'marker-drop';
-                        new mapboxgl.Marker(elDrop)
-                            .setLngLat([$dropLng, $dropLat])
-                            .addTo(map);
-
-                        const routeCoordinates = [
-                            [$pickupLng, $pickupLat],
-                            [$pickupLng + 0.02, $pickupLat + 0.005],
-                            [$pickupLng + 0.06, $pickupLat + 0.012],
-                            [$pickupLng + 0.11, $pickupLat + 0.014],
-                            [$dropLng, $dropLat]
-                        ];
-
-                        map.addSource('route', {
-                            'type': 'geojson',
-                            'data': {
-                                'type': 'Feature',
-                                'properties': {},
-                                'geometry': {
-                                    'type': 'LineString',
-                                    'coordinates': routeCoordinates
-                                }
-                            }
-                        });
-
-                        // Outer Cyan Glow
-                        map.addLayer({
-                            'id': 'route-glow',
-                            'type': 'line',
-                            'source': 'route',
-                            'layout': { 'line-join': 'round', 'line-cap': 'round' },
-                            'paint': {
-                                'line-color': '#00F2FE',
-                                'line-width': 8,
-                                'line-opacity': 0.8
-                            }
-                        });
-
-                        // Inner Pure White Spine
-                        map.addLayer({
-                            'id': 'route-line',
-                            'type': 'line',
-                            'source': 'route',
-                            'layout': { 'line-join': 'round', 'line-cap': 'round' },
-                            'paint': {
-                                'line-color': '#FFFFFF',
-                                'line-width': 3,
-                                'line-opacity': 1.0
-                            }
-                        });
-
-                        // Fit bounds around route
-                        const bounds = new mapboxgl.LngLatBounds();
-                        routeCoordinates.forEach(c => bounds.extend(c));
-                        map.fitBounds(bounds, { padding: 90 });
-                    }
-
-                    // 3. Nearby Live EV Drivers
-                    const nearbyDrivers = [
-                        { lng: $pickupLng + 0.004, lat: $pickupLat + 0.003, icon: '🛺' },
-                        { lng: $pickupLng - 0.005, lat: $pickupLat - 0.002, icon: '⚡' },
-                        { lng: $pickupLng + 0.008, lat: $pickupLat - 0.006, icon: '🛺' },
-                        { lng: $pickupLng - 0.003, lat: $pickupLat + 0.007, icon: '📦' }
-                    ];
-
-                    nearbyDrivers.forEach(d => {
-                        const el = document.createElement('div');
-                        el.className = 'marker-driver';
-                        el.innerHTML = d.icon;
-                        new mapboxgl.Marker(el)
-                            .setLngLat([d.lng, d.lat])
-                            .addTo(map);
-                    });
-                });
-            </script>
-        </body>
-        </html>
-        """.trimIndent()
+    val pickupPoint = remember(pickupLat, pickupLng) {
+        Point.fromLngLat(pickupLng, pickupLat)
+    }
+    val dropPoint = remember(dropLat, dropLng) {
+        Point.fromLngLat(dropLng, dropLat)
     }
 
-    Box(modifier = modifier.fillMaxSize().background(CanvasBlack)) {
-        AndroidView(
-            factory = { context ->
-                WebView(context).apply {
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        cacheMode = WebSettings.LOAD_DEFAULT
-                        useWideViewPort = true
-                        loadWithOverviewMode = true
-                    }
-                    webChromeClient = WebChromeClient()
-                    webViewClient = object : WebViewClient() {}
-                    setBackgroundColor(0xFF090B10.toInt())
-                    loadDataWithBaseURL("https://api.mapbox.com", mapHtml, "text/html", "UTF-8", null)
+    // Default to modern Dark theme for urban night/EV mobility aesthetic
+    var selectedStyleUri by remember { mutableStateOf(Style.DARK) }
+    var showStyleSwitcher by remember { mutableStateOf(false) }
+
+    val mapViewportState = rememberMapViewportState {
+        setCameraOptions {
+            center(pickupPoint)
+            zoom(14.2)
+            pitch(35.0)
+            bearing(0.0)
+        }
+    }
+
+    // Camera adjustment when pickup or route changes
+    LaunchedEffect(pickupLat, pickupLng, dropLat, dropLng, showRoute) {
+        if (showRoute) {
+            val midLat = (pickupLat + dropLat) / 2.0
+            val midLng = (pickupLng + dropLng) / 2.0
+            mapViewportState.flyTo(
+                CameraOptions.Builder()
+                    .center(Point.fromLngLat(midLng, midLat))
+                    .zoom(12.8)
+                    .pitch(40.0)
+                    .build()
+            )
+        } else {
+            mapViewportState.flyTo(
+                CameraOptions.Builder()
+                    .center(pickupPoint)
+                    .zoom(14.5)
+                    .pitch(30.0)
+                    .build()
+            )
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(CanvasBlack)
+    ) {
+        // 1. Native Compose Mapbox Map
+        MapboxMap(
+            modifier = Modifier.fillMaxSize(),
+            mapViewportState = mapViewportState,
+            style = {
+                MapStyle(style = selectedStyleUri)
+            }
+        ) {
+            // A. Pickup Marker (Native Compose ViewAnnotation)
+            ViewAnnotation(
+                options = viewAnnotationOptions {
+                    geometry(pickupPoint)
+                    allowOverlap(true)
                 }
-            },
-            update = { webView ->
-                webView.loadDataWithBaseURL("https://api.mapbox.com", mapHtml, "text/html", "UTF-8", null)
-            },
-            modifier = Modifier.fillMaxSize()
+            ) {
+                PickupMarkerNode(label = pickupLabel)
+            }
+
+            // B. Drop Marker & Polyline Route
+            if (showRoute) {
+                ViewAnnotation(
+                    options = viewAnnotationOptions {
+                        geometry(dropPoint)
+                        allowOverlap(true)
+                    }
+                ) {
+                    DropMarkerNode(label = dropLabel)
+                }
+
+                // Render High-visibility Glowing Polyline Route
+                val routeCoordinates = remember(pickupPoint, dropPoint) {
+                    listOf(pickupPoint, dropPoint)
+                }
+
+                // Cyan Electric Route Core
+                PolylineAnnotation(
+                    points = routeCoordinates
+                ) {
+                    lineColor = Color(0xFF00F2FE)
+                    lineWidth = 5.0
+                    lineOpacity = 0.95
+                }
+            }
+
+            // C. Live Nearby EV Drivers
+            nearbyVehicles.forEach { vehicle ->
+                val vehiclePoint = remember(vehicle.latitude, vehicle.longitude) {
+                    Point.fromLngLat(vehicle.longitude, vehicle.latitude)
+                }
+                val iconEmoji = when (vehicle.iconType) {
+                    "electric_auto" -> "⚡"
+                    "shared_e_rickshaw" -> "👥"
+                    "cargo_e_rickshaw" -> "📦"
+                    else -> "🛺"
+                }
+
+                ViewAnnotation(
+                    options = viewAnnotationOptions {
+                        geometry(vehiclePoint)
+                        allowOverlap(true)
+                    }
+                ) {
+                    VehicleMarkerNode(emoji = iconEmoji, batteryPercent = vehicle.batteryLevel)
+                }
+            }
+        }
+
+        // 2. Modern Glassmorphic Map Control HUD (Floating Recenter & Style Toggles)
+        Column(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 16.dp, bottom = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Style Switcher Pill
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(SurfaceElevated.copy(alpha = 0.88f))
+                    .border(1.dp, BorderSubtle, CircleShape)
+                    .clickable { showStyleSwitcher = !showStyleSwitcher },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Layers,
+                    contentDescription = "Map Style",
+                    tint = TextWhite,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Recenter GPS Button
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(SurfaceElevated.copy(alpha = 0.88f))
+                    .border(1.dp, BorderSubtle, CircleShape)
+                    .clickable {
+                        mapViewportState.flyTo(
+                            CameraOptions.Builder()
+                                .center(pickupPoint)
+                                .zoom(15.0)
+                                .pitch(35.0)
+                                .build()
+                        )
+                        onRecenterClicked?.invoke()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.GpsFixed,
+                    contentDescription = "Recenter",
+                    tint = EmeraldGreen,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        // Style Selection Dropdown Dialog / Overlay
+        AnimatedVisibility(
+            visible = showStyleSwitcher,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 68.dp)
+        ) {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceElevated.copy(alpha = 0.95f)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
+                elevation = CardDefaults.cardElevation(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Map Mode",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    StyleOptionChip(
+                        name = "🌙 Dark Cyber",
+                        isSelected = selectedStyleUri == Style.DARK,
+                        onClick = {
+                            selectedStyleUri = Style.DARK
+                            showStyleSwitcher = false
+                        }
+                    )
+                    StyleOptionChip(
+                        name = "☀️ Clean Day",
+                        isSelected = selectedStyleUri == Style.MAPBOX_STREETS,
+                        onClick = {
+                            selectedStyleUri = Style.MAPBOX_STREETS
+                            showStyleSwitcher = false
+                        }
+                    )
+                    StyleOptionChip(
+                        name = "🛰️ Satellite 3D",
+                        isSelected = selectedStyleUri == Style.SATELLITE_STREETS,
+                        onClick = {
+                            selectedStyleUri = Style.SATELLITE_STREETS
+                            showStyleSwitcher = false
+                        }
+                    )
+                    StyleOptionChip(
+                        name = "🚦 Traffic Live",
+                        isSelected = selectedStyleUri == Style.TRAFFIC_NIGHT,
+                        onClick = {
+                            selectedStyleUri = Style.TRAFFIC_NIGHT
+                            showStyleSwitcher = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StyleOptionChip(
+    name: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (isSelected) SapphireGlow.copy(alpha = 0.25f) else Color.Transparent)
+            .border(1.dp, if (isSelected) SapphireGlow else Color.Transparent, RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = name,
+            color = if (isSelected) ElectricCyan else TextWhite,
+            fontSize = 12.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
         )
+    }
+}
+
+@Composable
+private fun PickupMarkerNode(label: String) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.offset(y = (-14).dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .shadow(8.dp, RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(10.dp))
+                .background(SurfaceDark.copy(alpha = 0.92f))
+                .border(1.dp, EmeraldGreen.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+            Text(
+                text = "📍 $label",
+                color = TextWhite,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(EmeraldGreen)
+                .border(3.dp, Color.White, CircleShape)
+        )
+    }
+}
+
+@Composable
+private fun DropMarkerNode(label: String) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.offset(y = (-14).dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .shadow(8.dp, RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(10.dp))
+                .background(SurfaceDark.copy(alpha = 0.92f))
+                .border(1.dp, CrimsonRed.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 8.dp, vertical = 3.dp)
+        ) {
+            Text(
+                text = "🏁 $label",
+                color = TextWhite,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(CrimsonRed)
+                .border(3.dp, Color.White, CircleShape)
+        )
+    }
+}
+
+@Composable
+private fun VehicleMarkerNode(emoji: String, batteryPercent: Int?) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .shadow(6.dp, CircleShape)
+            .clip(CircleShape)
+            .background(SurfaceDark.copy(alpha = 0.9f))
+            .border(1.5.dp, ElectricCyan.copy(alpha = 0.7f), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text = emoji, fontSize = 16.sp)
     }
 }
 
@@ -221,4 +411,3 @@ fun MapboxLiveViewPreview() {
         MapboxLiveView()
     }
 }
-

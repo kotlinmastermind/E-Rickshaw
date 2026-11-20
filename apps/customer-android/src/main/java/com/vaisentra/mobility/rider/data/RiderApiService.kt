@@ -16,8 +16,26 @@ interface RiderApiService {
     suspend fun login(@Body request: LoginRequest): Response<TokenResponse>
 
     // RiderApiService.kt mein add karein:
+   // @POST("api/v1/user/biometric/toggle")
+    //suspend fun toggleBiometric(@Body body: Map<String, Boolean>): Response<Boolean>
+
+    // Fix return type (Backend returns {"biometric_enabled": true})
     @POST("api/v1/user/biometric/toggle")
-    suspend fun toggleBiometric(@Body body: Map<String, Boolean>): Response<Boolean>
+    suspend fun toggleBiometric(@Body body: Map<String, Boolean>): Response<Map<String, Boolean>>
+
+    // RiderApiService.kt mein add karein:
+    @GET("api/v1/fares/rules")
+    suspend fun getFareRules(): Response<List<FareRuleDto>>
+    @GET("api/v1/vehicles/nearby")
+    suspend fun getNearbyVehicles(
+        @Query("latitude") latitude: Double,
+        @Query("longitude") longitude: Double,
+        @Query("radius_km") radiusKm: Double = 5.0
+    ): Response<NearbyVehiclesResponse>
+
+    // Live Reverse Geocode (GPS -> Address)
+    @POST("api/v1/location/reverse-geocode")
+    suspend fun reverseGeocode(@Body request: ReverseGeocodeRequest): Response<ReverseGeocodeResponse>
 
     //@POST("api/v1/customers/profile")
     //suspend fun registerProfile(@Body request: RegisterCustomerRequest): Response<UserProfileDto>

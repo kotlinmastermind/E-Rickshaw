@@ -59,6 +59,61 @@ object RiderRepository {
     private val _rideReceipt = MutableStateFlow<RideReceiptDto?>(null)
     val rideReceipt: StateFlow<RideReceiptDto?> = _rideReceipt.asStateFlow()
 
+    private val _nearbyVehicles = MutableStateFlow<List<NearbyVehicleDto>>(emptyList())
+    val nearbyVehicles: StateFlow<List<NearbyVehicleDto>> = _nearbyVehicles.asStateFlow()
+
+    private val _bookingDraft = MutableStateFlow(BookingDraftState())
+    val bookingDraft: StateFlow<BookingDraftState> = _bookingDraft.asStateFlow()
+
+    private val _fareRules = MutableStateFlow<List<FareRuleDto>>(emptyList())
+    val fareRules: StateFlow<List<FareRuleDto>> = _fareRules.asStateFlow()
+
+    suspend fun fetchFareRules() {
+        try {
+            val res = NetworkClient.apiService.getFareRules()
+            if (res.isSuccessful && res.body() != null) {
+                _fareRules.value = res.body()!!.filter { it.isActive }
+            }
+        } catch (_: Exception) {
+        }
+    }
+    fun updatePickupLocation(lat: Double, lng: Double, address: String? = null) {
+        _bookingDraft.value = _bookingDraft.value.copy(
+            pickupLat = lat,
+            pickupLng = lng,
+            pickupAddress = address ?: _bookingDraft.value.pickupAddress
+        )
+    }
+
+    fun updateDestination(address: String, lat: Double, lng: Double) {
+        _bookingDraft.value = _bookingDraft.value.copy(
+            destinationAddress = address,
+            destinationLat = lat,
+            destinationLng = lng
+        )
+    }
+
+    fun selectVehicleCategory(code: String) {
+        _bookingDraft.value = _bookingDraft.value.copy(selectedCategoryCode = code)
+    }
+
+    suspend fun syncLiveLocationAndVehicles(lat: Double, lng: Double) {
+        updatePickupLocation(lat, lng)
+        try {
+            val geoRes = NetworkClient.apiService.reverseGeocode(ReverseGeocodeRequest(lat, lng))
+            if (geoRes.isSuccessful && geoRes.body() != null) {
+                updatePickupLocation(lat, lng, geoRes.body()!!.formattedAddress)
+            }
+        } catch (_: Exception) { }
+
+        try {
+            val vehRes = NetworkClient.apiService.getNearbyVehicles(lat, lng)
+            if (vehRes.isSuccessful && vehRes.body() != null) {
+                _nearbyVehicles.value = vehRes.body()!!.vehicles
+            }
+        } catch (_: Exception) { }
+    }
+
     suspend fun requestOtp(phone: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.sendOtp(OtpSendRequest(phone))
@@ -673,7 +728,6 @@ object RiderRepository {
                 mapOf("credential_id" to credId, "public_key" to pubKey)
             )
             if (res.isSuccessful) {
-                // Saath mein biometric flag bhi sync kar dein
                 NetworkClient.apiService.toggleBiometric(mapOf("enabled" to true))
                 Result.success(true)
             } else {

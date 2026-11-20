@@ -75,93 +75,118 @@ fun DutyDashboardScreen(onNavigate: (String) -> Unit) {
             }
         }
 
-        Column(
+        Box(
             modifier = Modifier
+                .fillMaxWidth()
                 .weight(1f)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Master Duty Radar Switch
-            Box(
+            // Native Mapbox Background Cockpit Live View
+            DriverMapboxLiveView(
+                modifier = Modifier.fillMaxSize(),
+                driverLat = 28.6139,
+                driverLng = 77.2090,
+                targetLat = if (isOnline) 28.6289 else null,
+                targetLng = if (isOnline) 77.3712 else null,
+                targetLabel = "High Demand Surge Corridor",
+                isNavigating = false
+            )
+
+            // Floating Duty Controls & Metrics Drawer
+            Column(
                 modifier = Modifier
-                    .size(200.dp)
-                    .clip(CircleShape)
-                    .background(if (isOnline) OnlineGlow else PilotCard)
-                    .border(2.5.dp, if (isOnline) PilotOnlineGreen else PilotOfflineGray, CircleShape)
-                    .clickable {
-                        val newStatus = !isOnline
-                        DriverRepository.setDutyStatus(newStatus)
-                        DriverDialogController.showToast(if (newStatus) "You are ONLINE! Receiving dispatch offers." else "You are OFFLINE.")
-                    },
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(text = if (isOnline) "🟢 ONLINE" else "⚪ OFFLINE", color = if (isOnline) PilotOnlineGreen else PilotTextMuted, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = if (isOnline) "Auto-Accept Radar Active" else "Tap to Go Online", color = PilotTextDim, fontSize = 11.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Quick Today Metrics Card
-            CockpitCard {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text(text = "TODAY'S PAY", color = PilotTextMuted, fontSize = 11.sp)
-                        Text(text = "₹${earnings.todayNetRupees.toInt()}", color = PilotElectricCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Column {
-                        Text(text = "TRIPS", color = PilotTextMuted, fontSize = 11.sp)
-                        Text(text = "${earnings.completedTripsToday}", color = PilotTextWhite, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Column {
-                        Text(text = "HOURS", color = PilotTextMuted, fontSize = 11.sp)
-                        Text(text = "${earnings.onlineHoursToday}h", color = PilotTextWhite, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                // Master Duty Radar Switch
+                Box(
+                    modifier = Modifier
+                        .size(170.dp)
+                        .clip(CircleShape)
+                        .background(if (isOnline) OnlineGlow.copy(alpha = 0.85f) else PilotCard.copy(alpha = 0.9f))
+                        .border(2.5.dp, if (isOnline) PilotOnlineGreen else PilotOfflineGray, CircleShape)
+                        .clickable {
+                            val newStatus = !isOnline
+                            DriverRepository.setDutyStatus(newStatus)
+                            DriverDialogController.showToast(if (newStatus) "You are ONLINE! Receiving dispatch offers." else "You are OFFLINE.")
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(text = if (isOnline) "🟢 ONLINE" else "⚪ OFFLINE", color = if (isOnline) PilotOnlineGreen else PilotTextMuted, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = if (isOnline) "Auto-Accept Active" else "Tap to Go Online", color = PilotTextDim, fontSize = 11.sp)
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // Active Vehicle Card
-            CockpitCard(modifier = Modifier.clickable { onNavigate("vehicle_inspect") }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "🛺", fontSize = 28.sp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = "DL-1ER-4921 (Mahindra Treo EV)", color = PilotTextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text(text = "Battery SoC: 78% • Range: 64 km", color = PilotOnlineGreen, fontSize = 12.sp)
+                // Bottom Floating Control Stack
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Quick Today Metrics Card
+                    CockpitCard(modifier = Modifier.background(PilotSurfaceElevated.copy(alpha = 0.92f))) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text(text = "TODAY'S PAY", color = PilotTextMuted, fontSize = 11.sp)
+                                Text(text = "₹${earnings.todayNetRupees.toInt()}", color = PilotElectricCyan, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Column {
+                                Text(text = "TRIPS", color = PilotTextMuted, fontSize = 11.sp)
+                                Text(text = "${earnings.completedTripsToday}", color = PilotTextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Column {
+                                Text(text = "HOURS", color = PilotTextMuted, fontSize = 11.sp)
+                                Text(text = "${earnings.onlineHoursToday}h", color = PilotTextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
-                    Text(text = "Inspect →", color = PilotElectricCyan, fontSize = 12.sp)
+
+                    // Active Vehicle Card
+                    CockpitCard(
+                        modifier = Modifier
+                            .background(PilotSurfaceElevated.copy(alpha = 0.92f))
+                            .clickable { onNavigate("vehicle_inspect") }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "🛺", fontSize = 24.sp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = "DL-1ER-4921 (Mahindra Treo EV)", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text(text = "Battery SoC: 78% • Range: 64 km", color = PilotOnlineGreen, fontSize = 11.sp)
+                            }
+                            Text(text = "Inspect →", color = PilotElectricCyan, fontSize = 12.sp)
+                        }
+                    }
+
+                    // Quick Nav Links
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CockpitButton(
+                            text = "Surge Heatmap",
+                            onClick = { onNavigate("heatmap") },
+                            modifier = Modifier.weight(1f),
+                            backgroundColor = PilotCard.copy(alpha = 0.95f),
+                            textColor = PilotTextWhite,
+                            icon = "🔥"
+                        )
+                        CockpitButton(
+                            text = "Test Offer",
+                            onClick = {
+                                DriverDialogController.show(DriverPopupType.INCOMING_OFFER, onConfirm = {
+                                    onNavigate("pickup_nav")
+                                })
+                            },
+                            modifier = Modifier.weight(1f),
+                            backgroundColor = PilotOnlineGreen,
+                            textColor = PilotCanvas,
+                            icon = "🚖"
+                        )
+                    }
                 }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Quick Nav Links
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CockpitButton(
-                    text = "Surge Heatmap",
-                    onClick = { onNavigate("heatmap") },
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = PilotCard,
-                    textColor = PilotTextWhite,
-                    icon = "🔥"
-                )
-                CockpitButton(
-                    text = "Test Incoming Offer",
-                    onClick = {
-                        DriverDialogController.show(DriverPopupType.INCOMING_OFFER, onConfirm = {
-                            onNavigate("pickup_nav")
-                        })
-                    },
-                    modifier = Modifier.weight(1f),
-                    backgroundColor = PilotOnlineGreen,
-                    textColor = PilotCanvas,
-                    icon = "🚖"
-                )
             }
         }
     }

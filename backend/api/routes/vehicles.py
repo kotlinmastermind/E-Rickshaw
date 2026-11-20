@@ -444,149 +444,67 @@ async def get_nearby_vehicles(
     category: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Returns available vehicles around customer's current GPS location at current time.
-    Supplies real registered fleet vehicles with exact vehicle types, icons, coordinates,
-    bearings, battery levels, distance, and ETAs.
-    """
-    fleet_templates = [
-        {
-            "id": "driver_veh_er_01",
-            "driver_name": "Ramesh Kumar",
-            "driver_phone": "+919876543210",
-            "rating": 4.88,
-            "category_code": "STANDARD_E_RICKSHAW",
-            "vehicle_type_name": "Standard E-Rickshaw",
-            "model_name": "Mayuri Deluxe Eco 1000W",
-            "license_plate": "BR-01-ER-4821",
-            "icon_type": "e_rickshaw",
-            "capacity": 4,
-            "dlat": 0.0028,
-            "dlng": 0.0021,
-            "bearing": 42.0,
-            "battery_level": 92,
-            "per_km_rate": 12.0
-        },
-        {
-            "id": "driver_veh_ea_02",
-            "driver_name": "Sunil Verma",
-            "driver_phone": "+919811223344",
-            "rating": 4.92,
-            "category_code": "ELECTRIC_AUTO",
-            "vehicle_type_name": "High-Speed Electric Auto",
-            "model_name": "Mahindra Treo High-Speed",
-            "license_plate": "BR-01-EA-8812",
-            "icon_type": "electric_auto",
-            "capacity": 3,
-            "dlat": -0.0035,
-            "dlng": 0.0039,
-            "bearing": 135.0,
-            "battery_level": 86,
-            "per_km_rate": 15.0
-        },
-        {
-            "id": "driver_veh_shared_03",
-            "driver_name": "Manoj Yadav",
-            "driver_phone": "+919822334455",
-            "rating": 4.75,
-            "category_code": "SHARED_E_RICKSHAW",
-            "vehicle_type_name": "Shared E-Rickshaw (Eco-Pool)",
-            "model_name": "Saarthi Shaktiman Eco-Pool",
-            "license_plate": "BR-01-ER-2914",
-            "icon_type": "shared_e_rickshaw",
-            "capacity": 4,
-            "dlat": 0.0042,
-            "dlng": -0.0031,
-            "bearing": 305.0,
-            "battery_level": 78,
-            "per_km_rate": 7.0
-        },
-        {
-            "id": "driver_veh_er_04",
-            "driver_name": "Dashrath Mahto",
-            "driver_phone": "+919833445566",
-            "rating": 4.95,
-            "category_code": "STANDARD_E_RICKSHAW",
-            "vehicle_type_name": "Standard E-Rickshaw",
-            "model_name": "Yatri Super Deluxe Eco",
-            "license_plate": "BR-01-ER-1093",
-            "icon_type": "e_rickshaw",
-            "capacity": 4,
-            "dlat": -0.0022,
-            "dlng": -0.0028,
-            "bearing": 220.0,
-            "battery_level": 95,
-            "per_km_rate": 12.0
-        },
-        {
-            "id": "driver_veh_cargo_05",
-            "driver_name": "Rajesh Paswan",
-            "driver_phone": "+919844556677",
-            "rating": 4.82,
-            "category_code": "CARGO_E_RICKSHAW",
-            "vehicle_type_name": "E-Loader Cargo",
-            "model_name": "Altigreen neEV Heavy Cargo",
-            "license_plate": "BR-01-EC-3310",
-            "icon_type": "cargo_e_rickshaw",
-            "capacity": 1,
-            "dlat": 0.0065,
-            "dlng": 0.0018,
-            "bearing": 15.0,
-            "battery_level": 84,
-            "per_km_rate": 18.0
-        },
-        {
-            "id": "driver_veh_ea_06",
-            "driver_name": "Vikas Singh",
-            "driver_phone": "+919855667788",
-            "rating": 4.89,
-            "category_code": "ELECTRIC_AUTO",
-            "vehicle_type_name": "High-Speed Electric Auto",
-            "model_name": "Piaggio Ape E-City FX",
-            "license_plate": "BR-01-EA-6520",
-            "icon_type": "electric_auto",
-            "capacity": 3,
-            "dlat": -0.0051,
-            "dlng": -0.0042,
-            "bearing": 255.0,
-            "battery_level": 89,
-            "per_km_rate": 15.0
-        }
-    ]
+    from datetime import datetime, timezone
+    from sqlalchemy import desc
+    from backend.domain.models import DriverProfile, DriverAvailability, DriverLocation, User
 
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(DriverProfile, DriverAvailability, DriverLocation, User)
+        .join(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
+        .join(DriverLocation, DriverLocation.driver_id == DriverProfile.id)
+        .outerjoin(User, User.id == DriverProfile.user_id)
+        .where(
+            DriverAvailability.is_online == True,
+            DriverAvailability.is_busy == False
+        )
+        .order_by(desc(DriverLocation.recorded_at))
+    )
+    res = await db.execute(stmt)
+    rows = res.all()
+
+    seen_drivers = set()
     vehicles = []
-    for item in fleet_templates:
-        if category and item["category_code"] != category:
+
+    for prof, avail, loc, user in rows:
+        if prof.id in seen_drivers:
             continue
-        v_lat = round(latitude + item["dlat"], 6)
-        v_lng = round(longitude + item["dlng"], 6)
+        seen_drivers.add(prof.id)
+
+        # 15 minutes se purani GPS ping ko ignore karein
+        rec_at = loc.recorded_at if loc.recorded_at.tzinfo else loc.recorded_at.replace(tzinfo=timezone.utc)
+        if (now - rec_at).total_seconds() > 900:
+            continue
 
         # Haversine distance
-        dlat_rad = math.radians(v_lat - latitude)
-        dlng_rad = math.radians(v_lng - longitude)
-        a = (math.sin(dlat_rad / 2) ** 2 +
-             math.cos(math.radians(latitude)) * math.cos(math.radians(v_lat)) *
-             math.sin(dlng_rad / 2) ** 2)
+        dlat_rad = math.radians(loc.latitude - latitude)
+        dlng_rad = math.radians(loc.longitude - longitude)
+        a = (
+            math.sin(dlat_rad / 2) ** 2
+            + math.cos(math.radians(latitude))
+            * math.cos(math.radians(loc.latitude))
+            * math.sin(dlng_rad / 2) ** 2
+        )
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         dist_km = round(6371.0 * c, 2)
 
         if dist_km <= radius_km:
             eta_mins = max(int(round((dist_km / 22.0) * 60.0)), 2)
             vehicles.append({
-                "id": item["id"],
-                "driver_name": item["driver_name"],
-                "driver_phone": item["driver_phone"],
-                "rating": item["rating"],
-                "category_code": item["category_code"],
-                "vehicle_type_name": item["vehicle_type_name"],
-                "model_name": item["model_name"],
-                "license_plate": item["license_plate"],
-                "icon_type": item["icon_type"],
-                "capacity": item["capacity"],
-                "latitude": v_lat,
-                "longitude": v_lng,
-                "bearing": item["bearing"],
-                "battery_level": item["battery_level"],
+                "id": prof.id,
+                "driver_name": (user.full_name if user and user.full_name else "EV Pilot"),
+                "driver_phone": (user.phone_number if user else None),
+                "rating": round(prof.rating_average or 4.9, 2),
+                "category_code": "E_RICKSHAW_STANDARD",
+                "vehicle_type_name": "E-Rickshaw EV",
+                "model_name": "RiderGo Electric",
+                "license_plate": prof.license_number or "EV-PILOT",
+                "icon_type": "e_rickshaw",
+                "capacity": 4,
+                "latitude": loc.latitude,
+                "longitude": loc.longitude,
+                "bearing": loc.heading or 0.0,
+                "battery_level": 90,
                 "distance_km": dist_km,
                 "eta_minutes": eta_mins,
                 "status": "AVAILABLE"
@@ -599,4 +517,3 @@ async def get_nearby_vehicles(
         "total_available": len(vehicles),
         "vehicles": vehicles
     }
-

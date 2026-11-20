@@ -77,6 +77,9 @@ dependencies {
     implementation(libs.logging.interceptor)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.play.services.location)
+    implementation(libs.mapbox.maps)
+    implementation(libs.mapbox.compose)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

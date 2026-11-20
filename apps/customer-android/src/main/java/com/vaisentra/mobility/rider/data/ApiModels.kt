@@ -288,4 +288,55 @@ data class SavedPlaceDto(
     @SerializedName("longitude") val longitude: Double,
     @SerializedName("tag") val tag: String = "HOME"
 )
+data class FareRuleDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("category_id") val categoryId: String,
+    @SerializedName("base_fare_rupees") val baseFareRupees: Int,
+    @SerializedName("per_km_rupees") val perKmRupees: Int,
+    @SerializedName("minimum_fare_rupees") val minimumFareRupees: Int,
+    @SerializedName("is_active") val isActive: Boolean = true
+)
 
+data class NearbyVehicleDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("driver_name") val driverName: String,
+    @SerializedName("driver_phone") val driverPhone: String?,
+    @SerializedName("rating") val rating: Double = 4.9,
+    @SerializedName("category_code") val categoryCode: String,
+    @SerializedName("vehicle_type_name") val vehicleTypeName: String,
+    @SerializedName("model_name") val modelName: String,
+    @SerializedName("license_plate") val licensePlate: String,
+    @SerializedName("icon_type") val iconType: String,
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double,
+    @SerializedName("bearing") val bearing: Double = 0.0,
+    @SerializedName("battery_level") val batteryLevel: Int = 90,
+    @SerializedName("distance_km") val distanceKm: Double = 0.5,
+    @SerializedName("eta_minutes") val etaMinutes: Int = 3
+)
+
+data class NearbyVehiclesResponse(
+    @SerializedName("total_available") val totalAvailable: Int = 0,
+    @SerializedName("vehicles") val vehicles: List<NearbyVehicleDto> = emptyList()
+)
+
+data class ReverseGeocodeRequest(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double
+)
+
+data class ReverseGeocodeResponse(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double,
+    @SerializedName("formatted_address") val formattedAddress: String
+)
+
+data class BookingDraftState(
+    val pickupAddress: String = "Fetching current location...",
+    val pickupLat: Double = 28.6139,
+    val pickupLng: Double = 77.2090,
+    val destinationAddress: String = "",
+    val destinationLat: Double = 28.6289,
+    val destinationLng: Double = 77.3712,
+    val selectedCategoryCode: String = "E_RICKSHAW_STANDARD"
+)

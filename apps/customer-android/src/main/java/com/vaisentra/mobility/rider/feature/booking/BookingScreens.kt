@@ -1,14 +1,16 @@
 package com.vaisentra.mobility.rider.feature.booking
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -20,26 +22,103 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
+import androidx.core.content.ContextCompat
 import com.vaisentra.mobility.rider.components.*
 import com.vaisentra.mobility.rider.data.RiderRepository
-import com.vaisentra.mobility.rider.data.VehicleCategoryDto
 import com.vaisentra.mobility.rider.theme.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 // =============================================================================
 // SCREEN 7: RAPIDO MAP HOME WITH MAPBOX GL BACKDROP
 // =============================================================================
 @Composable
 fun MapHomeScreen(onNavigate: (String) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
     val categories by RiderRepository.categories.collectAsState()
-    val savedPlaces by RiderRepository.savedPlaces.collectAsState()
+    val fareRules by RiderRepository.fareRules.collectAsState()
+    val nearbyVehicles by RiderRepository.nearbyVehicles.collectAsState()
+    val bookingDraft by RiderRepository.bookingDraft.collectAsState()
+    val wallet by RiderRepository.wallet.collectAsState()
+
+    var currentLat by remember { mutableDoubleStateOf(bookingDraft.pickupLat) }
+    var currentLng by remember { mutableDoubleStateOf(bookingDraft.pickupLng) }
+
+    fun fetchDeviceGpsAndSync() {
+        try {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val hasFine = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val hasCoarse = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (hasFine || hasCoarse) {
+                val lastLoc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                    ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                if (lastLoc != null) {
+                    currentLat = lastLoc.latitude
+                    currentLng = lastLoc.longitude
+                }
+
+                val provider = if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                    LocationManager.GPS_PROVIDER
+                } else {
+                    LocationManager.NETWORK_PROVIDER
+                }
+                @Suppress("DEPRECATION")
+                lm.requestSingleUpdate(provider, { freshLoc ->
+                    currentLat = freshLoc.latitude
+                    currentLng = freshLoc.longitude
+                    scope.launch {
+                        RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
+                    }
+                }, android.os.Looper.getMainLooper())
+            }
+        } catch (_: Exception) {
+        }
+
+        scope.launch {
+            RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        fetchDeviceGpsAndSync()
+    }
 
     LaunchedEffect(Unit) {
         RiderRepository.fetchVehicleCategories()
+        RiderRepository.fetchFareRules()
+        RiderRepository.fetchWalletBalance()
+        RiderRepository.fetchSavedPlaces()
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        )
+    }
+    LaunchedEffect(currentLat, currentLng) {
+        while (true) {
+            kotlinx.coroutines.delay(10_000L)
+            RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
+        }
     }
 
     Box(
@@ -47,16 +126,17 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
             .fillMaxSize()
             .background(CanvasBlack)
     ) {
-        // 1. Mapbox Dark Vector Map Canvas with Live Drivers & 3D Pitch
+        // 1. Live Mapbox Map with Real GPS & Backend Nearby Drivers
         MapboxLiveView(
             modifier = Modifier.fillMaxSize(),
-            pickupLat = 28.6139,
-            pickupLng = 77.2090,
+            pickupLat = currentLat,
+            pickupLng = currentLng,
             showRoute = false,
-            pickupLabel = "Connaught Place"
+            pickupLabel = bookingDraft.pickupAddress,
+            nearbyVehicles = nearbyVehicles
         )
 
-        // 2. Top Floating Pill Bar (Branding, Live SOS, Wallet Balance)
+        // 2. Top Floating Pill Bar (Branding, Live SOS, Live Wallet Balance)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -67,7 +147,6 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Profile & Brand Pill
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(16.dp))
@@ -78,12 +157,14 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(text = "⚡ RiderGo", color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Spacer(modifier = Modifier.width(6.dp))
-                        NeoBadge(text = "RAPIDO EV", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+                        NeoBadge(text = "LIVE EV", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
                     }
                 }
 
-                // Action Shortcuts (SOS & Quick Wallet)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
                             .size(42.dp)
@@ -95,23 +176,29 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
                     ) {
                         Text(text = "🚨", fontSize = 18.sp)
                     }
+
                     Box(
                         modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
+                            .clip(RoundedCornerShape(20.dp))
                             .background(SurfaceElevated.copy(alpha = 0.92f))
-                            .border(1.dp, BorderSubtle, CircleShape)
-                            .clickable { onNavigate("wallet_hub") },
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(20.dp))
+                            .clickable { onNavigate("wallet_hub") }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = "👛", fontSize = 18.sp)
+                        Text(
+                            text = "👛 ₹${wallet.displayBalanceRupees.toInt()}",
+                            color = EmeraldGreen,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 3. Rapido Floating Destination Search Bar
+            // 3. Live Pickup & Destination Search Bar
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -141,9 +228,10 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Pickup: Connaught Place • 8 EV Pilots Nearby",
+                            text = "Pickup: ${bookingDraft.pickupAddress} • ${nearbyVehicles.size} EV Pilots Nearby",
                             color = ElectricCyan,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            maxLines = 1
                         )
                     }
                     Text(
@@ -156,7 +244,7 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
             }
         }
 
-        // 4. Bottom Draggable Rapido Quick Fleet Sheet (Above persistent bottom bar)
+        // 4. Bottom Sheet Connected to Live Vehicle Categories & Fare Rules
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -168,7 +256,6 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
                 .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
             Column {
-                // Draggable notch indicator
                 Box(
                     modifier = Modifier
                         .width(38.dp)
@@ -202,39 +289,58 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // 4 Rapido Service Category Cards
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    val quickTiers = listOf(
-                        Triple("E-Rickshaw", "₹20 Base", "🛺"),
-                        Triple("Eco-Pool", "₹10 Seat", "👥"),
-                        Triple("E-Auto L5M", "₹30 Base", "⚡"),
-                        Triple("E-Cargo", "₹50 Base", "📦")
+                if (categories.isEmpty()) {
+                    Text(
+                        text = "Loading fleet from server...",
+                        color = TextMuted,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(vertical = 12.dp)
                     )
-                    quickTiers.forEach { (name, rate, icon) ->
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(SurfaceCard)
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
-                                .clickable { onNavigate("fare_matrix") }
-                                .padding(vertical = 12.dp, horizontal = 4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(text = icon, fontSize = 22.sp)
-                                Spacer(modifier = Modifier.height(5.dp))
-                                Text(
-                                    text = name,
-                                    color = TextWhite,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1
-                                )
-                                Text(text = rate, color = EmeraldGreen, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        categories.take(4).forEach { cat ->
+                            val rule = fareRules.firstOrNull { it.categoryId == cat.id }
+                            val subLabel = if (rule != null) "₹${rule.baseFareRupees} Base" else "${cat.capacity} Seats"
+                            val displayIcon = if (!cat.iconUrl.isNullOrBlank() && !cat.iconUrl.startsWith("http")) {
+                                cat.iconUrl
+                            } else {
+                                "🛺"
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(SurfaceCard)
+                                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                                    .clickable {
+                                        RiderRepository.selectVehicleCategory(cat.code)
+                                        onNavigate("destination_search")
+                                    }
+                                    .padding(vertical = 12.dp, horizontal = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(text = displayIcon, fontSize = 22.sp)
+                                    Spacer(modifier = Modifier.height(5.dp))
+                                    Text(
+                                        text = cat.name,
+                                        color = TextWhite,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                    Text(
+                                        text = subLabel,
+                                        color = EmeraldGreen,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
@@ -251,7 +357,8 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
 fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
     var query by remember { mutableStateOf("") }
     val savedPlaces by RiderRepository.savedPlaces.collectAsState()
-    var searchResults by remember { mutableStateOf(listOf<String>()) }
+    val bookingDraft by RiderRepository.bookingDraft.collectAsState()
+    var searchResults by remember { mutableStateOf(listOf<com.vaisentra.mobility.rider.data.MapSearchResult>()) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -267,7 +374,6 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
         )
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Pickup & Destination Inputs (Rapido Double Pin Box)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -277,21 +383,20 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
                 .padding(14.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Pickup Pin
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(EmeraldGreen))
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "Current GPS: Connaught Place, New Delhi",
+                        text = "Pickup: ${bookingDraft.pickupAddress}",
                         color = TextWhite,
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
                     )
                 }
 
-                Divider(color = BorderSubtle, thickness = 1.dp)
+                HorizontalDivider(color = BorderSubtle, thickness = 1.dp)
 
-                // Drop Destination Input
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(CrimsonRed))
                     Spacer(modifier = Modifier.width(12.dp))
@@ -301,17 +406,10 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
                             query = it
                             if (it.length >= 2) {
                                 scope.launch {
-                                    val places = RiderRepository.searchMapboxPlaces(it)
-                                    searchResults = if (places.isNotEmpty()) {
-                                        places.map { p -> p.full_address }
-                                    } else {
-                                        listOf(
-                                            "$it, Central Delhi (Metro Gate 4)",
-                                            "$it Commercial Hub, Sector 62",
-                                            "$it Transit Station, Anand Vihar"
-                                        )
-                                    }
+                                    searchResults = RiderRepository.searchMapboxPlaces(it)
                                 }
+                            } else {
+                                searchResults = emptyList()
                             }
                         },
                         placeholder = { Text(text = "Enter drop landmark, metro...", color = TextDim, fontSize = 13.sp) },
@@ -342,17 +440,20 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (query.isNotEmpty() && searchResults.isNotEmpty()) {
-                items(searchResults) { result ->
+                items(searchResults) { place ->
                     NeoCard(
-                        modifier = Modifier.clickable { onNavigate("fare_matrix") },
+                        modifier = Modifier.clickable {
+                            RiderRepository.updateDestination(place.full_address, place.latitude, place.longitude)
+                            onNavigate("fare_matrix")
+                        },
                         cornerRadius = 14.dp
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(text = "📍", fontSize = 18.sp)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(text = result, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text(text = "Mapbox Verified EV Transit Corridor", color = ElectricCyan, fontSize = 11.sp)
+                                Text(text = place.name, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text(text = place.full_address, color = ElectricCyan, fontSize = 11.sp, maxLines = 1)
                             }
                             Text(text = "Select →", color = EmeraldGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
@@ -361,7 +462,10 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
             } else {
                 items(savedPlaces) { place ->
                     NeoCard(
-                        modifier = Modifier.clickable { onNavigate("fare_matrix") },
+                        modifier = Modifier.clickable {
+                            RiderRepository.updateDestination(place.address, place.latitude, place.longitude)
+                            onNavigate("fare_matrix")
+                        },
                         cornerRadius = 14.dp
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -401,9 +505,10 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
 // =============================================================================
 @Composable
 fun MultiStopRouteScreen(onNavigate: (String) -> Unit) {
-    var stop1 by remember { mutableStateOf("Connaught Place (Pickup)") }
-    var stop2 by remember { mutableStateOf("Pragati Maidan Metro (Waypoint)") }
-    var stop3 by remember { mutableStateOf("Sector 62, Noida (Destination)") }
+    val bookingDraft by RiderRepository.bookingDraft.collectAsState()
+    var stop1 by remember { mutableStateOf(bookingDraft.pickupAddress) }
+    var stop2 by remember { mutableStateOf("") }
+    var stop3 by remember { mutableStateOf(bookingDraft.destinationAddress) }
 
     Column(
         modifier = Modifier
@@ -437,33 +542,39 @@ fun MultiStopRouteScreen(onNavigate: (String) -> Unit) {
 @Composable
 fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
     val scope = rememberCoroutineScope()
-    var selectedCategory by remember { mutableStateOf("E_RICKSHAW_STANDARD") }
+    val bookingDraft by RiderRepository.bookingDraft.collectAsState()
+    var selectedCategory by remember { mutableStateOf(bookingDraft.selectedCategoryCode) }
+    var fareComparisons by remember { mutableStateOf<List<com.vaisentra.mobility.rider.data.VehicleFareComparisonDto>>(emptyList()) }
 
-    val vehicleTiers = listOf(
-        Triple("E_RICKSHAW_STANDARD", "Standard E-Rickshaw", "₹129.04 • 4 Seats • 2 min away"),
-        Triple("E_RICKSHAW_SHARE", "Shared Eco-Pool", "₹94.93 • Per Seat • 3 min away"),
-        Triple("E_AUTO", "High-Speed Electric Auto", "₹155.00 • 3 Seats • L5M Enclosed"),
-        Triple("E_CARGO_LOADER", "E-Loader Cargo", "₹195.30 • 1 Seat • Parcel Transport")
-    )
+    LaunchedEffect(bookingDraft) {
+        val res = RiderRepository.compareFares(
+            bookingDraft.pickupLat,
+            bookingDraft.pickupLng,
+            bookingDraft.destinationLat,
+            bookingDraft.destinationLng
+        )
+        res.onSuccess { fareComparisons = it }
+    }
+
+    val firstEstimate = fareComparisons.firstOrNull()?.estimate
+    val destTitle = bookingDraft.destinationAddress.ifBlank { "Selected Destination" }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(CanvasBlack)
     ) {
-        // 1. Live Mapbox Vector Map with Active Route Polyline (Connaught Place -> Sector 62)
         MapboxLiveView(
             modifier = Modifier.fillMaxSize(),
-            pickupLat = 28.6139,
-            pickupLng = 77.2090,
-            dropLat = 28.6289,
-            dropLng = 77.3712,
+            pickupLat = bookingDraft.pickupLat,
+            pickupLng = bookingDraft.pickupLng,
+            dropLat = bookingDraft.destinationLat,
+            dropLng = bookingDraft.destinationLng,
             showRoute = true,
-            pickupLabel = "Connaught Place",
-            dropLabel = "Sector 62, Noida"
+            pickupLabel = bookingDraft.pickupAddress,
+            dropLabel = destTitle
         )
 
-        // 2. Top Route Info Header Floating Card
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -489,14 +600,21 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Route to Sector 62, Noida", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text(text = "3.96 km • Estimated 14 mins via Barapullah", color = ElectricCyan, fontSize = 11.sp)
+                    Text(text = "Route to $destTitle", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text(
+                        text = if (firstEstimate != null) {
+                            "${firstEstimate.distanceKm} km • Estimated ${firstEstimate.estimatedDurationMinutes.toInt()} mins"
+                        } else {
+                            "Calculating live route & fare..."
+                        },
+                        color = ElectricCyan,
+                        fontSize = 11.sp
+                    )
                 }
                 NeoBadge(text = "LIVE FARE", backgroundColor = SapphireGlow, textColor = ElectricCyan)
             }
         }
 
-        // 3. Rapido Bottom Sheet for Vehicle Tiers & Booking Action
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -508,7 +626,6 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             Column {
-                // Draggable handle
                 Box(
                     modifier = Modifier
                         .width(36.dp)
@@ -520,10 +637,12 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Vehicle List (Compact Rapido Vertical List)
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    vehicleTiers.forEach { (code, name, detail) ->
-                        val isSelected = selectedCategory == code
+                    fareComparisons.forEach { tier ->
+                        val isSelected = selectedCategory == tier.code
+                        val fareRupees = tier.estimate?.estimatedFareRupees ?: 0.0
+                        val detailText = "₹${String.format(Locale.US, "%.2f", fareRupees)} • ${tier.capacity} Seats • ${tier.description ?: ""}"
+
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -534,23 +653,15 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
                                     if (isSelected) BorderFocus else Color.Transparent,
                                     RoundedCornerShape(16.dp)
                                 )
-                                .clickable { selectedCategory = code }
+                                .clickable { selectedCategory = tier.code }
                                 .padding(horizontal = 14.dp, vertical = 10.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = when (code) {
-                                        "E_RICKSHAW_STANDARD" -> "🛺"
-                                        "E_RICKSHAW_SHARE" -> "👥"
-                                        "E_AUTO" -> "⚡"
-                                        else -> "📦"
-                                    },
-                                    fontSize = 26.sp
-                                )
+                                Text(text = "🛺", fontSize = 26.sp)
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                    Text(text = detail, color = if (isSelected) ElectricCyan else TextMuted, fontSize = 11.sp)
+                                    Text(text = tier.name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = detailText, color = if (isSelected) ElectricCyan else TextMuted, fontSize = 11.sp, maxLines = 1)
                                 }
                                 if (isSelected) {
                                     NeoBadge(text = "SELECTED", backgroundColor = SapphireGlow, textColor = ElectricCyan)
@@ -562,7 +673,6 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Payment & Promo Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -576,7 +686,7 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
                         Text(text = " ▾", color = TextMuted, fontSize = 12.sp)
                     }
                     Text(
-                        text = "Apply Promo (₹65 Off) →",
+                        text = "Apply Promo →",
                         color = EmeraldGreen,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -586,17 +696,20 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Big Rapido "Book Ride" Button
+                val selectedTierName = fareComparisons.firstOrNull { it.code == selectedCategory }?.name ?: "Ride"
                 NeoButton(
-                    text = when (selectedCategory) {
-                        "E_RICKSHAW_STANDARD" -> "Book Standard E-Rickshaw"
-                        "E_RICKSHAW_SHARE" -> "Book Shared Eco-Pool Seat"
-                        "E_AUTO" -> "Book High-Speed Electric Auto"
-                        else -> "Book E-Loader Cargo"
-                    },
+                    text = "Book $selectedTierName",
                     onClick = {
                         scope.launch {
-                            RiderRepository.createRideBooking("Connaught Place", "Sector 62, Noida", selectedCategory)
+                            RiderRepository.createRideBooking(
+                                pickupAddress = bookingDraft.pickupAddress,
+                                destinationAddress = destTitle,
+                                categoryId = selectedCategory,
+                                pickupLat = bookingDraft.pickupLat,
+                                pickupLng = bookingDraft.pickupLng,
+                                destLat = bookingDraft.destinationLat,
+                                destLng = bookingDraft.destinationLng
+                            )
                         }
                         onNavigate("dispatch_matching")
                     },
@@ -612,7 +725,8 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
 // =============================================================================
 @Composable
 fun ScheduleRideScreen(onNavigate: (String) -> Unit) {
-    var flightNo by remember { mutableStateOf("6E-204 (IndiGo)") }
+    val bookingDraft by RiderRepository.bookingDraft.collectAsState()
+    var flightNo by remember { mutableStateOf("") }
     var pickupDate by remember { mutableStateOf("Tomorrow, 07:30 AM") }
 
     Column(
@@ -627,17 +741,21 @@ fun ScheduleRideScreen(onNavigate: (String) -> Unit) {
         NeoCard {
             NeoTextField(value = pickupDate, onValueChange = { pickupDate = it }, placeholder = "Pickup Date & Time", label = "Scheduled Pickup")
             Spacer(modifier = Modifier.height(14.dp))
-            NeoTextField(value = flightNo, onValueChange = { flightNo = it }, placeholder = "Flight Number (e.g. 6E-204)", label = "Airport Flight Number", trailingText = "AUTO-SYNC ✈️")
+            NeoTextField(value = flightNo, onValueChange = { flightNo = it }, placeholder = "Flight Number (Optional)", label = "Airport Flight Number", trailingText = "AUTO-SYNC ✈️")
             Spacer(modifier = Modifier.height(20.dp))
-            NeoButton(text = "Confirm Scheduled Chauffeur", onClick = {
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            NeoButton(text = "Confirm Scheduled Ride", onClick = {
+                val tomorrowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.format(Date(System.currentTimeMillis() + 86_400_000L))
+
+                CoroutineScope(Dispatchers.IO).launch {
                     RiderRepository.scheduleRideBooking(
-                        pickup = "Home (Scheduled)",
-                        dest = "Indira Gandhi Airport T3",
-                        pickupTimeIso = java.time.Instant.now().plusSeconds(86400).toString()
+                        pickup = bookingDraft.pickupAddress,
+                        dest = bookingDraft.destinationAddress.ifBlank { "Airport / Station" },
+                        pickupTimeIso = tomorrowIso
                     )
                 }
-                DialogController.showToast("Ride scheduled for $pickupDate with flight sync active!")
+                DialogController.showToast("Ride scheduled for $pickupDate!")
                 onNavigate("map_home")
             })
         }
@@ -649,8 +767,8 @@ fun ScheduleRideScreen(onNavigate: (String) -> Unit) {
 // =============================================================================
 @Composable
 fun BookForGuestScreen(onNavigate: (String) -> Unit) {
-    var guestName by remember { mutableStateOf("Anita Roy") }
-    var guestPhone by remember { mutableStateOf("+91 98112 99887") }
+    var guestName by remember { mutableStateOf("") }
+    var guestPhone by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
