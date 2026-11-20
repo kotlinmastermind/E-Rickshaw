@@ -99,7 +99,7 @@ async def update_driver_profile(
     if payload.phone_number is not None:
         user.phone_number = payload.phone_number
     await db.commit()
-    return {"message": "Chauffeur profile updated."}
+    return {"message": "Driver profile updated."}
 
 @router.post("/documents")
 async def upload_document(

@@ -68,7 +68,7 @@ interface RiderApiService {
 
 
     @GET("api/v1/rides/active")
-    suspend fun getActiveRide(): Response<ActiveRideDto>
+    suspend fun getActiveRide(): Response<ActiveRideWrapperDto>
 
     @POST("api/v1/rides/{ride_id}/cancel")
     suspend fun cancelRide(@Path("ride_id") rideId: String, @Body body: Map<String, String>): Response<Map<String, Any>>

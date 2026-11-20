@@ -42,6 +42,7 @@ import java.util.TimeZone
 // =============================================================================
 // SCREEN 7: RAPIDO MAP HOME WITH MAPBOX GL BACKDROP
 // =============================================================================
+
 @Composable
 fun MapHomeScreen(onNavigate: (String) -> Unit) {
     val context = LocalContext.current
@@ -56,71 +57,149 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
     var currentLat by remember { mutableDoubleStateOf(bookingDraft.pickupLat) }
     var currentLng by remember { mutableDoubleStateOf(bookingDraft.pickupLng) }
 
-    fun fetchDeviceGpsAndSync() {
+    var fetchDeviceGpsAndSyncRef by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        fetchDeviceGpsAndSyncRef?.invoke(false)
+    }
+
+    fun fetchDeviceGpsAndSync(showToast: Boolean = false) {
+        val hasFine = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasFine && !hasCoarse) {
+            try {
+                permissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
+            } catch (_: Exception) {
+                // Protected against un-registered launcher state
+            }
+            return
+        }
+
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val isGpsOn = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+
+        if (!isGpsOn) {
+            if (showToast) {
+                DialogController.showToast("Please turn ON device Location (GPS)")
+            }
+            return
+        }
+
+        if (showToast) {
+            DialogController.showToast("Fetching live GPS location...")
+        }
+
         try {
-            val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val hasFine = ContextCompat.checkSelfPermission(
-                context, Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-            val hasCoarse = ContextCompat.checkSelfPermission(
-                context, Manifest.permission.ACCESS_COARSE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
+            val gpsLoc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            val netLoc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            val bestLast = when {
+                gpsLoc != null && netLoc != null -> if (gpsLoc.time > netLoc.time) gpsLoc else netLoc
+                gpsLoc != null -> gpsLoc
+                else -> netLoc
+            }
 
-            if (hasFine || hasCoarse) {
-                val lastLoc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                    ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                if (lastLoc != null) {
-                    currentLat = lastLoc.latitude
-                    currentLng = lastLoc.longitude
+            if (bestLast != null) {
+                currentLat = bestLast.latitude
+                currentLng = bestLast.longitude
+                scope.launch {
+                    RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
                 }
+            }
 
-                val provider = if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                    LocationManager.GPS_PROVIDER
-                } else {
-                    LocationManager.NETWORK_PROVIDER
+            val provider = if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                LocationManager.GPS_PROVIDER
+            } else {
+                LocationManager.NETWORK_PROVIDER
+            }
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                lm.getCurrentLocation(
+                    provider,
+                    null,
+                    ContextCompat.getMainExecutor(context)
+                ) { freshLoc ->
+                    if (freshLoc != null) {
+                        currentLat = freshLoc.latitude
+                        currentLng = freshLoc.longitude
+                        scope.launch {
+                            RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
+                            if (showToast) {
+                                DialogController.showToast("Live location updated!")
+                            }
+                        }
+                    }
                 }
+            } else {
                 @Suppress("DEPRECATION")
                 lm.requestSingleUpdate(provider, { freshLoc ->
                     currentLat = freshLoc.latitude
                     currentLng = freshLoc.longitude
                     scope.launch {
                         RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
+                        if (showToast) {
+                            DialogController.showToast("Live location updated!")
+                        }
                     }
                 }, android.os.Looper.getMainLooper())
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (showToast) {
+                DialogController.showToast("GPS Error: ${e.message}")
+            }
         }
-
-        scope.launch {
-            RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
-        }
-    }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        fetchDeviceGpsAndSync()
     }
 
     LaunchedEffect(Unit) {
+        fetchDeviceGpsAndSyncRef = { fetchDeviceGpsAndSync(it) }
         RiderRepository.fetchVehicleCategories()
         RiderRepository.fetchFareRules()
         RiderRepository.fetchWalletBalance()
         RiderRepository.fetchSavedPlaces()
-        permissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            )
-        )
+
+        val hasFine = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (hasFine || hasCoarse) {
+            fetchDeviceGpsAndSync(showToast = false)
+        } else {
+            try {
+                permissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
+            } catch (_: Exception) {
+                // Safeguard against launch before registry attachment
+            }
+        }
     }
+
     LaunchedEffect(currentLat, currentLng) {
         while (true) {
-            kotlinx.coroutines.delay(10_000L)
+            kotlinx.coroutines.delay(kotlin.time.Duration.parse("10s"))
             RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
         }
     }
 
+    // ==================== YEH UI HISSA MISSING THA ====================
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -133,7 +212,10 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
             pickupLng = currentLng,
             showRoute = false,
             pickupLabel = bookingDraft.pickupAddress,
-            nearbyVehicles = nearbyVehicles
+            nearbyVehicles = nearbyVehicles,
+            onRecenterClicked = {
+                fetchDeviceGpsAndSync(showToast = true)
+            }
         )
 
         // 2. Top Floating Pill Bar (Branding, Live SOS, Live Wallet Balance)
@@ -349,7 +431,6 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
         }
     }
 }
-
 // =============================================================================
 // SCREEN 8: DESTINATION SEARCH WITH MAPBOX AUTOCOMPLETE
 // =============================================================================
@@ -359,7 +440,23 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
     val savedPlaces by RiderRepository.savedPlaces.collectAsState()
     val bookingDraft by RiderRepository.bookingDraft.collectAsState()
     var searchResults by remember { mutableStateOf(listOf<com.vaisentra.mobility.rider.data.MapSearchResult>()) }
-    val scope = rememberCoroutineScope()
+    var isSearching by remember { mutableStateOf(false) }
+
+    // Debounced live search jab user type kare
+    LaunchedEffect(query) {
+        val trimmed = query.trim()
+        if (trimmed.length >= 2) {
+            isSearching = true
+            kotlinx.coroutines.delay(300L)
+            searchResults = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                RiderRepository.searchMapboxPlaces(trimmed)
+            }
+            isSearching = false
+        } else {
+            searchResults = emptyList()
+            isSearching = false
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -402,17 +499,8 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
                     Spacer(modifier = Modifier.width(12.dp))
                     OutlinedTextField(
                         value = query,
-                        onValueChange = {
-                            query = it
-                            if (it.length >= 2) {
-                                scope.launch {
-                                    searchResults = RiderRepository.searchMapboxPlaces(it)
-                                }
-                            } else {
-                                searchResults = emptyList()
-                            }
-                        },
-                        placeholder = { Text(text = "Enter drop landmark, metro...", color = TextDim, fontSize = 13.sp) },
+                        onValueChange = { query = it },
+                        placeholder = { Text(text = "Enter drop landmark, station, chowk...", color = TextDim, fontSize = 13.sp) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = Color.Transparent,
                             unfocusedContainerColor = Color.Transparent,
@@ -424,38 +512,83 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
                         singleLine = true,
                         modifier = Modifier.weight(1f)
                     )
+                    if (query.isNotEmpty()) {
+                        Text(
+                            text = "✕",
+                            color = TextMuted,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .clickable { query = "" }
+                                .padding(horizontal = 8.dp)
+                        )
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        Text(
-            text = if (query.isEmpty()) "Saved Places & Metro Feeder Hubs" else "Mapbox Suggested Routes",
-            color = TextMuted,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (query.trim().length < 2) "Saved Places" else "Mapbox Suggested Places",
+                color = TextMuted,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (isSearching) {
+                Text(text = "Searching...", color = ElectricCyan, fontSize = 11.sp)
+            }
+        }
         Spacer(modifier = Modifier.height(10.dp))
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (query.isNotEmpty() && searchResults.isNotEmpty()) {
-                items(searchResults) { place ->
-                    NeoCard(
-                        modifier = Modifier.clickable {
-                            RiderRepository.updateDestination(place.full_address, place.latitude, place.longitude)
-                            onNavigate("fare_matrix")
-                        },
-                        cornerRadius = 14.dp
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "📍", fontSize = 18.sp)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = place.name, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text(text = place.full_address, color = ElectricCyan, fontSize = 11.sp, maxLines = 1)
+            if (query.trim().length >= 2) {
+                if (searchResults.isNotEmpty()) {
+                    items(searchResults) { place ->
+                        NeoCard(
+                            modifier = Modifier.clickable {
+                                RiderRepository.updateDestination(place.full_address, place.latitude, place.longitude)
+                                onNavigate("fare_matrix")
+                            },
+                            cornerRadius = 14.dp
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = "📍", fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = place.name, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = place.full_address, color = ElectricCyan, fontSize = 11.sp, maxLines = 2)
+                                }
+                                Text(text = "Select →", color = EmeraldGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
-                            Text(text = "Select →", color = EmeraldGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else if (!isSearching) {
+                    item {
+                        NeoCard(
+                            modifier = Modifier.clickable {
+                                RiderRepository.updateDestination(
+                                    query.trim(),
+                                    bookingDraft.pickupLat + 0.015,
+                                    bookingDraft.pickupLng + 0.015
+                                )
+                                onNavigate("fare_matrix")
+                            },
+                            cornerRadius = 14.dp
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = "🧭", fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = "Set destination: \"${query.trim()}\"", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = "Tap to continue with custom pin", color = TextMuted, fontSize = 11.sp)
+                                }
+                                Text(text = "Go →", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -696,22 +829,34 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                val selectedTierName = fareComparisons.firstOrNull { it.code == selectedCategory }?.name ?: "Ride"
+                var isBooking by remember { mutableStateOf(false) }
+
+                val selectedTier = fareComparisons.firstOrNull { it.code == selectedCategory }
+                val selectedTierName = selectedTier?.name ?: "Ride"
+
                 NeoButton(
-                    text = "Book $selectedTierName",
+                    text = if (isBooking) "Requesting Live Pilot..." else "Book $selectedTierName",
                     onClick = {
+                        if (isBooking) return@NeoButton
                         scope.launch {
-                            RiderRepository.createRideBooking(
+                            isBooking = true
+                            val result = RiderRepository.createRideBooking(
                                 pickupAddress = bookingDraft.pickupAddress,
                                 destinationAddress = destTitle,
-                                categoryId = selectedCategory,
+                                categoryId = selectedTier?.categoryId ?: selectedCategory,
+                                estimateId = selectedTier?.estimate?.estimateId,
                                 pickupLat = bookingDraft.pickupLat,
                                 pickupLng = bookingDraft.pickupLng,
                                 destLat = bookingDraft.destinationLat,
                                 destLng = bookingDraft.destinationLng
                             )
+                            isBooking = false
+                            result.onSuccess {
+                                onNavigate("dispatch_matching")
+                            }.onFailure { err ->
+                                DialogController.showToast("Booking Error: ${err.message}")
+                            }
                         }
-                        onNavigate("dispatch_matching")
                     },
                     icon = "⚡"
                 )
@@ -797,5 +942,45 @@ fun BookForGuestScreen(onNavigate: (String) -> Unit) {
 fun MapHomeScreenPreview() {
     RiderGoTheme {
         MapHomeScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun DestinationSearchScreenPreview() {
+    RiderGoTheme {
+        DestinationSearchScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun MultiStopRouteScreenPreview() {
+    RiderGoTheme {
+        MultiStopRouteScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun VehicleFareMatrixScreenPreview() {
+    RiderGoTheme {
+        VehicleFareMatrixScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun ScheduleRideScreenPreview() {
+    RiderGoTheme {
+        ScheduleRideScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun BookForGuestScreenPreview() {
+    RiderGoTheme {
+        BookForGuestScreen(onNavigate = {})
     }
 }

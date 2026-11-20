@@ -123,6 +123,7 @@ data class IntermediateStopInput(
 
 data class RideBookingRequest(
     @SerializedName("estimate_id") val estimateId: String? = null,
+    @SerializedName("category_id") val categoryId: String? = null,
     @SerializedName("pickup_address") val pickupAddress: String,
     @SerializedName("destination_address") val destinationAddress: String,
     @SerializedName("pickup_latitude") val pickupLatitude: Double,
@@ -144,6 +145,7 @@ data class ActiveRideDto(
     @SerializedName("destination_address") val destinationAddress: String,
     @SerializedName("total_fare_cents", alternate = ["estimated_fare_cents", "final_fare_cents"]) val totalFareCents: Int? = null,
     @SerializedName("otp_code", alternate = ["start_otp"]) val otpCode: String? = null,
+    @SerializedName("driver") val driver: AssignedDriverNestedDto? = null,
     @SerializedName("driver_name") val driverName: String? = null,
     @SerializedName("driver_phone") val driverPhone: String? = null,
     @SerializedName("driver_rating") val driverRating: Double? = null,
@@ -153,6 +155,18 @@ data class ActiveRideDto(
     @SerializedName("driver_lng") val driverLng: Double? = null,
     @SerializedName("speed_kmh") val speedKmh: Double? = null,
     @SerializedName("created_at") val createdAt: String? = null
+)
+
+data class ActiveRideWrapperDto(
+    @SerializedName("active_ride") val activeRide: ActiveRideDto?
+)
+
+data class AssignedDriverNestedDto(
+    @SerializedName("driver_id") val driverId: String? = null,
+    @SerializedName("name") val name: String? = null,
+    @SerializedName("phone") val phone: String? = null,
+    @SerializedName("license_number") val licenseNumber: String? = null,
+    @SerializedName("rating") val rating: Double? = null
 )
 
 data class RideReceiptDto(

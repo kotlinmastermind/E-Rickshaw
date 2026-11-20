@@ -307,14 +307,17 @@ object RiderRepository {
         pickupAddress: String,
         destinationAddress: String,
         categoryId: String,
+        estimateId: String? = null,
         paymentMethod: String = "UPI",
-        pickupLat: Double = 28.6139,
-        pickupLng: Double = 77.2090,
-        destLat: Double = 28.6289,
-        destLng: Double = 77.3712
+        pickupLat: Double,
+        pickupLng: Double,
+        destLat: Double,
+        destLng: Double
     ): Result<ActiveRideDto> {
         return try {
             val request = RideBookingRequest(
+                estimateId = estimateId,
+                categoryId = categoryId,
                 pickupAddress = pickupAddress,
                 destinationAddress = destinationAddress,
                 pickupLatitude = pickupLat,
@@ -327,45 +330,39 @@ object RiderRepository {
             if (response.isSuccessful && response.body() != null) {
                 val ride = response.body()!!
                 _activeRide.value = ride
-                // Start live WebSocket stream for driver telemetry & dispatch
                 RiderWebSocketClient.connectRideTracking(ride.id)
+                startActiveRideSyncLoop(ride.id)
                 Result.success(ride)
             } else {
-                // Fallback to local session if network is offline or unauthenticated
-                val fallbackRide = ActiveRideDto(
-                    id = "ride-" + System.currentTimeMillis().toString().takeLast(6),
-                    status = "REQUESTED",
-                    pickupAddress = pickupAddress,
-                    destinationAddress = destinationAddress,
-                    totalFareCents = 12900,
-                    otpCode = "7294",
-                    driverName = "Ram Lal (EV Pilot)",
-                    driverPhone = "+91 98112 34567",
-                    driverRating = 4.92,
-                    vehiclePlate = "DL-1ER-4921",
-                    vehicleModel = "Standard E-Rickshaw (Zero Emissions)",
-                    speedKmh = 24.5
-                )
-                _activeRide.value = fallbackRide
-                Result.success(fallbackRide)
+                val errBody = response.errorBody()?.string() ?: "Booking failed: HTTP ${response.code()}"
+                Result.failure(Exception(errBody))
             }
         } catch (e: Exception) {
-            val fallbackRide = ActiveRideDto(
-                id = "ride-" + System.currentTimeMillis().toString().takeLast(6),
-                status = "REQUESTED",
-                pickupAddress = pickupAddress,
-                destinationAddress = destinationAddress,
-                totalFareCents = 12900,
-                otpCode = "7294",
-                driverName = "Ram Lal (EV Pilot)",
-                driverPhone = "+91 98112 34567",
-                driverRating = 4.92,
-                vehiclePlate = "DL-1ER-4921",
-                vehicleModel = "Standard E-Rickshaw (Zero Emissions)",
-                speedKmh = 24.5
-            )
-            _activeRide.value = fallbackRide
-            Result.success(fallbackRide)
+            Result.failure(e)
+        }
+    }
+
+    private fun startActiveRideSyncLoop(rideId: String) {
+        scope.launch {
+            while (_activeRide.value != null &&
+                _activeRide.value?.status !in listOf("COMPLETED", "CANCELLED")
+            ) {
+                kotlinx.coroutines.delay(4000L)
+                try {
+                    val res = NetworkClient.apiService.getActiveRide()
+                    val updated = res.body()?.activeRide
+                    if (res.isSuccessful && updated != null && updated.id == rideId) {
+                        // Nested driver object se name/phone/rating top-level par copy karein
+                        _activeRide.value = updated.copy(
+                            driverName = updated.driver?.name ?: updated.driverName,
+                            driverPhone = updated.driver?.phone ?: updated.driverPhone,
+                            driverRating = updated.driver?.rating ?: updated.driverRating,
+                            vehiclePlate = updated.driver?.licenseNumber ?: updated.vehiclePlate
+                        )
+                    }
+                } catch (_: Exception) {
+                }
+            }
         }
     }
 
@@ -586,14 +583,62 @@ object RiderRepository {
 
     // --- Mapbox Live Places & Routing ---
     suspend fun searchMapboxPlaces(query: String): List<MapSearchResult> {
-        return try {
-            val response = NetworkClient.apiService.searchPlacesMapbox(MapSearchRequest(query))
-            if (response.isSuccessful && response.body() != null) {
-                response.body()!!.results
-            } else {
-                emptyList()
+        val draft = _bookingDraft.value
+        val cleanQuery = query.trim()
+        if (cleanQuery.length < 2) return emptyList()
+
+        // 1. Pehle aapke FastAPI backend ko current GPS proximity ke saath try karein
+        try {
+            val response = NetworkClient.apiService.searchPlacesMapbox(
+                MapSearchRequest(
+                    query = cleanQuery,
+                    proximity_lat = draft.pickupLat,
+                    proximity_lng = draft.pickupLng
+                )
+            )
+            if (response.isSuccessful && response.body() != null && response.body()!!.results.isNotEmpty()) {
+                return response.body()!!.results
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
+        }
+
+        // 2. Fallback: Direct Mapbox Geocoding API (India bias + user GPS proximity)
+        return try {
+            val token = "pk.eyJ1Ijoia290bGlubWFzdGVybWluZCIsImEiOiJjbXZ5c205bWswZnV4MnhzOXNzdm02bDB0In0.XZPhcU3_Et2F5raRUkVtxQ"
+            val encoded = java.net.URLEncoder.encode(cleanQuery, "UTF-8")
+            val urlStr = "https://api.mapbox.com/geocoding/v5/mapbox.places/$encoded.json" +
+                    "?access_token=$token" +
+                    "&proximity=${draft.pickupLng},${draft.pickupLat}" +
+                    "&country=IN" +
+                    "&autocomplete=true" +
+                    "&limit=8"
+
+            val conn = java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            val jsonText = conn.inputStream.bufferedReader().use { it.readText() }
+            val root = org.json.JSONObject(jsonText)
+            val features = root.optJSONArray("features") ?: return emptyList()
+
+            val list = mutableListOf<MapSearchResult>()
+            for (i in 0 until features.length()) {
+                val feat = features.getJSONObject(i)
+                val center = feat.getJSONArray("center")
+                val lng = center.getDouble(0)
+                val lat = center.getDouble(1)
+                val name = feat.optString("text", cleanQuery)
+                val fullAddr = feat.optString("place_name", name)
+                list.add(
+                    MapSearchResult(
+                        name = name,
+                        full_address = fullAddr,
+                        latitude = lat,
+                        longitude = lng
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
             emptyList()
         }
     }
