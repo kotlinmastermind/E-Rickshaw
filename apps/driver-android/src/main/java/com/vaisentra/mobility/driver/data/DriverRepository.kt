@@ -37,6 +37,21 @@ object DriverRepository {
     private val _profilePhotoUri = MutableStateFlow<String?>(null)
     val profilePhotoUri: StateFlow<String?> = _profilePhotoUri.asStateFlow()
 
+    private val _driverLocation = MutableStateFlow(DriverLiveLocation())
+    val driverLocation: StateFlow<DriverLiveLocation> = _driverLocation.asStateFlow()
+
+    fun updateCurrentLocation(lat: Double, lng: Double, heading: Double = 0.0, speedMps: Double = 0.0, address: String? = null) {
+        _driverLocation.value = _driverLocation.value.copy(
+            latitude = lat,
+            longitude = lng,
+            heading = heading,
+            speedKmh = speedMps * 3.6,
+            address = address ?: _driverLocation.value.address,
+            isLiveGps = true,
+            lastUpdatedTimestamp = System.currentTimeMillis()
+        )
+    }
+
     fun initProfilePhoto() {
         _profilePhotoUri.value = DriverNetworkClient.getProfilePhotoUri()
     }
@@ -660,7 +675,7 @@ object DriverRepository {
         }
     }
 
-    fun pingLocation(lat: Double, lng: Double, heading: Double = 0.0, speedMps: Double = 0.0) {
+    fun pingLocation(lat: Double, lng: Double, heading: Double = 0.0, speedMps: Double = 0.0, accuracyM: Double? = null) {
         if (!DriverNetworkClient.isAuthenticated()) return
         scope.launch {
             try {
@@ -669,7 +684,8 @@ object DriverRepository {
                         latitude = lat,
                         longitude = lng,
                         heading = heading,
-                        speedMps = speedMps
+                        speedMps = speedMps,
+                        accuracyM = accuracyM
                     )
                 )
             } catch (e: Exception) {

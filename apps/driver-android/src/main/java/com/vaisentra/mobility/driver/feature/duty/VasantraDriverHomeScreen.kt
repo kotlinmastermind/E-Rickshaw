@@ -1,16 +1,29 @@
 package com.vaisentra.mobility.driver.feature.duty
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import kotlinx.coroutines.delay
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.drawscope.rotate
 import com.vaisentra.mobility.driver.components.DriverAvatar
+import com.vaisentra.mobility.driver.components.DriverMapboxLiveView
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -68,6 +81,8 @@ import com.vaisentra.mobility.driver.data.ActiveRideDto
 import com.vaisentra.mobility.driver.data.DailyIncentiveDto
 import com.vaisentra.mobility.driver.data.DispatchOfferDto
 import com.vaisentra.mobility.driver.data.DriverEarningsSummaryDto
+import com.vaisentra.mobility.driver.data.DriverLiveLocation
+import com.vaisentra.mobility.driver.data.DriverLocationManager
 import com.vaisentra.mobility.driver.data.DriverRepository
 import androidx.compose.runtime.collectAsState
 import com.vaisentra.mobility.driver.theme.DriverGoTheme
@@ -78,6 +93,7 @@ fun VasantraDriverHomeScreen(
     onNavigate: (String) -> Unit = {}
 ) {
     val isOnline by DriverRepository.isOnline.collectAsState()
+    val driverLocation by DriverRepository.driverLocation.collectAsState()
     val activeOffer by DriverRepository.activeOffer.collectAsState()
     val activeRide by DriverRepository.activeRide.collectAsState()
     val profile by DriverRepository.profile.collectAsState()
@@ -86,7 +102,36 @@ fun VasantraDriverHomeScreen(
     val unreadNotifications by DriverRepository.unreadNotificationCount.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
 
+    val context = LocalContext.current
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        val granted = (perms[Manifest.permission.ACCESS_FINE_LOCATION] == true) ||
+                      (perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true)
+        if (granted) {
+            DriverLocationManager.startTracking(context)
+        }
+    }
+
     LaunchedEffect(Unit) {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (fineGranted || coarseGranted) {
+            DriverLocationManager.startTracking(context)
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+
         DriverRepository.fetchDriverProfile()
         DriverRepository.fetchEarningsSummary()
         DriverRepository.fetchDailyTargets()
@@ -165,8 +210,23 @@ fun VasantraDriverHomeScreen(
                     VasantraMapSection(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(190.dp),
-                        isOnline = isOnline
+                            .height(205.dp),
+                        isOnline = isOnline,
+                        location = driverLocation,
+                        onRecenterClick = {
+                            DriverLocationManager.refreshCurrentLocation(context) { loc ->
+                                DriverRepository.pingLocation(
+                                    loc.latitude,
+                                    loc.longitude,
+                                    loc.heading,
+                                    loc.speedKmh / 3.6,
+                                    loc.accuracyMeters.toDouble()
+                                )
+                                DriverDialogController.showToast(
+                                    "📍 Live GPS synced: ${String.format(java.util.Locale.US, "%.4f, %.4f", loc.latitude, loc.longitude)}"
+                                )
+                            }
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -391,87 +451,205 @@ fun VasantraDriverTopHeader(
 @Composable
 fun VasantraMapSection(
     modifier: Modifier = Modifier,
-    isOnline: Boolean = true
+    isOnline: Boolean = true,
+    location: DriverLiveLocation = DriverLiveLocation(),
+    onRecenterClick: () -> Unit = {}
 ) {
+    var showNativeMap by remember { mutableStateOf(false) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 0.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "PulseAlpha"
+    )
+    val pulseRadius by infiniteTransition.animateFloat(
+        initialValue = 18f,
+        targetValue = 46f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "PulseRadius"
+    )
+
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFE5EEF5)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                drawRect(color = Color(0xFFE5EEF5))
-
-                val roadColor = Color.White
-                val greenAreaColor = Color(0xFFDCFCE7)
-
-                // Map grid streets
-                drawLine(color = roadColor, start = Offset(0f, size.height * 0.25f), end = Offset(size.width, size.height * 0.4f), strokeWidth = 14.dp.toPx())
-                drawLine(color = roadColor, start = Offset(0f, size.height * 0.65f), end = Offset(size.width, size.height * 0.5f), strokeWidth = 12.dp.toPx())
-                drawLine(color = roadColor, start = Offset(size.width * 0.3f, 0f), end = Offset(size.width * 0.45f, size.height), strokeWidth = 14.dp.toPx())
-                drawLine(color = roadColor, start = Offset(size.width * 0.75f, 0f), end = Offset(size.width * 0.85f, size.height), strokeWidth = 10.dp.toPx())
-
-                // Green area (Park)
-                val parkPath = Path().apply {
-                    moveTo(size.width * 0.05f, size.height * 0.05f)
-                    lineTo(size.width * 0.25f, size.height * 0.08f)
-                    lineTo(size.width * 0.2f, size.height * 0.3f)
-                    lineTo(size.width * 0.02f, size.height * 0.25f)
-                    close()
+            if (showNativeMap) {
+                // Live Interactive Mapbox Map with Real Device Coordinates
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(20.dp))
+                ) {
+                    DriverMapboxLiveView(
+                        modifier = Modifier.fillMaxSize(),
+                        driverLat = location.latitude,
+                        driverLng = location.longitude,
+                        headingDegrees = location.heading,
+                        onRecenterClicked = onRecenterClick
+                    )
                 }
-                drawPath(path = parkPath, color = greenAreaColor)
+            } else {
+                // Vasantra Stylized Live Radar Map
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawRect(color = Color(0xFFE5EEF5))
 
-                val parkPath2 = Path().apply {
-                    moveTo(size.width * 0.38f, size.height * 0.2f)
-                    lineTo(size.width * 0.45f, size.height * 0.35f)
-                    lineTo(size.width * 0.35f, size.height * 0.55f)
-                    close()
+                    val roadColor = Color.White
+                    val greenAreaColor = Color(0xFFDCFCE7)
+
+                    // Map grid streets
+                    drawLine(color = roadColor, start = Offset(0f, size.height * 0.25f), end = Offset(size.width, size.height * 0.4f), strokeWidth = 14.dp.toPx())
+                    drawLine(color = roadColor, start = Offset(0f, size.height * 0.65f), end = Offset(size.width, size.height * 0.5f), strokeWidth = 12.dp.toPx())
+                    drawLine(color = roadColor, start = Offset(size.width * 0.3f, 0f), end = Offset(size.width * 0.45f, size.height), strokeWidth = 14.dp.toPx())
+                    drawLine(color = roadColor, start = Offset(size.width * 0.75f, 0f), end = Offset(size.width * 0.85f, size.height), strokeWidth = 10.dp.toPx())
+
+                    // Green area (Park)
+                    val parkPath = Path().apply {
+                        moveTo(size.width * 0.05f, size.height * 0.05f)
+                        lineTo(size.width * 0.25f, size.height * 0.08f)
+                        lineTo(size.width * 0.2f, size.height * 0.3f)
+                        lineTo(size.width * 0.02f, size.height * 0.25f)
+                        close()
+                    }
+                    drawPath(path = parkPath, color = greenAreaColor)
+
+                    val parkPath2 = Path().apply {
+                        moveTo(size.width * 0.38f, size.height * 0.2f)
+                        lineTo(size.width * 0.45f, size.height * 0.35f)
+                        lineTo(size.width * 0.35f, size.height * 0.55f)
+                        close()
+                    }
+                    drawPath(path = parkPath2, color = greenAreaColor)
+
+                    // Demand Surge / Hotspot Marker Dot
+                    drawCircle(color = Color(0xFFF97316), radius = 6.dp.toPx(), center = Offset(size.width * 0.2f, size.height * 0.55f))
+
+                    // Real Live Driver Center Location Marker with Animated Radar Pulse
+                    val center = Offset(size.width * 0.5f, size.height * 0.52f)
+
+                    // Outer animated pulse ring
+                    drawCircle(
+                        color = Color(0xFF2563EB).copy(alpha = pulseAlpha),
+                        radius = pulseRadius.dp.toPx(),
+                        center = center
+                    )
+                    drawCircle(color = Color(0x333B82F6), radius = 24.dp.toPx(), center = center)
+                    drawCircle(color = Color(0x553B82F6), radius = 16.dp.toPx(), center = center)
+
+                    // Directional Navigation Arrow rotating with device heading
+                    rotate(degrees = location.heading.toFloat(), pivot = center) {
+                        val navArrow = Path().apply {
+                            moveTo(center.x, center.y - 14.dp.toPx())
+                            lineTo(center.x + 10.dp.toPx(), center.y + 10.dp.toPx())
+                            lineTo(center.x, center.y + 4.dp.toPx())
+                            lineTo(center.x - 10.dp.toPx(), center.y + 10.dp.toPx())
+                            close()
+                        }
+                        drawPath(path = navArrow, color = Color(0xFF2563EB))
+                    }
                 }
-                drawPath(path = parkPath2, color = greenAreaColor)
-
-                // Orange marker dot
-                drawCircle(color = Color(0xFFF97316), radius = 6.dp.toPx(), center = Offset(size.width * 0.2f, size.height * 0.55f))
-
-                // Center location marker
-                val center = Offset(size.width * 0.5f, size.height * 0.52f)
-                drawCircle(color = Color(0x333B82F6), radius = 30.dp.toPx(), center = center)
-                drawCircle(color = Color(0x553B82F6), radius = 20.dp.toPx(), center = center)
-
-                val navArrow = Path().apply {
-                    moveTo(center.x, center.y - 14.dp.toPx())
-                    lineTo(center.x + 10.dp.toPx(), center.y + 10.dp.toPx())
-                    lineTo(center.x, center.y + 4.dp.toPx())
-                    lineTo(center.x - 10.dp.toPx(), center.y + 10.dp.toPx())
-                    close()
-                }
-                drawPath(path = navArrow, color = Color(0xFF2563EB))
             }
 
-            // Speech Bubble "You are online" / "You are offline"
+            // Top Status & Locality Bar
+            Row(
+                modifier = Modifier
+                    .padding(top = 10.dp, start = 12.dp, end = 12.dp)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Map/Radar Toggle Pill
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White.copy(alpha = 0.95f),
+                    shadowElevation = 3.dp,
+                    modifier = Modifier.clickable { showNativeMap = !showNativeMap }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = if (showNativeMap) "📡 Radar" else "🗺️ Live Map",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1D61E7)
+                        )
+                    }
+                }
+
+                // Speech Bubble "You are online" / "You are offline"
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.White.copy(alpha = 0.98f),
+                    shadowElevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(if (isOnline) Color(0xFF10B981) else Color(0xFF94A3B8))
+                        )
+                        Text(
+                            text = if (isOnline) stringResource(id = R.string.you_are_online) else stringResource(id = R.string.status_offline),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+                }
+            }
+
+            // Live Address & GPS Coordinates Tag at Bottom-Left
             Surface(
                 modifier = Modifier
-                    .padding(top = 10.dp)
-                    .align(Alignment.TopCenter),
-                shape = RoundedCornerShape(20.dp),
-                color = Color.White,
-                shadowElevation = 4.dp
+                    .padding(12.dp)
+                    .align(Alignment.BottomStart),
+                shape = RoundedCornerShape(12.dp),
+                color = Color.White.copy(alpha = 0.94f),
+                shadowElevation = 3.dp
             ) {
-                Text(
-                    text = if (isOnline) stringResource(id = R.string.you_are_online) else stringResource(id = R.string.status_offline),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                )
+                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    Text(
+                        text = "📍 ${location.address.ifBlank { "Live Location" }}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${String.format(java.util.Locale.US, "%.4f°N, %.4f°E", location.latitude, location.longitude)} • ${if (location.isLiveGps) "Live GPS" else "Default"}",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (location.isLiveGps) Color(0xFF10B981) else Color(0xFF64748B)
+                    )
+                }
             }
 
-            // Location crosshair button at bottom-right
+            // Location crosshair button at bottom-right (Interactive & Live Backend Ping)
             Surface(
                 modifier = Modifier
                     .padding(12.dp)
                     .align(Alignment.BottomEnd)
-                    .size(40.dp),
+                    .size(42.dp)
+                    .clickable { onRecenterClick() },
                 shape = CircleShape,
                 color = Color.White,
                 shadowElevation = 4.dp
@@ -482,7 +660,7 @@ fun VasantraMapSection(
                 ) {
                     Canvas(modifier = Modifier.size(20.dp)) {
                         drawCircle(color = Color(0xFF0F172A), style = Stroke(width = 2.dp.toPx()))
-                        drawCircle(color = Color(0xFF0F172A), radius = 3.dp.toPx())
+                        drawCircle(color = Color(0xFF2563EB), radius = 3.5.dp.toPx())
                         drawLine(color = Color(0xFF0F172A), start = Offset(size.width / 2f, 0f), end = Offset(size.width / 2f, 4.dp.toPx()), strokeWidth = 2.dp.toPx())
                         drawLine(color = Color(0xFF0F172A), start = Offset(size.width / 2f, size.height - 4.dp.toPx()), end = Offset(size.width / 2f, size.height), strokeWidth = 2.dp.toPx())
                         drawLine(color = Color(0xFF0F172A), start = Offset(0f, size.height / 2f), end = Offset(4.dp.toPx(), size.height / 2f), strokeWidth = 2.dp.toPx())
