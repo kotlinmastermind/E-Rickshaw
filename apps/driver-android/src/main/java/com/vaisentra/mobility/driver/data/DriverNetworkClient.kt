@@ -189,7 +189,9 @@ object DriverNetworkClient {
                 // Refresh failed or no refresh token: clear invalid session
                 Log.w(TAG, "Session expired or invalid credentials; clearing token.")
                 clearAuthToken()
-                onAuthExpired?.invoke()
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    onAuthExpired?.invoke()
+                }
             }
         }
         response

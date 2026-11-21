@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -101,6 +102,11 @@ fun VasantraDriverHomeScreen(
     val dailyTarget by DriverRepository.dailyTarget.collectAsState()
     val unreadNotifications by DriverRepository.unreadNotificationCount.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) }
+
+    val hasActiveRide = activeRide != null &&
+        !activeRide?.id.isNullOrBlank() &&
+        activeRide?.status?.uppercase() in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "STARTED")
+    val hasActiveOffer = activeOffer != null && !activeOffer?.rideId.isNullOrBlank()
 
     val context = LocalContext.current
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -170,7 +176,7 @@ fun VasantraDriverHomeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 68.dp)
+                    .padding(bottom = if (hasActiveRide || hasActiveOffer) 140.dp else 20.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 // Top Dark Section for Status bar and Header
@@ -1757,12 +1763,15 @@ fun VasantraBottomNavigationBar(
     onTabSelected: (Int) -> Unit = {}
 ) {
     Surface(
-        modifier = modifier.height(60.dp),
+        modifier = modifier.fillMaxWidth(),
         color = Color.White,
         shadowElevation = 8.dp
     ) {
         Row(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .height(62.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {

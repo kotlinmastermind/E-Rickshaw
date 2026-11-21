@@ -20,6 +20,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.vaisentra.mobility.driver.BuildConfig
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.data.DriverNetworkClient
@@ -248,7 +250,7 @@ class DriverWorkflowRouter(
                         else -> DriverScreen.IN_TRIP_NAV
                     }
                 } else {
-                    DriverScreen.SHIFT_SUMMARY
+                    DriverScreen.OFFER_QUEUE
                 }
             }
             2 -> DriverScreen.PILOT_EARNINGS
@@ -257,12 +259,33 @@ class DriverWorkflowRouter(
             else -> DriverScreen.DUTY_DASHBOARD
         }
 
-        navController.navigate(targetScreen.name) {
-            popUpTo(DriverScreen.DUTY_DASHBOARD.name) {
-                saveState = true
+        val currentRoute = navController.currentBackStackEntry?.destination?.route
+        if (currentRoute == targetScreen.name) {
+            return
+        }
+
+        try {
+            if (targetScreen == DriverScreen.DUTY_DASHBOARD) {
+                navController.navigate(DriverScreen.DUTY_DASHBOARD.name) {
+                    popUpTo(DriverScreen.DUTY_DASHBOARD.name) {
+                        inclusive = false
+                    }
+                    launchSingleTop = true
+                }
+            } else {
+                navController.navigate(targetScreen.name) {
+                    popUpTo(DriverScreen.DUTY_DASHBOARD.name) {
+                        inclusive = false
+                        saveState = false
+                    }
+                    launchSingleTop = true
+                }
             }
-            launchSingleTop = true
-            restoreState = true
+        } catch (e: Exception) {
+            android.util.Log.w("DriverWorkflowRouter", "Tab navigation fallback: ${e.message}")
+            navController.navigate(targetScreen.name) {
+                launchSingleTop = true
+            }
         }
     }
 
@@ -313,22 +336,85 @@ fun DriverNavigation() {
         }
     }
 
+    val scope = rememberCoroutineScope()
     DisposableEffect(Unit) {
         DriverNetworkClient.onAuthExpired = {
-            DriverDialogController.showToast("Session expired. Please sign in again.")
-            router.navigateAndClearTo(DriverScreen.PILOT_LOGIN, DriverScreen.DUTY_DASHBOARD, inclusive = true)
+            scope.launch(Dispatchers.Main) {
+                DriverDialogController.showToast("Session expired. Please sign in again.")
+                router.navigateAndClearTo(DriverScreen.PILOT_LOGIN, DriverScreen.DUTY_DASHBOARD, inclusive = true)
+            }
         }
         onDispose {
             DriverNetworkClient.onAuthExpired = null
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(CockpitBackground)) {
-        NavHost(
-            navController = navController,
-            startDestination = startDestination,
-            modifier = Modifier.fillMaxSize()
+    val hideBottomBarRoutes = setOf(
+        DriverScreen.PILOT_LOGIN.name,
+        DriverScreen.PILOT_OTP.name,
+        DriverScreen.PILOT_RECOVERY.name,
+        DriverScreen.DOC_EXPIRY_WATCHDOG.name,
+        DriverScreen.PICKUP_NAV.name,
+        DriverScreen.ARRIVED_PICKUP.name,
+        DriverScreen.WAITING_TIMER.name,
+        DriverScreen.BOARDING_OTP.name,
+        DriverScreen.IN_TRIP_NAV.name,
+        DriverScreen.TRIP_COMPLETED_FARE.name,
+        DriverScreen.CASH_COLLECTION.name,
+        DriverScreen.UPI_SETTLEMENT.name
+    )
+
+    val showBottomBar = currentRoute !in hideBottomBarRoutes
+    val unreadNotifications by DriverRepository.unreadNotificationCount.collectAsState()
+
+    val tabIndex = when (currentRoute) {
+        DriverScreen.DUTY_DASHBOARD.name, DriverScreen.VEHICLE_INSPECTION.name, DriverScreen.VEHICLE_RC_STATUS.name,
+        DriverScreen.SHIFT_START.name, DriverScreen.SHIFT_END.name, DriverScreen.FATIGUE_CHECK.name,
+        DriverScreen.GPS_PING.name, DriverScreen.HEATMAP_SURGE.name, DriverScreen.ROAD_HAZARDS.name -> 0
+
+        DriverScreen.INCOMING_OFFER.name, DriverScreen.OFFER_QUEUE.name, DriverScreen.MULTI_STOP.name,
+        DriverScreen.POOL_MANIFEST.name, DriverScreen.CORRIDOR_WAYPOINTS.name, DriverScreen.CO_PASSENGER_BROADCAST.name -> 1
+
+        DriverScreen.PILOT_EARNINGS.name, DriverScreen.PAYOUT_ACCOUNTS.name, DriverScreen.INSTANT_PAYOUT.name,
+        DriverScreen.DRIVER_LEDGER.name, DriverScreen.DAILY_TARGETS.name, DriverScreen.WEEKLY_GOALS.name,
+        DriverScreen.STREAK_MISSIONS.name, DriverScreen.SHIFT_SUMMARY.name -> 2
+
+        DriverScreen.NOTIFICATIONS_CENTER.name -> 3
+
+        DriverScreen.PILOT_PROFILE.name, DriverScreen.DOCUMENT_VAULT.name, DriverScreen.DRIVER_PREFERENCES.name,
+        DriverScreen.PERFORMANCE_SCORECARD.name, DriverScreen.ACADEMY_TRAINING.name, DriverScreen.DRIVER_INCIDENT.name,
+        DriverScreen.FOUND_ITEM.name, DriverScreen.DRIVER_HELPDESK.name, DriverScreen.EMERGENCY_CONTACTS.name,
+        DriverScreen.ROUTE_DEVIATION.name, DriverScreen.SPEEDOMETER.name, DriverScreen.AUDIO_SHIELD.name,
+        DriverScreen.EMERGENCY_SOS.name, DriverScreen.BATTERY_SWAP_DEPOT.name -> 4
+
+        else -> 0
+    }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = CockpitBackground,
+        bottomBar = {
+            if (showBottomBar) {
+                VasantraBottomNavigationBar(
+                    selectedTab = tabIndex,
+                    unreadCount = unreadNotifications,
+                    onTabSelected = { index ->
+                        router.navigateTab(index)
+                    }
+                )
+            }
+        }
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = if (showBottomBar) innerPadding.calculateBottomPadding() else 0.dp)
         ) {
+            NavHost(
+                navController = navController,
+                startDestination = startDestination,
+                modifier = Modifier.fillMaxSize()
+            ) {
             // ==========================================
             // 1. Pilot Auth & KYC Flow (1-6)
             // ==========================================
@@ -824,66 +910,10 @@ fun DriverNavigation() {
             }
         }
 
-        // ==========================================
-        // Main 5-Tab Shell (VasantraBottomNavigationBar)
-        // Hidden during active in-trip navigation and onboarding
-        // ==========================================
-        val hideBottomBarRoutes = setOf(
-            DriverScreen.PILOT_LOGIN.name,
-            DriverScreen.PILOT_OTP.name,
-            DriverScreen.PILOT_RECOVERY.name,
-            DriverScreen.DOC_EXPIRY_WATCHDOG.name,
-            DriverScreen.PICKUP_NAV.name,
-            DriverScreen.ARRIVED_PICKUP.name,
-            DriverScreen.WAITING_TIMER.name,
-            DriverScreen.BOARDING_OTP.name,
-            DriverScreen.IN_TRIP_NAV.name,
-            DriverScreen.TRIP_COMPLETED_FARE.name,
-            DriverScreen.CASH_COLLECTION.name,
-            DriverScreen.UPI_SETTLEMENT.name
-        )
-
-        val showBottomBar = currentRoute !in hideBottomBarRoutes
-
-        if (showBottomBar) {
-            val unreadNotifications by DriverRepository.unreadNotificationCount.collectAsState()
-
-            val tabIndex = when (currentRoute) {
-                DriverScreen.DUTY_DASHBOARD.name, DriverScreen.VEHICLE_INSPECTION.name, DriverScreen.VEHICLE_RC_STATUS.name,
-                DriverScreen.SHIFT_START.name, DriverScreen.SHIFT_END.name, DriverScreen.FATIGUE_CHECK.name,
-                DriverScreen.GPS_PING.name, DriverScreen.HEATMAP_SURGE.name, DriverScreen.ROAD_HAZARDS.name -> 0
-
-                DriverScreen.INCOMING_OFFER.name, DriverScreen.OFFER_QUEUE.name, DriverScreen.MULTI_STOP.name,
-                DriverScreen.POOL_MANIFEST.name, DriverScreen.CORRIDOR_WAYPOINTS.name, DriverScreen.CO_PASSENGER_BROADCAST.name -> 1
-
-                DriverScreen.PILOT_EARNINGS.name, DriverScreen.PAYOUT_ACCOUNTS.name, DriverScreen.INSTANT_PAYOUT.name,
-                DriverScreen.DRIVER_LEDGER.name, DriverScreen.DAILY_TARGETS.name, DriverScreen.WEEKLY_GOALS.name,
-                DriverScreen.STREAK_MISSIONS.name, DriverScreen.SHIFT_SUMMARY.name -> 2
-
-                DriverScreen.NOTIFICATIONS_CENTER.name -> 3
-
-                DriverScreen.PILOT_PROFILE.name, DriverScreen.DOCUMENT_VAULT.name, DriverScreen.DRIVER_PREFERENCES.name,
-                DriverScreen.PERFORMANCE_SCORECARD.name, DriverScreen.ACADEMY_TRAINING.name, DriverScreen.DRIVER_INCIDENT.name,
-                DriverScreen.FOUND_ITEM.name, DriverScreen.DRIVER_HELPDESK.name, DriverScreen.EMERGENCY_CONTACTS.name,
-                DriverScreen.ROUTE_DEVIATION.name, DriverScreen.SPEEDOMETER.name, DriverScreen.AUDIO_SHIELD.name,
-                DriverScreen.EMERGENCY_SOS.name, DriverScreen.BATTERY_SWAP_DEPOT.name -> 4
-
-                else -> 0
-            }
-
-            VasantraBottomNavigationBar(
-                modifier = Modifier.align(Alignment.BottomCenter),
-                selectedTab = tabIndex,
-                unreadCount = unreadNotifications,
-                onTabSelected = { index ->
-                    router.navigateTab(index)
-                }
-            )
-        }
-
         // Host for all 15 Popups/Modals & Toasts
         DriverGoDialogHost()
     }
+}
 }
 
 /**
