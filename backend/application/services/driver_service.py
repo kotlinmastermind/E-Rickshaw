@@ -381,10 +381,15 @@ class DriverService:
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        today_earnings_cents = sum(
-            round((r.final_fare_cents or 0) * 0.8)
-            for r in rides
+        today_rides = [
+            r for r in rides
             if r.completed_at and r.completed_at.replace(tzinfo=timezone.utc if r.completed_at.tzinfo is None else None) >= today_start
+        ]
+        today_earnings_cents = sum(round((r.final_fare_cents or 0) * 0.8) for r in today_rides)
+        today_completed_trips = len(today_rides)
+        today_distance_km = round(
+            sum((r.actual_distance_km if r.actual_distance_km is not None else (r.estimated_distance_km or 0.0)) for r in today_rides),
+            1
         )
         weekly_earnings_cents = total_earnings_cents
 
@@ -404,9 +409,10 @@ class DriverService:
             "weekly_earnings_cents": weekly_earnings_cents,
             "currency": "INR",
             "completed_trips": trips_count,
+            "today_completed_trips": today_completed_trips,
+            "today_distance_km": today_distance_km,
             "wallet_balance_cents": driver.wallet_balance_cents,
             "rating_average": driver.rating_average,
             "rating_count": driver.rating_count,
             "recent_trips": recent_trips
         }
-

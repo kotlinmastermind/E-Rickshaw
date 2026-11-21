@@ -28,50 +28,91 @@ object DriverWebSocketClient {
             .build()
     }
 
-    fun connectDispatchChannel() {
-        if (dispatchWebSocket != null) return
-
+    private fun buildWsBaseUrl(): String {
         val baseHttpUrl = DriverNetworkClient.baseUrl.trimEnd('/')
-        val wsBaseUrl = if (baseHttpUrl.startsWith("https://")) {
+        return if (baseHttpUrl.startsWith("https://")) {
             baseHttpUrl.replaceFirst("https://", "wss://")
         } else {
             baseHttpUrl.replaceFirst("http://", "ws://")
         }
-        val targetUrl = "$wsBaseUrl/api/v1/ws/driver/dispatch"
+    }
 
-        val requestBuilder = Request.Builder().url(targetUrl)
-        DriverNetworkClient.authToken?.let { token ->
-            requestBuilder.addHeader("Authorization", "Bearer $token")
+    fun connectDispatchChannel() {
+        val token = DriverNetworkClient.authToken
+        if (token.isNullOrBlank()) {
+            Log.w(TAG, "Cannot connect Dispatch WebSocket: authToken is null/blank.")
+            return
         }
+        if (dispatchWebSocket != null) return
+
+        val targetUrl = "${buildWsBaseUrl()}/api/v1/ws/driver/dispatch"
+        val request = Request.Builder()
+            .url(targetUrl)
+            .addHeader("Authorization", "Bearer $token")
+            .build()
 
         Log.i(TAG, "Connecting Driver Dispatch WebSocket: $targetUrl")
-        dispatchWebSocket = client.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
+        dispatchWebSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "Driver Dispatch WebSocket connected.")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (text == "pong") return
                 Log.d(TAG, "Driver Dispatch Message: $text")
                 try {
                     val json = JSONObject(text)
-                    val eventType = json.optString("type", "")
+                    val eventType = json.optString("event", json.optString("type", ""))
 
-                    if (eventType == "DISPATCH_OFFER" || json.has("ride_id")) {
-                        val offer = DispatchOfferDto(
-                            rideId = json.optString("ride_id", "ride-" + System.currentTimeMillis()),
-                            assignmentId = json.optString("assignment_id", "asg-01"),
-                            passengerName = json.optString("passenger_name", "Commuter Passenger"),
-                            passengerPhone = json.optString("passenger_phone", "+91 99999 00000"),
-                            passengerRating = json.optDouble("passenger_rating", 4.90),
-                            pickupAddress = json.optString("pickup_address", "Current Pickup Location"),
-                            destinationAddress = json.optString("destination_address", "Destination"),
-                            distanceKm = json.optDouble("distance_km", 4.5),
-                            pickupDistanceMeters = json.optInt("pickup_distance_meters", 350),
-                            estimatedFareRupees = json.optDouble("estimated_fare_rupees", 85.0),
-                            paymentMode = json.optString("payment_mode", "UPI"),
-                            timeoutSeconds = json.optInt("timeout_seconds", 15)
-                        )
-                        DriverRepository.onNewDispatchOfferReceived(offer)
+                    when {
+                        eventType == "SESSION_REVOKED" -> {
+                            Log.w(TAG, "Dispatch WebSocket session revoked by backend.")
+                            disconnectAll()
+                        }
+                        eventType == "DISPATCH_OFFER" || json.has("ride_id") -> {
+                            val rideId = json.optString("ride_id", "")
+                            if (rideId.isBlank()) return
+
+                            val fareCents = when {
+                                json.has("estimated_fare_cents") && !json.isNull("estimated_fare_cents") ->
+                                    json.optLong("estimated_fare_cents", 0L)
+                                json.has("estimated_fare_rupees") ->
+                                    (json.optDouble("estimated_fare_rupees", 0.0) * 100).toLong()
+                                else -> 0L
+                            }
+
+                            val pickupDistKm = if (json.has("pickup_distance_km") && !json.isNull("pickup_distance_km")) {
+                                json.optDouble("pickup_distance_km", 0.0)
+                            } else null
+
+                            val offer = DispatchOfferDto(
+                                rideId = rideId,
+                                assignmentId = json.optString("assignment_id", ""),
+                                passengerName = json.optString("passenger_name", "Commuter Passenger"),
+                                passengerPhone = json.optString("passenger_phone", ""),
+                                passengerRating = json.optDouble("passenger_rating", 0.0),
+                                pickupAddress = json.optString("pickup_address", "Pickup Location"),
+                                destinationAddress = json.optString(
+                                    "destination_address",
+                                    json.optString("destination_area", "Destination")
+                                ),
+                                distanceKm = json.optDouble("estimated_trip_distance_km", json.optDouble("distance_km", 0.0)),
+                                pickupDistanceKm = pickupDistKm,
+                                estimatedFareCents = fareCents,
+                                paymentMode = json.optString("payment_mode", "UPI"),
+                                expiresAt = if (json.isNull("expires_at")) null else json.optString("expires_at"),
+                                timeoutSeconds = json.optInt("timeout_seconds", 25)
+                            )
+
+                            // Send delivery acknowledgement expected by backend ws.py
+                            val ackPayload = JSONObject().apply {
+                                put("type", "OFFER_ACK")
+                                put("ride_id", rideId)
+                            }
+                            webSocket.send(ackPayload.toString())
+
+                            DriverRepository.onNewDispatchOfferReceived(offer)
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing dispatch offer message: ${e.message}", e)
@@ -79,45 +120,45 @@ object DriverWebSocketClient {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.i(TAG, "Driver Dispatch WebSocket closed.")
+                Log.i(TAG, "Driver Dispatch WebSocket closed: $code $reason")
                 dispatchWebSocket = null
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.w(TAG, "Driver Dispatch WebSocket failure: ${t.message}")
+                Log.w(TAG, "Driver Dispatch WebSocket failure (${response?.code}): ${t.message}")
                 dispatchWebSocket = null
             }
         })
     }
 
     fun connectRideTracking(rideId: String) {
+        val token = DriverNetworkClient.authToken
+        if (token.isNullOrBlank()) {
+            Log.w(TAG, "Cannot connect Ride Tracking WebSocket: authToken is null/blank.")
+            return
+        }
         disconnectRideTracking()
 
-        val baseHttpUrl = DriverNetworkClient.baseUrl.trimEnd('/')
-        val wsBaseUrl = if (baseHttpUrl.startsWith("https://")) {
-            baseHttpUrl.replaceFirst("https://", "wss://")
-        } else {
-            baseHttpUrl.replaceFirst("http://", "ws://")
-        }
-        val targetUrl = "$wsBaseUrl/api/v1/ws/rides/$rideId/tracking"
-
-        val requestBuilder = Request.Builder().url(targetUrl)
-        DriverNetworkClient.authToken?.let { token ->
-            requestBuilder.addHeader("Authorization", "Bearer $token")
-        }
+        val targetUrl = "${buildWsBaseUrl()}/api/v1/ws/rides/$rideId/tracking"
+        val request = Request.Builder()
+            .url(targetUrl)
+            .addHeader("Authorization", "Bearer $token")
+            .build()
 
         Log.i(TAG, "Connecting Pilot Ride Tracking WebSocket: $targetUrl")
-        rideTrackingWebSocket = client.newWebSocket(requestBuilder.build(), object : WebSocketListener() {
+        rideTrackingWebSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "Pilot Ride Tracking WebSocket connected for $rideId")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (text == "pong") return
                 Log.d(TAG, "Ride Tracking Event: $text")
                 try {
                     val json = JSONObject(text)
                     val status = json.optString("status", "")
-                    if (status == "CANCELLED") {
+                    val event = json.optString("event", json.optString("event_type", json.optString("type", "")))
+                    if (status == "CANCELLED" || event == "RIDE_CANCELLED") {
                         DriverRepository.handleRideCancelledByPassenger()
                     }
                 } catch (e: Exception) {
@@ -151,4 +192,3 @@ object DriverWebSocketClient {
         dispatchWebSocket = null
     }
 }
-

@@ -5,14 +5,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -24,14 +22,23 @@ import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.launch
 
 /**
- * Screen 23: Route Deviation & Anomaly Alarm (unexpected detours & delay detection)
+ * Screen 23: Route Deviation & Anomaly Alarm
  */
 @Composable
 fun RouteDeviationScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    var isDeviationAcknowledged by remember { mutableStateOf(false) }
+    val reasons = listOf(
+        "Road block / municipal construction ahead",
+        "Passenger requested alternate drop point",
+        "Severe traffic / waterlogged bypass",
+        "Accidental missed turn"
+    )
+    var selectedReason by remember { mutableStateOf(reasons.first()) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -41,7 +48,7 @@ fun RouteDeviationScreen(
     ) {
         CockpitHeader(
             title = "Route Deviation Alert",
-            subtitle = "Automatic anomaly watchdog: 340m off course",
+            subtitle = "Automatic anomaly watchdog",
             onBack = onNavigateBack
         )
 
@@ -66,12 +73,6 @@ fun RouteDeviationScreen(
                 CockpitCard {
                     Text("SELECT REASON FOR DETOUR", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(10.dp))
-                    val reasons = listOf(
-                        "Road block / municipal construction ahead",
-                        "Passenger requested alternate drop point",
-                        "Severe traffic / waterlogged bypass",
-                        "Accidental missed turn"
-                    )
                     reasons.forEach { reason ->
                         Row(
                             modifier = Modifier
@@ -80,8 +81,8 @@ fun RouteDeviationScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = isDeviationAcknowledged,
-                                onClick = { isDeviationAcknowledged = true },
+                                selected = selectedReason == reason,
+                                onClick = { selectedReason = reason },
                                 colors = RadioButtonDefaults.colors(selectedColor = ElectricCyan)
                             )
                             Spacer(Modifier.width(8.dp))
@@ -93,14 +94,24 @@ fun RouteDeviationScreen(
 
             item {
                 CockpitButton(
-                    text = "CONFIRM DETOUR REASON & UPDATE ROUTE",
+                    text = if (isSubmitting) "LOGGING DETOUR..." else "CONFIRM DETOUR REASON & UPDATE ROUTE",
+                    enabled = !isSubmitting,
                     onClick = {
-                        val rideId = DriverRepository.currentRideId.value ?: "ride-latest"
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            DriverRepository.reportRouteDeviation(rideId, 28.6289, 77.3710)
+                        if (rideId.isBlank()) {
+                            onShowToast("No active ride found.")
+                            return@CockpitButton
                         }
-                        onShowToast("Detour reason logged in Supabase trips_audit")
-                        onNavigateBack()
+                        isSubmitting = true
+                        scope.launch {
+                            val res = DriverRepository.reportRouteDeviation(rideId, 28.6289, 77.3710)
+                            isSubmitting = false
+                            if (res.isSuccess) {
+                                onShowToast("Detour reason logged: $selectedReason")
+                                onNavigateBack()
+                            } else {
+                                onShowToast("Failed to log detour: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -110,7 +121,7 @@ fun RouteDeviationScreen(
 }
 
 /**
- * Screen 27: Speedometer & Urban Limits (35 km/h urban limit gauge)
+ * Screen 27: Speedometer & Urban Limits
  */
 @Composable
 fun SpeedometerScreen(
@@ -153,7 +164,6 @@ fun SpeedometerScreen(
                         fontWeight = FontWeight.ExtraBold
                     )
                     Text("KILOMETERS PER HOUR", color = CockpitTextSecondary, fontSize = 12.sp)
-
                     Spacer(Modifier.height(16.dp))
                     CockpitBadge(
                         if (speed > maxLimit) "OVERSPEEDING (>35 KM/H)" else "SAFE URBAN SPEED COMPLIANT",
@@ -162,23 +172,13 @@ fun SpeedometerScreen(
                 }
             }
 
-            CockpitCard {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text("MUNICIPAL SPEED CAP", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("35 km/h limit", color = CockpitTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("ACCELERATION G-FORCE", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("0.08 G (Smooth)", color = EmeraldPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CockpitButton(
                     text = "Test 25 km/h",
-                    onClick = { speed = 25 },
+                    onClick = {
+                        speed = 25
+                        DriverRepository.pingLocation(28.6139, 77.2090, 0.0, 25.0 / 3.6)
+                    },
                     modifier = Modifier.weight(1f),
                     isOutlined = true
                 )
@@ -186,6 +186,7 @@ fun SpeedometerScreen(
                     text = "Test 38 km/h Alert",
                     onClick = {
                         speed = 38
+                        DriverRepository.pingLocation(28.6139, 77.2090, 0.0, 38.0 / 3.6)
                         onShowToast("Auditory alert triggered: Speed > 35 km/h")
                     },
                     modifier = Modifier.weight(1f),
@@ -197,7 +198,7 @@ fun SpeedometerScreen(
 }
 
 /**
- * Screen 28: Cabin Audio Safety Shield (encrypted ambient audio capture)
+ * Screen 28: Cabin Audio Safety Shield
  */
 @Composable
 fun AudioShieldScreen(
@@ -205,6 +206,28 @@ fun AudioShieldScreen(
     onShowToast: (String) -> Unit = {}
 ) {
     var isShieldActive by remember { mutableStateOf(false) }
+    var isUpdating by remember { mutableStateOf(false) }
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    fun toggleShield(targetState: Boolean) {
+        if (rideId.isBlank()) {
+            isShieldActive = targetState
+            onShowToast(if (targetState) "Audio Shield armed (local standby — no active ride)" else "Audio Shield stopped")
+            return
+        }
+        isUpdating = true
+        scope.launch {
+            val res = DriverRepository.updateAudioShieldConsent(rideId, targetState)
+            isUpdating = false
+            if (res.isSuccess) {
+                isShieldActive = targetState
+                onShowToast(if (targetState) "Audio Shield consent synced & active" else "Audio Shield stopped")
+            } else {
+                onShowToast("Failed to sync Audio Shield: ${res.exceptionOrNull()?.message}")
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -224,53 +247,32 @@ fun AudioShieldScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                CockpitCard(glow = isShieldActive) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("Active Trip Audio Sentinel", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text(
-                                if (isShieldActive) "Recording active: AES-256 encrypted" else "Shield is idle (tap toggle to arm)",
-                                color = if (isShieldActive) EmeraldPrimary else CockpitTextSecondary,
-                                fontSize = 12.sp
-                            )
-                        }
-                        Switch(
-                            checked = isShieldActive,
-                            onCheckedChange = {
-                                isShieldActive = it
-                                onShowToast(if (it) "Audio Shield activated" else "Audio Shield stopped")
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = EmeraldPrimary,
-                                checkedTrackColor = EmeraldPrimary.copy(alpha = 0.3f)
-                            )
+            CockpitCard(glow = isShieldActive) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Active Trip Audio Sentinel", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text(
+                            if (isShieldActive) "Recording active: AES-256 encrypted" else "Shield is idle",
+                            color = if (isShieldActive) EmeraldPrimary else CockpitTextSecondary,
+                            fontSize = 12.sp
                         )
                     }
-                }
-
-                CockpitCard {
-                    Text("PRIVACY & ENCRYPTION GUARANTEE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "• Audio files are encrypted on device with asymmetric public key\n• Pilot and passenger cannot play back recordings\n• Files are only unlocked by safety audit officers upon dispute/FIR filing\n• Auto-deleted after 7 days if no safety flag is raised",
-                        color = CockpitTextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp
+                    Switch(
+                        checked = isShieldActive,
+                        enabled = !isUpdating,
+                        onCheckedChange = { toggleShield(it) }
                     )
                 }
             }
 
             CockpitButton(
-                text = if (isShieldActive) "STOP RECORDING" else "START AUDIO SHIELD",
-                onClick = {
-                    isShieldActive = !isShieldActive
-                    onShowToast(if (isShieldActive) "Audio shield armed" else "Audio shield disarmed")
-                },
+                text = if (isUpdating) "SYNCING..." else if (isShieldActive) "STOP RECORDING" else "START AUDIO SHIELD",
+                enabled = !isUpdating,
+                onClick = { toggleShield(!isShieldActive) },
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -278,13 +280,17 @@ fun AudioShieldScreen(
 }
 
 /**
- * Screen 29: Emergency SOS & Pilot 112 (1-tap panic trigger to Delhi Police 112)
+ * Screen 29: Emergency SOS & Pilot 112
  */
 @Composable
 fun EmergencySosScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    var isSending by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -305,23 +311,27 @@ fun EmergencySosScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             CockpitCard(glow = true) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("CRITICAL EMERGENCY DISPATCH", color = CrimsonAlert, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "Pressing the SOS button immediately:\n1. Dials Delhi Police Control Room (112)\n2. Sends live GPS coordinates to Driver Emergency Contacts\n3. Triggers 24x7 Security Operations Center (SOC) agent callback",
-                        color = CockpitTextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
+                Text(
+                    "Pressing SOS immediately alerts Security Operations Center (SOC) & Emergency Contacts.",
+                    color = CockpitTextSecondary,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
             }
 
-            // Big SOS Button
             Button(
+                enabled = !isSending,
                 onClick = {
-                    onShowToast("EMERGENCY 112 BROADCAST DISPATCHED!")
+                    isSending = true
+                    scope.launch {
+                        val res = DriverRepository.triggerEmergencySos(rideId)
+                        isSending = false
+                        if (res.isSuccess) {
+                            onShowToast(res.getOrNull() ?: "EMERGENCY 112 BROADCAST DISPATCHED!")
+                        } else {
+                            onShowToast("SOS alert error: ${res.exceptionOrNull()?.message}")
+                        }
+                    }
                 },
                 modifier = Modifier.size(180.dp),
                 shape = CircleShape,
@@ -330,7 +340,7 @@ fun EmergencySosScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Emergency, contentDescription = null, tint = Color.White, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.height(4.dp))
-                    Text("SOS 112", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)
+                    Text(if (isSending) "SENDING..." else "SOS 112", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)
                 }
             }
 
@@ -345,21 +355,16 @@ fun EmergencySosScreen(
 }
 
 /**
- * Screen 30: Low Battery Swap Depot (route to Anand Vihar swap hub)
+ * Screen 30: Low Battery Swap Depot
  */
 @Composable
 fun BatterySwapDepotScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    LaunchedEffect(Unit) {
-        DriverRepository.fetchHeatMap()
-    }
-
     val depots = listOf(
         SwapDepotItem("Sun Mobility Hub - Anand Vihar ISBT", "0.8 km", "12 Charged Packs Ready", EmeraldPrimary),
-        SwapDepotItem("Battery Smart Depot - Preet Vihar Gate 1", "2.1 km", "7 Charged Packs Ready", EmeraldPrimary),
-        SwapDepotItem("Bounce Infinity Station - Laxmi Nagar", "3.4 km", "3 Charged Packs Ready", AmberWarning)
+        SwapDepotItem("Battery Smart Depot - Preet Vihar Gate 1", "2.1 km", "7 Charged Packs Ready", EmeraldPrimary)
     )
 
     Column(
@@ -378,35 +383,11 @@ fun BatterySwapDepotScreen(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item {
-                CockpitCard(glow = true) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("CURRENT VEHICLE BATTERY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("16% SoC (Range: ~8 km)", color = CrimsonAlert, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        }
-                        CockpitBadge("RESERVE WARNING", CrimsonAlert)
-                    }
-                }
-            }
-
             items(depots) { depot ->
                 CockpitCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(depot.name, color = CockpitTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                            Spacer(Modifier.height(2.dp))
-                            Text("${depot.distance} • ${depot.status}", color = depot.tint, fontSize = 12.sp)
-                        }
-                    }
+                    Text(depot.name, color = CockpitTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text("${depot.distance} • ${depot.status}", color = depot.tint, fontSize = 12.sp)
                     Spacer(Modifier.height(10.dp))
                     CockpitButton(
                         text = "Reserve Pack & Navigate (${depot.distance})",
@@ -420,15 +401,23 @@ fun BatterySwapDepotScreen(
 }
 
 /**
- * Screen 45: Driver Incident Reporting (collision, passenger dispute, mechanical fault)
+ * Screen 45: Driver Incident Reporting
  */
 @Composable
 fun DriverIncidentScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    var incidentType by remember { mutableStateOf("Passenger Dispute") }
+    val types = listOf(
+        "Passenger Dispute / Fare Refusal" to "PASSENGER_DISPUTE",
+        "Vehicle Breakdown / Flat Tyre" to "VEHICLE_BREAKDOWN",
+        "Minor Road Collision / Scratch" to "ROAD_COLLISION"
+    )
+    var selectedIndex by remember { mutableIntStateOf(0) }
     var descriptionText by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -450,21 +439,18 @@ fun DriverIncidentScreen(
                 CockpitCard {
                     Text("INCIDENT CATEGORY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    val types = listOf("Passenger Dispute / Fare Refusal", "Vehicle Breakdown / Flat Tyre", "Minor Road Collision / Scratch", "Police Harassment / Challan")
-                    types.forEach { type ->
+                    types.forEachIndexed { idx, (label, _) ->
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = incidentType == type,
-                                onClick = { incidentType = type },
+                                selected = selectedIndex == idx,
+                                onClick = { selectedIndex = idx },
                                 colors = RadioButtonDefaults.colors(selectedColor = ElectricCyan)
                             )
                             Spacer(Modifier.width(8.dp))
-                            Text(type, color = CockpitTextPrimary, fontSize = 13.sp)
+                            Text(label, color = CockpitTextPrimary, fontSize = 13.sp)
                         }
                     }
                 }
@@ -474,17 +460,36 @@ fun DriverIncidentScreen(
                 CockpitTextField(
                     value = descriptionText,
                     onValueChange = { descriptionText = it },
-                    label = "Detailed Incident Description",
-                    placeholder = "Describe what occurred, location landmark, etc."
+                    label = "Detailed Incident Description (min 10 chars)",
+                    placeholder = "Describe what occurred..."
                 )
             }
 
             item {
                 CockpitButton(
-                    text = "Submit Incident Report",
+                    text = if (isSubmitting) "Submitting..." else "Submit Incident Report",
+                    enabled = !isSubmitting,
                     onClick = {
-                        onShowToast("Incident filed. Ticket #INC-${(1000..9999).random()} created.")
-                        onNavigateBack()
+                        if (descriptionText.trim().length < 10) {
+                            onShowToast("Please enter at least 10 characters in description.")
+                            return@CockpitButton
+                        }
+                        isSubmitting = true
+                        val categoryCode = types[selectedIndex].second
+                        scope.launch {
+                            val res = DriverRepository.submitDriverIncident(
+                                rideId = rideId,
+                                category = categoryCode,
+                                description = descriptionText
+                            )
+                            isSubmitting = false
+                            if (res.isSuccess) {
+                                onShowToast("Incident report submitted (${res.getOrNull()}).")
+                                onNavigateBack()
+                            } else {
+                                onShowToast("Failed to submit: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -494,18 +499,23 @@ fun DriverIncidentScreen(
 }
 
 /**
- * Screen 48: Driver Emergency Contacts (family emergency contacts management)
+ * Screen 48: Driver Emergency Contacts
  */
 @Composable
 fun EmergencyContactsScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val contacts = listOf(
-        EmergencyContact("Sunita Sharma", "Spouse", "+91 98110 54321", true),
-        EmergencyContact("Ajay Sharma", "Brother", "+91 98712 99887", true),
-        EmergencyContact("Mohan Lal", "Garage Partner", "+91 99100 12345", false)
-    )
+    val contacts by DriverRepository.emergencyContacts.collectAsState()
+    var newName by remember { mutableStateOf("") }
+    var newRelation by remember { mutableStateOf("") }
+    var newPhone by remember { mutableStateOf("") }
+    var isSaving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchEmergencyContacts()
+    }
 
     Column(
         modifier = Modifier
@@ -523,47 +533,72 @@ fun EmergencyContactsScreen(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(contacts) { contact ->
+            item {
                 CockpitCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(contact.name, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text("${contact.relation} • ${contact.phone}", color = CockpitTextSecondary, fontSize = 12.sp)
-                        }
-                        if (contact.isPrimary) {
-                            CockpitBadge("PRIMARY", EmeraldPrimary)
-                        }
-                    }
+                    Text("ADD EMERGENCY CONTACT", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    CockpitTextField(value = newName, onValueChange = { newName = it }, placeholder = "Contact Name", label = "Full Name")
+                    Spacer(Modifier.height(8.dp))
+                    CockpitTextField(value = newRelation, onValueChange = { newRelation = it }, placeholder = "e.g. Spouse, Brother", label = "Relationship")
+                    Spacer(Modifier.height(8.dp))
+                    CockpitTextField(value = newPhone, onValueChange = { newPhone = it }, placeholder = "+91 98110 54321", label = "Phone Number")
+                    Spacer(Modifier.height(10.dp))
+                    CockpitButton(
+                        text = if (isSaving) "Saving..." else "+ Save Emergency Contact",
+                        enabled = !isSaving && newName.trim().length >= 2 && newPhone.trim().length >= 10,
+                        onClick = {
+                            isSaving = true
+                            scope.launch {
+                                val res = DriverRepository.addEmergencyContact(newName, newRelation, newPhone)
+                                isSaving = false
+                                if (res.isSuccess) {
+                                    newName = ""
+                                    newRelation = ""
+                                    newPhone = ""
+                                    onShowToast("Emergency contact saved!")
+                                } else {
+                                    onShowToast("Failed: ${res.exceptionOrNull()?.message}")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
 
-            item {
-                CockpitButton(
-                    text = "+ Add New Emergency Contact",
-                    onClick = { onShowToast("Add contact form opened") },
-                    modifier = Modifier.fillMaxWidth(),
-                    isOutlined = true
-                )
+            if (contacts.isEmpty()) {
+                item {
+                    CockpitCard {
+                        Text("No emergency contacts saved yet.", color = CockpitTextMuted, fontSize = 13.sp)
+                    }
+                }
+            } else {
+                items(contacts) { contact ->
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(contact.name, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Text("${contact.relationship} • ${contact.phoneNumber}", color = CockpitTextSecondary, fontSize = 12.sp)
+                            }
+                            IconButton(onClick = {
+                                scope.launch {
+                                    val res = DriverRepository.deleteEmergencyContact(contact.id)
+                                    if (res.isSuccess) onShowToast("Contact removed")
+                                    else onShowToast("Could not remove contact")
+                                }
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = CrimsonAlert)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-private data class SwapDepotItem(
-    val name: String,
-    val distance: String,
-    val status: String,
-    val tint: Color
-)
-
-private data class EmergencyContact(
-    val name: String,
-    val relation: String,
-    val phone: String,
-    val isPrimary: Boolean
-)
-
+private data class SwapDepotItem(val name: String, val distance: String, val status: String, val tint: Color)

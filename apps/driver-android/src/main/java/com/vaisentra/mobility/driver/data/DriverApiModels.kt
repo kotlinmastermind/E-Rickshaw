@@ -2,133 +2,463 @@ package com.vaisentra.mobility.driver.data
 
 import com.google.gson.annotations.SerializedName
 
-// --- Driver Auth & Profile (Supabase: users, driver_profiles, driver_documents) ---
-data class DriverLoginRequest(
+// --- Driver Auth & Profile (FastAPI: /api/v1/auth/login, /api/v1/auth/otp/*, /api/v1/drivers/profile, /documents) ---
+data class OtpSendRequest(
     @SerializedName("phone_number") val phoneNumber: String,
-    @SerializedName("password") val password: String? = null
+    @SerializedName("role") val role: String = "driver"
+)
+
+data class OtpVerifyRequest(
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("otp_code") val otpCode: String,
+    @SerializedName("role") val role: String = "driver",
+    @SerializedName("full_name") val fullName: String? = null
+)
+
+data class ChangePasswordRequest(
+    @SerializedName("current_password") val currentPassword: String? = null,
+    @SerializedName("new_password") val newPassword: String
+)
+
+data class RecoveryRequest(
+    @SerializedName("identifier") val identifier: String
+)
+
+data class PasswordResetRequest(
+    @SerializedName("user_id") val userId: String? = null,
+    @SerializedName("recovery_code") val recoveryCode: String,
+    @SerializedName("new_password") val newPassword: String
+)
+
+data class DriverTokenResponse(
+    @SerializedName("message") val message: String? = null,
+    @SerializedName("access_token") val accessToken: String = "",
+    @SerializedName("refresh_token") val refreshToken: String? = null,
+    @SerializedName("token_type") val tokenType: String? = "bearer",
+    @SerializedName("expires_in") val expiresIn: Int? = null,
+    @SerializedName("is_new_user") val isNewUser: Boolean = false,
+    @SerializedName("user") val user: LoginUserDto? = null
+)
+
+data class DriverLoginRequest(
+    @SerializedName("identifier") val identifier: String,
+    @SerializedName("password") val password: String? = null,
+    @SerializedName("login_type") val loginType: String = "PASSWORD"
+)
+
+data class LoginUserDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("phone_number") val phoneNumber: String? = null,
+    @SerializedName("email") val email: String? = null,
+    @SerializedName("username") val username: String? = null,
+    @SerializedName("full_name") val fullName: String? = null,
+    @SerializedName("role") val role: String? = null
+)
+
+data class DriverLoginResponse(
+    @SerializedName("message") val message: String? = null,
+    @SerializedName("access_token") val accessToken: String? = null,
+    @SerializedName("refresh_token") val refreshToken: String? = null,
+    @SerializedName("token_type") val tokenType: String? = null,
+    @SerializedName("expires_in") val expiresIn: Int? = null,
+    @SerializedName("user") val user: LoginUserDto? = null
 )
 
 data class DriverProfileDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("user_id") val userId: String,
-    @SerializedName("full_name") val fullName: String,
-    @SerializedName("phone_number") val phoneNumber: String,
-    @SerializedName("license_number") val licenseNumber: String,
-    @SerializedName("badge_number") val badgeNumber: String,
-    @SerializedName("assigned_vehicle_plate") val assignedVehiclePlate: String = "DL-1ER-4921",
-    @SerializedName("assigned_vehicle_model") val assignedVehicleModel: String = "Mahindra Treo Electric",
-    @SerializedName("rating") val rating: Double = 4.95,
-    @SerializedName("completed_trips") val completedTrips: Int = 2420,
-    @SerializedName("acceptance_rate") val acceptanceRate: Double = 96.5,
-    @SerializedName("onboarding_status") val onboardingStatus: String = "ACTIVE_VERIFIED"
-)
+    @SerializedName("id") val id: String = "",
+    @SerializedName("driver_id") val driverId: String = "",
+    @SerializedName("user_id") val userId: String = "",
+    @SerializedName("full_name") val fullName: String = "",
+    @SerializedName("phone_number") val phoneNumber: String = "",
+    @SerializedName("license_number") val licenseNumber: String = "",
+    @SerializedName("approval_status") val approvalStatus: String = "PENDING",
+    @SerializedName("rating_average", alternate = ["rating"]) val rating: Double = 0.0,
+    @SerializedName("rating_count") val ratingCount: Int = 0,
+    @SerializedName("total_trips", alternate = ["completed_trips"]) val completedTrips: Int = 0,
+    @SerializedName("wallet_balance_cents") val walletBalanceCents: Long = 0L,
+    @SerializedName("badge_number") val badgeNumber: String = "",
+    @SerializedName("assigned_vehicle_plate") val assignedVehiclePlate: String = "",
+    @SerializedName("assigned_vehicle_model") val assignedVehicleModel: String = "",
+    @SerializedName("acceptance_rate") val acceptanceRate: Double = 0.0
+) {
+    val onboardingStatus: String get() = approvalStatus
+    val walletBalanceRupees: Double get() = walletBalanceCents / 100.0
+}
 
 data class DriverDocumentDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("document_type") val documentType: String,
-    @SerializedName("status") val status: String = "APPROVED",
-    @SerializedName("expiry_date") val expiryDate: String,
-    @SerializedName("days_until_expiry") val daysUntilExpiry: Int = 45
+    @SerializedName("id") val id: String = "",
+    @SerializedName("document_type") val documentType: String = "",
+    @SerializedName("file_name") val fileName: String = "",
+    @SerializedName("verification_status", alternate = ["status"]) val status: String = "PENDING",
+    @SerializedName("rejection_reason") val rejectionReason: String? = null,
+    @SerializedName("created_at") val createdAt: String = "",
+    @SerializedName("expiry_date") val expiryDate: String = "",
+    @SerializedName("days_until_expiry") val daysUntilExpiry: Int = 0
 )
 
-// --- Duty & Location Telemetry (Supabase: driver_availability, driver_locations, driver_shifts) ---
+// --- Active Ride & Notifications ---
+data class ActiveRideDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("status") val status: String = "",
+    @SerializedName("pickup_address") val pickupAddress: String = "",
+    @SerializedName("pickup_latitude") val pickupLatitude: Double? = null,
+    @SerializedName("pickup_longitude") val pickupLongitude: Double? = null,
+    @SerializedName("destination_address") val destinationAddress: String = "",
+    @SerializedName("destination_latitude") val destinationLatitude: Double? = null,
+    @SerializedName("destination_longitude") val destinationLongitude: Double? = null,
+    @SerializedName("estimated_fare_cents") val estimatedFareCents: Long = 0L,
+    @SerializedName("final_fare_cents") val finalFareCents: Long? = null,
+    @SerializedName("payment_method") val paymentMethod: String = "CASH"
+)
+
+data class AutoAcceptRequest(
+    @SerializedName("enabled") val enabled: Boolean,
+    @SerializedName("max_distance_km") val maxDistanceKm: Double = 5.0
+)
+
+data class ActiveRideResponseDto(
+    @SerializedName("active_ride") val activeRide: ActiveRideDto? = null
+)
+
+data class NotificationInboxResponseDto(
+    @SerializedName("items") val items: List<NotificationItemDto> = emptyList(),
+    @SerializedName("unread_count") val unreadCount: Int = 0,
+    @SerializedName("total") val total: Int = 0
+)
+
+// --- Duty & Location Telemetry ---
 data class DutyStatusUpdateRequest(
-    @SerializedName("is_online") val isOnline: Boolean,
-    @SerializedName("status") val status: String = "AVAILABLE"
+    @SerializedName("is_online") val isOnline: Boolean
 )
 
 data class DriverLocationPingRequest(
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
-    @SerializedName("heading") val heading: Double? = 90.0,
-    @SerializedName("speed_mps") val speedMps: Double? = 7.8, // ~28 km/h
-    @SerializedName("accuracy_m") val accuracyM: Double? = 2.5,
+    @SerializedName("heading") val heading: Double? = null,
+    @SerializedName("speed_mps") val speedMps: Double? = null,
+    @SerializedName("accuracy_m") val accuracyM: Double? = null,
     @SerializedName("is_mock_location") val isMockLocation: Boolean = false,
-    @SerializedName("active_ride_id") val activeRideId: String? = null
+    @SerializedName("location_source") val locationSource: String = "FUSED"
 )
 
-data class OdometerLogRequest(
-    @SerializedName("reading_km") val readingKm: Double,
-    @SerializedName("battery_soc_pct") val batterySocPct: Int,
-    @SerializedName("photo_url") val photoUrl: String? = null
+data class StartShiftRequest(
+    @SerializedName("vehicle_id") val vehicleId: String? = null,
+    @SerializedName("start_odometer_km") val startOdometerKm: Double? = null
 )
 
-// --- Ride Dispatch & Turn-by-Turn Ops (Supabase: rides, ride_assignments) ---
+data class EndShiftRequest(
+    @SerializedName("end_odometer_km") val endOdometerKm: Double? = null
+)
+
+// --- Ride Dispatch & Turn-by-Turn Ops ---
 data class DispatchOfferDto(
-    @SerializedName("ride_id") val rideId: String,
-    @SerializedName("assignment_id") val assignmentId: String,
-    @SerializedName("passenger_name") val passengerName: String,
-    @SerializedName("passenger_phone") val passengerPhone: String,
-    @SerializedName("passenger_rating") val passengerRating: Double = 4.90,
-    @SerializedName("pickup_address") val pickupAddress: String,
-    @SerializedName("destination_address") val destinationAddress: String,
-    @SerializedName("distance_km") val distanceKm: Double,
-    @SerializedName("pickup_distance_meters") val pickupDistanceMeters: Int,
-    @SerializedName("estimated_fare_rupees") val estimatedFareRupees: Double,
+    @SerializedName("ride_id") val rideId: String = "",
+    @SerializedName("assignment_id") val assignmentId: String = "",
+    @SerializedName("passenger_name") val passengerName: String = "Commuter Passenger",
+    @SerializedName("passenger_phone") val passengerPhone: String = "",
+    @SerializedName("passenger_rating") val passengerRating: Double = 0.0,
+    @SerializedName("pickup_address") val pickupAddress: String = "",
+    @SerializedName("destination_area", alternate = ["destination_address"]) val destinationAddress: String = "",
+    @SerializedName("vehicle_category") val vehicleCategory: String = "",
+    @SerializedName("estimated_trip_distance_km", alternate = ["distance_km"]) val distanceKm: Double = 0.0,
+    @SerializedName("pickup_distance_km") val pickupDistanceKm: Double? = null,
+    @SerializedName("estimated_fare_cents") val estimatedFareCents: Long = 0L,
+    @SerializedName("estimated_driver_earnings_cents") val estimatedDriverEarningsCents: Long = 0L,
     @SerializedName("payment_mode") val paymentMode: String = "UPI",
-    @SerializedName("timeout_seconds") val timeoutSeconds: Int = 15
-)
+    @SerializedName("expires_at") val expiresAt: String? = null,
+    @SerializedName("escalation_level") val escalationLevel: Int = 0,
+    @SerializedName("timeout_seconds") val timeoutSeconds: Int = 25
+) {
+    val estimatedFareRupees: Double
+        get() = estimatedFareCents / 100.0
 
-data class OfferResponseRequest(
-    @SerializedName("assignment_id") val assignmentId: String,
-    @SerializedName("action") val action: String, // ACCEPT or DECLINE
-    @SerializedName("reason") val reason: String? = null
-)
+    val estimatedDriverEarningsRupees: Double
+        get() = if (estimatedDriverEarningsCents > 0L) estimatedDriverEarningsCents / 100.0 else estimatedFareRupees
 
-data class VerifyOtpRequest(
-    @SerializedName("ride_id") val rideId: String,
-    @SerializedName("otp_code") val otpCode: String
-)
+    val pickupDistanceMeters: Int
+        get() = ((pickupDistanceKm ?: 0.0) * 1000.0).toInt()
+}
 
 data class CashCollectRequest(
-    @SerializedName("ride_id") val rideId: String,
-    @SerializedName("collected_amount_rupees") val collectedAmountRupees: Double,
-    @SerializedName("tendered_cash") val tenderedCash: Double
+    @SerializedName("ride_id") val rideId: String
 )
 
-// --- Financials, Payouts & Ledger (Supabase: driver_ledger_entries, driver_payout_accounts) ---
+// --- Financials, Payouts & Ledger ---
 data class DriverEarningsSummaryDto(
-    @SerializedName("today_gross_rupees", alternate = ["today_earnings_cents"]) val todayGrossRupees: Double = 1420.0,
-    @SerializedName("today_net_rupees", alternate = ["weekly_earnings_cents"]) val todayNetRupees: Double = 1278.0,
-    @SerializedName("completed_trips_today", alternate = ["completed_trips"]) val completedTripsToday: Int = 11,
-    @SerializedName("online_hours_today") val onlineHoursToday: Double = 6.4,
-    @SerializedName("wallet_balance_rupees", alternate = ["wallet_balance_cents"]) val walletBalanceRupees: Double = 3840.50,
-    @SerializedName("pending_payout_rupees") val pendingPayoutRupees: Double = 800.0
+    @SerializedName("total_earnings_cents") val totalEarningsCents: Long = 0L,
+    @SerializedName("today_earnings_cents") val todayEarningsCents: Long = 0L,
+    @SerializedName("weekly_earnings_cents") val weeklyEarningsCents: Long = 0L,
+    @SerializedName("currency") val currency: String = "INR",
+    @SerializedName("completed_trips") val completedTripsToday: Int = 0,
+    @SerializedName("today_completed_trips") val todayCompletedTrips: Int = 0,
+    @SerializedName("today_distance_km") val todayDistanceKm: Double = 0.0,
+    @SerializedName("wallet_balance_cents") val walletBalanceCents: Long = 0L,
+    @SerializedName("rating_average") val ratingAverage: Double = 0.0,
+    @SerializedName("rating_count") val ratingCount: Int = 0,
+    val onlineHoursToday: Double = 0.0,
+    val pendingPayoutRupees: Double = 0.0
 ) {
-    val displayTodayNetRupees: Double
-        get() = if (todayGrossRupees > 10000.0) (todayGrossRupees / 100.0) else todayGrossRupees
-
-    val displayWalletBalanceRupees: Double
-        get() = if (walletBalanceRupees > 10000.0) (walletBalanceRupees / 100.0) else walletBalanceRupees
+    val todayGrossRupees: Double get() = todayEarningsCents / 100.0
+    val todayNetRupees: Double get() = todayEarningsCents / 100.0
+    val weeklyRupees: Double get() = weeklyEarningsCents / 100.0
+    val walletBalanceRupees: Double get() = walletBalanceCents / 100.0
+    val displayTodayNetRupees: Double get() = todayNetRupees
+    val displayWalletBalanceRupees: Double get() = walletBalanceRupees
 }
 
 data class PayoutRequestDto(
-    @SerializedName("amount_rupees") val amountRupees: Double,
-    @SerializedName("payout_method") val payoutMethod: String = "UPI_IMPS",
-    @SerializedName("destination_vpa") val destinationVpa: String = "ramlal@upi"
+    @SerializedName("amount_cents") val amountCents: Long,
+    @SerializedName("account_number_mask") val accountNumberMask: String = "**** 9988",
+    @SerializedName("ifsc") val ifsc: String = "HDFC0001234"
 )
 
 data class LedgerItemDto(
-    @SerializedName("id") val id: String,
-    @SerializedName("title") val title: String,
-    @SerializedName("amount_rupees") val amountRupees: Double,
-    @SerializedName("type") val type: String, // CREDIT or DEBIT
-    @SerializedName("timestamp") val timestamp: String
+    @SerializedName("id") val id: String = "",
+    @SerializedName("entry_type") val type: String = "CREDIT",
+    @SerializedName("category") val category: String = "",
+    @SerializedName("amount_cents") val amountCents: Long = 0L,
+    @SerializedName("amount_rupees") val amountRupees: Double = 0.0,
+    @SerializedName("balance_after_cents") val balanceAfterCents: Long = 0L,
+    @SerializedName("balance_after_rupees") val balanceAfterRupees: Double = 0.0,
+    @SerializedName("reference_id") val referenceId: String? = null,
+    @SerializedName("description") val title: String = "",
+    @SerializedName("created_at") val timestamp: String = ""
 )
 
-// --- Performance Scorecard & Incentives (Supabase: driver_weekly_goals, driver_daily_targets) ---
+data class DriverLedgerResponseDto(
+    @SerializedName("driver_id") val driverId: String = "",
+    @SerializedName("current_balance_cents") val currentBalanceCents: Long = 0L,
+    @SerializedName("current_balance_rupees") val currentBalanceRupees: Double = 0.0,
+    @SerializedName("entries_count") val entriesCount: Int = 0,
+    @SerializedName("ledger") val ledger: List<LedgerItemDto> = emptyList()
+)
+
+// --- Performance Scorecard & Incentives ---
 data class ScorecardDto(
-    @SerializedName("rating") val rating: Double = 4.95,
-    @SerializedName("acceptance_rate") val acceptanceRate: Double = 96.5,
-    @SerializedName("cancellation_rate") val cancellationRate: Double = 1.2,
+    @SerializedName("rating") val rating: Double = 0.0,
+    @SerializedName("acceptance_rate") val acceptanceRate: Double = 0.0,
+    @SerializedName("cancellation_rate") val cancellationRate: Double = 0.0,
     @SerializedName("safety_incident_count") val safetyIncidentCount: Int = 0,
-    @SerializedName("cleanliness_score") val cleanlinessScore: Double = 4.98
+    @SerializedName("cleanliness_score") val cleanlinessScore: Double = 0.0
 )
 
 data class DailyIncentiveDto(
-    @SerializedName("target_rides") val targetRides: Int = 12,
-    @SerializedName("completed_rides") val completedRides: Int = 9,
-    @SerializedName("reward_rupees") val rewardRupees: Double = 300.0,
-    @SerializedName("expires_in_hours") val expiresInHours: Double = 3.5
+    @SerializedName("target_date") val targetDate: String = "",
+    @SerializedName("target_trips") val targetRides: Int = 0,
+    @SerializedName("completed_trips") val completedRides: Int = 0,
+    @SerializedName("target_earnings_cents") val targetEarningsCents: Long = 0L,
+    @SerializedName("achieved_earnings_cents") val achievedEarningsCents: Long = 0L,
+    @SerializedName("bonus_cents") val bonusCents: Long = 0L,
+    @SerializedName("is_achieved") val isAchieved: Boolean = false,
+    @SerializedName("trips_progress_percentage") val tripsProgressPercentage: Double = 0.0,
+    @SerializedName("earnings_progress_percentage") val earningsProgressPercentage: Double = 0.0
+) {
+    val rewardRupees: Double get() = bonusCents / 100.0
+}
+
+// --- Safety & Onboarding Payloads ---
+data class FatigueCheckRequest(
+    @SerializedName("result") val result: String, // FIT | NEEDS_REST | UNFIT
+    @SerializedName("ride_id") val rideId: String? = null,
+    @SerializedName("note") val note: String? = null
 )
 
+data class RouteAnomalyRequest(
+    @SerializedName("ride_id") val rideId: String,
+    @SerializedName("current_lat") val currentLat: Double,
+    @SerializedName("current_lng") val currentLng: Double
+)
+
+data class VehicleInspectionRequest(
+    @SerializedName("vehicle_id") val vehicleId: String,
+    @SerializedName("checklist_results") val checklistResults: Map<String, String>,
+    @SerializedName("photos") val photos: Map<String, String>,
+    @SerializedName("notes") val notes: String? = null
+)
+
+data class RecordingConsentRequest(
+    @SerializedName("ride_id") val rideId: String,
+    @SerializedName("role") val role: String = "DRIVER",
+    @SerializedName("consented") val consented: Boolean
+)
+
+data class EmergencyAlertRequest(
+    @SerializedName("ride_id") val rideId: String,
+    @SerializedName("notes") val notes: String? = null
+)
+
+data class SafetyIncidentRequest(
+    @SerializedName("ride_id") val rideId: String? = null,
+    @SerializedName("category") val category: String,
+    @SerializedName("severity") val severity: String = "MEDIUM",
+    @SerializedName("description") val description: String
+)
+
+data class EmergencyContactDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("name") val name: String = "",
+    @SerializedName("relationship") val relationship: String = "Family",
+    @SerializedName("phone_number") val phoneNumber: String = "",
+    @SerializedName("notify_on_trip_start") val notifyOnTripStart: Boolean = true,
+    @SerializedName("notify_on_arrival") val notifyOnArrival: Boolean = true
+)
+
+data class EmergencyContactCreateRequest(
+    @SerializedName("name") val name: String,
+    @SerializedName("relationship") val relationship: String = "Family",
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("notify_on_trip_start") val notifyOnTripStart: Boolean = true,
+    @SerializedName("notify_on_arrival") val notifyOnArrival: Boolean = true
+)
+
+data class PoolManifestEntryDto(
+    @SerializedName("booking_id") val bookingId: String? = null,
+    @SerializedName("ride_id") val rideId: String? = null,
+    @SerializedName("seats_reserved") val seatsReserved: Int = 1,
+    @SerializedName("booking_status") val bookingStatus: String = "CONFIRMED",
+    @SerializedName("allocated_fare_cents") val allocatedFareCents: Long? = null,
+    @SerializedName("driver_earnings_cents") val driverEarningsCents: Long? = null
+)
+
+data class PoolStopDto(
+    @SerializedName("stop_id") val stopId: String = "",
+    @SerializedName("booking_id") val bookingId: String = "",
+    @SerializedName("stop_type") val stopType: String = "PICKUP",
+    @SerializedName("sequence_order") val sequenceOrder: Int = 0,
+    @SerializedName("address") val address: String = "",
+    @SerializedName("status") val status: String = "PENDING"
+)
+
+data class PoolFinancialSummaryDto(
+    @SerializedName("total_fare_cents") val totalFareCents: Long = 0L,
+    @SerializedName("total_driver_earnings_cents") val totalDriverEarningsCents: Long = 0L
+)
+
+data class SharedPoolTripDto(
+    @SerializedName("trip_id") val tripId: String = "",
+    @SerializedName("status") val status: String = "",
+    @SerializedName("max_seats") val maxSeats: Int = 4,
+    @SerializedName("reserved_seats") val reservedSeats: Int = 0,
+    @SerializedName("manifest") val manifest: List<PoolManifestEntryDto> = emptyList(),
+    @SerializedName("stops") val stops: List<PoolStopDto> = emptyList(),
+    @SerializedName("financial_summary") val financialSummary: PoolFinancialSummaryDto? = null
+)
+
+data class RideStopDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("sequence_order") val sequenceOrder: Int = 0,
+    @SerializedName("address") val address: String = "",
+    @SerializedName("status") val status: String = "PENDING"
+)
+
+data class TrainingModuleDto(
+    @SerializedName("module_id") val moduleId: String = "",
+    @SerializedName("module_code") val moduleCode: String = "",
+    @SerializedName("title") val title: String = "",
+    @SerializedName("description") val description: String = "",
+    @SerializedName("duration_minutes") val durationMinutes: Int = 5,
+    @SerializedName("is_completed") val isCompleted: Boolean = false,
+    @SerializedName("assessment_passed") val assessmentPassed: Boolean = false
+)
+
+data class DriverTicketDto(
+    @SerializedName("ticket_id") val ticketId: String = "",
+    @SerializedName("subject") val subject: String = "",
+    @SerializedName("message") val message: String = "",
+    @SerializedName("status") val status: String = "OPEN",
+    @SerializedName("admin_response") val adminResponse: String? = null,
+    @SerializedName("created_at") val createdAt: String = ""
+)
+
+data class CreateDriverTicketRequest(
+    @SerializedName("subject") val subject: String,
+    @SerializedName("message") val message: String
+)
+
+data class NotificationItemDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("title") val title: String = "",
+    @SerializedName("body") val body: String = "",
+    @SerializedName("event_type") val eventType: String = "",
+    @SerializedName("is_read") val isRead: Boolean = false,
+    @SerializedName("created_at") val createdAt: String? = null
+)
+
+data class HeatMapClusterDto(
+    @SerializedName("latitude") val latitude: Double = 0.0,
+    @SerializedName("longitude") val longitude: Double = 0.0,
+    @SerializedName("count") val count: Int = 0,
+    @SerializedName("intensity") val intensity: Double = 0.0
+)
+
+data class HeatMapResponseDto(
+    @SerializedName("clusters") val clusters: List<HeatMapClusterDto> = emptyList(),
+    @SerializedName("metric") val metric: String = "demand",
+    @SerializedName("window_hours") val windowHours: Int = 2
+)
+
+data class RoadRestrictionDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("title") val title: String = "",
+    @SerializedName("description") val description: String = "",
+    @SerializedName("restriction_type") val restrictionType: String = "ROAD_CLOSURE",
+    @SerializedName("latitude") val latitude: Double = 0.0,
+    @SerializedName("longitude") val longitude: Double = 0.0,
+    @SerializedName("radius_meters") val radiusMeters: Double = 500.0
+)
+
+data class PayoutAccountDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("account_type") val accountType: String = "BANK_ACCOUNT",
+    @SerializedName("bank_name") val bankName: String? = null,
+    @SerializedName("account_number_mask") val accountNumberMask: String? = null,
+    @SerializedName("ifsc_code") val ifscCode: String? = null,
+    @SerializedName("upi_vpa") val upiVpa: String? = null,
+    @SerializedName("beneficiary_name") val beneficiaryName: String? = null,
+    @SerializedName("verification_status") val verificationStatus: String = "PENDING",
+    @SerializedName("is_primary") val isPrimary: Boolean = false
+)
+
+data class WeeklyGoalDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("week_start_date") val weekStartDate: String = "",
+    @SerializedName("target_earnings_rupees") val targetEarningsRupees: Double = 0.0,
+    @SerializedName("current_earnings_rupees") val currentEarningsRupees: Double = 0.0,
+    @SerializedName("progress_percentage") val progressPercentage: Double = 0.0,
+    @SerializedName("target_trips") val targetTrips: Int = 30,
+    @SerializedName("current_trips") val currentTrips: Int = 0,
+    @SerializedName("is_achieved") val isAchieved: Boolean = false,
+    @SerializedName("pace_message") val paceMessage: String = ""
+)
+
+data class IncentiveMilestoneDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("program_name") val programName: String = "",
+    @SerializedName("tier_name") val tierName: String = "",
+    @SerializedName("target_trips") val targetTrips: Int = 0,
+    @SerializedName("current_trips") val currentTrips: Int = 0,
+    @SerializedName("reward_rupees") val rewardRupees: Double = 0.0,
+    @SerializedName("is_unlocked") val isUnlocked: Boolean = false,
+    @SerializedName("eligibility_notes") val eligibilityNotes: String? = null
+)
+
+data class IncentiveOverviewDto(
+    @SerializedName("milestones") val milestones: List<IncentiveMilestoneDto> = emptyList()
+)
+
+data class FareBreakdownInnerDto(
+    @SerializedName("gross_fare_rupees") val grossFareRupees: Double = 0.0
+)
+
+data class RideBreakdownDto(
+    @SerializedName("ride_id") val rideId: String = "",
+    @SerializedName("status") val status: String = "",
+    @SerializedName("fare_breakdown") val fareBreakdown: FareBreakdownInnerDto? = null,
+    @SerializedName("net_driver_earnings_rupees") val netDriverEarningsRupees: Double = 0.0
+)
+
+data class DriverProfileUpdateRequest(
+    @SerializedName("full_name") val fullName: String? = null,
+    @SerializedName("email") val email: String? = null,
+    @SerializedName("phone_number") val phoneNumber: String? = null
+)

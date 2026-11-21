@@ -1,6 +1,5 @@
 package com.vaisentra.mobility.driver.feature.trip
 
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,17 +13,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import java.util.Locale
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.launch
 
 /**
- * Screen 15: Incoming Ride Offer Card (full countdown view)
+ * Screen 15: Incoming Ride Offer Card (State-driven from DriverRepository.activeOffer)
  */
 @Composable
 fun IncomingOfferScreen(
@@ -33,12 +35,25 @@ fun IncomingOfferScreen(
     onRejectOffer: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    var secondsLeft by remember { mutableIntStateOf(15) }
+    val activeOffer by DriverRepository.activeOffer.collectAsState()
 
     LaunchedEffect(Unit) {
-        while (secondsLeft > 0) {
-            kotlinx.coroutines.delay(1000)
-            secondsLeft--
+        if (activeOffer == null) {
+            DriverRepository.fetchActiveOffers()
+        }
+    }
+
+    val offer = activeOffer
+    var secondsLeft by remember(offer?.rideId) { mutableIntStateOf(offer?.timeoutSeconds ?: 25) }
+
+    LaunchedEffect(offer?.rideId) {
+        if (offer != null) {
+            while (secondsLeft > 0) {
+                kotlinx.coroutines.delay(1.seconds)
+                secondsLeft--
+            }
+            DriverRepository.rejectOffer(offer.rideId, "DISPATCH_TIMEOUT")
+            onRejectOffer()
         }
     }
 
@@ -54,98 +69,106 @@ fun IncomingOfferScreen(
             onBack = onNavigateBack
         )
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            CockpitCard(glow = true) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CockpitBadge("E-RICKSHAW STANDARD", ElectricCyan)
-                    Text("Auto-Reject in ${secondsLeft}s", color = CrimsonAlert, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("ESTIMATED NET PAY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text("₹82.50", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("DISTANCE & TIME", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text("4.2 km • 14 min", color = CockpitTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider(color = CockpitBorder)
-                Spacer(Modifier.height(16.dp))
-
-                // Route breakdown
-                Row(verticalAlignment = Alignment.Top) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 4.dp)) {
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(EmeraldPrimary))
-                        Box(Modifier.width(2.dp).height(38.dp).background(CockpitBorder))
-                        Box(Modifier.size(10.dp).clip(CircleShape).background(ElectricCyan))
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Column {
-                            Text("PICKUP (0.6 km away)", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text("Mayur Vihar Ph-1 Metro Gate 2", color = CockpitTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Column {
-                            Text("DROP", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text("Pocket 1 Market, Mayur Vihar", color = CockpitTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Payment: UPI Digital Auto-Pay", color = CockpitTextSecondary, fontSize = 12.sp)
-                    Text("Rider: Priya S. (4.9★)", color = CockpitTextSecondary, fontSize = 12.sp)
+        if (offer == null) {
+            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                CockpitCard {
+                    Text("No active ride offers right now.", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Text("Stay online on the Duty Dashboard to receive live WebSocket offers.", color = CockpitTextMuted, fontSize = 12.sp)
                 }
             }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                CockpitCard(glow = true) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CockpitBadge(offer.vehicleCategory.ifBlank { "E-RICKSHAW" }, ElectricCyan)
+                        Text("Auto-Reject in ${secondsLeft}s", color = CrimsonAlert, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
 
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                CockpitButton(
-                    text = "ACCEPT RIDE OFFER (₹82.50)",
-                    onClick = {
-                        onShowToast("Offer Accepted! Route initialized.")
-                        onAcceptOffer()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                CockpitButton(
-                    text = "PASS / REJECT",
-                    onClick = {
-                        onShowToast("Offer passed")
-                        onRejectOffer()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    isOutlined = true
-                )
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("ESTIMATED NET PAY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("₹${"%.2f".format(offer.estimatedDriverEarningsRupees)}", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("DISTANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("${"%.1f".format(offer.distanceKm)} km", color = CockpitTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+                    HorizontalDivider(color = CockpitBorder)
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(verticalAlignment = Alignment.Top) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(top = 4.dp)) {
+                            Box(Modifier.size(10.dp).clip(CircleShape).background(EmeraldPrimary))
+                            Box(Modifier.width(2.dp).height(38.dp).background(CockpitBorder))
+                            Box(Modifier.size(10.dp).clip(CircleShape).background(ElectricCyan))
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Column {
+                                Text("PICKUP (${offer.pickupDistanceMeters}m away)", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(offer.pickupAddress, color = CockpitTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Column {
+                                Text("DROP", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(offer.destinationAddress, color = CockpitTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CockpitButton(
+                        text = "ACCEPT RIDE OFFER (₹${"%.2f".format(offer.estimatedDriverEarningsRupees)})",
+                        onClick = {
+                            DriverRepository.acceptOffer(offer.rideId) { ok ->
+                                if (ok) {
+                                    onShowToast("Offer Accepted! Route initialized.")
+                                    onAcceptOffer()
+                                } else {
+                                    onShowToast("Could not accept offer. It may have expired.")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    CockpitButton(
+                        text = "PASS / REJECT",
+                        onClick = {
+                            DriverRepository.rejectOffer(offer.rideId, "PILOT_DECLINED") {
+                                onShowToast("Offer passed")
+                                onRejectOffer()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        isOutlined = true
+                    )
+                }
             }
         }
     }
 }
 
 /**
- * Screen 16: Auto-Dispatch Offer Queue (continuous trip matching)
+ * Screen 16: Auto-Dispatch Offer Queue (POST /api/v1/drivers/auto-accept)
  */
 @Composable
 fun OfferQueueScreen(
@@ -153,7 +176,8 @@ fun OfferQueueScreen(
     onShowToast: (String) -> Unit = {}
 ) {
     var autoAcceptPool by remember { mutableStateOf(true) }
-    var maxQueueDepth by remember { mutableIntStateOf(3) }
+    var isUpdating by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -178,15 +202,25 @@ fun OfferQueueScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text("Continuous Chained Dispatch", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             Text("Match next ride before current trip drops off", color = CockpitTextSecondary, fontSize = 12.sp)
                         }
                         Switch(
                             checked = autoAcceptPool,
-                            onCheckedChange = {
-                                autoAcceptPool = it
-                                onShowToast(if (it) "Chained dispatch active" else "Chained dispatch paused")
+                            enabled = !isUpdating,
+                            onCheckedChange = { next ->
+                                isUpdating = true
+                                scope.launch {
+                                    val res = DriverRepository.updateAutoAccept(next)
+                                    isUpdating = false
+                                    if (res.isSuccess) {
+                                        autoAcceptPool = next
+                                        onShowToast(if (next) "Chained dispatch active" else "Chained dispatch paused")
+                                    } else {
+                                        onShowToast("Failed to update auto-accept: ${res.exceptionOrNull()?.message}")
+                                    }
+                                }
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = EmeraldPrimary,
@@ -196,53 +230,12 @@ fun OfferQueueScreen(
                     }
                 }
             }
-
-            item {
-                Text("QUEUED UP NEXT", color = CockpitTextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-
-            item {
-                CockpitCard {
-                    CockpitBadge("CHAINED TRIP #1 (AUTO-MATCHED)", EmeraldPrimary)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Pickup: Noida Sec 15 Metro Station Gate 1", color = CockpitTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Text("Drop: Atta Market Sector 18", color = CockpitTextSecondary, fontSize = 13.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Est. Net: ₹45.00", color = EmeraldPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Start: In ~8 min (after drop)", color = ElectricCyan, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            item {
-                CockpitCard {
-                    CockpitBadge("CHAINED TRIP #2 (STANDBY)", AmberWarning)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Pickup: Great India Place Mall Drop Gate", color = CockpitTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Text("Drop: Botanical Garden Metro", color = CockpitTextSecondary, fontSize = 13.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Est. Net: ₹52.00", color = EmeraldPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Start: In ~22 min", color = CockpitTextSecondary, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            item {
-                CockpitButton(
-                    text = "Clear Standby Queue",
-                    onClick = { onShowToast("Standby queue cleared") },
-                    modifier = Modifier.fillMaxWidth(),
-                    isOutlined = true
-                )
-            }
         }
     }
 }
 
 /**
- * Screen 17: Navigation to Pickup Spot (turn-by-turn with traffic avoidance)
+ * Screen 17: Navigation to Pickup Spot (GET /api/v1/rides/active + POST /api/v1/rides/{ride_id}/arrived)
  */
 @Composable
 fun PickupNavScreen(
@@ -250,6 +243,17 @@ fun PickupNavScreen(
     onArrived: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val activeRide by DriverRepository.activeRide.collectAsState()
+    var isUpdating by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchActiveRide()
+    }
+
+    val targetLat = activeRide?.pickupLatitude ?: 28.6289
+    val targetLng = activeRide?.pickupLongitude ?: 77.3712
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -258,7 +262,7 @@ fun PickupNavScreen(
     ) {
         CockpitHeader(
             title = "En-Route to Pickup",
-            subtitle = "Navigating to passenger pickup location",
+            subtitle = "Ride: ${rideId.ifBlank { "Active" }}",
             onBack = onNavigateBack
         )
 
@@ -267,72 +271,41 @@ fun PickupNavScreen(
                 .fillMaxSize()
                 .weight(1f)
         ) {
-            // Native Mapbox Navigation Map
             DriverMapboxLiveView(
                 modifier = Modifier.fillMaxSize(),
                 driverLat = 28.6139,
                 driverLng = 77.2090,
-                targetLat = 28.6289,
-                targetLng = 77.3712,
-                targetLabel = "Metro Gate 2 Pillar 28",
+                targetLat = targetLat,
+                targetLng = targetLng,
+                targetLabel = activeRide?.pickupAddress?.ifBlank { "Passenger Pickup" } ?: "Passenger Pickup",
                 isNavigating = true,
                 headingDegrees = 45.0
             )
 
-            // Floating Navigation HUD Cards
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(16.dp),
-                verticalArrangement = Arrangement.SpaceBetween
+                verticalArrangement = Arrangement.Bottom
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // Navigation instruction card
-                    CockpitCard(glow = true) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.TurnRight, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(36.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text("In 120 meters", color = ElectricCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text("Turn right onto Metro Feeder Corridor Road", color = CockpitTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("ETA: 3 mins • 700m remaining", color = CockpitTextSecondary, fontSize = 12.sp)
-                            Text("Target: Gate 2", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    // Passenger details card
-                    CockpitCard {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text("Rider: Ankit Verma", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                Text("Pickup: Metro Gate 2 Pillar 28", color = CockpitTextSecondary, fontSize = 12.sp)
-                            }
-                            IconButton(
-                                onClick = { onShowToast("Dialing passenger via masked proxy...") },
-                                modifier = Modifier.clip(CircleShape).background(EmeraldPrimary.copy(alpha = 0.2f))
-                            ) {
-                                Icon(Icons.Default.Phone, contentDescription = "Call", tint = EmeraldPrimary)
-                            }
-                        }
-                    }
-                }
-
                 CockpitButton(
-                    text = "ARRIVED AT PICKUP POINT",
+                    text = if (isUpdating) "UPDATING..." else "ARRIVED AT PICKUP POINT",
+                    enabled = !isUpdating,
                     onClick = {
-                        com.vaisentra.mobility.driver.data.DriverRepository.markArrived(
-                            com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value
-                        )
-                        onShowToast("Status updated to ARRIVED")
-                        onArrived()
+                        if (rideId.isBlank()) {
+                            onShowToast("No active ride found.")
+                            return@CockpitButton
+                        }
+                        isUpdating = true
+                        DriverRepository.markArrived(rideId, targetLat, targetLng) { ok ->
+                            isUpdating = false
+                            if (ok) {
+                                onShowToast("Status updated to ARRIVED")
+                                onArrived()
+                            } else {
+                                onShowToast("Failed to mark arrived.")
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -342,7 +315,7 @@ fun PickupNavScreen(
 }
 
 /**
- * Screen 18: Arrived at Pickup Point (GPS proximity verification)
+ * Screen 18: Arrived at Pickup Point
  */
 @Composable
 fun ArrivedPickupScreen(
@@ -350,6 +323,8 @@ fun ArrivedPickupScreen(
     onStartWaitingTimer: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val rideId by DriverRepository.currentRideId.collectAsState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -358,7 +333,7 @@ fun ArrivedPickupScreen(
     ) {
         CockpitHeader(
             title = "Arrived at Pickup",
-            subtitle = "GPS proximity locked within 25 meters",
+            subtitle = "GPS proximity confirmed",
             onBack = onNavigateBack
         )
 
@@ -368,24 +343,14 @@ fun ArrivedPickupScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                CockpitCard(glow = true) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(32.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("Proximity Confirmed", color = EmeraldPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text("Vehicle is parked at designated pickup point", color = CockpitTextSecondary, fontSize = 12.sp)
-                        }
+            CockpitCard(glow = true) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("Proximity Confirmed", color = EmeraldPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Text("Waiting grace: 5 minutes complimentary before paid meter begins.", color = CockpitTextSecondary, fontSize = 12.sp)
                     }
-                }
-
-                CockpitCard {
-                    Text("COMMUTER NOTIFIED", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Notification sent: 'Pilot Ramesh has arrived at Metro Gate 2'", color = CockpitTextPrimary, fontSize = 13.sp)
-                    Spacer(Modifier.height(10.dp))
-                    Text("Waiting grace: 5 minutes complimentary before paid meter begins (₹1.50/min)", color = CockpitTextSecondary, fontSize = 12.sp)
                 }
             }
 
@@ -393,16 +358,20 @@ fun ArrivedPickupScreen(
                 CockpitButton(
                     text = "START WAITING TIMER & BILLABLE METER",
                     onClick = {
-                        onShowToast("Waiting timer started")
-                        onStartWaitingTimer()
+                        if (rideId.isNotBlank()) {
+                            DriverRepository.startTripWaiting(rideId) { ok ->
+                                if (ok) {
+                                    onShowToast("Waiting timer started")
+                                    onStartWaitingTimer()
+                                } else {
+                                    onShowToast("Could not start waiting timer.")
+                                }
+                            }
+                        } else {
+                            onStartWaitingTimer()
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
-                )
-                CockpitButton(
-                    text = "Call Passenger (Masked Proxy)",
-                    onClick = { onShowToast("Connecting masked call...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    isOutlined = true
                 )
             }
         }
@@ -410,7 +379,7 @@ fun ArrivedPickupScreen(
 }
 
 /**
- * Screen 19: Waiting Timer & Billable Meter (5-min complimentary grace & waiting fee)
+ * Screen 19: Waiting Timer & Billable Meter
  */
 @Composable
 fun WaitingTimerScreen(
@@ -418,8 +387,17 @@ fun WaitingTimerScreen(
     onProceedToOtp: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    var elapsedSeconds by remember { mutableIntStateOf(340) } // 5m 40s (into billable time)
-    val graceSeconds = 300 // 5 minutes
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    var elapsedSeconds by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1.seconds)
+            elapsedSeconds++
+        }
+    }
+
+    val graceSeconds = 300
     val billableSeconds = maxOf(0, elapsedSeconds - graceSeconds)
     val billableMinutes = (billableSeconds + 59) / 60
     val waitingFeeRupees = billableMinutes * 1.50
@@ -452,7 +430,7 @@ fun WaitingTimerScreen(
                         val mins = elapsedSeconds / 60
                         val secs = elapsedSeconds % 60
                         Text(
-                            String.format("%02d:%02d", mins, secs),
+                            String.format(Locale.US, "%02d:%02d", mins, secs),
                             color = if (billableSeconds > 0) AmberWarning else EmeraldPrimary,
                             fontSize = 42.sp,
                             fontWeight = FontWeight.ExtraBold
@@ -469,11 +447,11 @@ fun WaitingTimerScreen(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column {
                             Text("ACCUMULATED WAITING FEE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("₹${String.format("%.2f", waitingFeeRupees)}", color = EmeraldPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            Text("₹${String.format(Locale.US, "%.2f", waitingFeeRupees)}", color = EmeraldPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text("BILLABLE MINUTES", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("${billableMinutes} min (₹1.50/min)", color = CockpitTextPrimary, fontSize = 14.sp)
+                            Text("$billableMinutes min (₹1.50/min)", color = CockpitTextPrimary, fontSize = 14.sp)
                         }
                     }
                 }
@@ -483,15 +461,30 @@ fun WaitingTimerScreen(
                 CockpitButton(
                     text = "PASSENGER BOARDED (ENTER OTP)",
                     onClick = {
-                        val rideId = DriverRepository.currentRideId.value ?: "ride-latest"
-                        DriverRepository.stopTripWaiting(rideId)
-                        onProceedToOtp()
+                        if (rideId.isNotBlank()) {
+                            DriverRepository.stopTripWaiting(rideId) {
+                                onProceedToOtp()
+                            }
+                        } else {
+                            onProceedToOtp()
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
                 CockpitButton(
                     text = "Cancel Trip (Rider No-Show)",
-                    onClick = { onShowToast("No-show fee of ₹30 credited to wallet") },
+                    onClick = {
+                        if (rideId.isNotBlank()) {
+                            DriverRepository.claimNoShow(rideId) { ok ->
+                                if (ok) {
+                                    onShowToast("No-show claimed!")
+                                    onNavigateBack()
+                                } else {
+                                    onShowToast("Cannot claim no-show yet.")
+                                }
+                            }
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     isOutlined = true
                 )
@@ -501,7 +494,7 @@ fun WaitingTimerScreen(
 }
 
 /**
- * Screen 20: Boarding & Commuter OTP Verify (4-digit start OTP unlock)
+ * Screen 20: Boarding & Commuter OTP Verify
  */
 @Composable
 fun BoardingOtpScreen(
@@ -509,6 +502,7 @@ fun BoardingOtpScreen(
     onTripStarted: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val rideId by DriverRepository.currentRideId.collectAsState()
     var otpDigits by remember { mutableStateOf(listOf("", "", "", "", "", "")) }
     var isVerifying by remember { mutableStateOf(false) }
 
@@ -545,7 +539,7 @@ fun BoardingOtpScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
                 ) {
-                    otpDigits.forEachIndexed { index, digit ->
+                    otpDigits.forEach { digit ->
                         Box(
                             modifier = Modifier
                                 .size(46.dp)
@@ -565,7 +559,6 @@ fun BoardingOtpScreen(
 
                 Spacer(Modifier.height(20.dp))
 
-                // Simulated numpad
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     val rows = listOf(
                         listOf("1", "2", "3"),
@@ -610,10 +603,10 @@ fun BoardingOtpScreen(
                 text = if (isVerifying) "VERIFYING OTP..." else "START RIDE",
                 onClick = {
                     val code = otpDigits.joinToString("")
-                    if (code.length == 6) {
+                    if (code.length == 6 && rideId.isNotBlank()) {
                         isVerifying = true
-                        com.vaisentra.mobility.driver.data.DriverRepository.verifyStartOtp(
-                            rideId = com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value,
+                        DriverRepository.verifyStartOtp(
+                            rideId = rideId,
                             otp = code,
                             onSuccess = {
                                 isVerifying = false
@@ -626,7 +619,7 @@ fun BoardingOtpScreen(
                             }
                         )
                     } else {
-                        onShowToast("Please enter all 6 digits")
+                        onShowToast("Enter 6-digit OTP on an active ride")
                     }
                 },
                 enabled = otpDigits.all { it.isNotEmpty() } && !isVerifying,
@@ -637,7 +630,7 @@ fun BoardingOtpScreen(
 }
 
 /**
- * Screen 21: In-Trip Turn Navigation (speed limit alerts & next turn)
+ * Screen 21: In-Trip Turn Navigation
  */
 @Composable
 fun InTripNavScreen(
@@ -645,7 +638,9 @@ fun InTripNavScreen(
     onEndTrip: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val rideId by DriverRepository.currentRideId.collectAsState()
     var currentSpeed by remember { mutableIntStateOf(26) }
+    var isFinishing by remember { mutableStateOf(false) }
     val speedLimit = 35
 
     Column(
@@ -656,7 +651,7 @@ fun InTripNavScreen(
     ) {
         CockpitHeader(
             title = "Trip In Progress",
-            subtitle = "Active commuter trip navigation & telemetry",
+            subtitle = "Ride: ${rideId.ifBlank { "Active" }}",
             onBack = onNavigateBack
         )
 
@@ -667,19 +662,6 @@ fun InTripNavScreen(
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Next turn banner
-                CockpitCard(glow = true) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Straight, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(36.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("In 450 meters", color = ElectricCyan, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Text("Continue straight past Metro Pillar 68", color = CockpitTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                // Cockpit HUD (Speedometer & distance)
                 CockpitCard {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -691,30 +673,28 @@ fun InTripNavScreen(
                             Text("$currentSpeed km/h", color = if (currentSpeed > speedLimit) CrimsonAlert else EmeraldPrimary, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
                             Text("Limit: $speedLimit km/h", color = CockpitTextSecondary, fontSize = 11.sp)
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("REMAINING DISTANCE", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text("2.4 km", color = CockpitTextPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                            Text("Est. Time: 7 mins", color = ElectricCyan, fontSize = 12.sp)
-                        }
                     }
-                }
-
-                // Destination Card
-                CockpitCard {
-                    Text("DROP DESTINATION", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Text("Pocket 1 Market, Mayur Vihar Phase 1", color = CockpitTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 
             CockpitButton(
-                text = "COMPLETE TRIP & COLLECT FARE",
+                text = if (isFinishing) "COMPLETING..." else "COMPLETE TRIP & COLLECT FARE",
+                enabled = !isFinishing,
                 onClick = {
-                    com.vaisentra.mobility.driver.data.DriverRepository.finishTrip(
-                        com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value
-                    )
-                    onShowToast("Trip ended. Calculating final fare...")
-                    onEndTrip()
+                    if (rideId.isBlank()) {
+                        onShowToast("No active ride ID.")
+                        return@CockpitButton
+                    }
+                    isFinishing = true
+                    DriverRepository.finishTrip(rideId) { ok ->
+                        isFinishing = false
+                        if (ok) {
+                            onShowToast("Trip ended. Calculating final fare...")
+                            onEndTrip()
+                        } else {
+                            onShowToast("Could not finish trip.")
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -723,18 +703,22 @@ fun InTripNavScreen(
 }
 
 /**
- * Screen 22: Multi-Stop Waypoints (sequential stop navigation & passenger notes)
+ * Screen 22: Multi-Stop Waypoints (GET /api/v1/rides/{ride_id}/stops)
  */
 @Composable
 fun MultiStopScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val stops = listOf(
-        WaypointStop(1, "Stop 1: Metro Station Gate 2", "Dropped passenger 1", true),
-        WaypointStop(2, "Stop 2: Main Market SBI ATM", "Current Destination • In 300m", false),
-        WaypointStop(3, "Stop 3: Pocket B Residential Gate", "Next Final Drop", false)
-    )
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val stops by DriverRepository.rideStops.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(rideId) {
+        if (rideId.isNotBlank()) {
+            DriverRepository.fetchRideStops(rideId)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -748,46 +732,46 @@ fun MultiStopScreen(
             onBack = onNavigateBack
         )
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(stops) { stop ->
-                CockpitCard(glow = !stop.isCompleted && stop.order == 2) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(if (stop.isCompleted) EmeraldPrimary else ElectricCyan),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("${stop.order}", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        if (stops.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = if (rideId.isBlank()) "No active ride." else "No intermediate stops for this ride.",
+                    color = CockpitTextMuted,
+                    fontSize = 14.sp
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(stops) { stop ->
+                    val isCompleted = stop.status in listOf("COMPLETED", "ARRIVED", "DEPARTED")
+                    CockpitCard(glow = !isCompleted) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Stop ${stop.sequenceOrder}: ${stop.address}", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Status: ${stop.status}", color = CockpitTextSecondary, fontSize = 12.sp)
                             }
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text(stop.title, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text(stop.subtitle, color = CockpitTextSecondary, fontSize = 12.sp)
+                            if (isCompleted) {
+                                CockpitBadge("COMPLETED", EmeraldPrimary)
+                            } else {
+                                CockpitButton(
+                                    text = "Arrived",
+                                    onClick = {
+                                        scope.launch {
+                                            val res = DriverRepository.markRideStopArrived(rideId, stop.id)
+                                            if (res.isSuccess) onShowToast("Arrived at ${stop.address}")
+                                            else onShowToast("Failed to update stop")
+                                        }
+                                    }
+                                )
                             }
                         }
-                        if (stop.isCompleted) {
-                            CockpitBadge("COMPLETED", EmeraldPrimary)
-                        } else {
-                            CockpitBadge("ACTIVE", ElectricCyan)
-                        }
-                    }
-                    if (!stop.isCompleted && stop.order == 2) {
-                        Spacer(Modifier.height(10.dp))
-                        CockpitButton(
-                            text = "Mark Stop 2 Reached",
-                            onClick = { onShowToast("Waypoint #2 marked reached") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
                     }
                 }
             }
@@ -795,10 +779,66 @@ fun MultiStopScreen(
     }
 }
 
-private data class WaypointStop(
-    val order: Int,
-    val title: String,
-    val subtitle: String,
-    val isCompleted: Boolean
-)
+@Preview(showBackground = true)
+@Composable
+fun IncomingOfferScreenPreview() {
+    DriverGoTheme {
+        IncomingOfferScreen()
+    }
+}
 
+@Preview(showBackground = true)
+@Composable
+fun OfferQueueScreenPreview() {
+    DriverGoTheme {
+        OfferQueueScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PickupNavScreenPreview() {
+    DriverGoTheme {
+        PickupNavScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun ArrivedPickupScreenPreview() {
+    DriverGoTheme {
+        ArrivedPickupScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun WaitingTimerScreenPreview() {
+    DriverGoTheme {
+        WaitingTimerScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun BoardingOtpScreenPreview() {
+    DriverGoTheme {
+        BoardingOtpScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun InTripNavScreenPreview() {
+    DriverGoTheme {
+        InTripNavScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun MultiStopScreenPreview() {
+    DriverGoTheme {
+        MultiStopScreen()
+    }
+}

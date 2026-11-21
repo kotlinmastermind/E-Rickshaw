@@ -22,7 +22,7 @@ import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
 
 /**
- * Screen 36: Daily Targets & Incentive Bonus (10 rides in morning peak for ₹300)
+ * Screen 36: Daily Targets & Incentive Bonus
  */
 @Composable
 fun DailyTargetsScreen(
@@ -36,8 +36,9 @@ fun DailyTargetsScreen(
     }
 
     val completedRides = dailyTarget.completedRides
-    val targetRides = dailyTarget.targetRides
-    val progress = completedRides.toFloat() / targetRides
+    val targetRides = dailyTarget.targetRides.coerceAtLeast(1)
+    val progress = (completedRides.toFloat() / targetRides.toFloat()).coerceIn(0f, 1f)
+    val remaining = (targetRides - completedRides).coerceAtLeast(0)
 
     Column(
         modifier = Modifier
@@ -57,17 +58,11 @@ fun DailyTargetsScreen(
         ) {
             item {
                 CockpitCard(glow = true) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            CockpitBadge("MORNING PEAK SURGE QUEST", AmberWarning)
-                            Spacer(Modifier.height(6.dp))
-                            Text("Complete 10 rides (08:00 - 12:00)", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text("Reward: ₹300 Extra Bonus Credit", color = EmeraldPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
+                    Column {
+                        CockpitBadge(if (dailyTarget.isAchieved) "TARGET ACHIEVED" else "DAILY QUEST", AmberWarning)
+                        Spacer(Modifier.height(6.dp))
+                        Text("Complete $targetRides rides today", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text("Reward: ₹${"%.0f".format(dailyTarget.rewardRupees)} Extra Bonus Credit", color = EmeraldPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                     Spacer(Modifier.height(14.dp))
                     LinearProgressIndicator(
@@ -79,32 +74,8 @@ fun DailyTargetsScreen(
                     Spacer(Modifier.height(6.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("$completedRides / $targetRides completed", color = CockpitTextSecondary, fontSize = 12.sp)
-                        Text("${targetRides - completedRides} rides left to unlock ₹300", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("$remaining rides left to unlock ₹${"%.0f".format(dailyTarget.rewardRupees)}", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
-                }
-            }
-
-            item {
-                Text("UPCOMING MISSIONS TODAY", color = CockpitTextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-
-            item {
-                CockpitCard {
-                    CockpitBadge("EVENING RUSH SLAM", ElectricCyan)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Complete 8 rides between 17:00 - 21:00", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("Bonus: ₹250 wallet credit", color = EmeraldPrimary, fontSize = 12.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Starts in 1h 45m", color = CockpitTextMuted, fontSize = 11.sp)
-                }
-            }
-
-            item {
-                CockpitCard {
-                    CockpitBadge("CLEAN EV CHAMPION", EmeraldPrimary)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Zero battery-depletion cancelations for 24h", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("Bonus: Free battery swap token worth ₹120", color = EmeraldPrimary, fontSize = 12.sp)
                 }
             }
         }
@@ -112,17 +83,18 @@ fun DailyTargetsScreen(
 }
 
 /**
- * Screen 37: Weekly Goals & Progress (weekly ride milestones & multiplier tiers)
+ * Screen 37: Weekly Goals & Progress (GET /api/v1/drivers/financials/goals/weekly)
  */
 @Composable
 fun WeeklyGoalsScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val weeklyRides = 58
-    val tier1 = 50
-    val tier2 = 75
-    val tier3 = 100
+    val weeklyGoal by DriverRepository.weeklyGoal.collectAsState()
+    LaunchedEffect(Unit) { DriverRepository.fetchWeeklyGoal() }
+
+    val targetTrips = weeklyGoal.targetTrips.coerceAtLeast(1)
+    val progressFraction = (weeklyGoal.progressPercentage.toFloat() / 100f).coerceIn(0f, 1f)
 
     Column(
         modifier = Modifier
@@ -132,7 +104,7 @@ fun WeeklyGoalsScreen(
     ) {
         CockpitHeader(
             title = "Weekly Tier Goals",
-            subtitle = "Cumulative milestone bonuses & commission cashback",
+            subtitle = "Cumulative milestone bonuses & weekly pace",
             onBack = onNavigateBack
         )
 
@@ -142,58 +114,26 @@ fun WeeklyGoalsScreen(
         ) {
             item {
                 CockpitCard(glow = true) {
-                    Text("WEEKLY PROGRESS (MON - SUN)", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("WEEKLY PROGRESS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text("$weeklyRides Trips Completed", color = ElectricCyan, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
-                    Text("Tier 1 Unlocked (+₹800). Next Tier 2 in 17 trips (+₹1,500 total)", color = EmeraldPrimary, fontSize = 13.sp)
+                    Text("${weeklyGoal.currentTrips} / $targetTrips Trips", color = ElectricCyan, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "Weekly Earnings: ₹${"%.2f".format(weeklyGoal.currentEarningsRupees)} / ₹${"%.0f".format(weeklyGoal.targetEarningsRupees)}",
+                        color = EmeraldPrimary,
+                        fontSize = 13.sp
+                    )
+                    if (weeklyGoal.paceMessage.isNotBlank()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(weeklyGoal.paceMessage, color = CockpitTextSecondary, fontSize = 12.sp)
+                    }
 
                     Spacer(Modifier.height(14.dp))
                     LinearProgressIndicator(
-                        progress = { weeklyRides.toFloat() / tier2 },
+                        progress = { progressFraction },
                         modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
                         color = ElectricCyan,
                         trackColor = CockpitSurfaceHighlight
                     )
-                }
-            }
-
-            item {
-                Text("WEEKLY REWARD TIERS", color = CockpitTextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-
-            item {
-                CockpitCard {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text("Bronze Tier (50 Trips)", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("₹800 Cash Bonus", color = EmeraldPrimary, fontSize = 12.sp)
-                        }
-                        CockpitBadge("UNLOCKED", EmeraldPrimary)
-                    }
-                }
-            }
-
-            item {
-                CockpitCard(glow = true) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text("Silver Tier (75 Trips)", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("₹1,500 Cash Bonus + 5% Fee Discount", color = ElectricCyan, fontSize = 12.sp)
-                        }
-                        CockpitBadge("IN PROGRESS (17 left)", ElectricCyan)
-                    }
-                }
-            }
-
-            item {
-                CockpitCard {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text("Gold Tier (100 Trips)", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("₹2,500 Cash Bonus + 100% Free Swap Passes", color = AmberWarning, fontSize = 12.sp)
-                        }
-                        CockpitBadge("LOCKED", CockpitTextMuted)
-                    }
                 }
             }
         }
@@ -201,20 +141,18 @@ fun WeeklyGoalsScreen(
 }
 
 /**
- * Screen 38: Streak Missions & Badges (zero-cancellation streak badges)
+ * Screen 38: Streak Missions & Badges (GET /api/v1/drivers/financials/incentives)
  */
 @Composable
 fun StreakMissionsScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val badges = listOf(
-        PilotBadgeItem("Zero Cancels", "14 days without pilot cancelation", Icons.Default.Shield, EmeraldPrimary, true),
-        PilotBadgeItem("Early Bird", "50+ morning feeder rides before 09:00", Icons.Default.WbSunny, AmberWarning, true),
-        PilotBadgeItem("Metro Feeder Pro", "500+ metro station pickups completed", Icons.Default.Subway, ElectricCyan, true),
-        PilotBadgeItem("Eco Century", "1,000 kg CO2 emissions offset", Icons.Default.Eco, EmeraldPrimary, true),
-        PilotBadgeItem("5-Star Master", "Maintain 4.95+ rating over 200 rides", Icons.Default.Star, AmberWarning, false)
-    )
+    val milestones by DriverRepository.incentiveMilestones.collectAsState()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchIncentiveMilestones()
+    }
 
     Column(
         modifier = Modifier
@@ -224,51 +162,49 @@ fun StreakMissionsScreen(
     ) {
         CockpitHeader(
             title = "Streak Missions & Badges",
-            subtitle = "Excellence honours, streak multipliers & pilot bragging rights",
+            subtitle = "Live incentive quests & bonus tiers",
             onBack = onNavigateBack
         )
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item {
-                CockpitCard(glow = true) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.LocalFireDepartment, contentDescription = null, tint = AmberWarning, modifier = Modifier.size(36.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("18-Day Zero Cancellation Streak!", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Text("Active streak multiplier: +5% on all base fares", color = EmeraldPrimary, fontSize = 12.sp)
-                        }
-                    }
-                }
+        if (milestones.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No active incentive quests right now.", color = CockpitTextMuted, fontSize = 14.sp)
             }
-
-            items(badges) { badge ->
-                CockpitCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(badge.tint.copy(alpha = 0.2f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(badge.icon, contentDescription = null, tint = badge.tint)
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(milestones) { quest ->
+                    val tint = if (quest.isUnlocked) EmeraldPrimary else AmberWarning
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(tint.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = tint)
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(quest.programName, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text(
+                                        "${quest.currentTrips}/${quest.targetTrips} trips • Reward ₹${"%.0f".format(quest.rewardRupees)}",
+                                        color = CockpitTextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
                             }
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text(badge.title, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text(badge.desc, color = CockpitTextSecondary, fontSize = 11.sp)
-                            }
+                            CockpitBadge(if (quest.isUnlocked) "UNLOCKED" else quest.tierName, tint)
                         }
-                        CockpitBadge(if (badge.earned) "EARNED" else "IN PROGRESS", if (badge.earned) badge.tint else CockpitTextMuted)
                     }
                 }
             }
@@ -277,7 +213,7 @@ fun StreakMissionsScreen(
 }
 
 /**
- * Screen 43: Performance & Safety Scorecard (rating 4.95★, acceptance 96.5%)
+ * Screen 43: Performance & Safety Scorecard
  */
 @Composable
 fun PerformanceScorecardScreen(
@@ -314,10 +250,10 @@ fun PerformanceScorecardScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("OVERALL QUALITY SCORE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("CUSTOMER RATING", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(4.dp))
-                            Text("98.4 / 100", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
-                            Text("Tier: ELITE DIAMOND PILOT", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("${"%.2f".format(scorecard.rating)} ★", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("Cleanliness: ${"%.2f".format(scorecard.cleanlinessScore)} / 5.0", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                         Icon(Icons.Default.Stars, contentDescription = null, tint = AmberWarning, modifier = Modifier.size(48.dp))
                     }
@@ -328,22 +264,11 @@ fun PerformanceScorecardScreen(
                 CockpitCard {
                     Text("CORE PERFORMANCE BENCHMARKS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(10.dp))
-                    ScoreRow("Customer Satisfaction Rating", "4.95 ★", EmeraldPrimary)
-                    ScoreRow("Dispatch Acceptance Rate", "96.5%", EmeraldPrimary)
-                    ScoreRow("Driver Cancellation Rate", "0.4%", EmeraldPrimary)
-                    ScoreRow("On-Time Pickup Rate", "99.1%", EmeraldPrimary)
-                    ScoreRow("Speed Limit Adherence", "100.0%", EmeraldPrimary)
-                    ScoreRow("Vehicle Inspection Compliance", "100.0%", EmeraldPrimary)
-                }
-            }
-
-            item {
-                CockpitCard {
-                    Text("COMMUTER FEEDBACK HIGHLIGHTS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("“Ramesh Ji drove very smoothly and vehicle was very clean with proper hand sanitizer.”", color = CockpitTextSecondary, fontSize = 12.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Text("“Polite behavior and quick route through metro traffic.”", color = CockpitTextSecondary, fontSize = 12.sp)
+                    ScoreRow("Customer Satisfaction Rating", "${"%.2f".format(scorecard.rating)} ★", EmeraldPrimary)
+                    ScoreRow("Dispatch Acceptance Rate", "${"%.1f".format(scorecard.acceptanceRate)}%", EmeraldPrimary)
+                    ScoreRow("Driver Cancellation Rate", "${"%.1f".format(scorecard.cancellationRate)}%", EmeraldPrimary)
+                    ScoreRow("Safety Incidents", "${scorecard.safetyIncidentCount}", if (scorecard.safetyIncidentCount == 0) EmeraldPrimary else CrimsonAlert)
+                    ScoreRow("Cabin Cleanliness Score", "${"%.2f".format(scorecard.cleanlinessScore)}", EmeraldPrimary)
                 }
             }
         }
@@ -362,12 +287,3 @@ private fun ScoreRow(label: String, value: String, valueColor: Color) {
         Text(value, color = valueColor, fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }
-
-private data class PilotBadgeItem(
-    val title: String,
-    val desc: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-    val tint: Color,
-    val earned: Boolean
-)
-

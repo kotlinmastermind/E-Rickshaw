@@ -3,7 +3,6 @@ package com.vaisentra.mobility.driver.feature.fare
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -14,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
@@ -23,7 +21,7 @@ import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.launch
 
 /**
- * Screen 31: Trip Completed & Fare Calculation (itemized fare calculation)
+ * Screen 31: Trip Completed & Fare Calculation (GET /api/v1/drivers/financials/rides/{ride_id}/breakdown)
  */
 @Composable
 fun TripCompletedFareScreen(
@@ -33,6 +31,27 @@ fun TripCompletedFareScreen(
     onFinishTrip: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val offer by DriverRepository.activeOffer.collectAsState()
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val breakdown by DriverRepository.rideBreakdown.collectAsState()
+    val scope = rememberCoroutineScope()
+    var isFinishing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(rideId) {
+        if (rideId.isNotBlank()) {
+            DriverRepository.fetchRideBreakdown(rideId)
+        }
+    }
+
+    val totalFare = breakdown?.fareBreakdown?.grossFareRupees
+        ?.takeIf { it > 0.0 }
+        ?: offer?.estimatedFareRupees
+        ?: 0.0
+    val netPay = breakdown?.netDriverEarningsRupees
+        ?.takeIf { it > 0.0 }
+        ?: offer?.estimatedDriverEarningsRupees
+        ?: (totalFare * 0.8)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -41,7 +60,7 @@ fun TripCompletedFareScreen(
     ) {
         CockpitHeader(
             title = "Trip Complete",
-            subtitle = "Itemized fare calculation & settlement",
+            subtitle = "Fare calculation & settlement",
             onBack = onNavigateBack
         )
 
@@ -57,33 +76,17 @@ fun TripCompletedFareScreen(
                     ) {
                         Text("TOTAL FARE COLLECTIBLE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹82.50", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("₹${"%.2f".format(totalFare)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(4.dp))
-                        Text("Pilot Net Pay: ₹74.25 (Commission 10%: ₹8.25)", color = CockpitTextSecondary, fontSize = 12.sp)
+                        Text("Pilot Net Pay: ₹${"%.2f".format(netPay)}", color = CockpitTextSecondary, fontSize = 12.sp)
                     }
-                }
-            }
-
-            item {
-                CockpitCard {
-                    Text("ITEMIZED FARE BREAKDOWN", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(10.dp))
-                    FareRow("Base Fare (First 1.5 km)", "₹20.00")
-                    FareRow("Distance Fare (2.7 km × ₹10/km)", "₹27.00")
-                    FareRow("Ride Time Fare (14 min × ₹1/min)", "₹14.00")
-                    FareRow("Waiting Time (4 min over grace)", "₹6.00")
-                    FareRow("Surge Multiplier (1.2x Peak Demand)", "₹15.50")
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = CockpitBorder)
-                    FareRow("Gross Rider Bill", "₹82.50", isBold = true, textColor = CockpitTextPrimary)
-                    FareRow("Platform Tech Fee (10%)", "-₹8.25", textColor = CrimsonAlert)
-                    FareRow("Pilot Final Credit", "₹74.25", isBold = true, textColor = EmeraldPrimary)
                 }
             }
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     CockpitButton(
-                        text = "COLLECT CASH (₹82.50)",
+                        text = "COLLECT CASH (₹${"%.2f".format(totalFare)})",
                         onClick = onCollectCash,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -94,8 +97,20 @@ fun TripCompletedFareScreen(
                         isOutlined = true
                     )
                     CockpitButton(
-                        text = "Close & Return to Duty",
-                        onClick = onFinishTrip,
+                        text = if (isFinishing) "Completing..." else "Close & Return to Duty",
+                        enabled = !isFinishing,
+                        onClick = {
+                            if (rideId.isNotBlank() && breakdown?.status != "COMPLETED") {
+                                isFinishing = true
+                                DriverRepository.finishTrip(rideId) { ok ->
+                                    isFinishing = false
+                                    if (ok) onFinishTrip()
+                                    else onShowToast("Could not finish trip. Please retry.")
+                                }
+                            } else {
+                                onFinishTrip()
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         isOutlined = true
                     )
@@ -106,7 +121,7 @@ fun TripCompletedFareScreen(
 }
 
 /**
- * Screen 32: Cash Collection Calculator (tendered cash, change computation)
+ * Screen 32: Cash Collection Calculator (POST /api/v1/payments/cash-collect)
  */
 @Composable
 fun CashCollectionScreen(
@@ -114,8 +129,22 @@ fun CashCollectionScreen(
     onCashCollected: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val totalBill = 82.50
+    val offer by DriverRepository.activeOffer.collectAsState()
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val breakdown by DriverRepository.rideBreakdown.collectAsState()
+
+    LaunchedEffect(rideId) {
+        if (rideId.isNotBlank()) {
+            DriverRepository.fetchRideBreakdown(rideId)
+        }
+    }
+
+    val totalBill = breakdown?.fareBreakdown?.grossFareRupees
+        ?.takeIf { it > 0.0 }
+        ?: offer?.estimatedFareRupees
+        ?: 0.0
     var tenderedAmount by remember { mutableStateOf("100") }
+    var isSubmitting by remember { mutableStateOf(false) }
     val tenderedVal = tenderedAmount.toDoubleOrNull() ?: 0.0
     val changeReturn = maxOf(0.0, tenderedVal - totalBill)
 
@@ -139,15 +168,9 @@ fun CashCollectionScreen(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 CockpitCard(glow = true) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("AMOUNT DUE FROM PASSENGER", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("₹82.50", color = CrimsonAlert, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
-                        }
+                    Column {
+                        Text("AMOUNT DUE FROM PASSENGER", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("₹${"%.2f".format(totalBill)}", color = CrimsonAlert, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
 
@@ -176,28 +199,34 @@ fun CashCollectionScreen(
                 )
 
                 CockpitCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("RETURN CHANGE TO COMMUTER", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("₹${String.format("%.2f", changeReturn)}", color = EmeraldPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                        }
+                    Column {
+                        Text("RETURN CHANGE TO COMMUTER", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("₹${"%.2f".format(changeReturn)}", color = EmeraldPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
             CockpitButton(
-                text = "CONFIRM CASH RECEIVED (₹82.50)",
+                text = if (isSubmitting) "CONFIRMING..." else "CONFIRM CASH RECEIVED (₹${"%.2f".format(totalBill)})",
+                enabled = !isSubmitting,
                 onClick = {
-                    com.vaisentra.mobility.driver.data.DriverRepository.collectCash(
-                        rideId = com.vaisentra.mobility.driver.data.DriverRepository.currentRideId.value,
+                    if (rideId.isBlank()) {
+                        onShowToast("No active ride ID.")
+                        return@CockpitButton
+                    }
+                    isSubmitting = true
+                    DriverRepository.collectCash(
+                        rideId = rideId,
                         amountTendered = tenderedVal
-                    )
-                    onShowToast("Cash collected. ₹74.25 credited to wallet balance")
-                    onCashCollected()
+                    ) { ok ->
+                        isSubmitting = false
+                        if (ok) {
+                            onShowToast("Cash collected and reconciled!")
+                            onCashCollected()
+                        } else {
+                            onShowToast("Failed to confirm cash collection.")
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -206,7 +235,7 @@ fun CashCollectionScreen(
 }
 
 /**
- * Screen 33: Digital UPI QR Settlement (passenger scans pilot's dynamic UPI QR)
+ * Screen 33: Digital UPI QR Settlement (POST /api/v1/payments/upi-checkout)
  */
 @Composable
 fun UpiSettlementScreen(
@@ -214,6 +243,25 @@ fun UpiSettlementScreen(
     onPaymentConfirmed: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val offer by DriverRepository.activeOffer.collectAsState()
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val breakdown by DriverRepository.rideBreakdown.collectAsState()
+    val totalBill = breakdown?.fareBreakdown?.grossFareRupees
+        ?.takeIf { it > 0.0 }
+        ?: offer?.estimatedFareRupees
+        ?: 0.0
+    var upiIntentUrl by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(rideId) {
+        if (rideId.isNotBlank()) {
+            DriverRepository.fetchRideBreakdown(rideId)
+            val res = DriverRepository.generateDynamicUpi(rideId, totalBill.coerceAtLeast(1.0))
+            upiIntentUrl = res.getOrNull()
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -240,10 +288,9 @@ fun UpiSettlementScreen(
                 ) {
                     Text("AMOUNT TO PAY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text("₹82.50", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("₹${"%.2f".format(totalBill)}", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(14.dp))
 
-                    // QR Code Simulation
                     Box(
                         modifier = Modifier
                             .size(200.dp)
@@ -253,26 +300,41 @@ fun UpiSettlementScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.QrCode2, contentDescription = null, tint = Color.Black, modifier = Modifier.size(150.dp))
-                            Text("UPI // RAZORPAY AUTOPAY", color = Color.DarkGray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (upiIntentUrl != null) "UPI READY" else "GENERATING QR...",
+                                color = Color.DarkGray,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
 
                     Spacer(Modifier.height(12.dp))
-                    Text("UPI ID: vaisentra.mobility@okhdfcbank", color = CockpitTextSecondary, fontSize = 12.sp)
-                    Text("Auto-verifying payment gateway webhook...", color = ElectricCyan, fontSize = 11.sp)
+                    Text(upiIntentUrl ?: "Waiting for UPI intent...", color = ElectricCyan, fontSize = 11.sp, maxLines = 1)
                 }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 CockpitButton(
-                    text = "VERIFY PAYMENT RECEIVED",
+                    text = if (isLoading) "REFRESHING..." else "GENERATE / VERIFY UPI",
+                    enabled = !isLoading,
                     onClick = {
-                        val rideId = DriverRepository.currentRideId.value ?: "ride-latest"
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            DriverRepository.generateDynamicUpi(rideId, 82.50)
+                        if (rideId.isBlank()) {
+                            onShowToast("No active ride ID.")
+                            return@CockpitButton
                         }
-                        onShowToast("Payment of ₹82.50 verified via Razorpay webhook!")
-                        onPaymentConfirmed()
+                        isLoading = true
+                        scope.launch {
+                            val res = DriverRepository.generateDynamicUpi(rideId, totalBill.coerceAtLeast(1.0))
+                            isLoading = false
+                            if (res.isSuccess) {
+                                upiIntentUrl = res.getOrNull()
+                                onShowToast("UPI checkout ready!")
+                                onPaymentConfirmed()
+                            } else {
+                                onShowToast("UPI error: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -286,22 +348,3 @@ fun UpiSettlementScreen(
         }
     }
 }
-
-@Composable
-private fun FareRow(
-    label: String,
-    value: String,
-    isBold: Boolean = false,
-    textColor: Color = CockpitTextSecondary
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, color = CockpitTextSecondary, fontSize = 12.sp)
-        Text(value, color = textColor, fontSize = 13.sp, fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal)
-    }
-}
-

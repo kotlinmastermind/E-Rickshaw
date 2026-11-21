@@ -1,11 +1,11 @@
 package com.vaisentra.mobility.driver.feature.support
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -13,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -23,19 +22,18 @@ import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.launch
 
 /**
- * Screen 44: Electric Academy Training (battery health, regenerative braking, etiquette)
+ * Screen 44: Electric Academy Training (GET /api/v1/driver-onboarding/training/curriculum)
  */
 @Composable
 fun AcademyTrainingScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val modules = listOf(
-        TrainingModule("EV Battery Life Optimization", "Thermal management & safe swap hygiene", "Completed", EmeraldPrimary, true),
-        TrainingModule("Regenerative Braking Technique", "Maximizing kinetic range recovery", "Completed", EmeraldPrimary, true),
-        TrainingModule("Customer Etiquette & Safety First", "De-escalation & POSH zero-tolerance", "Completed", EmeraldPrimary, true),
-        TrainingModule("Monsoon Wet Weather Driving", "Preventing aqua-planing on electric 3-wheelers", "New Module", ElectricCyan, false)
-    )
+    val modules by DriverRepository.trainingModules.collectAsState()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchTrainingCurriculum()
+    }
 
     Column(
         modifier = Modifier
@@ -49,46 +47,31 @@ fun AcademyTrainingScreen(
             onBack = onNavigateBack
         )
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item {
-                CockpitCard(glow = true) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("ACADEMY CERTIFICATION STATUS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("Certified EV Pilot • Grade A+", color = EmeraldPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        }
-                        Icon(Icons.Default.School, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(36.dp))
-                    }
-                }
+        if (modules.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No training modules assigned yet.", color = CockpitTextMuted, fontSize = 14.sp)
             }
-
-            items(modules) { module ->
-                CockpitCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(module.title, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text(module.desc, color = CockpitTextSecondary, fontSize = 12.sp)
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(modules) { module ->
+                    val isDone = module.isCompleted || module.assessmentPassed
+                    val statusText = if (isDone) "Completed" else "${module.durationMinutes} min Module"
+                    val tint = if (isDone) EmeraldPrimary else ElectricCyan
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(module.title, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(module.description, color = CockpitTextSecondary, fontSize = 12.sp)
+                            }
+                            CockpitBadge(statusText, tint)
                         }
-                        CockpitBadge(module.status, module.tint)
-                    }
-                    if (!module.isDone) {
-                        Spacer(Modifier.height(10.dp))
-                        CockpitButton(
-                            text = "Start Interactive Module (5 mins)",
-                            onClick = { onShowToast("Module '${module.title}' launched") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
                     }
                 }
             }
@@ -97,15 +80,18 @@ fun AcademyTrainingScreen(
 }
 
 /**
- * Screen 46: Found Lost Item in Cab (log belongings found in rear cabin)
+ * Screen 46: Found Lost Item in Cab (POST /api/v1/drivers/safety/incidents)
  */
 @Composable
 fun FoundItemScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    var itemCategory by remember { mutableStateOf("Mobile Phone") }
+    var itemCategory by remember { mutableStateOf("Mobile Phone / Tablet") }
     var itemNotes by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -158,16 +144,20 @@ fun FoundItemScreen(
 
             item {
                 CockpitButton(
-                    text = "Report Found Item & Lock Ticket",
+                    text = if (isSubmitting) "Submitting..." else "Report Found Item & Lock Ticket",
+                    enabled = !isSubmitting && itemNotes.isNotBlank(),
                     onClick = {
-                        val currentRide = DriverRepository.currentRideId.value ?: "ride-latest"
-                        val cat = itemCategory
-                        val notes = itemNotes
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            DriverRepository.reportFoundItem(currentRide, cat, notes)
+                        isSubmitting = true
+                        scope.launch {
+                            val res = DriverRepository.reportFoundItem(rideId, itemCategory, itemNotes)
+                            isSubmitting = false
+                            if (res.isSuccess) {
+                                onShowToast("Found item logged!")
+                                onNavigateBack()
+                            } else {
+                                onShowToast("Failed to report item: ${res.exceptionOrNull()?.message}")
+                            }
                         }
-                        onShowToast("Lost property logged in Supabase. Commuter notified.")
-                        onNavigateBack()
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -177,18 +167,23 @@ fun FoundItemScreen(
 }
 
 /**
- * Screen 47: Driver Helpdesk Tickets (vehicle maintenance, payout queries)
+ * Screen 47: Driver Helpdesk Tickets (GET/POST /api/v1/driver-onboarding/tickets)
  */
 @Composable
 fun DriverHelpdeskScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val tickets = listOf(
-        HelpdeskTicket("TKT-8841", "Payout discrepancy on morning surge", "Resolved (₹50 credited)", EmeraldPrimary, "Yesterday"),
-        HelpdeskTicket("TKT-8799", "Tyre pressure sensor recalibration", "Closed", CockpitTextMuted, "3 days ago"),
-        HelpdeskTicket("TKT-8902", "App GPS ping jitter query", "Open (In Review)", AmberWarning, "Today")
-    )
+    val tickets by DriverRepository.driverTickets.collectAsState()
+    var showCreateForm by remember { mutableStateOf(false) }
+    var subject by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchDriverTickets()
+    }
 
     Column(
         modifier = Modifier
@@ -208,25 +203,79 @@ fun DriverHelpdeskScreen(
         ) {
             item {
                 CockpitButton(
-                    text = "+ Raise New Helpdesk Ticket",
-                    onClick = { onShowToast("New ticket form opened") },
+                    text = if (showCreateForm) "Cancel New Ticket" else "+ Raise New Helpdesk Ticket",
+                    onClick = { showCreateForm = !showCreateForm },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            items(tickets) { ticket ->
-                CockpitCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(ticket.id, color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text(ticket.subject, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("Updated: ${ticket.timestamp}", color = CockpitTextSecondary, fontSize = 11.sp)
+            if (showCreateForm) {
+                item {
+                    CockpitCard {
+                        Text("NEW SUPPORT TICKET", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        CockpitTextField(
+                            value = subject,
+                            onValueChange = { subject = it },
+                            label = "Subject",
+                            placeholder = "Brief issue summary"
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        CockpitTextField(
+                            value = message,
+                            onValueChange = { message = it },
+                            label = "Message",
+                            placeholder = "Describe your issue in detail..."
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        CockpitButton(
+                            text = if (isSubmitting) "Submitting..." else "Submit Ticket",
+                            enabled = !isSubmitting && subject.trim().length >= 3 && message.trim().length >= 5,
+                            onClick = {
+                                isSubmitting = true
+                                scope.launch {
+                                    val res = DriverRepository.createDriverTicket(subject, message)
+                                    isSubmitting = false
+                                    if (res.isSuccess) {
+                                        subject = ""
+                                        message = ""
+                                        showCreateForm = false
+                                        onShowToast("Support ticket created!")
+                                    } else {
+                                        onShowToast("Failed: ${res.exceptionOrNull()?.message}")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+
+            if (tickets.isEmpty()) {
+                item {
+                    CockpitCard {
+                        Text("No support tickets found.", color = CockpitTextMuted, fontSize = 13.sp)
+                    }
+                }
+            } else {
+                items(tickets) { ticket ->
+                    val statusColor = if (ticket.status.equals("RESOLVED", ignoreCase = true) ||
+                        ticket.status.equals("CLOSED", ignoreCase = true)
+                    ) EmeraldPrimary else AmberWarning
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(ticket.ticketId.take(10), color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(ticket.subject, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Created: ${ticket.createdAt}", color = CockpitTextSecondary, fontSize = 11.sp)
+                            }
+                            CockpitBadge(ticket.status, statusColor)
                         }
-                        CockpitBadge(ticket.status, ticket.statusColor)
                     }
                 }
             }
@@ -235,19 +284,19 @@ fun DriverHelpdeskScreen(
 }
 
 /**
- * Screen 49: Push Notifications Center (surge alerts, weather warnings, incentives)
+ * Screen 49: Push Notifications Center (GET /api/v1/notifications/inbox & PATCH .../read)
  */
 @Composable
 fun NotificationsCenterScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val notifications = listOf(
-        DriverNotif("Surge Alert 1.8x", "High demand near Anand Vihar ISBT. +₹65 per ride for next 45 mins.", Icons.Default.Bolt, AmberWarning, "10m ago"),
-        DriverNotif("Payout Transferred", "₹1,500 successfully sent to your HDFC bank account.", Icons.Default.AccountBalanceWallet, EmeraldPrimary, "1h ago"),
-        DriverNotif("Weather Advisory", "Light monsoon showers in East Delhi. Maintain safe 25 km/h braking distance.", Icons.Default.Cloud, ElectricCyan, "2h ago"),
-        DriverNotif("Incentive Goal Unlocked", "Congratulations! You completed 10 morning rides. ₹300 bonus credited.", Icons.Default.EmojiEvents, EmeraldPrimary, "5h ago")
-    )
+    val notifications by DriverRepository.notifications.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchNotifications()
+    }
 
     Column(
         modifier = Modifier
@@ -257,34 +306,48 @@ fun NotificationsCenterScreen(
     ) {
         CockpitHeader(
             title = "Pilot Notifications",
-            subtitle = "Surge triggers, weather warnings & operational announcements",
+            subtitle = "Surge triggers, weather warnings & announcements",
             onBack = onNavigateBack
         )
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(notifications) { notif ->
-                CockpitCard {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(notif.tint.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(notif.icon, contentDescription = null, tint = notif.tint, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(notif.title, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text(notif.time, color = CockpitTextMuted, fontSize = 11.sp)
+        if (notifications.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No notifications yet.", color = CockpitTextMuted, fontSize = 14.sp)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(notifications) { notif ->
+                    val tint = if (notif.isRead) CockpitTextMuted else EmeraldPrimary
+                    CockpitCard(
+                        glow = !notif.isRead,
+                        modifier = Modifier.clickable {
+                            if (!notif.isRead) {
+                                scope.launch { DriverRepository.markNotificationAsRead(notif.id) }
                             }
-                            Spacer(Modifier.height(4.dp))
-                            Text(notif.body, color = CockpitTextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+                        }
+                    ) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(tint.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Notifications, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(notif.title, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text(notif.createdAt?.take(10) ?: "", color = CockpitTextMuted, fontSize = 11.sp)
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(notif.body, color = CockpitTextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+                            }
                         }
                     }
                 }
@@ -292,8 +355,3 @@ fun NotificationsCenterScreen(
         }
     }
 }
-
-private data class TrainingModule(val title: String, val desc: String, val status: String, val tint: Color, val isDone: Boolean)
-private data class HelpdeskTicket(val id: String, val subject: String, val status: String, val statusColor: Color, val timestamp: String)
-private data class DriverNotif(val title: String, val body: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val tint: Color, val time: String)
-

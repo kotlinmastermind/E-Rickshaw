@@ -18,22 +18,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.launch
 
 /**
- * Screen 24: Shared Pool Passenger Manifest (passenger seat allocation, names, stops)
+ * Screen 24: Shared Pool Passenger Manifest (GET /api/v1/pools/ride/{ride_id})
  */
 @Composable
 fun PoolManifestScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val seats = listOf(
-        SeatManifestItem("Seat #1 (Front)", "Kavita S.", "Mayur Vihar Ph-1 Metro", "Preet Vihar Pillar 12", true, "₹25.00"),
-        SeatManifestItem("Seat #2 (Rear Left)", "Rohit Kumar", "Mayur Vihar Ph-1 Metro", "Nirman Vihar Metro", true, "₹30.00"),
-        SeatManifestItem("Seat #3 (Rear Center)", "Deepak Joshi", "Laxmi Nagar Chowk", "Anand Vihar ISBT", false, "₹35.00"),
-        SeatManifestItem("Seat #4 (Rear Right)", "EMPTY SEAT", "-", "-", false, "Matching...")
-    )
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val sharedTrip by DriverRepository.sharedPoolTrip.collectAsState()
+
+    LaunchedEffect(rideId) {
+        if (rideId.isNotBlank()) {
+            DriverRepository.fetchSharedTripForRide(rideId)
+        }
+    }
+
+    val manifest = sharedTrip?.manifest.orEmpty()
+    val totalPoolEarningsRupees = (sharedTrip?.financialSummary?.totalDriverEarningsCents ?: 0L) / 100.0
+    val occupiedSeats = sharedTrip?.reservedSeats ?: 0
+    val maxSeats = sharedTrip?.maxSeats ?: 4
 
     Column(
         modifier = Modifier
@@ -43,7 +52,7 @@ fun PoolManifestScreen(
     ) {
         CockpitHeader(
             title = "Shared Pool Manifest",
-            subtitle = "Eco-Pool 4-passenger manifest & seat allocations",
+            subtitle = "Eco-Pool passenger manifest & seat allocations",
             onBack = onNavigateBack
         )
 
@@ -60,33 +69,45 @@ fun PoolManifestScreen(
                     ) {
                         Column {
                             Text("TOTAL POOL FARE EARNING", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("₹90.00 / trip", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("₹${"%.2f".format(totalPoolEarningsRupees)} / trip", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
                         }
-                        CockpitBadge("3 / 4 SEATS OCCUPIED", ElectricCyan)
+                        CockpitBadge("$occupiedSeats / $maxSeats SEATS OCCUPIED", ElectricCyan)
                     }
                 }
             }
 
-            items(seats) { seat ->
-                CockpitCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(seat.seatNumber, color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text(seat.commuterName, color = if (seat.isBoarded) CockpitTextPrimary else CockpitTextSecondary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Spacer(Modifier.height(4.dp))
-                            Text("Drop: ${seat.dropLocation}", color = CockpitTextSecondary, fontSize = 12.sp)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(seat.fare, color = if (seat.isBoarded) EmeraldPrimary else CockpitTextMuted, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(Modifier.height(4.dp))
-                            CockpitBadge(
-                                if (seat.isBoarded) "BOARDED" else if (seat.commuterName != "EMPTY SEAT") "PENDING PICKUP" else "VACANT",
-                                if (seat.isBoarded) EmeraldPrimary else if (seat.commuterName != "EMPTY SEAT") AmberWarning else CockpitTextMuted
-                            )
+            if (manifest.isEmpty()) {
+                item {
+                    CockpitCard {
+                        Text(
+                            text = if (rideId.isBlank()) "No active shared ride." else "No pool passengers in manifest yet.",
+                            color = CockpitTextMuted,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            } else {
+                items(manifest) { entry ->
+                    val fareRupees = (entry.driverEarningsCents ?: entry.allocatedFareCents ?: 0L) / 100.0
+                    val isBoarded = entry.bookingStatus in listOf("IN_TRANSIT", "ACTIVE_BOARDING", "COMPLETED")
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Booking ${entry.bookingId?.take(8) ?: "-"}", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("${entry.seatsReserved} Seat(s) Reserved", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("₹${"%.2f".format(fareRupees)}", color = EmeraldPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Spacer(Modifier.height(4.dp))
+                                CockpitBadge(
+                                    entry.bookingStatus,
+                                    if (isBoarded) EmeraldPrimary else AmberWarning
+                                )
+                            }
                         }
                     }
                 }
@@ -96,21 +117,26 @@ fun PoolManifestScreen(
 }
 
 /**
- * Screen 25: Corridor Waypoint Management (pickup/drop sequence on corridor)
+ * Screen 25: Corridor Waypoint Management (GET /api/v1/pools/ride/{ride_id} & /api/v1/rides/{ride_id}/stops)
  */
 @Composable
 fun CorridorWaypointsScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
-    val corridorSteps = listOf(
-        CorridorStep(1, "PICKUP", "Mayur Vihar Metro Gate 2", "Commuter: Kavita S.", true),
-        CorridorStep(2, "PICKUP", "Mayur Vihar Metro Gate 2", "Commuter: Rohit Kumar", true),
-        CorridorStep(3, "DROP", "Preet Vihar Pillar 12", "Commuter: Kavita S.", false),
-        CorridorStep(4, "PICKUP", "Laxmi Nagar Chowk", "Commuter: Deepak Joshi", false),
-        CorridorStep(5, "DROP", "Nirman Vihar Metro", "Commuter: Rohit Kumar", false),
-        CorridorStep(6, "DROP", "Anand Vihar ISBT", "Commuter: Deepak Joshi", false)
-    )
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val sharedTrip by DriverRepository.sharedPoolTrip.collectAsState()
+    val rideStops by DriverRepository.rideStops.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(rideId) {
+        if (rideId.isNotBlank()) {
+            DriverRepository.fetchSharedTripForRide(rideId)
+            DriverRepository.fetchRideStops(rideId)
+        }
+    }
+
+    val poolStops = sharedTrip?.stops.orEmpty()
 
     Column(
         modifier = Modifier
@@ -120,7 +146,7 @@ fun CorridorWaypointsScreen(
     ) {
         CockpitHeader(
             title = "Corridor Sequence",
-            subtitle = "Optimized routing order for all pool riders",
+            subtitle = "Routing order for active ride stops",
             onBack = onNavigateBack
         )
 
@@ -128,39 +154,89 @@ fun CorridorWaypointsScreen(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(corridorSteps) { step ->
-                CockpitCard(glow = !step.done && step.stepIndex == 3) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(if (step.done) EmeraldPrimary else if (step.type == "PICKUP") ElectricCyan else AmberWarning),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("${step.stepIndex}", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            if (poolStops.isNotEmpty()) {
+                items(poolStops) { step ->
+                    val done = step.status in listOf("COMPLETED", "ARRIVED", "DEPARTED")
+                    CockpitCard(glow = !done) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(if (done) EmeraldPrimary else if (step.stopType == "PICKUP") ElectricCyan else AmberWarning),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("${step.sequenceOrder}", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    CockpitBadge(step.stopType, if (step.stopType == "PICKUP") ElectricCyan else AmberWarning)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(step.address, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("Status: ${step.status}", color = CockpitTextSecondary, fontSize = 11.sp)
+                                }
                             }
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                CockpitBadge(step.type, if (step.type == "PICKUP") ElectricCyan else AmberWarning)
-                                Spacer(Modifier.height(2.dp))
-                                Text(step.location, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text(step.passenger, color = CockpitTextSecondary, fontSize = 11.sp)
+                            if (done) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = EmeraldPrimary)
                             }
                         }
-                        if (step.done) {
-                            Icon(Icons.Default.Check, contentDescription = null, tint = EmeraldPrimary)
-                        } else if (step.stepIndex == 3) {
-                            CockpitButton(
-                                text = "Arrived",
-                                onClick = { onShowToast("Arrived at Preet Vihar Pillar 12") }
-                            )
+                    }
+                }
+            } else if (rideStops.isNotEmpty()) {
+                items(rideStops) { stop ->
+                    val done = stop.status in listOf("COMPLETED", "ARRIVED", "DEPARTED")
+                    CockpitCard(glow = !done) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(if (done) EmeraldPrimary else ElectricCyan),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("${stop.sequenceOrder}", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(stop.address, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("Status: ${stop.status}", color = CockpitTextSecondary, fontSize = 11.sp)
+                                }
+                            }
+                            if (done) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = EmeraldPrimary)
+                            } else {
+                                CockpitButton(
+                                    text = "Arrived",
+                                    onClick = {
+                                        scope.launch {
+                                            val res = DriverRepository.markRideStopArrived(rideId, stop.id)
+                                            if (res.isSuccess) onShowToast("Arrived at ${stop.address}")
+                                            else onShowToast("Failed to update stop: ${res.exceptionOrNull()?.message}")
+                                        }
+                                    }
+                                )
+                            }
                         }
+                    }
+                }
+            } else {
+                item {
+                    CockpitCard {
+                        Text(
+                            text = if (rideId.isBlank()) "No active ride." else "No intermediate stops for this ride.",
+                            color = CockpitTextMuted,
+                            fontSize = 13.sp
+                        )
                     }
                 }
             }
@@ -169,14 +245,43 @@ fun CorridorWaypointsScreen(
 }
 
 /**
- * Screen 26: Co-Passenger Broadcast (send announcement to corridor riders)
+ * Screen 26: Co-Passenger Broadcast (POST /api/v1/pools/{trip_id}/messages or /api/v1/rides/{ride_id}/chat/messages)
  */
 @Composable
 fun CoPassengerBroadcastScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val rideId by DriverRepository.currentRideId.collectAsState()
+    val sharedTrip by DriverRepository.sharedPoolTrip.collectAsState()
     var broadcastMsg by remember { mutableStateOf("") }
+    var isSending by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(rideId) {
+        if (rideId.isNotBlank()) {
+            DriverRepository.fetchSharedTripForRide(rideId)
+        }
+    }
+
+    fun sendAnnouncement(text: String) {
+        if (text.isBlank()) return
+        if (rideId.isBlank() && sharedTrip?.tripId.isNullOrBlank()) {
+            onShowToast("No active ride or pool trip.")
+            return
+        }
+        isSending = true
+        scope.launch {
+            val res = DriverRepository.sendCoPassengerBroadcast(sharedTrip?.tripId, rideId, text)
+            isSending = false
+            if (res.isSuccess) {
+                broadcastMsg = ""
+                onShowToast("Broadcast sent!")
+            } else {
+                onShowToast("Failed to send: ${res.exceptionOrNull()?.message}")
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -186,7 +291,7 @@ fun CoPassengerBroadcastScreen(
     ) {
         CockpitHeader(
             title = "Co-Passenger Broadcast",
-            subtitle = "Send announcement to all 4 pool riders at once",
+            subtitle = "Send announcement to active trip riders",
             onBack = onNavigateBack
         )
 
@@ -208,10 +313,8 @@ fun CoPassengerBroadcastScreen(
                     )
                     presets.forEach { preset ->
                         Button(
-                            onClick = {
-                                broadcastMsg = preset
-                                onShowToast("Broadcast: '$preset' sent to all riders!")
-                            },
+                            enabled = !isSending,
+                            onClick = { sendAnnouncement(preset) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),
@@ -232,33 +335,11 @@ fun CoPassengerBroadcastScreen(
             }
 
             CockpitButton(
-                text = "SEND BROADCAST NOTIFICATION",
-                onClick = {
-                    if (broadcastMsg.isNotBlank()) {
-                        onShowToast("Notification broadcasted to 4 riders")
-                        broadcastMsg = ""
-                    }
-                },
+                text = if (isSending) "SENDING..." else "SEND BROADCAST NOTIFICATION",
+                enabled = !isSending && broadcastMsg.isNotBlank(),
+                onClick = { sendAnnouncement(broadcastMsg) },
                 modifier = Modifier.fillMaxWidth()
             )
         }
     }
 }
-
-private data class SeatManifestItem(
-    val seatNumber: String,
-    val commuterName: String,
-    val pickupLocation: String,
-    val dropLocation: String,
-    val isBoarded: Boolean,
-    val fare: String
-)
-
-private data class CorridorStep(
-    val stepIndex: Int,
-    val type: String,
-    val location: String,
-    val passenger: String,
-    val done: Boolean
-)
-

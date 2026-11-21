@@ -46,37 +46,37 @@ import com.vaisentra.mobility.driver.theme.DriverGoTheme
 @Composable
 fun DriverGoVerificationScreen(
     modifier: Modifier = Modifier,
-    initialCode: String = "482",
+    initialCode: String = "",
     codeLength: Int = 6,
     resendTimerText: String = "00:30",
     onVerifyClick: (String) -> Unit = {},
     onChangeNumberClick: () -> Unit = {},
-    onResendClick: () -> Unit = {}
+    onResendClick: () -> Unit = {},
 ) {
     var code by remember { mutableStateOf(initialCode) }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFFF5A26))
+            .background(Color(0xFFFF5A26)),
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 16.dp, start = 12.dp, end = 12.dp),
             shape = RoundedCornerShape(32.dp),
-            color = Color(0xFFFAF7F5)
+            color = Color(0xFFFAF7F5),
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 24.dp)
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
             ) {
                 Text(
                     text = stringResource(id = R.string.verification_code_title),
                     color = Color(0xFF4A443F),
                     fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -85,10 +85,10 @@ fun DriverGoVerificationScreen(
                     code = code,
                     codeLength = codeLength,
                     onCodeChange = { newCode ->
-                        if (newCode.length <= codeLength && newCode.all { it.isDigit() }) {
+                        if ((newCode.length <= codeLength) && newCode.all { it.isDigit() }) {
                             code = newCode
                         }
-                    }
+                    },
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -96,13 +96,14 @@ fun DriverGoVerificationScreen(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         text = stringResource(id = R.string.resend_code_in, resendTimerText),
                         color = Color(0xFF6E6862),
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.Normal
+                        fontWeight = FontWeight.Normal,
+                        modifier = Modifier.clickable { onResendClick() },
                     )
 
                     Text(
@@ -111,7 +112,7 @@ fun DriverGoVerificationScreen(
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                         textDecoration = TextDecoration.Underline,
-                        modifier = Modifier.clickable { onChangeNumberClick() }
+                        modifier = Modifier.clickable { onChangeNumberClick() },
                     )
                 }
 
@@ -125,25 +126,25 @@ fun DriverGoVerificationScreen(
                     shape = RoundedCornerShape(20.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF141210),
-                        contentColor = Color.White
-                    )
+                        contentColor = Color.White,
+                    ),
                 ) {
                     Row(
                         horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = stringResource(id = R.string.verify_button_text),
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color.White,
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(
                             painter = painterResource(id = R.drawable.ic_check),
                             contentDescription = stringResource(id = R.string.verify_button_text),
                             tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
@@ -159,7 +160,7 @@ fun OtpCodeInputRow(
     code: String,
     codeLength: Int,
     onCodeChange: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     BasicTextField(
         value = code,
@@ -168,12 +169,12 @@ fun OtpCodeInputRow(
         decorationBox = {
             Row(
                 modifier = modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 val activeIndex = code.length.coerceAtMost(codeLength - 1)
                 for (i in 0 until codeLength) {
                     val digit = code.getOrNull(i)?.toString() ?: ""
-                    val isActive = i == activeIndex && code.length < codeLength
+                    val isActive = (i == activeIndex) && (code.length < codeLength)
 
                     Box(
                         modifier = Modifier
@@ -185,21 +186,21 @@ fun OtpCodeInputRow(
                             .border(
                                 width = if (isActive) 2.dp else 1.dp,
                                 color = if (isActive) Color(0xFF141210) else Color(0xFFE5E0DA),
-                                shape = RoundedCornerShape(16.dp)
+                                shape = RoundedCornerShape(16.dp),
                             ),
-                        contentAlignment = Alignment.Center
+                        contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             text = digit,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF141210),
-                            textAlign = TextAlign.Center
+                            textAlign = TextAlign.Center,
                         )
                     }
                 }
             }
-        }
+        },
     )
 }
 
@@ -208,7 +209,7 @@ fun OtpCodeInputRow(
 fun DriverGoVerificationScreenPreview() {
     DriverGoTheme {
         DriverGoVerificationScreen(
-            initialCode = "482"
+            initialCode = "482",
         )
     }
 }

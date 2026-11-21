@@ -13,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,174 +21,14 @@ import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.launch
 
-// Screen 10: Duty Dashboard & Auto-Accept Radar (Main Cockpit Home)
+// Screen 10: Duty Dashboard -> Uses VasantraDriverHomeScreen
 @Composable
 fun DutyDashboardScreen(onNavigate: (String) -> Unit) {
-    val isOnline by DriverRepository.isOnline.collectAsState()
-    val earnings by DriverRepository.earnings.collectAsState()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(PilotCanvas)
-    ) {
-        // Top Cockpit Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(PilotSurfaceElevated)
-                    .clickable { onNavigate("catalog") }
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "⚡ DriverGo", color = PilotTextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    CockpitBadge(text = "50 SCREENS", backgroundColor = SurgeGlow, textColor = PilotAmber)
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(PilotSurfaceElevated)
-                        .clickable { DriverDialogController.show(DriverPopupType.PILOT_SOS) },
-                    contentAlignment = Alignment.Center
-                ) { Text(text = "🚨", fontSize = 16.sp) }
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(PilotSurfaceElevated)
-                        .clickable { onNavigate("pilot_profile") },
-                    contentAlignment = Alignment.Center
-                ) { Text(text = "👨‍✈️", fontSize = 16.sp) }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
-            // Native Mapbox Background Cockpit Live View
-            DriverMapboxLiveView(
-                modifier = Modifier.fillMaxSize(),
-                driverLat = 28.6139,
-                driverLng = 77.2090,
-                targetLat = if (isOnline) 28.6289 else null,
-                targetLng = if (isOnline) 77.3712 else null,
-                targetLabel = "High Demand Surge Corridor",
-                isNavigating = false
-            )
-
-            // Floating Duty Controls & Metrics Drawer
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                // Master Duty Radar Switch
-                Box(
-                    modifier = Modifier
-                        .size(170.dp)
-                        .clip(CircleShape)
-                        .background(if (isOnline) OnlineGlow.copy(alpha = 0.85f) else PilotCard.copy(alpha = 0.9f))
-                        .border(2.5.dp, if (isOnline) PilotOnlineGreen else PilotOfflineGray, CircleShape)
-                        .clickable {
-                            val newStatus = !isOnline
-                            DriverRepository.setDutyStatus(newStatus)
-                            DriverDialogController.showToast(if (newStatus) "You are ONLINE! Receiving dispatch offers." else "You are OFFLINE.")
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = if (isOnline) "🟢 ONLINE" else "⚪ OFFLINE", color = if (isOnline) PilotOnlineGreen else PilotTextMuted, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = if (isOnline) "Auto-Accept Active" else "Tap to Go Online", color = PilotTextDim, fontSize = 11.sp)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Bottom Floating Control Stack
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Quick Today Metrics Card
-                    CockpitCard(modifier = Modifier.background(PilotSurfaceElevated.copy(alpha = 0.92f))) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Column {
-                                Text(text = "TODAY'S PAY", color = PilotTextMuted, fontSize = 11.sp)
-                                Text(text = "₹${earnings.todayNetRupees.toInt()}", color = PilotElectricCyan, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Column {
-                                Text(text = "TRIPS", color = PilotTextMuted, fontSize = 11.sp)
-                                Text(text = "${earnings.completedTripsToday}", color = PilotTextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                            }
-                            Column {
-                                Text(text = "HOURS", color = PilotTextMuted, fontSize = 11.sp)
-                                Text(text = "${earnings.onlineHoursToday}h", color = PilotTextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    // Active Vehicle Card
-                    CockpitCard(
-                        modifier = Modifier
-                            .background(PilotSurfaceElevated.copy(alpha = 0.92f))
-                            .clickable { onNavigate("vehicle_inspect") }
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "🛺", fontSize = 24.sp)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = "DL-1ER-4921 (Mahindra Treo EV)", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text(text = "Battery SoC: 78% • Range: 64 km", color = PilotOnlineGreen, fontSize = 11.sp)
-                            }
-                            Text(text = "Inspect →", color = PilotElectricCyan, fontSize = 12.sp)
-                        }
-                    }
-
-                    // Quick Nav Links
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CockpitButton(
-                            text = "Surge Heatmap",
-                            onClick = { onNavigate("heatmap") },
-                            modifier = Modifier.weight(1f),
-                            backgroundColor = PilotCard.copy(alpha = 0.95f),
-                            textColor = PilotTextWhite,
-                            icon = "🔥"
-                        )
-                        CockpitButton(
-                            text = "Test Offer",
-                            onClick = {
-                                DriverDialogController.show(DriverPopupType.INCOMING_OFFER, onConfirm = {
-                                    onNavigate("pickup_nav")
-                                })
-                            },
-                            modifier = Modifier.weight(1f),
-                            backgroundColor = PilotOnlineGreen,
-                            textColor = PilotCanvas,
-                            icon = "🚖"
-                        )
-                    }
-                }
-            }
-        }
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchDriverProfile()
+        DriverRepository.fetchEarningsSummary()
     }
+    VasantraDriverHomeScreen(onNavigate = onNavigate)
 }
 
 // Screen 7: Assigned Vehicle & Daily Inspection
@@ -198,6 +37,9 @@ fun VehicleInspectionScreen(onNavigate: (String) -> Unit) {
     var tyrePressureOk by remember { mutableStateOf(true) }
     var lightsOk by remember { mutableStateOf(true) }
     var brakeBuzzerOk by remember { mutableStateOf(true) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    val profile by DriverRepository.profile.collectAsState()
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -206,7 +48,11 @@ fun VehicleInspectionScreen(onNavigate: (String) -> Unit) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        CockpitHeader(title = "Vehicle Inspection Check", subtitle = "DL-1ER-4921 • Pre-Shift Walkaround", onBack = { onNavigate("duty_dashboard") })
+        CockpitHeader(
+            title = "Vehicle Inspection Check",
+            subtitle = "${profile.assignedVehiclePlate.ifBlank { "Vehicle" }} • Pre-Shift Walkaround",
+            onBack = { onNavigate("duty_dashboard") }
+        )
         Spacer(modifier = Modifier.height(16.dp))
 
         CockpitCard {
@@ -229,13 +75,21 @@ fun VehicleInspectionScreen(onNavigate: (String) -> Unit) {
         }
         Spacer(modifier = Modifier.height(16.dp))
         CockpitButton(
-            text = "Sign-Off Inspection & Log Odometer →",
+            text = if (isSubmitting) "Submitting..." else "Sign-Off Inspection & Log Odometer →",
+            enabled = !isSubmitting,
             onClick = {
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    DriverRepository.submitVehicleInspectionCheck("DL-1ER-4921", tyrePressureOk, lightsOk, brakeBuzzerOk)
+                isSubmitting = true
+                scope.launch {
+                    val vehicleId = profile.assignedVehiclePlate.ifBlank { "default-vehicle" }
+                    val res = DriverRepository.submitVehicleInspectionCheck(vehicleId, tyrePressureOk, lightsOk, brakeBuzzerOk)
+                    isSubmitting = false
+                    if (res.isSuccess) {
+                        DriverDialogController.showToast("Vehicle inspection logged!")
+                        onNavigate("shift_start")
+                    } else {
+                        DriverDialogController.showToast("Inspection failed: ${res.exceptionOrNull()?.message}")
+                    }
                 }
-                DriverDialogController.showToast("Vehicle inspection checklist logged in Supabase!")
-                onNavigate("shift_start")
             }
         )
     }
@@ -244,22 +98,22 @@ fun VehicleInspectionScreen(onNavigate: (String) -> Unit) {
 // Screen 8: Vehicle RC, Fitness & PUC
 @Composable
 fun VehicleRcStatusScreen(onNavigate: (String) -> Unit) {
+    val profile by DriverRepository.profile.collectAsState()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(PilotCanvas)
             .padding(16.dp)
     ) {
-        CockpitHeader(title = "RC, Fitness & Commercial PUC", subtitle = "Vehicle DL-1ER-4921 Compliance", onBack = { onNavigate("duty_dashboard") })
+        CockpitHeader(title = "RC, Fitness & Commercial PUC", subtitle = "Vehicle Compliance", onBack = { onNavigate("duty_dashboard") })
         Spacer(modifier = Modifier.height(16.dp))
 
         CockpitCard {
             val specs = listOf(
-                "Registration No" to "DL-1ER-4921",
-                "Owner / Fleet" to "Vaisentra Electric Mobility Fleet 1",
-                "Permit Type" to "Delhi NCR 3-Wheeler Passenger Permit",
-                "Fitness Validity" to "28-Feb-2028 (Active ✓)",
-                "Commercial Insurance" to "Policy #BAJAJ-ALLIANZ-82910"
+                "Registration No" to profile.assignedVehiclePlate.ifBlank { "Pending Assignment" },
+                "Model" to profile.assignedVehicleModel.ifBlank { "EV 3-Wheeler" },
+                "Approval Status" to profile.approvalStatus,
+                "License" to profile.licenseNumber.ifBlank { "-" }
             )
             specs.forEach { (k, v) ->
                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -276,6 +130,8 @@ fun VehicleRcStatusScreen(onNavigate: (String) -> Unit) {
 fun ShiftStartScreen(onNavigate: (String) -> Unit) {
     var odoReading by remember { mutableStateOf("48210") }
     var batterySoc by remember { mutableStateOf("92") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -283,7 +139,7 @@ fun ShiftStartScreen(onNavigate: (String) -> Unit) {
             .background(PilotCanvas)
             .padding(16.dp)
     ) {
-        CockpitHeader(title = "Start Duty Shift", subtitle = "Opening meter declaration in Supabase", onBack = { onNavigate("duty_dashboard") })
+        CockpitHeader(title = "Start Duty Shift", subtitle = "Opening meter declaration", onBack = { onNavigate("duty_dashboard") })
         Spacer(modifier = Modifier.height(16.dp))
 
         CockpitCard {
@@ -292,15 +148,22 @@ fun ShiftStartScreen(onNavigate: (String) -> Unit) {
             CockpitTextField(value = batterySoc, onValueChange = { batterySoc = it }, placeholder = "e.g. 92", label = "Battery SoC Percentage (%)", trailingText = "BATTERY OK ✓")
             Spacer(modifier = Modifier.height(20.dp))
             CockpitButton(
-                text = "Unlock Shift & Go Online",
+                text = if (isSubmitting) "Starting Shift..." else "Unlock Shift & Go Online",
+                enabled = !isSubmitting,
                 onClick = {
-                    val odo = odoReading.toDoubleOrNull() ?: 48210.0
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        DriverRepository.startShiftOdometer(odo)
+                    val odo = odoReading.toDoubleOrNull() ?: 0.0
+                    isSubmitting = true
+                    scope.launch {
+                        val res = DriverRepository.startShiftOdometer(odo)
+                        isSubmitting = false
+                        if (res.isSuccess) {
+                            DriverRepository.setDutyStatus(true)
+                            DriverDialogController.showToast("Shift started! Odometer $odo km recorded.")
+                            onNavigate("duty_dashboard")
+                        } else {
+                            DriverDialogController.showToast("Start shift failed: ${res.exceptionOrNull()?.message}")
+                        }
                     }
-                    DriverRepository.setDutyStatus(true)
-                    DriverDialogController.showToast("Shift started! Odometer $odo km recorded in Supabase.")
-                    onNavigate("duty_dashboard")
                 },
                 backgroundColor = PilotOnlineGreen
             )
@@ -311,6 +174,7 @@ fun ShiftStartScreen(onNavigate: (String) -> Unit) {
 // Screen 12: Driver Fatigue & Rest Check
 @Composable
 fun FatigueCheckScreen(onNavigate: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -321,15 +185,19 @@ fun FatigueCheckScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
 
         CockpitCard(borderColor = PilotAmber) {
-            Text(text = "Duty Cycle: 4 Hours 15 Mins", color = PilotAmber, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(text = "Fatigue Safety Check", color = PilotAmber, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
-            Text(text = "To guarantee high passenger alertness, pilots must take a 15-minute rest pause after every 4.5 hours of continuous transit.", color = PilotTextMuted, fontSize = 13.sp)
+            Text(text = "To guarantee passenger safety, pilots should take a 15-minute rest pause after every 4.5 hours of continuous transit.", color = PilotTextMuted, fontSize = 13.sp)
             Spacer(modifier = Modifier.height(16.dp))
             CockpitButton(text = "Start 15-Min Break Now", onClick = {
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    DriverRepository.submitFatigueCheckResult("NEEDS_REST", "Driver initiated 15-min hydration & rest break")
+                scope.launch {
+                    val res = DriverRepository.submitFatigueCheckResult("NEEDS_REST", "Driver initiated 15-min rest break")
+                    if (res.isSuccess) {
+                        DriverDialogController.show(DriverPopupType.FATIGUE_BREAK)
+                    } else {
+                        DriverDialogController.showToast("Failed to log fatigue check")
+                    }
                 }
-                DriverDialogController.show(DriverPopupType.FATIGUE_BREAK)
             }, backgroundColor = PilotAmber, textColor = PilotCanvas)
         }
     }
@@ -339,6 +207,8 @@ fun FatigueCheckScreen(onNavigate: (String) -> Unit) {
 @Composable
 fun ShiftEndScreen(onNavigate: (String) -> Unit) {
     var closingOdo by remember { mutableStateOf("48292") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -350,20 +220,25 @@ fun ShiftEndScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
 
         CockpitCard {
-            Text(text = "Today's Shift Distance: 82 km", color = PilotElectricCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(12.dp))
             CockpitTextField(value = closingOdo, onValueChange = { closingOdo = it }, placeholder = "e.g. 48292", label = "Closing Odometer Reading (km)")
             Spacer(modifier = Modifier.height(20.dp))
             CockpitButton(
-                text = "Close Shift & Submit Handover",
+                text = if (isSubmitting) "Closing Shift..." else "Close Shift & Submit Handover",
+                enabled = !isSubmitting,
                 onClick = {
-                    val odo = closingOdo.toDoubleOrNull() ?: 48292.0
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        DriverRepository.endShiftOdometer(odo)
+                    val odo = closingOdo.toDoubleOrNull() ?: 0.0
+                    isSubmitting = true
+                    scope.launch {
+                        val res = DriverRepository.endShiftOdometer(odo)
+                        isSubmitting = false
+                        if (res.isSuccess) {
+                            DriverRepository.setDutyStatus(false)
+                            DriverDialogController.showToast("Shift ended! Handover submitted.")
+                            onNavigate("shift_summary")
+                        } else {
+                            DriverDialogController.showToast("End shift failed: ${res.exceptionOrNull()?.message}")
+                        }
                     }
-                    DriverRepository.setDutyStatus(false)
-                    DriverDialogController.showToast("Shift ended! Handover report submitted.")
-                    onNavigate("shift_summary")
                 },
                 backgroundColor = PilotCrimson
             )
@@ -398,10 +273,9 @@ fun DriverPreferencesScreen(onNavigate: (String) -> Unit) {
             }
         }
         Spacer(modifier = Modifier.height(20.dp))
-        CockpitButton(text = "Save Preferences to Supabase", onClick = {
-            DriverDialogController.showToast("Pilot preferences saved in Supabase!")
+        CockpitButton(text = "Save Preferences", onClick = {
+            DriverDialogController.showToast("Preferences updated.")
             onNavigate("duty_dashboard")
         })
     }
 }
-

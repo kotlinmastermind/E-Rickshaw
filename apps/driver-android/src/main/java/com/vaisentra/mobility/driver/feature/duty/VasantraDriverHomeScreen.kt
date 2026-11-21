@@ -2,7 +2,6 @@ package com.vaisentra.mobility.driver.feature.duty
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,16 +22,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -49,6 +51,13 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.R
+import com.vaisentra.mobility.driver.components.DriverDialogController
+import com.vaisentra.mobility.driver.data.ActiveRideDto
+import com.vaisentra.mobility.driver.data.DailyIncentiveDto
+import com.vaisentra.mobility.driver.data.DispatchOfferDto
+import com.vaisentra.mobility.driver.data.DriverEarningsSummaryDto
+import com.vaisentra.mobility.driver.data.DriverRepository
+import androidx.compose.runtime.collectAsState
 import com.vaisentra.mobility.driver.theme.DriverGoTheme
 
 @Composable
@@ -56,116 +65,144 @@ fun VasantraDriverHomeScreen(
     modifier: Modifier = Modifier,
     onNavigate: (String) -> Unit = {}
 ) {
-    var isOnline by remember { mutableStateOf(true) }
-    var selectedTab by remember { mutableStateOf(0) }
+    val isOnline by DriverRepository.isOnline.collectAsState()
+    val activeOffer by DriverRepository.activeOffer.collectAsState()
+    val activeRide by DriverRepository.activeRide.collectAsState()
+    val profile by DriverRepository.profile.collectAsState()
+    val earnings by DriverRepository.earnings.collectAsState()
+    val dailyTarget by DriverRepository.dailyTarget.collectAsState()
+    val unreadNotifications by DriverRepository.unreadNotificationCount.collectAsState()
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchDriverProfile()
+        DriverRepository.fetchEarningsSummary()
+        DriverRepository.fetchDailyTargets()
+        DriverRepository.fetchActiveRide()
+        DriverRepository.fetchUnreadNotificationsCount()
+        if (isOnline) {
+            DriverRepository.fetchActiveOffers()
+        }
+    }
 
     Surface(
         modifier = modifier.fillMaxSize(),
-        color = Color(0xFFF4F6FC)
+        color = Color(0xFFF5F6F8)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 72.dp)
+                    .padding(bottom = 68.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Spacer(modifier = Modifier.height(36.dp))
-
-                VasantraDriverTopHeader(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    onNotificationClick = { onNavigate("notifications") }
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Box(
+                // Top Dark Section for Status bar and Header
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.TopCenter
+                        .background(Color(0xFF000000))
+                        .padding(bottom = 16.dp)
                 ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(36.dp))
 
-                        VasantraMapSection(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp),
-                            isOnline = isOnline
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        VasantraRideRequestCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            onAccept = { onNavigate("accept_ride") },
-                            onReject = { }
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        VasantraCurrentRideCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            onNavigateClick = { onNavigate("navigation") },
-                            onEndRideClick = { onNavigate("end_ride") }
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        VasantraEarningsSummaryCard(
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        VasantraQuickActionsGrid(
-                            modifier = Modifier.fillMaxWidth(),
-                            onActionClick = { route -> onNavigate(route) }
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        VasantraSosBannerCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            onSosClick = { onNavigate("sos") }
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        VasantraMoreFeaturesGrid(
-                            modifier = Modifier.fillMaxWidth(),
-                            onViewAllClick = { onNavigate("features") },
-                            onFeatureClick = { route -> onNavigate(route) }
-                        )
-
-                        Spacer(modifier = Modifier.height(24.dp))
-                    }
-
-                    VasantraStatusTogglePill(
-                        modifier = Modifier.align(Alignment.TopCenter),
+                    VasantraDriverTopHeader(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        driverName = profile.fullName.ifBlank { stringResource(id = R.string.driver_name_sample) },
+                        driverRating = if (profile.rating > 0.0) "${"%.1f".format(profile.rating)} (${profile.ratingCount})" else stringResource(id = R.string.driver_rating_sample),
                         isOnline = isOnline,
-                        onToggle = { isOnline = !isOnline }
+                        onToggleDuty = { next ->
+                            DriverRepository.setDutyStatus(next) { ok, err ->
+                                DriverDialogController.showToast(
+                                    if (ok) (if (next) "You are ONLINE" else "You are OFFLINE")
+                                    else "Duty update failed: ${err ?: "Approval required"}"
+                                )
+                            }
+                        },
+                        onProfileClick = {
+                            onNavigate("profile")
+                        }
                     )
                 }
-            }
 
-            VasantraBottomNavigationBar(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth(),
-                selectedTab = selectedTab,
-                onTabSelected = { index ->
-                    selectedTab = index
-                    when (index) {
-                        0 -> onNavigate("home")
-                        1 -> onNavigate("trips")
-                        2 -> onNavigate("earnings")
-                        3 -> onNavigate("notifications")
-                        4 -> onNavigate("profile")
-                    }
+                // Main Content List
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                ) {
+                    VasantraMapSection(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(190.dp),
+                        isOnline = isOnline
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    VasantraRideRequestCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        offer = activeOffer,
+                        onAccept = {
+                            val offerId = activeOffer?.rideId
+                            if (!offerId.isNullOrBlank()) {
+                                DriverRepository.acceptOffer(offerId) { ok ->
+                                    if (ok) onNavigate("accept_ride")
+                                    else DriverDialogController.showToast("Could not accept ride")
+                                }
+                            } else {
+                                onNavigate("accept_ride")
+                            }
+                        },
+                        onReject = {
+                            val offerId = activeOffer?.rideId
+                            if (!offerId.isNullOrBlank()) {
+                                DriverRepository.rejectOffer(offerId)
+                            }
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    VasantraCurrentRideCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        activeRide = activeRide,
+                        onNavigateClick = { onNavigate("navigation") },
+                        onEndRideClick = { onNavigate("end_ride") }
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    VasantraEarningsSummaryCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        earnings = earnings
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    VasantraQuickActionsGrid(
+                        modifier = Modifier.fillMaxWidth(),
+                        walletBalanceText = "₹${"%.0f".format(earnings.walletBalanceRupees)}",
+                        onActionClick = { route -> onNavigate(route) }
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    VasantraSosBannerCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        onSosClick = { onNavigate("sos") }
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    VasantraBonusCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        dailyTarget = dailyTarget,
+                        onBonusClick = { onNavigate("bonus") }
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
                 }
-            )
+            }
         }
     }
 }
@@ -173,7 +210,11 @@ fun VasantraDriverHomeScreen(
 @Composable
 fun VasantraDriverTopHeader(
     modifier: Modifier = Modifier,
-    onNotificationClick: () -> Unit = {}
+    driverName: String = stringResource(id = R.string.driver_name_sample),
+    driverRating: String = stringResource(id = R.string.driver_rating_sample),
+    isOnline: Boolean = true,
+    onToggleDuty: (Boolean) -> Unit = {},
+    onProfileClick: () -> Unit = {}
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -182,205 +223,122 @@ fun VasantraDriverTopHeader(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { onProfileClick() }
         ) {
-            Box(modifier = Modifier.size(52.dp)) {
-                Canvas(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                ) {
-                    drawCircle(color = Color(0xFFD1D5DB))
-                    drawCircle(color = Color(0xFF374151), radius = size.minDimension / 4f, center = Offset(size.width / 2f, size.height / 2.6f))
-                    drawCircle(color = Color(0xFF374151), radius = size.minDimension / 2.4f, center = Offset(size.width / 2f, size.height * 0.95f))
-                }
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .align(Alignment.BottomEnd)
-                        .clip(CircleShape)
-                        .background(Color(0xFF10B981)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Canvas(modifier = Modifier.size(10.dp)) {
-                        val checkPath = Path().apply {
-                            moveTo(size.width * 0.2f, size.height * 0.5f)
-                            lineTo(size.width * 0.45f, size.height * 0.75f)
-                            lineTo(size.width * 0.85f, size.height * 0.25f)
-                        }
-                        drawPath(
-                            path = checkPath,
-                            color = Color.White,
-                            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-                        )
-                    }
+            // Profile Avatar
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF374151))
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    // Face skin tone background
+                    drawCircle(color = Color(0xFFE5C09B))
+                    // Hair
+                    drawArc(
+                        color = Color(0xFF1F2937),
+                        startAngle = 170f,
+                        sweepAngle = 200f,
+                        useCenter = true,
+                        topLeft = Offset(-size.width * 0.05f, -size.height * 0.1f),
+                        size = Size(size.width * 1.1f, size.height * 0.7f)
+                    )
+                    // Eyes
+                    drawCircle(color = Color(0xFF1F2937), radius = size.width * 0.04f, center = Offset(size.width * 0.38f, size.height * 0.45f))
+                    drawCircle(color = Color(0xFF1F2937), radius = size.width * 0.04f, center = Offset(size.width * 0.62f, size.height * 0.45f))
+                    // Beard / Smile
+                    drawArc(
+                        color = Color(0xFF1F2937),
+                        startAngle = 20f,
+                        sweepAngle = 140f,
+                        useCenter = false,
+                        topLeft = Offset(size.width * 0.35f, size.height * 0.55f),
+                        size = Size(size.width * 0.3f, size.height * 0.25f),
+                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                    // Shirt
+                    drawArc(
+                        color = Color(0xFF2563EB),
+                        startAngle = 0f,
+                        sweepAngle = 180f,
+                        useCenter = true,
+                        topLeft = Offset(0f, size.height * 0.75f),
+                        size = Size(size.width, size.height * 0.5f)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
             Column {
                 Text(
-                    text = stringResource(id = R.string.driver_name_sample),
+                    text = driverName,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A),
+                    color = Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = stringResource(id = R.string.driver_id_sample),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF64748B)
-                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(modifier = Modifier.size(14.dp)) {
+                        val starPath = Path().apply {
+                            val centerX = size.width / 2f
+                            val centerY = size.height / 2f
+                            val outerR = size.width / 2f
+                            val innerR = outerR * 0.4f
+                            for (i in 0 until 10) {
+                                val r = if (i % 2 == 0) outerR else innerR
+                                val angle = Math.toRadians((i * 36 - 90).toDouble())
+                                val x = (centerX + r * kotlin.math.cos(angle)).toFloat()
+                                val y = (centerY + r * kotlin.math.sin(angle)).toFloat()
+                                if (i == 0) moveTo(x, y) else lineTo(x, y)
+                            }
+                            close()
+                        }
+                        drawPath(path = starPath, color = Color(0xFFFACC15))
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    Text(
+                        text = driverRating,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFFE5E7EB)
+                    )
+                }
             }
         }
 
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(end = 12.dp)
-            ) {
-                Canvas(modifier = Modifier.size(24.dp)) {
-                    val leftPath = Path().apply {
-                        moveTo(size.width * 0.05f, size.height * 0.1f)
-                        lineTo(size.width * 0.45f, size.height * 0.9f)
-                        lineTo(size.width * 0.3f, size.height * 0.9f)
-                        lineTo(size.width * 0.05f, size.height * 0.4f)
-                        close()
-                    }
-                    val rightPath = Path().apply {
-                        moveTo(size.width * 0.45f, size.height * 0.9f)
-                        lineTo(size.width * 0.95f, size.height * 0.1f)
-                        lineTo(size.width * 0.7f, size.height * 0.1f)
-                        lineTo(size.width * 0.35f, size.height * 0.75f)
-                        close()
-                    }
-                    drawPath(path = leftPath, color = Color(0xFF1D61E7))
-                    drawPath(path = rightPath, color = Color(0xFFFF7A00))
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                Column {
-                    Row {
-                        Text(
-                            text = stringResource(id = R.string.vasantra_brand_name),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color(0xFF0F2147)
-                        )
-                    }
-                    Text(
-                        text = stringResource(id = R.string.mobility_brand_name),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1D61E7)
-                    )
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clickable { onNotificationClick() },
-                contentAlignment = Alignment.Center
-            ) {
-                Canvas(modifier = Modifier.size(24.dp)) {
-                    val bellPath = Path().apply {
-                        moveTo(size.width * 0.5f, size.height * 0.15f)
-                        cubicTo(size.width * 0.35f, size.height * 0.15f, size.width * 0.25f, size.height * 0.3f, size.width * 0.25f, size.height * 0.55f)
-                        lineTo(size.width * 0.15f, size.height * 0.75f)
-                        lineTo(size.width * 0.85f, size.height * 0.75f)
-                        lineTo(size.width * 0.75f, size.height * 0.55f)
-                        cubicTo(size.width * 0.75f, size.height * 0.3f, size.width * 0.65f, size.height * 0.15f, size.width * 0.5f, size.height * 0.15f)
-                        close()
-                    }
-                    drawPath(path = bellPath, color = Color(0xFF0F172A))
-                    drawArc(
-                        color = Color(0xFF0F172A),
-                        startAngle = 0f,
-                        sweepAngle = 180f,
-                        useCenter = false,
-                        topLeft = Offset(size.width * 0.38f, size.height * 0.78f),
-                        size = Size(size.width * 0.24f, size.height * 0.18f),
-                        style = Stroke(width = 2.dp.toPx())
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .align(Alignment.TopEnd)
-                        .clip(CircleShape)
-                        .background(Color(0xFFEF4444)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "3",
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun VasantraStatusTogglePill(
-    modifier: Modifier = Modifier,
-    isOnline: Boolean = true,
-    onToggle: () -> Unit = {}
-) {
-    Surface(
-        modifier = modifier
-            .shadow(elevation = 6.dp, shape = RoundedCornerShape(30.dp))
-            .clip(RoundedCornerShape(30.dp))
-            .clickable { onToggle() },
-        color = Color.White,
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFE2E8F0)))
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(12.dp)
-                    .clip(CircleShape)
-                    .background(if (isOnline) Color(0xFF10B981) else Color(0xFF94A3B8))
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
             Text(
                 text = if (isOnline) stringResource(id = R.string.status_online) else stringResource(id = R.string.status_offline),
-                fontSize = 16.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A)
+                color = if (isOnline) Color(0xFF10B981) else Color(0xFF9CA3AF)
             )
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            Canvas(modifier = Modifier.size(12.dp)) {
-                val arrowPath = Path().apply {
-                    moveTo(0f, size.height * 0.3f)
-                    lineTo(size.width * 0.5f, size.height * 0.8f)
-                    lineTo(size.width, size.height * 0.3f)
-                }
-                drawPath(
-                    path = arrowPath,
-                    color = Color(0xFF0F172A),
-                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            Switch(
+                checked = isOnline,
+                onCheckedChange = { onToggleDuty(it) },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color(0xFF10B981),
+                    uncheckedThumbColor = Color.White,
+                    uncheckedTrackColor = Color(0xFF4B5563)
                 )
-            }
+            )
         }
     }
 }
@@ -394,36 +352,46 @@ fun VasantraMapSection(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFE5EEF5)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                drawRect(color = Color(0xFFE3EDF7))
+                drawRect(color = Color(0xFFE5EEF5))
 
-                val roadColor = Color(0xFFFFFFFF)
-                val mainRoadColor = Color(0xFFFDE68A)
+                val roadColor = Color.White
+                val greenAreaColor = Color(0xFFDCFCE7)
 
-                drawLine(color = roadColor, start = Offset(0f, size.height * 0.3f), end = Offset(size.width, size.height * 0.5f), strokeWidth = 14.dp.toPx())
-                drawLine(color = mainRoadColor, start = Offset(size.width * 0.4f, 0f), end = Offset(size.width * 0.7f, size.height), strokeWidth = 18.dp.toPx())
-                drawLine(color = roadColor, start = Offset(0f, size.height * 0.75f), end = Offset(size.width, size.height * 0.65f), strokeWidth = 12.dp.toPx())
-                drawLine(color = roadColor, start = Offset(size.width * 0.15f, 0f), end = Offset(size.width * 0.25f, size.height), strokeWidth = 10.dp.toPx())
+                // Map grid streets
+                drawLine(color = roadColor, start = Offset(0f, size.height * 0.25f), end = Offset(size.width, size.height * 0.4f), strokeWidth = 14.dp.toPx())
+                drawLine(color = roadColor, start = Offset(0f, size.height * 0.65f), end = Offset(size.width, size.height * 0.5f), strokeWidth = 12.dp.toPx())
+                drawLine(color = roadColor, start = Offset(size.width * 0.3f, 0f), end = Offset(size.width * 0.45f, size.height), strokeWidth = 14.dp.toPx())
+                drawLine(color = roadColor, start = Offset(size.width * 0.75f, 0f), end = Offset(size.width * 0.85f, size.height), strokeWidth = 10.dp.toPx())
 
-                val riverPath = Path().apply {
-                    moveTo(size.width * 0.7f, 0f)
-                    cubicTo(size.width * 0.8f, size.height * 0.3f, size.width * 0.5f, size.height * 0.6f, size.width * 0.9f, size.height)
+                // Green area (Park)
+                val parkPath = Path().apply {
+                    moveTo(size.width * 0.05f, size.height * 0.05f)
+                    lineTo(size.width * 0.25f, size.height * 0.08f)
+                    lineTo(size.width * 0.2f, size.height * 0.3f)
+                    lineTo(size.width * 0.02f, size.height * 0.25f)
+                    close()
                 }
-                drawPath(path = riverPath, color = Color(0xFFBFDBFE), style = Stroke(width = 24.dp.toPx(), cap = StrokeCap.Round))
+                drawPath(path = parkPath, color = greenAreaColor)
 
-                drawRoundRect(
-                    color = Color(0xFFDCFCE7),
-                    topLeft = Offset(size.width * 0.05f, size.height * 0.1f),
-                    size = Size(size.width * 0.25f, size.height * 0.25f),
-                    cornerRadius = CornerRadius(12.dp.toPx())
-                )
+                val parkPath2 = Path().apply {
+                    moveTo(size.width * 0.38f, size.height * 0.2f)
+                    lineTo(size.width * 0.45f, size.height * 0.35f)
+                    lineTo(size.width * 0.35f, size.height * 0.55f)
+                    close()
+                }
+                drawPath(path = parkPath2, color = greenAreaColor)
 
-                val center = Offset(size.width * 0.5f, size.height * 0.45f)
-                drawCircle(color = Color(0x331D61E7), radius = 32.dp.toPx(), center = center)
-                drawCircle(color = Color(0x551D61E7), radius = 22.dp.toPx(), center = center)
+                // Orange marker dot
+                drawCircle(color = Color(0xFFF97316), radius = 6.dp.toPx(), center = Offset(size.width * 0.2f, size.height * 0.55f))
+
+                // Center location marker
+                val center = Offset(size.width * 0.5f, size.height * 0.52f)
+                drawCircle(color = Color(0x333B82F6), radius = 30.dp.toPx(), center = center)
+                drawCircle(color = Color(0x553B82F6), radius = 20.dp.toPx(), center = center)
 
                 val navArrow = Path().apply {
                     moveTo(center.x, center.y - 14.dp.toPx())
@@ -432,39 +400,28 @@ fun VasantraMapSection(
                     lineTo(center.x - 10.dp.toPx(), center.y + 10.dp.toPx())
                     close()
                 }
-                drawPath(path = navArrow, color = Color(0xFF1D61E7))
+                drawPath(path = navArrow, color = Color(0xFF2563EB))
             }
 
+            // Speech Bubble "You are online" / "You are offline"
             Surface(
                 modifier = Modifier
-                    .padding(12.dp)
-                    .align(Alignment.TopStart),
+                    .padding(top = 10.dp)
+                    .align(Alignment.TopCenter),
                 shape = RoundedCornerShape(20.dp),
                 color = Color.White,
                 shadowElevation = 4.dp
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Canvas(modifier = Modifier.size(16.dp)) {
-                        drawCircle(color = Color(0xFF1D61E7), style = Stroke(width = 2.dp.toPx()))
-                        drawCircle(color = Color(0xFF1D61E7), radius = 3.dp.toPx())
-                        drawLine(color = Color(0xFF1D61E7), start = Offset(size.width / 2f, 0f), end = Offset(size.width / 2f, 4.dp.toPx()), strokeWidth = 2.dp.toPx())
-                        drawLine(color = Color(0xFF1D61E7), start = Offset(size.width / 2f, size.height - 4.dp.toPx()), end = Offset(size.width / 2f, size.height), strokeWidth = 2.dp.toPx())
-                        drawLine(color = Color(0xFF1D61E7), start = Offset(0f, size.height / 2f), end = Offset(4.dp.toPx(), size.height / 2f), strokeWidth = 2.dp.toPx())
-                        drawLine(color = Color(0xFF1D61E7), start = Offset(size.width - 4.dp.toPx(), size.height / 2f), end = Offset(size.width, size.height / 2f), strokeWidth = 2.dp.toPx())
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(id = R.string.you_are_here),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
-                }
+                Text(
+                    text = if (isOnline) stringResource(id = R.string.you_are_online) else stringResource(id = R.string.status_offline),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
             }
 
+            // Location crosshair button at bottom-right
             Surface(
                 modifier = Modifier
                     .padding(12.dp)
@@ -479,8 +436,12 @@ fun VasantraMapSection(
                     contentAlignment = Alignment.Center
                 ) {
                     Canvas(modifier = Modifier.size(20.dp)) {
-                        drawCircle(color = Color(0xFF1D61E7), style = Stroke(width = 2.dp.toPx()))
-                        drawCircle(color = Color(0xFF1D61E7), radius = 4.dp.toPx())
+                        drawCircle(color = Color(0xFF0F172A), style = Stroke(width = 2.dp.toPx()))
+                        drawCircle(color = Color(0xFF0F172A), radius = 3.dp.toPx())
+                        drawLine(color = Color(0xFF0F172A), start = Offset(size.width / 2f, 0f), end = Offset(size.width / 2f, 4.dp.toPx()), strokeWidth = 2.dp.toPx())
+                        drawLine(color = Color(0xFF0F172A), start = Offset(size.width / 2f, size.height - 4.dp.toPx()), end = Offset(size.width / 2f, size.height), strokeWidth = 2.dp.toPx())
+                        drawLine(color = Color(0xFF0F172A), start = Offset(0f, size.height / 2f), end = Offset(4.dp.toPx(), size.height / 2f), strokeWidth = 2.dp.toPx())
+                        drawLine(color = Color(0xFF0F172A), start = Offset(size.width - 4.dp.toPx(), size.height / 2f), end = Offset(size.width, size.height / 2f), strokeWidth = 2.dp.toPx())
                     }
                 }
             }
@@ -491,6 +452,7 @@ fun VasantraMapSection(
 @Composable
 fun VasantraRideRequestCard(
     modifier: Modifier = Modifier,
+    offer: DispatchOfferDto? = null,
     onAccept: () -> Unit = {},
     onReject: () -> Unit = {}
 ) {
@@ -498,8 +460,7 @@ fun VasantraRideRequestCard(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFE2E8F0)))
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -507,100 +468,48 @@ fun VasantraRideRequestCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFFF7A00))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Canvas(modifier = Modifier.size(12.dp)) {
-                            drawCircle(color = Color.White, style = Stroke(width = 1.5.dp.toPx()))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Green lightning bolt icon
+                    Canvas(modifier = Modifier.size(22.dp)) {
+                        val boltPath = Path().apply {
+                            moveTo(size.width * 0.6f, 0f)
+                            lineTo(size.width * 0.15f, size.height * 0.55f)
+                            lineTo(size.width * 0.5f, size.height * 0.55f)
+                            lineTo(size.width * 0.4f, size.height)
+                            lineTo(size.width * 0.85f, size.height * 0.45f)
+                            lineTo(size.width * 0.5f, size.height * 0.45f)
+                            close()
                         }
-                        Spacer(modifier = Modifier.width(4.dp))
+                        drawPath(path = boltPath, color = Color(0xFF10B981))
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Column {
                         Text(
                             text = stringResource(id = R.string.ride_request_tag),
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = if (offer != null) "${"%.1f".format(offer.pickupDistanceKm ?: 0.0)} km away • ${"%.1f".format(offer.distanceKm)} km trip" else stringResource(id = R.string.ride_request_time_distance),
+                            fontSize = 13.sp,
+                            color = Color(0xFF6B7280),
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
 
                 Text(
-                    text = stringResource(id = R.string.time_2_min_ago),
-                    fontSize = 12.sp,
-                    color = Color(0xFF64748B),
-                    fontWeight = FontWeight.Medium
+                    text = if (offer != null) "₹${"%.0f".format(offer.estimatedDriverEarningsRupees)}" else stringResource(id = R.string.sample_fare),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF0F172A)
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF1D61E7))
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = stringResource(id = R.string.sample_pickup),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 4.dp, top = 2.dp, bottom = 2.dp)
-                            .width(2.dp)
-                            .height(16.dp)
-                            .background(Color(0xFFCBD5E1))
-                    )
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFEF4444))
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = stringResource(id = R.string.sample_drop),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
-                    }
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = stringResource(id = R.string.sample_fare),
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF0F172A)
-                    )
-                    Text(
-                        text = stringResource(id = R.string.sample_distance),
-                        fontSize = 13.sp,
-                        color = Color(0xFF64748B),
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -609,25 +518,18 @@ fun VasantraRideRequestCard(
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable { onReject() },
-                    color = Color.White,
-                    border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFEF4444)))
+                    color = Color(0xFFF3F4F6)
                 ) {
-                    Row(
+                    Box(
                         modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                        contentAlignment = Alignment.Center
                     ) {
-                        Canvas(modifier = Modifier.size(16.dp)) {
-                            drawLine(color = Color(0xFFEF4444), start = Offset(0f, 0f), end = Offset(size.width, size.height), strokeWidth = 2.5.dp.toPx(), cap = StrokeCap.Round)
-                            drawLine(color = Color(0xFFEF4444), start = Offset(size.width, 0f), end = Offset(0f, size.height), strokeWidth = 2.5.dp.toPx(), cap = StrokeCap.Round)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = stringResource(id = R.string.action_reject),
-                            color = Color(0xFFEF4444),
+                            color = Color(0xFF1F2937),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -637,25 +539,15 @@ fun VasantraRideRequestCard(
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable { onAccept() },
-                    color = Color(0xFF10B981)
+                    color = Color(0xFF000000)
                 ) {
-                    Row(
+                    Box(
                         modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                        contentAlignment = Alignment.Center
                     ) {
-                        Canvas(modifier = Modifier.size(16.dp)) {
-                            val path = Path().apply {
-                                moveTo(size.width * 0.15f, size.height * 0.5f)
-                                lineTo(size.width * 0.4f, size.height * 0.75f)
-                                lineTo(size.width * 0.85f, size.height * 0.25f)
-                            }
-                            drawPath(path = path, color = Color.White, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = stringResource(id = R.string.action_accept),
                             color = Color.White,
@@ -672,14 +564,15 @@ fun VasantraRideRequestCard(
 @Composable
 fun VasantraCurrentRideCard(
     modifier: Modifier = Modifier,
+    activeRide: ActiveRideDto? = null,
     onNavigateClick: () -> Unit = {},
     onEndRideClick: () -> Unit = {}
 ) {
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F2147)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0B1320)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -687,203 +580,146 @@ fun VasantraCurrentRideCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0x2210B981))
-                        .border(1.dp, Color(0xFF10B981), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF10B981))
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(id = R.string.current_ride_tag),
-                            color = Color(0xFF10B981),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // White Car icon
+                    Canvas(modifier = Modifier.size(24.dp)) {
+                        val carPath = Path().apply {
+                            moveTo(size.width * 0.15f, size.height * 0.4f)
+                            cubicTo(size.width * 0.25f, size.height * 0.15f, size.width * 0.35f, size.height * 0.1f, size.width * 0.5f, size.height * 0.1f)
+                            cubicTo(size.width * 0.65f, size.height * 0.1f, size.width * 0.75f, size.height * 0.15f, size.width * 0.85f, size.height * 0.4f)
+                            lineTo(size.width * 0.98f, size.height * 0.45f)
+                            cubicTo(size.width, size.height * 0.45f, size.width, size.height * 0.75f, size.width * 0.95f, size.height * 0.75f)
+                            lineTo(size.width * 0.05f, size.height * 0.75f)
+                            cubicTo(0f, size.height * 0.75f, 0f, size.height * 0.45f, size.width * 0.02f, size.height * 0.45f)
+                            close()
+                        }
+                        drawPath(path = carPath, color = Color.White)
+                        drawCircle(color = Color.White, radius = size.width * 0.08f, center = Offset(size.width * 0.25f, size.height * 0.82f))
+                        drawCircle(color = Color.White, radius = size.width * 0.08f, center = Offset(size.width * 0.75f, size.height * 0.82f))
                     }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Text(
+                        text = stringResource(id = R.string.current_ride_tag),
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // En Route Tag Pill
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFFDCFCE7))
+                        .clickable { onEndRideClick() }
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
                     Text(
-                        text = stringResource(id = R.string.label_eta),
-                        fontSize = 12.sp,
-                        color = Color(0xFF94A3B8),
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(id = R.string.sample_eta_time),
-                        fontSize = 18.sp,
-                        color = Color(0xFF10B981),
+                        text = activeRide?.status?.replace("_", " ") ?: stringResource(id = R.string.tag_en_route),
+                        color = Color(0xFF059669),
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = activeRide?.pickupAddress?.takeIf { it.isNotBlank() }?.let { "Pickup: $it" } ?: stringResource(id = R.string.sample_current_pickup),
+                fontSize = 13.sp,
+                color = Color(0xFFE2E8F0),
+                fontWeight = FontWeight.Medium
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = activeRide?.destinationAddress?.takeIf { it.isNotBlank() }?.let { "Drop: $it" } ?: stringResource(id = R.string.sample_current_drop),
+                fontSize = 13.sp,
+                color = Color(0xFFE2E8F0),
+                fontWeight = FontWeight.Medium
+            )
+
             Spacer(modifier = Modifier.height(14.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFF59E0B))
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(id = R.string.sample_current_pickup),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-
-                Text(
-                    text = "→",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF3B82F6))
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(id = R.string.sample_current_drop),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(24.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
+                // Progress Line with 3 dots
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .background(Color(0xFF1E293B))
-                )
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.65f)
-                        .height(3.dp)
-                        .background(Color(0xFF1D61E7))
-                )
-
-                Box(
-                    modifier = Modifier
-                        .padding(start = 120.dp)
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(Color.White),
-                    contentAlignment = Alignment.Center
+                        .weight(1f)
+                        .height(20.dp),
+                    contentAlignment = Alignment.CenterStart
                 ) {
-                    Canvas(modifier = Modifier.size(14.dp)) {
-                        drawRoundRect(
-                            color = Color(0xFF0F2147),
-                            topLeft = Offset(0f, size.height * 0.3f),
-                            size = Size(size.width, size.height * 0.5f),
-                            cornerRadius = CornerRadius(2.dp.toPx())
+                    Canvas(modifier = Modifier.fillMaxWidth()) {
+                        val strokeW = 4.dp.toPx()
+                        val progressFraction = when (activeRide?.status) {
+                            "ASSIGNED" -> 0.25f
+                            "ARRIVED" -> 0.5f
+                            "IN_PROGRESS" -> 0.75f
+                            else -> 0.6f
+                        }
+                        val activeWidth = size.width * progressFraction
+
+                        // Background track
+                        drawLine(
+                            color = Color(0xFF374151),
+                            start = Offset(0f, size.height / 2f),
+                            end = Offset(size.width, size.height / 2f),
+                            strokeWidth = strokeW,
+                            cap = StrokeCap.Round
                         )
-                        drawCircle(color = Color(0xFF1D61E7), radius = 2.dp.toPx(), center = Offset(size.width * 0.25f, size.height * 0.8f))
-                        drawCircle(color = Color(0xFF1D61E7), radius = 2.dp.toPx(), center = Offset(size.width * 0.75f, size.height * 0.8f))
+
+                        // Active green track
+                        drawLine(
+                            color = Color(0xFF10B981),
+                            start = Offset(0f, size.height / 2f),
+                            end = Offset(activeWidth, size.height / 2f),
+                            strokeWidth = strokeW,
+                            cap = StrokeCap.Round
+                        )
+
+                        // Node dots
+                        drawCircle(color = Color(0xFF10B981), radius = 5.dp.toPx(), center = Offset(0f, size.height / 2f))
+                        drawCircle(color = Color(0xFF10B981), radius = 6.dp.toPx(), center = Offset(activeWidth, size.height / 2f))
+                        drawCircle(color = Color(0xFF6B7280), radius = 5.dp.toPx(), center = Offset(size.width, size.height / 2f))
                     }
                 }
 
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF10B981))
-                )
-            }
+                Spacer(modifier = Modifier.width(16.dp))
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+                // Navigate Green Button
                 Surface(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
                         .clickable { onNavigateClick() },
-                    color = Color(0xFF1D61E7)
+                    color = Color(0xFF10B981)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Canvas(modifier = Modifier.size(16.dp)) {
-                            val path = Path().apply {
-                                moveTo(size.width * 0.5f, 0f)
-                                lineTo(size.width, size.height)
-                                lineTo(size.width * 0.5f, size.height * 0.75f)
-                                lineTo(0f, size.height)
+                            val navPath = Path().apply {
+                                moveTo(size.width * 0.85f, 0f)
+                                lineTo(size.width * 0.1f, size.height * 0.4f)
+                                lineTo(size.width * 0.45f, size.height * 0.55f)
+                                lineTo(size.width * 0.6f, size.height * 0.9f)
                                 close()
                             }
-                            drawPath(path = path, color = Color.White)
+                            drawPath(path = navPath, color = Color.White)
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
                         Text(
                             text = stringResource(id = R.string.action_navigate),
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable { onEndRideClick() },
-                    color = Color(0xFFEF4444)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Canvas(modifier = Modifier.size(14.dp)) {
-                            drawRoundRect(color = Color.White, cornerRadius = CornerRadius(2.dp.toPx()))
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = stringResource(id = R.string.action_end_ride),
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
@@ -897,62 +733,78 @@ fun VasantraCurrentRideCard(
 
 @Composable
 fun VasantraEarningsSummaryCard(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    earnings: DriverEarningsSummaryDto = DriverEarningsSummaryDto()
 ) {
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFE2E8F0)))
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(modifier = Modifier.weight(1.3f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF10B981)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "₹",
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1.3f)
+            ) {
+                // Wallet icon box
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF111827)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.size(20.dp)) {
+                        drawRoundRect(
                             color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
+                            topLeft = Offset(0f, size.height * 0.25f),
+                            size = Size(size.width, size.height * 0.65f),
+                            cornerRadius = CornerRadius(3.dp.toPx()),
+                            style = Stroke(width = 2.dp.toPx())
                         )
+                        drawArc(
+                            color = Color.White,
+                            startAngle = 180f,
+                            sweepAngle = 180f,
+                            useCenter = false,
+                            topLeft = Offset(size.width * 0.3f, 0f),
+                            size = Size(size.width * 0.4f, size.height * 0.35f),
+                            style = Stroke(width = 2.dp.toPx())
+                        )
+                        drawCircle(color = Color.White, radius = 1.5.dp.toPx(), center = Offset(size.width * 0.5f, size.height * 0.55f))
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(id = R.string.todays_earnings_title),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
-                Text(
-                    text = stringResource(id = R.string.sample_todays_earnings),
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A)
-                )
+                Column {
+                    Text(
+                        text = stringResource(id = R.string.todays_earnings_title),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF374151)
+                    )
+                    Text(
+                        text = "₹${"%.0f".format(earnings.todayNetRupees)}",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF111827)
+                    )
+                }
             }
 
             Box(
                 modifier = Modifier
                     .width(1.dp)
-                    .height(40.dp)
-                    .background(Color(0xFFE2E8F0))
+                    .height(36.dp)
+                    .background(Color(0xFFF3F4F6))
             )
 
             Column(
@@ -960,23 +812,24 @@ fun VasantraEarningsSummaryCard(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = stringResource(id = R.string.sample_rides_count),
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
-                )
-                Text(
                     text = stringResource(id = R.string.label_rides),
                     fontSize = 12.sp,
-                    color = Color(0xFF64748B)
+                    color = Color(0xFF6B7280)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = earnings.todayCompletedTrips.toString(),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF111827)
                 )
             }
 
             Box(
                 modifier = Modifier
                     .width(1.dp)
-                    .height(40.dp)
-                    .background(Color(0xFFE2E8F0))
+                    .height(36.dp)
+                    .background(Color(0xFFF3F4F6))
             )
 
             Column(
@@ -984,39 +837,30 @@ fun VasantraEarningsSummaryCard(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = stringResource(id = R.string.sample_total_distance),
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
-                )
-                Text(
                     text = stringResource(id = R.string.label_distance),
                     fontSize = 12.sp,
-                    color = Color(0xFF64748B)
+                    color = Color(0xFF6B7280)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "${"%.1f".format(earnings.todayDistanceKm)} km",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF111827)
                 )
             }
 
+            // Upward trend arrow icon
             Box(
                 modifier = Modifier
-                    .weight(0.8f)
-                    .height(44.dp),
-                contentAlignment = Alignment.BottomCenter
+                    .size(24.dp)
+                    .align(Alignment.Top),
+                contentAlignment = Alignment.Center
             ) {
-                Row(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    val heights = listOf(0.3f, 0.5f, 0.4f, 0.8f, 1.0f)
-                    heights.forEachIndexed { index, h ->
-                        Box(
-                            modifier = Modifier
-                                .width(6.dp)
-                                .fillMaxHeight(h)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(if (index == 4) Color(0xFF10B981) else Color(0xFF86EFAC))
-                        )
-                    }
+                Canvas(modifier = Modifier.size(16.dp)) {
+                    drawLine(color = Color(0xFF374151), start = Offset(0f, size.height), end = Offset(size.width, 0f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(color = Color(0xFF374151), start = Offset(size.width * 0.4f, 0f), end = Offset(size.width, 0f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(color = Color(0xFF374151), start = Offset(size.width, 0f), end = Offset(size.width, size.height * 0.6f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
                 }
             }
         }
@@ -1026,16 +870,17 @@ fun VasantraEarningsSummaryCard(
 @Composable
 fun VasantraQuickActionsGrid(
     modifier: Modifier = Modifier,
+    walletBalanceText: String = stringResource(id = R.string.sample_wallet_balance),
     onActionClick: (String) -> Unit = {}
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         VasantraQuickActionItem(
             modifier = Modifier.weight(1f),
             title = stringResource(id = R.string.label_wallet),
-            subtitle = stringResource(id = R.string.sample_wallet_balance),
+            subtitle = walletBalanceText,
             iconType = 0,
             onClick = { onActionClick("wallet") }
         )
@@ -1078,8 +923,7 @@ fun VasantraQuickActionItem(
         modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFE2E8F0)))
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(
             modifier = Modifier
@@ -1089,63 +933,60 @@ fun VasantraQuickActionItem(
             verticalArrangement = Arrangement.Center
         ) {
             Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFEFF6FF)),
+                modifier = Modifier.size(28.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(modifier = Modifier.size(20.dp)) {
                     when (iconType) {
-                        0 -> {
+                        0 -> { // Wallet
                             drawRoundRect(
-                                color = Color(0xFF1D61E7),
+                                color = Color(0xFF111827),
                                 topLeft = Offset(0f, size.height * 0.2f),
-                                size = Size(size.width, size.height * 0.6f),
+                                size = Size(size.width, size.height * 0.65f),
                                 cornerRadius = CornerRadius(3.dp.toPx()),
                                 style = Stroke(width = 2.dp.toPx())
                             )
-                            drawCircle(color = Color(0xFF1D61E7), radius = 2.dp.toPx(), center = Offset(size.width * 0.75f, size.height * 0.5f))
+                            drawCircle(color = Color(0xFF111827), radius = 2.dp.toPx(), center = Offset(size.width * 0.75f, size.height * 0.52f))
                         }
-                        1 -> {
-                            drawCircle(color = Color(0xFF1D61E7), style = Stroke(width = 2.dp.toPx()))
-                            drawLine(color = Color(0xFF1D61E7), start = Offset(size.width / 2f, size.height / 2f), end = Offset(size.width / 2f, size.height * 0.25f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-                            drawLine(color = Color(0xFF1D61E7), start = Offset(size.width / 2f, size.height / 2f), end = Offset(size.width * 0.75f, size.height / 2f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                        1 -> { // History (Clock)
+                            drawCircle(color = Color(0xFF111827), style = Stroke(width = 2.dp.toPx()))
+                            drawLine(color = Color(0xFF111827), start = Offset(size.width / 2f, size.height / 2f), end = Offset(size.width / 2f, size.height * 0.25f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                            drawLine(color = Color(0xFF111827), start = Offset(size.width / 2f, size.height / 2f), end = Offset(size.width * 0.75f, size.height / 2f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
                         }
-                        2 -> {
+                        2 -> { // Support (Headphones)
                             drawArc(
-                                color = Color(0xFF1D61E7),
+                                color = Color(0xFF111827),
                                 startAngle = 180f,
                                 sweepAngle = 180f,
                                 useCenter = false,
                                 style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
                             )
-                            drawRoundRect(color = Color(0xFF1D61E7), topLeft = Offset(0f, size.height * 0.45f), size = Size(4.dp.toPx(), 8.dp.toPx()))
-                            drawRoundRect(color = Color(0xFF1D61E7), topLeft = Offset(size.width - 4.dp.toPx(), size.height * 0.45f), size = Size(4.dp.toPx(), 8.dp.toPx()))
+                            drawRoundRect(color = Color(0xFF111827), topLeft = Offset(0f, size.height * 0.45f), size = Size(4.dp.toPx(), 8.dp.toPx()), cornerRadius = CornerRadius(1.dp.toPx()))
+                            drawRoundRect(color = Color(0xFF111827), topLeft = Offset(size.width - 4.dp.toPx(), size.height * 0.45f), size = Size(4.dp.toPx(), 8.dp.toPx()), cornerRadius = CornerRadius(1.dp.toPx()))
                         }
-                        else -> {
+                        else -> { // Documents
                             drawRoundRect(
-                                color = Color(0xFF1D61E7),
+                                color = Color(0xFF111827),
                                 topLeft = Offset(size.width * 0.15f, 0f),
                                 size = Size(size.width * 0.7f, size.height),
                                 cornerRadius = CornerRadius(2.dp.toPx()),
                                 style = Stroke(width = 2.dp.toPx())
                             )
-                            drawLine(color = Color(0xFF1D61E7), start = Offset(size.width * 0.3f, size.height * 0.3f), end = Offset(size.width * 0.7f, size.height * 0.3f), strokeWidth = 2.dp.toPx())
-                            drawLine(color = Color(0xFF1D61E7), start = Offset(size.width * 0.3f, size.height * 0.5f), end = Offset(size.width * 0.7f, size.height * 0.5f), strokeWidth = 2.dp.toPx())
-                            drawLine(color = Color(0xFF1D61E7), start = Offset(size.width * 0.3f, size.height * 0.7f), end = Offset(size.width * 0.55f, size.height * 0.7f), strokeWidth = 2.dp.toPx())
+                            drawLine(color = Color(0xFF111827), start = Offset(size.width * 0.35f, size.height * 0.3f), end = Offset(size.width * 0.65f, size.height * 0.3f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                            drawLine(color = Color(0xFF111827), start = Offset(size.width * 0.35f, size.height * 0.5f), end = Offset(size.width * 0.65f, size.height * 0.5f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                            drawLine(color = Color(0xFF111827), start = Offset(size.width * 0.35f, size.height * 0.7f), end = Offset(size.width * 0.55f, size.height * 0.7f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = title,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A),
+                color = Color(0xFF111827),
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1155,8 +996,8 @@ fun VasantraQuickActionItem(
                 Text(
                     text = subtitle,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A),
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF10B981),
                     textAlign = TextAlign.Center
                 )
             }
@@ -1173,13 +1014,12 @@ fun VasantraSosBannerCard(
         modifier = modifier.clickable { onSosClick() },
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFFCA5A5)))
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -1187,75 +1027,151 @@ fun VasantraSosBannerCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFEF4444)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Canvas(modifier = Modifier.size(20.dp)) {
-                        val path = Path().apply {
-                            moveTo(size.width * 0.5f, 0f)
-                            lineTo(size.width, size.height * 0.3f)
-                            lineTo(size.width, size.height * 0.7f)
-                            lineTo(size.width * 0.5f, size.height)
-                            lineTo(0f, size.height * 0.7f)
-                            lineTo(0f, size.height * 0.3f)
-                            close()
-                        }
-                        drawPath(path = path, color = Color.White)
-                        drawLine(color = Color(0xFFEF4444), start = Offset(size.width / 2f, size.height * 0.25f), end = Offset(size.width / 2f, size.height * 0.55f), strokeWidth = 2.5.dp.toPx(), cap = StrokeCap.Round)
-                        drawCircle(color = Color(0xFFEF4444), radius = 1.5.dp.toPx(), center = Offset(size.width / 2f, size.height * 0.72f))
+                // Red shield icon with exclamation mark
+                Canvas(modifier = Modifier.size(24.dp)) {
+                    val shieldPath = Path().apply {
+                        moveTo(size.width * 0.5f, 0f)
+                        lineTo(size.width, size.height * 0.25f)
+                        lineTo(size.width, size.height * 0.65f)
+                        cubicTo(size.width, size.height * 0.85f, size.width * 0.5f, size.height, size.width * 0.5f, size.height)
+                        cubicTo(size.width * 0.5f, size.height, 0f, size.height * 0.85f, 0f, size.height * 0.65f)
+                        lineTo(0f, size.height * 0.25f)
+                        close()
                     }
+                    drawPath(path = shieldPath, color = Color(0xFFEF4444))
+                    drawLine(color = Color.White, start = Offset(size.width / 2f, size.height * 0.3f), end = Offset(size.width / 2f, size.height * 0.6f), strokeWidth = 2.5.dp.toPx(), cap = StrokeCap.Round)
+                    drawCircle(color = Color.White, radius = 1.5.dp.toPx(), center = Offset(size.width / 2f, size.height * 0.75f))
                 }
 
                 Spacer(modifier = Modifier.width(10.dp))
 
                 Text(
                     text = stringResource(id = R.string.sos_tag),
-                    fontSize = 18.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color(0xFFDC2626)
+                    color = Color(0xFFEF4444)
                 )
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(16.dp))
 
-                Column {
+                Text(
+                    text = stringResource(id = R.string.emergency_assistance),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF991B1B)
+                )
+            }
+
+            // Chevron right icon
+            Canvas(modifier = Modifier.size(14.dp)) {
+                val arrowPath = Path().apply {
+                    moveTo(size.width * 0.3f, 0f)
+                    lineTo(size.width * 0.8f, size.height / 2f)
+                    lineTo(size.width * 0.3f, size.height)
+                }
+                drawPath(
+                    path = arrowPath,
+                    color = Color(0xFFEF4444),
+                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun VasantraBonusCard(
+    modifier: Modifier = Modifier,
+    dailyTarget: DailyIncentiveDto = DailyIncentiveDto(),
+    onBonusClick: () -> Unit = {}
+) {
+    Card(
+        modifier = modifier.clickable { onBonusClick() },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0B1320)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Trophy icon
+                    Canvas(modifier = Modifier.size(24.dp)) {
+                        val cupPath = Path().apply {
+                            moveTo(size.width * 0.2f, 0f)
+                            lineTo(size.width * 0.8f, 0f)
+                            lineTo(size.width * 0.75f, size.height * 0.45f)
+                            cubicTo(size.width * 0.7f, size.height * 0.6f, size.width * 0.3f, size.height * 0.6f, size.width * 0.25f, size.height * 0.45f)
+                            close()
+                        }
+                        drawPath(path = cupPath, color = Color(0xFFFACC15))
+                        drawRect(color = Color(0xFFFACC15), topLeft = Offset(size.width * 0.42f, size.height * 0.55f), size = Size(size.width * 0.16f, size.height * 0.25f))
+                        drawRoundRect(color = Color(0xFFFACC15), topLeft = Offset(size.width * 0.2f, size.height * 0.8f), size = Size(size.width * 0.6f, size.height * 0.2f), cornerRadius = CornerRadius(2.dp.toPx()))
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column {
+                        Text(
+                            text = stringResource(id = R.string.bonus_title),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFACC15)
+                        )
+                        Text(
+                            text = if (dailyTarget.targetRides > 0) "Complete ${dailyTarget.targetRides} rides for ₹${"%.0f".format(dailyTarget.rewardRupees)}" else stringResource(id = R.string.bonus_subtitle),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = stringResource(id = R.string.emergency_help_title),
-                        fontSize = 15.sp,
+                        text = if (dailyTarget.targetRides > 0) "${dailyTarget.completedRides}/${dailyTarget.targetRides}" else stringResource(id = R.string.bonus_progress),
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF991B1B)
+                        color = Color.White
                     )
-                    Text(
-                        text = stringResource(id = R.string.emergency_help_desc),
-                        fontSize = 11.sp,
-                        color = Color(0xFF64748B)
-                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Canvas(modifier = Modifier.size(12.dp)) {
+                        val arrowPath = Path().apply {
+                            moveTo(size.width * 0.3f, 0f)
+                            lineTo(size.width * 0.8f, size.height / 2f)
+                            lineTo(size.width * 0.3f, size.height)
+                        }
+                        drawPath(
+                            path = arrowPath,
+                            color = Color.White,
+                            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                        )
+                    }
                 }
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Yellow Progress Bar
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .fillMaxWidth()
+                    .height(6.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFEF4444)),
-                contentAlignment = Alignment.Center
+                    .background(Color(0xFF374151))
             ) {
-                Canvas(modifier = Modifier.size(20.dp)) {
-                    val phonePath = Path().apply {
-                        moveTo(size.width * 0.2f, size.height * 0.1f)
-                        lineTo(size.width * 0.4f, size.height * 0.3f)
-                        lineTo(size.width * 0.3f, size.height * 0.5f)
-                        cubicTo(size.width * 0.4f, size.height * 0.7f, size.width * 0.6f, size.height * 0.8f, size.width * 0.7f, size.height * 0.7f)
-                        lineTo(size.width * 0.9f, size.height * 0.8f)
-                        lineTo(size.width * 0.8f, size.height)
-                        cubicTo(size.width * 0.3f, size.height, 0f, size.height * 0.7f, 0f, size.height * 0.2f)
-                        close()
-                    }
-                    drawPath(path = phonePath, color = Color.White)
-                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(if (dailyTarget.targetRides > 0) (dailyTarget.completedRides.toFloat() / dailyTarget.targetRides.toFloat()).coerceIn(0f, 1f) else 0.6f)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(Color(0xFFFACC15))
+                )
             }
         }
     }
@@ -1337,8 +1253,7 @@ fun VasantraFeatureItem(
         modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFE2E8F0)))
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(
             modifier = Modifier
@@ -1351,14 +1266,7 @@ fun VasantraFeatureItem(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(
-                        when (iconType) {
-                            0 -> Color(0xFFFFF7ED)
-                            1 -> Color(0xFFFEFCE8)
-                            2 -> Color(0xFFFFF7ED)
-                            else -> Color(0xFFF0FDFA)
-                        }
-                    ),
+                    .background(Color(0xFFF3F4F6)),
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(modifier = Modifier.size(20.dp)) {
@@ -1417,10 +1325,11 @@ fun VasantraFeatureItem(
 fun VasantraBottomNavigationBar(
     modifier: Modifier = Modifier,
     selectedTab: Int = 0,
+    unreadCount: Int = 0,
     onTabSelected: (Int) -> Unit = {}
 ) {
     Surface(
-        modifier = modifier.height(64.dp),
+        modifier = modifier.height(60.dp),
         color = Color.White,
         shadowElevation = 8.dp
     ) {
@@ -1439,7 +1348,7 @@ fun VasantraBottomNavigationBar(
 
             tabs.forEachIndexed { index, title ->
                 val isSelected = selectedTab == index
-                val itemColor = if (isSelected) Color(0xFF1D61E7) else Color(0xFF64748B)
+                val itemColor = if (isSelected) Color(0xFF000000) else Color(0xFF6B7280)
 
                 Column(
                     modifier = Modifier
@@ -1455,7 +1364,7 @@ fun VasantraBottomNavigationBar(
                     ) {
                         Canvas(modifier = Modifier.size(20.dp)) {
                             when (index) {
-                                0 -> {
+                                0 -> { // Home - Filled house
                                     val housePath = Path().apply {
                                         moveTo(size.width * 0.5f, 0f)
                                         lineTo(size.width, size.height * 0.45f)
@@ -1468,48 +1377,65 @@ fun VasantraBottomNavigationBar(
                                     }
                                     drawPath(path = housePath, color = itemColor)
                                 }
-                                1 -> {
-                                    drawRoundRect(
-                                        color = itemColor,
-                                        topLeft = Offset(0f, size.height * 0.3f),
-                                        size = Size(size.width, size.height * 0.5f),
-                                        cornerRadius = CornerRadius(3.dp.toPx())
-                                    )
-                                    drawCircle(color = Color.White, radius = 2.5.dp.toPx(), center = Offset(size.width * 0.25f, size.height * 0.8f))
-                                    drawCircle(color = Color.White, radius = 2.5.dp.toPx(), center = Offset(size.width * 0.75f, size.height * 0.8f))
+                                1 -> { // Trips - Car icon
+                                    val carPath = Path().apply {
+                                        moveTo(size.width * 0.15f, size.height * 0.4f)
+                                        cubicTo(size.width * 0.25f, size.height * 0.15f, size.width * 0.35f, size.height * 0.1f, size.width * 0.5f, size.height * 0.1f)
+                                        cubicTo(size.width * 0.65f, size.height * 0.1f, size.width * 0.75f, size.height * 0.15f, size.width * 0.85f, size.height * 0.4f)
+                                        lineTo(size.width * 0.98f, size.height * 0.45f)
+                                        cubicTo(size.width, size.height * 0.45f, size.width, size.height * 0.75f, size.width * 0.95f, size.height * 0.75f)
+                                        lineTo(size.width * 0.05f, size.height * 0.75f)
+                                        cubicTo(0f, size.height * 0.75f, 0f, size.height * 0.45f, size.width * 0.02f, size.height * 0.45f)
+                                        close()
+                                    }
+                                    drawPath(path = carPath, color = itemColor)
+                                    drawCircle(color = itemColor, radius = size.width * 0.08f, center = Offset(size.width * 0.25f, size.height * 0.82f))
+                                    drawCircle(color = itemColor, radius = size.width * 0.08f, center = Offset(size.width * 0.75f, size.height * 0.82f))
                                 }
-                                2 -> {
-                                    drawCircle(color = itemColor, style = Stroke(width = 2.dp.toPx()))
+                                2 -> { // Earnings - Bar Chart
+                                    val barW = size.width * 0.2f
+                                    drawRoundRect(color = itemColor, topLeft = Offset(0f, size.height * 0.5f), size = Size(barW, size.height * 0.5f), cornerRadius = CornerRadius(1.dp.toPx()))
+                                    drawRoundRect(color = itemColor, topLeft = Offset(size.width * 0.4f, size.height * 0.2f), size = Size(barW, size.height * 0.8f), cornerRadius = CornerRadius(1.dp.toPx()))
+                                    drawRoundRect(color = itemColor, topLeft = Offset(size.width * 0.8f, size.height * 0.35f), size = Size(barW, size.height * 0.65f), cornerRadius = CornerRadius(1.dp.toPx()))
                                 }
-                                3 -> {
+                                3 -> { // Notifications - Bell
                                     val bellPath = Path().apply {
-                                        moveTo(size.width * 0.5f, size.height * 0.15f)
-                                        cubicTo(size.width * 0.35f, size.height * 0.15f, size.width * 0.25f, size.height * 0.3f, size.width * 0.25f, size.height * 0.55f)
-                                        lineTo(size.width * 0.15f, size.height * 0.75f)
-                                        lineTo(size.width * 0.85f, size.height * 0.75f)
-                                        lineTo(size.width * 0.75f, size.height * 0.55f)
-                                        cubicTo(size.width * 0.75f, size.height * 0.3f, size.width * 0.65f, size.height * 0.15f, size.width * 0.5f, size.height * 0.15f)
+                                        moveTo(size.width * 0.5f, size.height * 0.12f)
+                                        cubicTo(size.width * 0.35f, size.height * 0.12f, size.width * 0.22f, size.height * 0.28f, size.width * 0.22f, size.height * 0.55f)
+                                        lineTo(size.width * 0.12f, size.height * 0.75f)
+                                        lineTo(size.width * 0.88f, size.height * 0.75f)
+                                        lineTo(size.width * 0.78f, size.height * 0.55f)
+                                        cubicTo(size.width * 0.78f, size.height * 0.28f, size.width * 0.65f, size.height * 0.12f, size.width * 0.5f, size.height * 0.12f)
                                         close()
                                     }
                                     drawPath(path = bellPath, color = itemColor)
+                                    drawArc(
+                                        color = itemColor,
+                                        startAngle = 0f,
+                                        sweepAngle = 180f,
+                                        useCenter = false,
+                                        topLeft = Offset(size.width * 0.38f, size.height * 0.78f),
+                                        size = Size(size.width * 0.24f, size.height * 0.18f),
+                                        style = Stroke(width = 2.dp.toPx())
+                                    )
                                 }
-                                else -> {
-                                    drawCircle(color = itemColor, radius = size.width * 0.25f, center = Offset(size.width / 2f, size.height * 0.3f))
+                                else -> { // Profile - User
+                                    drawCircle(color = itemColor, radius = size.width * 0.25f, center = Offset(size.width / 2f, size.height * 0.28f))
                                     drawArc(color = itemColor, startAngle = 180f, sweepAngle = 180f, useCenter = true, topLeft = Offset(0f, size.height * 0.45f), size = Size(size.width, size.height * 0.55f))
                                 }
                             }
                         }
 
-                        if (index == 3) {
+                        if (index == 3 && unreadCount > 0) {
                             Box(
                                 modifier = Modifier
-                                    .size(12.dp)
+                                    .size(14.dp)
                                     .align(Alignment.TopEnd)
                                     .clip(CircleShape)
                                     .background(Color(0xFFEF4444)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(text = "3", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text(text = unreadCount.toString(), color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1522,16 +1448,6 @@ fun VasantraBottomNavigationBar(
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         color = itemColor
                     )
-
-                    if (isSelected) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Box(
-                            modifier = Modifier
-                                .width(24.dp)
-                                .height(2.dp)
-                                .background(Color(0xFF1D61E7))
-                        )
-                    }
                 }
             }
         }
@@ -1543,5 +1459,18 @@ fun VasantraBottomNavigationBar(
 private fun VasantraDriverHomeScreenPreview() {
     DriverGoTheme {
         VasantraDriverHomeScreen()
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF000000L)
+@Composable
+private fun VasantraDriverTopHeaderPreview() {
+    DriverGoTheme {
+        VasantraDriverTopHeader(
+            modifier = Modifier.padding(16.dp),
+            driverName = "Rajesh Kumar",
+            driverRating = "4.9 (128)",
+            isOnline = true
+        )
     }
 }

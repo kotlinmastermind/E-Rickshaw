@@ -178,9 +178,9 @@ fun RiderAppNavigation() {
             else -> MapHomeScreen { navigateTo(it) }
         }
 
-        // Persistent Rapido-Style Bottom Navigation Bar
-        val showBottomBar = currentRoute in listOf(
-            "map_home", "wallet_hub", "pilot_assigned", "telemetry_hud", "emergency_sos", "account_hub", "past_trips"
+        // Persistent Rapido-Style Bottom Navigation Bar (Shown on all pages except auth/onboarding)
+        val showBottomBar = currentRoute !in listOf(
+            "splash", "app_lock", "auth_phone", "auth_otp", "auth_reset", "auth_kyc", "auth_biometric"
         )
         if (showBottomBar) {
             RiderBottomBar(
@@ -201,6 +201,14 @@ fun RiderBottomBar(
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val activeTab = when (currentRoute) {
+        "wallet_hub", "payment_methods", "wallet_auto_topup", "split_fare" -> "wallet_hub"
+        "pilot_assigned", "dispatch_matching", "driver_rc", "pilot_arrived", "boarding_otp", "telemetry_hud", "in_trip_chat", "ride_receipt", "rate_driver", "tip_driver", "past_trips", "gst_invoice" -> "pilot_assigned"
+        "emergency_sos", "safety_deviation", "safety_audio", "safety_share", "emergency_contacts", "fare_dispute", "lost_item", "support_tickets", "support_chat", "safety_incident" -> "emergency_sos"
+        "account_hub", "refer_earn", "green_club", "notifications", "saved_places" -> "account_hub"
+        else -> "map_home"
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -214,11 +222,11 @@ fun RiderBottomBar(
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            BottomNavItem("🗺️", "Explore", "map_home", currentRoute, onNavigate)
-            BottomNavItem("💳", "Wallet", "wallet_hub", currentRoute, onNavigate)
-            BottomNavItem("🚘", "Active", "pilot_assigned", currentRoute, onNavigate)
-            BottomNavItem("🚨", "Safety", "emergency_sos", currentRoute, onNavigate, isWarning = true)
-            BottomNavItem("👤", "Account", "account_hub", currentRoute, onNavigate)
+            BottomNavItem("🗺️", "Explore", "map_home", activeTab, onNavigate)
+            BottomNavItem("💳", "Wallet", "wallet_hub", activeTab, onNavigate)
+            BottomNavItem("🚘", "Active", "pilot_assigned", activeTab, onNavigate)
+            BottomNavItem("🚨", "Safety", "emergency_sos", activeTab, onNavigate, isWarning = true)
+            BottomNavItem("👤", "Account", "account_hub", activeTab, onNavigate)
         }
     }
 }

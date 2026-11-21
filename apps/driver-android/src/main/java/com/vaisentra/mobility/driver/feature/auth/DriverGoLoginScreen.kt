@@ -30,7 +30,7 @@ fun DriverGoLoginScreen(
     modifier: Modifier = Modifier,
     initialPhoneNumber: String = "",
     onNextClick: (String) -> Unit = {},
-    onTermsClick: () -> Unit = {}
+    onTermsClick: () -> Unit = {},
 ) {
     var phoneNumber by remember { mutableStateOf(initialPhoneNumber) }
 

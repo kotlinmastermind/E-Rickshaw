@@ -1,22 +1,21 @@
 package com.vaisentra.mobility.driver.navigation
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.feature.auth.*
 import com.vaisentra.mobility.driver.feature.duty.*
@@ -105,14 +104,93 @@ enum class DriverScreen(val title: String, val category: String) {
     NOTIFICATIONS_CENTER("49. Notifications Center", "Support & Academy")
 }
 
+private fun resolveDashboardRoute(route: String): DriverScreen {
+    DriverScreen.entries.firstOrNull { it.name.equals(route, ignoreCase = true) }?.let { return it }
+
+    return when (route.lowercase()) {
+        // Auth & KYC
+        "login", "auth_login" -> DriverScreen.PILOT_LOGIN
+        "otp", "auth_otp" -> DriverScreen.PILOT_OTP
+        "forgot", "recovery", "auth_reset" -> DriverScreen.PILOT_PASSWORD_RECOVERY
+        "pilot_profile", "profile" -> DriverScreen.PILOT_PROFILE
+        "documents", "document_vault", "doc_vault" -> DriverScreen.DOCUMENT_VAULT
+        "doc_expiry", "expiry" -> DriverScreen.DOC_EXPIRY_WATCHDOG
+
+        // Duty & Vehicle
+        "duty_dashboard", "home" -> DriverScreen.DUTY_DASHBOARD
+        "inspection", "vehicle_inspect" -> DriverScreen.VEHICLE_INSPECTION
+        "rc_status", "vehicle_rc" -> DriverScreen.VEHICLE_RC_STATUS
+        "shift_start" -> DriverScreen.SHIFT_START
+        "shift_end" -> DriverScreen.SHIFT_END
+        "fatigue", "fatigue_check" -> DriverScreen.FATIGUE_CHECK
+        "preferences", "settings" -> DriverScreen.DRIVER_PREFERENCES
+
+        // Telemetry & Maps
+        "gps", "gps_ping" -> DriverScreen.GPS_PING
+        "heatmap", "surge" -> DriverScreen.HEATMAP_SURGE
+        "hazards", "road_hazards" -> DriverScreen.ROAD_HAZARDS
+
+        // Trip Ops
+        "offer", "incoming_offer" -> DriverScreen.INCOMING_OFFER
+        "offer_queue", "queue", "trips" -> DriverScreen.OFFER_QUEUE
+        "pickup_nav", "accept_ride", "navigation" -> DriverScreen.PICKUP_NAV
+        "arrived" -> DriverScreen.ARRIVED_PICKUP
+        "waiting" -> DriverScreen.WAITING_TIMER
+        "boarding_otp" -> DriverScreen.BOARDING_OTP
+        "in_trip_nav" -> DriverScreen.IN_TRIP_NAV
+        "multi_stop" -> DriverScreen.MULTI_STOP
+
+        // Shared Pool
+        "pool", "pool_manifest" -> DriverScreen.POOL_MANIFEST
+        "corridor", "corridor_waypoints" -> DriverScreen.CORRIDOR_WAYPOINTS
+        "broadcast", "co_passenger_broadcast" -> DriverScreen.CO_PASSENGER_BROADCAST
+
+        // Safety Sentinel
+        "route_deviation" -> DriverScreen.ROUTE_DEVIATION
+        "speedometer" -> DriverScreen.SPEEDOMETER
+        "audio_shield" -> DriverScreen.AUDIO_SHIELD
+        "sos", "emergency_sos" -> DriverScreen.EMERGENCY_SOS
+        "battery_swap", "swap_depot" -> DriverScreen.BATTERY_SWAP_DEPOT
+        "incident", "driver_incident" -> DriverScreen.DRIVER_INCIDENT
+        "emergency_contacts", "contacts" -> DriverScreen.EMERGENCY_CONTACTS
+
+        // Fare Settlement
+        "trip_fare", "trip_completed", "end_ride" -> DriverScreen.TRIP_COMPLETED_FARE
+        "cash", "cash_collection" -> DriverScreen.CASH_COLLECTION
+        "upi", "upi_settlement" -> DriverScreen.UPI_SETTLEMENT
+
+        // Earnings & Ledger
+        "shift_summary", "summary" -> DriverScreen.SHIFT_SUMMARY
+        "earnings", "wallet" -> DriverScreen.PILOT_EARNINGS
+        "payout_accounts", "banks" -> DriverScreen.PAYOUT_ACCOUNTS
+        "instant_payout", "payout" -> DriverScreen.INSTANT_PAYOUT
+        "ledger", "driver_ledger", "history" -> DriverScreen.DRIVER_LEDGER
+
+        // Goals & Scorecard
+        "daily_targets", "targets", "bonus", "incentives" -> DriverScreen.DAILY_TARGETS
+        "weekly_goals", "goals" -> DriverScreen.WEEKLY_GOALS
+        "streaks", "streak_missions" -> DriverScreen.STREAK_MISSIONS
+        "scorecard", "rating", "performance" -> DriverScreen.PERFORMANCE_SCORECARD
+
+        // Academy & Support
+        "academy", "training" -> DriverScreen.ACADEMY_TRAINING
+        "found_item", "lost_item" -> DriverScreen.FOUND_ITEM
+        "helpdesk", "support" -> DriverScreen.DRIVER_HELPDESK
+        "notifications", "inbox" -> DriverScreen.NOTIFICATIONS_CENTER
+
+        else -> DriverScreen.DUTY_DASHBOARD
+    }
+}
+
 @Composable
 fun DriverAppNavigation() {
     var currentScreen by remember { mutableStateOf(DriverScreen.PILOT_LOGIN) }
+    var showCatalogDialog by remember { mutableStateOf(false) }
 
-    fun triggerPopup(popupId: String) {
+    fun triggerPopup(popupId: String, onConfirm: (() -> Unit)? = null) {
         try {
             val type = DriverPopupType.valueOf(popupId)
-            DriverDialogController.show(type)
+            DriverDialogController.show(type, onConfirm)
         } catch (_: Exception) {}
     }
 
@@ -124,64 +202,49 @@ fun DriverAppNavigation() {
         when (currentScreen) {
             // 1. Auth & KYC
             DriverScreen.PILOT_LOGIN -> PilotLoginScreen(onNavigate = { route ->
-                when (route) {
-                    "otp" -> currentScreen = DriverScreen.PILOT_OTP
-                    "forgot" -> currentScreen = DriverScreen.PILOT_PASSWORD_RECOVERY
-                    else -> currentScreen = DriverScreen.DUTY_DASHBOARD
-                }
+                currentScreen = resolveDashboardRoute(route)
             })
             DriverScreen.PILOT_OTP -> PilotOtpScreen(onNavigate = { route ->
-                when (route) {
-                    "home" -> currentScreen = DriverScreen.DUTY_DASHBOARD
-                    else -> currentScreen = DriverScreen.DUTY_DASHBOARD
-                }
+                currentScreen = resolveDashboardRoute(route)
             })
-            DriverScreen.PILOT_PASSWORD_RECOVERY -> PilotPasswordRecoveryScreen(onNavigate = {
-                currentScreen = DriverScreen.PILOT_LOGIN
+            DriverScreen.PILOT_PASSWORD_RECOVERY -> PilotPasswordRecoveryScreen(onNavigate = { route ->
+                currentScreen = resolveDashboardRoute(route)
             })
-            DriverScreen.PILOT_PROFILE -> PilotProfileScreen(onNavigate = {
-                currentScreen = DriverScreen.DUTY_DASHBOARD
+            DriverScreen.PILOT_PROFILE -> PilotProfileScreen(onNavigate = { route ->
+                currentScreen = resolveDashboardRoute(route)
             })
-            DriverScreen.DOCUMENT_VAULT -> DocumentVaultScreen(onNavigate = {
-                currentScreen = DriverScreen.DUTY_DASHBOARD
+            DriverScreen.DOCUMENT_VAULT -> DocumentVaultScreen(onNavigate = { route ->
+                currentScreen = resolveDashboardRoute(route)
             })
-            DriverScreen.DOC_EXPIRY_WATCHDOG -> DocumentExpiryWatchdogScreen(onNavigate = {
-                currentScreen = DriverScreen.DUTY_DASHBOARD
+            DriverScreen.DOC_EXPIRY_WATCHDOG -> DocumentExpiryWatchdogScreen(onNavigate = { route ->
+                currentScreen = resolveDashboardRoute(route)
             })
 
             // 2. Duty & Vehicle
             DriverScreen.VEHICLE_INSPECTION -> VehicleInspectionScreen(onNavigate = { route ->
-                if (route == "shift_start") currentScreen = DriverScreen.SHIFT_START
-                else currentScreen = DriverScreen.DUTY_DASHBOARD
+                currentScreen = resolveDashboardRoute(route)
             })
-            DriverScreen.VEHICLE_RC_STATUS -> VehicleRcStatusScreen(onNavigate = {
-                currentScreen = DriverScreen.DUTY_DASHBOARD
+            DriverScreen.VEHICLE_RC_STATUS -> VehicleRcStatusScreen(onNavigate = { route ->
+                currentScreen = resolveDashboardRoute(route)
             })
             DriverScreen.SHIFT_START -> ShiftStartScreen(onNavigate = { route ->
-                if (route == "duty") currentScreen = DriverScreen.DUTY_DASHBOARD
-                else currentScreen = DriverScreen.DUTY_DASHBOARD
+                currentScreen = resolveDashboardRoute(route)
             })
             DriverScreen.DUTY_DASHBOARD -> DutyDashboardScreen(onNavigate = { route ->
-                when (route) {
-                    "offer" -> currentScreen = DriverScreen.INCOMING_OFFER
-                    "pickup_nav" -> currentScreen = DriverScreen.PICKUP_NAV
-                    "inspection", "vehicle_inspect" -> currentScreen = DriverScreen.VEHICLE_INSPECTION
-                    "earnings" -> currentScreen = DriverScreen.PILOT_EARNINGS
-                    "heatmap" -> currentScreen = DriverScreen.HEATMAP_SURGE
-                    "catalog" -> currentScreen = DriverScreen.DUTY_DASHBOARD
-                    "pilot_profile" -> currentScreen = DriverScreen.PILOT_PROFILE
-                    else -> currentScreen = DriverScreen.DUTY_DASHBOARD
+                if (route.equals("catalog", ignoreCase = true)) {
+                    showCatalogDialog = true
+                } else {
+                    currentScreen = resolveDashboardRoute(route)
                 }
             })
-            DriverScreen.FATIGUE_CHECK -> FatigueCheckScreen(onNavigate = {
-                currentScreen = DriverScreen.DUTY_DASHBOARD
+            DriverScreen.FATIGUE_CHECK -> FatigueCheckScreen(onNavigate = { route ->
+                currentScreen = resolveDashboardRoute(route)
             })
             DriverScreen.SHIFT_END -> ShiftEndScreen(onNavigate = { route ->
-                if (route == "summary") currentScreen = DriverScreen.SHIFT_SUMMARY
-                else currentScreen = DriverScreen.DUTY_DASHBOARD
+                currentScreen = if (route == "summary") DriverScreen.SHIFT_SUMMARY else resolveDashboardRoute(route)
             })
-            DriverScreen.DRIVER_PREFERENCES -> DriverPreferencesScreen(onNavigate = {
-                currentScreen = DriverScreen.DUTY_DASHBOARD
+            DriverScreen.DRIVER_PREFERENCES -> DriverPreferencesScreen(onNavigate = { route ->
+                currentScreen = resolveDashboardRoute(route)
             })
 
             // 3. Telemetry & Maps
@@ -320,7 +383,11 @@ fun DriverAppNavigation() {
             )
             DriverScreen.INSTANT_PAYOUT -> InstantPayoutScreen(
                 onNavigateBack = { currentScreen = DriverScreen.PILOT_EARNINGS },
-                onPayoutSuccess = { triggerPopup("PAYOUT_SUCCESS") },
+                onPayoutSuccess = {
+                    triggerPopup("PAYOUT_SUCCESS") {
+                        currentScreen = DriverScreen.DRIVER_LEDGER
+                    }
+                },
                 onShowToast = { showToast(it) }
             )
             DriverScreen.DRIVER_LEDGER -> DriverLedgerScreen(
@@ -346,7 +413,7 @@ fun DriverAppNavigation() {
                 onShowToast = { showToast(it) }
             )
 
-            // 10. Support & Academy
+            // 10. Academy & Support
             DriverScreen.ACADEMY_TRAINING -> AcademyTrainingScreen(
                 onNavigateBack = { currentScreen = DriverScreen.DUTY_DASHBOARD },
                 onShowToast = { showToast(it) }
@@ -365,8 +432,145 @@ fun DriverAppNavigation() {
             )
         }
 
+        if (showCatalogDialog) {
+            Dialog(onDismissRequest = { showCatalogDialog = false }) {
+                CockpitCard(modifier = Modifier.fillMaxHeight(0.85f)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("DriverGo 50-Screen Hub", color = PilotTextWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        TextButton(onClick = { showCatalogDialog = false }) {
+                            Text("Close", color = PilotElectricCyan)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(DriverScreen.entries) { screen ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(PilotSurface)
+                                    .clickable {
+                                        currentScreen = screen
+                                        showCatalogDialog = false
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(screen.title, color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                CockpitBadge(screen.category, OnlineGlow, PilotOnlineGreen)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Persistent Cockpit Bottom Navigation Bar (Shown on all pages except auth/KYC)
+        val showBottomBar = currentScreen !in listOf(
+            DriverScreen.PILOT_LOGIN,
+            DriverScreen.PILOT_OTP,
+            DriverScreen.PILOT_PASSWORD_RECOVERY,
+            DriverScreen.PILOT_PROFILE,
+            DriverScreen.DOCUMENT_VAULT,
+            DriverScreen.DOC_EXPIRY_WATCHDOG
+        )
+        if (showBottomBar) {
+            DriverBottomBar(
+                currentScreen = currentScreen,
+                onNavigate = { currentScreen = it },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
+
         // Host for all 15 Popups/Modals & Toasts
         DriverGoDialogHost()
     }
 }
 
+@Composable
+fun DriverBottomBar(
+    currentScreen: DriverScreen,
+    onNavigate: (DriverScreen) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val activeTab = when (currentScreen) {
+        DriverScreen.DUTY_DASHBOARD, DriverScreen.VEHICLE_INSPECTION, DriverScreen.VEHICLE_RC_STATUS,
+        DriverScreen.SHIFT_START, DriverScreen.SHIFT_END, DriverScreen.FATIGUE_CHECK,
+        DriverScreen.GPS_PING, DriverScreen.HEATMAP_SURGE, DriverScreen.ROAD_HAZARDS -> DriverScreen.DUTY_DASHBOARD
+
+        DriverScreen.INCOMING_OFFER, DriverScreen.OFFER_QUEUE, DriverScreen.PICKUP_NAV,
+        DriverScreen.ARRIVED_PICKUP, DriverScreen.WAITING_TIMER, DriverScreen.BOARDING_OTP,
+        DriverScreen.IN_TRIP_NAV, DriverScreen.MULTI_STOP, DriverScreen.POOL_MANIFEST,
+        DriverScreen.CORRIDOR_WAYPOINTS, DriverScreen.CO_PASSENGER_BROADCAST -> DriverScreen.OFFER_QUEUE
+
+        DriverScreen.TRIP_COMPLETED_FARE, DriverScreen.CASH_COLLECTION, DriverScreen.UPI_SETTLEMENT,
+        DriverScreen.SHIFT_SUMMARY, DriverScreen.PILOT_EARNINGS, DriverScreen.PAYOUT_ACCOUNTS,
+        DriverScreen.INSTANT_PAYOUT, DriverScreen.DRIVER_LEDGER, DriverScreen.DAILY_TARGETS,
+        DriverScreen.WEEKLY_GOALS, DriverScreen.STREAK_MISSIONS -> DriverScreen.PILOT_EARNINGS
+
+        DriverScreen.ROUTE_DEVIATION, DriverScreen.SPEEDOMETER, DriverScreen.AUDIO_SHIELD,
+        DriverScreen.EMERGENCY_SOS, DriverScreen.BATTERY_SWAP_DEPOT, DriverScreen.DRIVER_INCIDENT,
+        DriverScreen.EMERGENCY_CONTACTS -> DriverScreen.EMERGENCY_SOS
+
+        DriverScreen.PERFORMANCE_SCORECARD, DriverScreen.ACADEMY_TRAINING, DriverScreen.FOUND_ITEM,
+        DriverScreen.DRIVER_HELPDESK, DriverScreen.NOTIFICATIONS_CENTER, DriverScreen.DRIVER_PREFERENCES -> DriverScreen.NOTIFICATIONS_CENTER
+
+        else -> DriverScreen.DUTY_DASHBOARD
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            .background(CockpitSurface)
+            .border(1.dp, CockpitBorder, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            DriverBottomNavItem("🏠", "Duty", DriverScreen.DUTY_DASHBOARD, activeTab, onNavigate)
+            DriverBottomNavItem("🚘", "Trips", DriverScreen.OFFER_QUEUE, activeTab, onNavigate)
+            DriverBottomNavItem("💰", "Earnings", DriverScreen.PILOT_EARNINGS, activeTab, onNavigate)
+            DriverBottomNavItem("🚨", "Safety", DriverScreen.EMERGENCY_SOS, activeTab, onNavigate, isWarning = true)
+            DriverBottomNavItem("🔔", "Inbox", DriverScreen.NOTIFICATIONS_CENTER, activeTab, onNavigate)
+        }
+    }
+}
+
+@Composable
+private fun DriverBottomNavItem(
+    icon: String,
+    label: String,
+    screen: DriverScreen,
+    activeTab: DriverScreen,
+    onNavigate: (DriverScreen) -> Unit,
+    isWarning: Boolean = false
+) {
+    val isSelected = activeTab == screen
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onNavigate(screen) }
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Text(text = icon, fontSize = 18.sp)
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            color = if (isSelected) {
+                if (isWarning) CrimsonAlert else ElectricCyan
+            } else CockpitTextMuted
+        )
+    }
+}
