@@ -1,16 +1,25 @@
 package com.vaisentra.mobility.driver.feature.duty
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.scale
 import kotlinx.coroutines.delay
 import android.Manifest
 import android.content.pm.PackageManager
@@ -1764,15 +1773,17 @@ fun VasantraBottomNavigationBar(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
         color = Color.White,
-        shadowElevation = 8.dp
+        shadowElevation = 12.dp,
+        border = BorderStroke(1.dp, Color(0xFFF1F5F9))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .height(62.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+                .height(66.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
             val tabs = listOf(
@@ -1785,106 +1796,227 @@ fun VasantraBottomNavigationBar(
 
             tabs.forEachIndexed { index, title ->
                 val isSelected = selectedTab == index
-                val itemColor = if (isSelected) Color(0xFF000000) else Color(0xFF6B7280)
+
+                // Smooth animations for tab interaction
+                val pillScale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.0f else 0.94f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                    label = "pillScale"
+                )
+                val iconColor by animateColorAsState(
+                    targetValue = if (isSelected) Color.White else Color(0xFF64748B),
+                    animationSpec = tween(220),
+                    label = "iconColor"
+                )
+                val pillBgColor by animateColorAsState(
+                    targetValue = if (isSelected) Color(0xFF0F172A) else Color.Transparent,
+                    animationSpec = tween(220),
+                    label = "pillBgColor"
+                )
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) Color(0xFF0F172A) else Color(0xFF94A3B8),
+                    animationSpec = tween(220),
+                    label = "textColor"
+                )
 
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clickable { onTabSelected(index) },
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onTabSelected(index) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
+                    // Elevated icon container pill
                     Box(
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier
+                            .width(if (isSelected) 52.dp else 44.dp)
+                            .height(30.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(pillBgColor)
+                            .scale(pillScale),
                         contentAlignment = Alignment.Center
                     ) {
-                        Canvas(modifier = Modifier.size(20.dp)) {
+                        Canvas(modifier = Modifier.size(19.dp)) {
+                            val w = size.width
+                            val h = size.height
+
                             when (index) {
-                                0 -> { // Home - Filled house
-                                    val housePath = Path().apply {
-                                        moveTo(size.width * 0.5f, 0f)
-                                        lineTo(size.width, size.height * 0.45f)
-                                        lineTo(size.width * 0.85f, size.height * 0.45f)
-                                        lineTo(size.width * 0.85f, size.height)
-                                        lineTo(size.width * 0.15f, size.height)
-                                        lineTo(size.width * 0.15f, size.height * 0.45f)
-                                        lineTo(0f, size.height * 0.45f)
+                                0 -> { // Modern Architectural Home
+                                    val roof = Path().apply {
+                                        moveTo(w * 0.5f, h * 0.08f)
+                                        lineTo(w * 0.96f, h * 0.44f)
+                                        lineTo(w * 0.82f, h * 0.44f)
+                                        lineTo(w * 0.82f, h * 0.92f)
+                                        lineTo(w * 0.18f, h * 0.92f)
+                                        lineTo(w * 0.18f, h * 0.44f)
+                                        lineTo(w * 0.04f, h * 0.44f)
                                         close()
                                     }
-                                    drawPath(path = housePath, color = itemColor)
+                                    drawPath(path = roof, color = iconColor)
+
+                                    // Doorway aperture
+                                    drawRoundRect(
+                                        color = if (isSelected) Color(0xFF0F172A) else Color.White,
+                                        topLeft = Offset(w * 0.38f, h * 0.58f),
+                                        size = Size(w * 0.24f, h * 0.34f),
+                                        cornerRadius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+                                    )
                                 }
-                                1 -> { // Trips - Car icon
-                                    val carPath = Path().apply {
-                                        moveTo(size.width * 0.15f, size.height * 0.4f)
-                                        cubicTo(size.width * 0.25f, size.height * 0.15f, size.width * 0.35f, size.height * 0.1f, size.width * 0.5f, size.height * 0.1f)
-                                        cubicTo(size.width * 0.65f, size.height * 0.1f, size.width * 0.75f, size.height * 0.15f, size.width * 0.85f, size.height * 0.4f)
-                                        lineTo(size.width * 0.98f, size.height * 0.45f)
-                                        cubicTo(size.width, size.height * 0.45f, size.width, size.height * 0.75f, size.width * 0.95f, size.height * 0.75f)
-                                        lineTo(size.width * 0.05f, size.height * 0.75f)
-                                        cubicTo(0f, size.height * 0.75f, 0f, size.height * 0.45f, size.width * 0.02f, size.height * 0.45f)
+                                1 -> { // Aerodynamic Electric Mobility / Cab
+                                    val body = Path().apply {
+                                        moveTo(w * 0.14f, h * 0.48f)
+                                        cubicTo(w * 0.22f, h * 0.20f, w * 0.32f, h * 0.14f, w * 0.50f, h * 0.14f)
+                                        cubicTo(w * 0.68f, h * 0.14f, w * 0.78f, h * 0.20f, w * 0.86f, h * 0.48f)
+                                        lineTo(w * 0.96f, h * 0.54f)
+                                        cubicTo(w * 1.0f, h * 0.58f, w * 1.0f, h * 0.74f, w * 0.94f, h * 0.74f)
+                                        lineTo(w * 0.06f, h * 0.74f)
+                                        cubicTo(0f, h * 0.74f, 0f, h * 0.58f, w * 0.04f, h * 0.54f)
                                         close()
                                     }
-                                    drawPath(path = carPath, color = itemColor)
-                                    drawCircle(color = itemColor, radius = size.width * 0.08f, center = Offset(size.width * 0.25f, size.height * 0.82f))
-                                    drawCircle(color = itemColor, radius = size.width * 0.08f, center = Offset(size.width * 0.75f, size.height * 0.82f))
-                                }
-                                2 -> { // Earnings - Bar Chart
-                                    val barW = size.width * 0.2f
-                                    drawRoundRect(color = itemColor, topLeft = Offset(0f, size.height * 0.5f), size = Size(barW, size.height * 0.5f), cornerRadius = CornerRadius(1.dp.toPx()))
-                                    drawRoundRect(color = itemColor, topLeft = Offset(size.width * 0.4f, size.height * 0.2f), size = Size(barW, size.height * 0.8f), cornerRadius = CornerRadius(1.dp.toPx()))
-                                    drawRoundRect(color = itemColor, topLeft = Offset(size.width * 0.8f, size.height * 0.35f), size = Size(barW, size.height * 0.65f), cornerRadius = CornerRadius(1.dp.toPx()))
-                                }
-                                3 -> { // Notifications - Bell
-                                    val bellPath = Path().apply {
-                                        moveTo(size.width * 0.5f, size.height * 0.12f)
-                                        cubicTo(size.width * 0.35f, size.height * 0.12f, size.width * 0.22f, size.height * 0.28f, size.width * 0.22f, size.height * 0.55f)
-                                        lineTo(size.width * 0.12f, size.height * 0.75f)
-                                        lineTo(size.width * 0.88f, size.height * 0.75f)
-                                        lineTo(size.width * 0.78f, size.height * 0.55f)
-                                        cubicTo(size.width * 0.78f, size.height * 0.28f, size.width * 0.65f, size.height * 0.12f, size.width * 0.5f, size.height * 0.12f)
+                                    drawPath(path = body, color = iconColor)
+
+                                    // Windshield glass
+                                    val glass = Path().apply {
+                                        moveTo(w * 0.24f, h * 0.44f)
+                                        cubicTo(w * 0.28f, h * 0.26f, w * 0.36f, h * 0.22f, w * 0.50f, h * 0.22f)
+                                        cubicTo(w * 0.64f, h * 0.22f, w * 0.72f, h * 0.26f, w * 0.76f, h * 0.44f)
                                         close()
                                     }
-                                    drawPath(path = bellPath, color = itemColor)
+                                    drawPath(path = glass, color = if (isSelected) Color(0xFF0F172A) else Color.White)
+
+                                    // Wheels with hubs
+                                    drawCircle(color = iconColor, radius = w * 0.09f, center = Offset(w * 0.26f, h * 0.78f))
+                                    drawCircle(color = if (isSelected) Color(0xFF0F172A) else Color.White, radius = w * 0.035f, center = Offset(w * 0.26f, h * 0.78f))
+                                    drawCircle(color = iconColor, radius = w * 0.09f, center = Offset(w * 0.74f, h * 0.78f))
+                                    drawCircle(color = if (isSelected) Color(0xFF0F172A) else Color.White, radius = w * 0.035f, center = Offset(w * 0.74f, h * 0.78f))
+                                }
+                                2 -> { // Graduated Financial Growth Analytics
+                                    val barW = w * 0.22f
+                                    val cr = CornerRadius(2.5.dp.toPx(), 2.5.dp.toPx())
+                                    // Pillar 1 (Left - starter)
+                                    drawRoundRect(
+                                        color = iconColor.copy(alpha = if (isSelected) 0.65f else 0.5f),
+                                        topLeft = Offset(w * 0.08f, h * 0.52f),
+                                        size = Size(barW, h * 0.40f),
+                                        cornerRadius = cr
+                                    )
+                                    // Pillar 2 (Center - peak)
+                                    drawRoundRect(
+                                        color = iconColor,
+                                        topLeft = Offset(w * 0.39f, h * 0.16f),
+                                        size = Size(barW, h * 0.76f),
+                                        cornerRadius = cr
+                                    )
+                                    // Pillar 3 (Right - growth)
+                                    drawRoundRect(
+                                        color = iconColor.copy(alpha = if (isSelected) 0.85f else 0.75f),
+                                        topLeft = Offset(w * 0.70f, h * 0.34f),
+                                        size = Size(barW, h * 0.58f),
+                                        cornerRadius = cr
+                                    )
+                                }
+                                3 -> { // Precision Bell with Suspension Loop
+                                    // Suspension loop
+                                    drawCircle(
+                                        color = iconColor,
+                                        radius = w * 0.075f,
+                                        center = Offset(w * 0.5f, h * 0.12f),
+                                        style = Stroke(width = 1.8.dp.toPx())
+                                    )
+                                    // Bell flare
+                                    val bell = Path().apply {
+                                        moveTo(w * 0.5f, h * 0.16f)
+                                        cubicTo(w * 0.32f, h * 0.16f, w * 0.22f, h * 0.32f, w * 0.22f, h * 0.56f)
+                                        lineTo(w * 0.14f, h * 0.74f)
+                                        lineTo(w * 0.86f, h * 0.74f)
+                                        lineTo(w * 0.78f, h * 0.56f)
+                                        cubicTo(w * 0.78f, h * 0.32f, w * 0.68f, h * 0.16f, w * 0.5f, h * 0.16f)
+                                        close()
+                                    }
+                                    drawPath(path = bell, color = iconColor)
+
+                                    // Clapper striker
                                     drawArc(
-                                        color = itemColor,
+                                        color = iconColor,
                                         startAngle = 0f,
                                         sweepAngle = 180f,
                                         useCenter = false,
-                                        topLeft = Offset(size.width * 0.38f, size.height * 0.78f),
-                                        size = Size(size.width * 0.24f, size.height * 0.18f),
-                                        style = Stroke(width = 2.dp.toPx())
+                                        topLeft = Offset(w * 0.38f, h * 0.76f),
+                                        size = Size(w * 0.24f, h * 0.15f),
+                                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
                                     )
                                 }
-                                else -> { // Profile - User
-                                    drawCircle(color = itemColor, radius = size.width * 0.25f, center = Offset(size.width / 2f, size.height * 0.28f))
-                                    drawArc(color = itemColor, startAngle = 180f, sweepAngle = 180f, useCenter = true, topLeft = Offset(0f, size.height * 0.45f), size = Size(size.width, size.height * 0.55f))
+                                else -> { // Executive Captain Profile
+                                    // Head circle
+                                    drawCircle(
+                                        color = iconColor,
+                                        radius = w * 0.22f,
+                                        center = Offset(w * 0.5f, h * 0.28f)
+                                    )
+                                    // Contoured shoulder mantle
+                                    val mantle = Path().apply {
+                                        moveTo(w * 0.12f, h * 0.88f)
+                                        cubicTo(w * 0.12f, h * 0.60f, w * 0.30f, h * 0.54f, w * 0.50f, h * 0.54f)
+                                        cubicTo(w * 0.70f, h * 0.54f, w * 0.88f, h * 0.60f, w * 0.88f, h * 0.88f)
+                                        close()
+                                    }
+                                    drawPath(path = mantle, color = iconColor)
                                 }
                             }
                         }
 
+                        // High-contrast notification badge
                         if (index == 3 && unreadCount > 0) {
                             Box(
                                 modifier = Modifier
-                                    .size(14.dp)
+                                    .size(16.dp)
                                     .align(Alignment.TopEnd)
+                                    .offset(x = 3.dp, y = (-2).dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFEF4444)),
+                                    .background(Color(0xFFEF4444))
+                                    .border(1.5.dp, Color.White, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(text = unreadCount.toString(), color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                                    color = Color.White,
+                                    fontSize = 7.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    lineHeight = 8.sp,
+                                    textAlign = TextAlign.Center
+                                )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
 
                     Text(
                         text = title,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = itemColor
+                        fontSize = if (isSelected) 11.sp else 10.5.sp,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+
+                    // Active dot indicator
+                    if (isSelected) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .size(4.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF10B981))
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
                 }
             }
         }

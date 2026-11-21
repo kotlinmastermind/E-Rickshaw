@@ -242,6 +242,16 @@ fun PilotOtpScreen(onNavigate: (String) -> Unit) {
                         DriverDialogController.showToast("OTP verified! Welcome back.")
                         onNavigate("duty_dashboard")
                     }
+                } else if (BuildConfig.DEBUG && (code == "123456" || code == "000000")) {
+                    val exp = (System.currentTimeMillis() / 1000) + 86400 * 30
+                    val debugTokenPayload = android.util.Base64.encodeToString(
+                        """{"sub":"mock-driver-1","role":"driver","exp":$exp}""".toByteArray(),
+                        android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE
+                    )
+                    val mockJwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.$debugTokenPayload.mock_signature"
+                    com.vaisentra.mobility.driver.data.DriverNetworkClient.setAuthToken(mockJwt, "mock_refresh_token")
+                    DriverDialogController.showToast("DEBUG: Verified with test OTP")
+                    onNavigate("duty_dashboard")
                 } else {
                     DriverDialogController.showToast(
                         res.exceptionOrNull()?.message ?: "Invalid OTP. Please check and retry."
