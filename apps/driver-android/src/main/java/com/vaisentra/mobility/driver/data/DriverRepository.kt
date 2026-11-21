@@ -19,6 +19,32 @@ object DriverRepository {
     private const val TAG = "DriverRepository"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    private val _isBackendOnline = MutableStateFlow(true)
+    val isBackendOnline: StateFlow<Boolean> = _isBackendOnline.asStateFlow()
+
+    init {
+        DriverNetworkClient.onAuthExpired = {
+            logout()
+        }
+    }
+
+    suspend fun checkBackendHealth(): Result<BackendHealthDto> {
+        return try {
+            val res = DriverNetworkClient.apiService.healthCheck()
+            if (res.isSuccessful && res.body() != null) {
+                _isBackendOnline.value = true
+                Result.success(res.body()!!)
+            } else {
+                _isBackendOnline.value = false
+                Result.failure(IllegalStateException("Backend health check failed: HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            _isBackendOnline.value = false
+            Log.w(TAG, "checkBackendHealth exception: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
     private val _isOnline = MutableStateFlow(false)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 

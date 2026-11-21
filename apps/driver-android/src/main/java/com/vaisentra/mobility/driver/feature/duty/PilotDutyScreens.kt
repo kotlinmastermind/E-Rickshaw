@@ -13,10 +13,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverNetworkClient
 import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.launch
@@ -246,36 +248,187 @@ fun ShiftEndScreen(onNavigate: (String) -> Unit) {
     }
 }
 
-// Screen 50: Driver Preferences & Zones
+// Screen 50: Driver Preferences, Zones & Backend Server Configuration
 @Composable
 fun DriverPreferencesScreen(onNavigate: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
     var autoAcceptPool by remember { mutableStateOf(true) }
     var preferEastDelhi by remember { mutableStateOf(true) }
+    var currentServerUrl by remember { mutableStateOf(DriverNetworkClient.baseUrl) }
+    var healthStatus by remember { mutableStateOf("Checking...") }
+    var isChecking by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentServerUrl) {
+        isChecking = true
+        val healthRes = DriverRepository.checkBackendHealth()
+        isChecking = false
+        healthStatus = if (healthRes.isSuccess) {
+            "🟢 LIVE (${healthRes.getOrNull()?.service ?: "FastAPI"})"
+        } else {
+            "🔴 UNREACHABLE"
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(PilotCanvas)
             .padding(16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
-        CockpitHeader(title = "Pilot Corridor Preferences", subtitle = "Custom dispatch routing preferences", onBack = { onNavigate("duty_dashboard") })
+        CockpitHeader(
+            title = "Pilot Corridor & System",
+            subtitle = "Custom dispatch routing & backend server",
+            onBack = { onNavigate("duty_dashboard") }
+        )
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Dispatch Preferences Card
         CockpitCard {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "DISPATCH & CORRIDOR PREFERENCES",
+                color = PilotElectricCyan,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(text = "Auto-Accept Eco-Pool Feeder Rides", color = PilotTextWhite, fontSize = 13.sp)
                 Switch(checked = autoAcceptPool, onCheckedChange = { autoAcceptPool = it })
             }
             Spacer(modifier = Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(text = "Preferred Corridor: Anand Vihar / CP", color = PilotTextWhite, fontSize = 13.sp)
                 Switch(checked = preferEastDelhi, onCheckedChange = { preferEastDelhi = it })
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Backend Connectivity & Server Environment Card
+        CockpitCard {
+            Text(
+                text = "BACKEND SERVER CONFIGURATION",
+                color = PilotElectricCyan,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = "Active Server Endpoint:",
+                color = PilotTextMuted,
+                fontSize = 12.sp
+            )
+            Text(
+                text = currentServerUrl,
+                color = PilotTextWhite,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Health Status: ",
+                    color = PilotTextMuted,
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = healthStatus,
+                    color = if (healthStatus.contains("LIVE")) PilotOnlineGreen else PilotAmber,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        DriverNetworkClient.switchServer(DriverNetworkClient.DEFAULT_RENDER_URL)
+                        currentServerUrl = DriverNetworkClient.baseUrl
+                        DriverDialogController.showToast("Switched to Render Backend")
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (currentServerUrl.contains("render")) PilotElectricCyan else CockpitSurface
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "Cloud (Render)",
+                        fontSize = 11.sp,
+                        color = if (currentServerUrl.contains("render")) Color.Black else PilotTextWhite
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        DriverNetworkClient.switchServer(DriverNetworkClient.LOCAL_EMULATOR_URL)
+                        currentServerUrl = DriverNetworkClient.baseUrl
+                        DriverDialogController.showToast("Switched to Local (10.0.2.2:8000)")
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (currentServerUrl.contains("10.0.2.2")) PilotElectricCyan else CockpitSurface
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = "Localhost",
+                        fontSize = 11.sp,
+                        color = if (currentServerUrl.contains("10.0.2.2")) Color.Black else PilotTextWhite
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        isChecking = true
+                        val res = DriverRepository.checkBackendHealth()
+                        isChecking = false
+                        healthStatus = if (res.isSuccess) {
+                            "🟢 LIVE (${res.getOrNull()?.service ?: "FastAPI"})"
+                        } else {
+                            "🔴 UNREACHABLE: ${res.exceptionOrNull()?.message}"
+                        }
+                        DriverDialogController.showToast("Health Check: $healthStatus")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = if (isChecking) "Checking..." else "Ping Backend Server",
+                    color = PilotElectricCyan,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(20.dp))
-        CockpitButton(text = "Save Preferences", onClick = {
-            DriverDialogController.showToast("Preferences updated.")
-            onNavigate("duty_dashboard")
-        })
+
+        CockpitButton(
+            text = "Save Preferences & Return",
+            onClick = {
+                DriverDialogController.showToast("Preferences saved.")
+                onNavigate("duty_dashboard")
+            }
+        )
     }
 }

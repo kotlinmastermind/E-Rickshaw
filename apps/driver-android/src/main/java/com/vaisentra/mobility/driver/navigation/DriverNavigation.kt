@@ -313,6 +313,16 @@ fun DriverNavigation() {
         }
     }
 
+    DisposableEffect(Unit) {
+        DriverNetworkClient.onAuthExpired = {
+            DriverDialogController.showToast("Session expired. Please sign in again.")
+            router.navigateAndClearTo(DriverScreen.PILOT_LOGIN, DriverScreen.DUTY_DASHBOARD, inclusive = true)
+        }
+        onDispose {
+            DriverNetworkClient.onAuthExpired = null
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(CockpitBackground)) {
         NavHost(
             navController = navController,

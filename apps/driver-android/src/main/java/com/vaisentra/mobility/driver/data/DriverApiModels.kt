@@ -30,6 +30,16 @@ data class PasswordResetRequest(
     @SerializedName("new_password") val newPassword: String
 )
 
+data class TokenRefreshRequest(
+    @SerializedName("refresh_token") val refreshToken: String
+)
+
+data class BackendHealthDto(
+    @SerializedName("status") val status: String = "",
+    @SerializedName("service") val service: String = "",
+    @SerializedName("timestamp") val timestamp: String = ""
+)
+
 data class DriverTokenResponse(
     @SerializedName("message") val message: String? = null,
     @SerializedName("access_token") val accessToken: String = "",

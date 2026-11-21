@@ -8,7 +8,14 @@ import retrofit2.http.*
  */
 interface DriverApiService {
 
+    // --- Backend Health & Status ---
+    @GET("health")
+    suspend fun healthCheck(): Response<BackendHealthDto>
+
     // --- Pilot Authentication ---
+    @POST("api/v1/auth/token/refresh")
+    suspend fun refreshToken(@Body request: TokenRefreshRequest): Response<DriverTokenResponse>
+
     @POST("api/v1/auth/otp/send")
     suspend fun sendOtp(@Body request: OtpSendRequest): Response<Map<String, Any>>
 
