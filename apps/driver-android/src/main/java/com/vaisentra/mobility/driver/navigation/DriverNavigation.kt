@@ -201,19 +201,7 @@ fun resolveRoute(route: String): DriverScreen? {
  * or in-progress trip from the backend before setting the initial screen.
  */
 fun resolveStartRoute(): DriverScreen {
-    if (!DriverNetworkClient.isAuthenticated()) {
-        return DriverScreen.PILOT_LOGIN
-    }
-    val activeRide = DriverRepository.activeRide.value
-    if (activeRide != null && !activeRide.id.isNullOrBlank()) {
-        return when (activeRide.status.uppercase()) {
-            "ASSIGNED" -> DriverScreen.PICKUP_NAV
-            "ARRIVED" -> DriverScreen.ARRIVED_PICKUP
-            "IN_PROGRESS", "STARTED" -> DriverScreen.IN_TRIP_NAV
-            else -> DriverScreen.DUTY_DASHBOARD
-        }
-    }
-    return DriverScreen.DUTY_DASHBOARD
+    return DriverScreen.PILOT_LOGIN
 }
 
 /**
@@ -423,6 +411,9 @@ fun DriverNavigation() {
                     when (route) {
                         "auth_otp", "otp" -> router.navigateTo(DriverScreen.PILOT_OTP)
                         "auth_recovery", "forgot" -> router.navigateTo(DriverScreen.PILOT_RECOVERY)
+                        "duty_dashboard", "home", "dashboard" -> {
+                            router.navigateAndClearTo(DriverScreen.DUTY_DASHBOARD, DriverScreen.PILOT_LOGIN, inclusive = true)
+                        }
                         else -> router.navigateRoute(route)
                     }
                 })
