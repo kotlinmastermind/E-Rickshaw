@@ -85,6 +85,14 @@ object DriverWebSocketClient {
                                 json.optDouble("pickup_distance_km", 0.0)
                             } else null
 
+                            val pickupEta = if (json.has("pickup_duration_minutes") && !json.isNull("pickup_duration_minutes")) {
+                                json.optInt("pickup_duration_minutes", 3)
+                            } else null
+
+                            val tripEta = if (json.has("trip_duration_minutes") && !json.isNull("trip_duration_minutes")) {
+                                json.optInt("trip_duration_minutes", 12)
+                            } else null
+
                             val offer = DispatchOfferDto(
                                 rideId = rideId,
                                 assignmentId = json.optString("assignment_id", ""),
@@ -98,6 +106,8 @@ object DriverWebSocketClient {
                                 ),
                                 distanceKm = json.optDouble("estimated_trip_distance_km", json.optDouble("distance_km", 0.0)),
                                 pickupDistanceKm = pickupDistKm,
+                                pickupDurationMinutes = pickupEta,
+                                tripDurationMinutes = tripEta,
                                 estimatedFareCents = fareCents,
                                 paymentMode = json.optString("payment_mode", "UPI"),
                                 expiresAt = if (json.isNull("expires_at")) null else json.optString("expires_at"),
@@ -156,10 +166,13 @@ object DriverWebSocketClient {
                 Log.d(TAG, "Ride Tracking Event: $text")
                 try {
                     val json = JSONObject(text)
-                    val status = json.optString("status", "")
-                    val event = json.optString("event", json.optString("event_type", json.optString("type", "")))
-                    if (status == "CANCELLED" || event == "RIDE_CANCELLED") {
-                        DriverRepository.handleRideCancelledByPassenger()
+                    val status = json.optString("status", "").uppercase()
+                    val event = json.optString("event", json.optString("event_type", json.optString("type", ""))).uppercase()
+                    if (status in listOf("CANCELLED", "COMPLETED", "DROPPED", "FINISHED") || event in listOf("RIDE_CANCELLED", "RIDE_COMPLETED")) {
+                        DriverRepository.clearActiveRide()
+                        if (status == "CANCELLED" || event == "RIDE_CANCELLED") {
+                            DriverRepository.handleRideCancelledByPassenger()
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in ride tracking message: ${e.message}")

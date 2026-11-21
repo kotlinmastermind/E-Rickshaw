@@ -337,6 +337,8 @@ class CascadingDispatchService:
                 except RuntimeError:
                     pass
 
+                pickup_eta = max(1, round((selected_dist / 20.0) * 60)) if selected_dist is not None else 3
+                trip_eta = round(ride.estimated_duration_minutes) if ride.estimated_duration_minutes else max(2, round((ride.estimated_distance_km / 22.0) * 60))
                 # Dispatch instant WebSocket event (Redis Pub/Sub multi-worker + local fallback)
                 offer_payload = {
                     "event": "DISPATCH_OFFER",
@@ -345,6 +347,9 @@ class CascadingDispatchService:
                     "destination_address": ride.destination_address,
                     "estimated_fare_cents": fare_cents,
                     "pickup_distance_km": round(selected_dist, 1) if selected_dist is not None else None,
+                    "pickup_duration_minutes": pickup_eta,
+                    "estimated_trip_distance_km": ride.estimated_distance_km,
+                    "trip_duration_minutes": trip_eta,
                     "timeout_seconds": OFFER_TIMEOUT_SECONDS,
                     "expires_at": new_assignment.expires_at.isoformat() if new_assignment.expires_at else None
                 }

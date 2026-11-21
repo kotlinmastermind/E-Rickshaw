@@ -36,7 +36,6 @@ enum class DriverScreen(val title: String, val category: String) {
     // 1. Pilot Auth & KYC (1-6)
     PILOT_LOGIN("1. Pilot Login", "Auth & KYC"),
     PILOT_OTP("2. Road OTP Verify", "Auth & KYC"),
-    PILOT_PASSWORD_RECOVERY("3. PIN Recovery", "Auth & KYC"),
     PILOT_PROFILE("4. Transport Pilot Profile", "Auth & KYC"),
     DOCUMENT_VAULT("5. Document Vault", "Auth & KYC"),
     DOC_EXPIRY_WATCHDOG("6. Document Expiry Watchdog", "Auth & KYC"),
@@ -109,9 +108,8 @@ private fun resolveDashboardRoute(route: String): DriverScreen {
 
     return when (route.lowercase()) {
         // Auth & KYC
-        "login", "auth_login" -> DriverScreen.PILOT_LOGIN
+        "login", "auth_login", "forgot", "recovery", "auth_reset" -> DriverScreen.PILOT_LOGIN
         "otp", "auth_otp" -> DriverScreen.PILOT_OTP
-        "forgot", "recovery", "auth_reset" -> DriverScreen.PILOT_PASSWORD_RECOVERY
         "pilot_profile", "profile" -> DriverScreen.PILOT_PROFILE
         "documents", "document_vault", "doc_vault" -> DriverScreen.DOCUMENT_VAULT
         "doc_expiry", "expiry" -> DriverScreen.DOC_EXPIRY_WATCHDOG
@@ -205,9 +203,6 @@ fun DriverAppNavigation() {
                 currentScreen = resolveDashboardRoute(route)
             })
             DriverScreen.PILOT_OTP -> PilotOtpScreen(onNavigate = { route ->
-                currentScreen = resolveDashboardRoute(route)
-            })
-            DriverScreen.PILOT_PASSWORD_RECOVERY -> PilotPasswordRecoveryScreen(onNavigate = { route ->
                 currentScreen = resolveDashboardRoute(route)
             })
             DriverScreen.PILOT_PROFILE -> PilotProfileScreen(onNavigate = { route ->
@@ -474,7 +469,6 @@ fun DriverAppNavigation() {
         val showBottomBar = currentScreen !in listOf(
             DriverScreen.PILOT_LOGIN,
             DriverScreen.PILOT_OTP,
-            DriverScreen.PILOT_PASSWORD_RECOVERY,
             DriverScreen.PILOT_PROFILE,
             DriverScreen.DOCUMENT_VAULT,
             DriverScreen.DOC_EXPIRY_WATCHDOG

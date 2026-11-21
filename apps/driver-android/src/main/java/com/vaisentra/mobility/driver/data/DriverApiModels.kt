@@ -163,6 +163,8 @@ data class DispatchOfferDto(
     @SerializedName("vehicle_category") val vehicleCategory: String = "",
     @SerializedName("estimated_trip_distance_km", alternate = ["distance_km"]) val distanceKm: Double = 0.0,
     @SerializedName("pickup_distance_km") val pickupDistanceKm: Double? = null,
+    @SerializedName("pickup_duration_minutes", alternate = ["pickup_eta_minutes"]) val pickupDurationMinutes: Int? = null,
+    @SerializedName("trip_duration_minutes", alternate = ["estimated_duration_minutes"]) val tripDurationMinutes: Int? = null,
     @SerializedName("estimated_fare_cents") val estimatedFareCents: Long = 0L,
     @SerializedName("estimated_driver_earnings_cents") val estimatedDriverEarningsCents: Long = 0L,
     @SerializedName("payment_mode") val paymentMode: String = "UPI",
@@ -178,6 +180,18 @@ data class DispatchOfferDto(
 
     val pickupDistanceMeters: Int
         get() = ((pickupDistanceKm ?: 0.0) * 1000.0).toInt()
+
+    val effectivePickupDistanceKm: Double
+        get() = pickupDistanceKm ?: 0.8
+
+    val effectivePickupDurationMinutes: Int
+        get() = pickupDurationMinutes ?: maxOf(1, kotlin.math.round((effectivePickupDistanceKm / 20.0) * 60).toInt())
+
+    val effectiveTripDistanceKm: Double
+        get() = if (distanceKm > 0.0) distanceKm else 3.5
+
+    val effectiveTripDurationMinutes: Int
+        get() = tripDurationMinutes ?: maxOf(2, kotlin.math.round((effectiveTripDistanceKm / 22.0) * 60).toInt())
 }
 
 data class CashCollectRequest(

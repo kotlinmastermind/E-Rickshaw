@@ -243,19 +243,32 @@ object DriverRepository {
     suspend fun fetchActiveRide(): Result<ActiveRideDto?> {
         return try {
             val res = DriverNetworkClient.apiService.getActiveRide()
-            val ride = res.body()?.activeRide
             if (res.isSuccessful) {
-                _activeRide.value = ride
-                if (ride != null && ride.id.isNotBlank()) {
-                    _currentRideId.value = ride.id
+                val ride = res.body()?.activeRide
+                val status = ride?.status?.uppercase() ?: ""
+                val isActive = ride != null && ride.id.isNotBlank() && status in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "STARTED")
+                _activeRide.value = if (isActive) ride else null
+                if (isActive) {
+                    _currentRideId.value = ride!!.id
+                } else {
+                    _currentRideId.value = ""
                 }
-                Result.success(ride)
+                Result.success(_activeRide.value)
             } else {
+                _activeRide.value = null
+                _currentRideId.value = ""
                 Result.failure(IllegalStateException("getActiveRide failed: HTTP ${res.code()}"))
             }
         } catch (e: Exception) {
+            _activeRide.value = null
+            _currentRideId.value = ""
             Result.failure(e)
         }
+    }
+
+    fun clearActiveRide() {
+        _activeRide.value = null
+        _currentRideId.value = ""
     }
 
     suspend fun fetchUnreadNotificationsCount(): Result<Int> {
@@ -376,14 +389,14 @@ object DriverRepository {
             val body = res.body()
             if (res.isSuccessful && body != null) {
                 val firstOffer = body.firstOrNull()
-                if (firstOffer != null) {
-                    onNewDispatchOfferReceived(firstOffer)
-                }
+                _activeOffer.value = firstOffer
                 Result.success(body)
             } else {
+                _activeOffer.value = null
                 Result.failure(IllegalStateException("getActiveOffers failed: HTTP ${res.code()}"))
             }
         } catch (e: Exception) {
+            _activeOffer.value = null
             Result.failure(e)
         }
     }
@@ -603,7 +616,6 @@ object DriverRepository {
 
     fun onNewDispatchOfferReceived(offer: DispatchOfferDto) {
         _activeOffer.value = offer
-        DriverDialogController.show(DriverPopupType.INCOMING_OFFER)
     }
 
     fun handleRideCancelledByPassenger() {

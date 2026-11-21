@@ -1,5 +1,11 @@
 package com.vaisentra.mobility.driver.feature.duty
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import kotlinx.coroutines.delay
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -86,8 +92,21 @@ fun VasantraDriverHomeScreen(
         DriverRepository.fetchDailyTargets()
         DriverRepository.fetchActiveRide()
         DriverRepository.fetchUnreadNotificationsCount()
+    }
+
+    LaunchedEffect(isOnline) {
         if (isOnline) {
             DriverRepository.fetchActiveOffers()
+            DriverRepository.fetchActiveRide()
+            while (true) {
+                delay(3500)
+                if (DriverRepository.isOnline.value) {
+                    if (DriverRepository.activeRide.value == null) {
+                        DriverRepository.fetchActiveOffers()
+                    }
+                    DriverRepository.fetchActiveRide()
+                }
+            }
         }
     }
 
@@ -145,39 +164,6 @@ fun VasantraDriverHomeScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    VasantraRideRequestCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        offer = activeOffer,
-                        onAccept = {
-                            val offerId = activeOffer?.rideId
-                            if (!offerId.isNullOrBlank()) {
-                                DriverRepository.acceptOffer(offerId) { ok ->
-                                    if (ok) onNavigate("accept_ride")
-                                    else DriverDialogController.showToast("Could not accept ride")
-                                }
-                            } else {
-                                onNavigate("accept_ride")
-                            }
-                        },
-                        onReject = {
-                            val offerId = activeOffer?.rideId
-                            if (!offerId.isNullOrBlank()) {
-                                DriverRepository.rejectOffer(offerId)
-                            }
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    VasantraCurrentRideCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        activeRide = activeRide,
-                        onNavigateClick = { onNavigate("navigation") },
-                        onEndRideClick = { onNavigate("end_ride") }
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
                     VasantraEarningsSummaryCard(
                         modifier = Modifier.fillMaxWidth(),
                         earnings = earnings
@@ -207,6 +193,63 @@ fun VasantraDriverHomeScreen(
                     )
 
                     Spacer(modifier = Modifier.height(20.dp))
+                }
+            }
+
+            // Real-Time Floating Ride Request Card from FastAPI Backend
+            AnimatedVisibility(
+                visible = activeOffer != null && !activeOffer?.rideId.isNullOrBlank(),
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 14.dp, end = 14.dp, bottom = 14.dp)
+            ) {
+                activeOffer?.let { offer ->
+                    VasantraRideRequestCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        offer = offer,
+                        onAccept = {
+                            val offerId = offer.rideId
+                            if (offerId.isNotBlank()) {
+                                DriverRepository.acceptOffer(offerId) { ok ->
+                                    if (ok) onNavigate("accept_ride")
+                                    else DriverDialogController.showToast("Could not accept ride")
+                                }
+                            } else {
+                                onNavigate("accept_ride")
+                            }
+                        },
+                        onReject = {
+                            val offerId = offer.rideId
+                            if (offerId.isNotBlank()) {
+                                DriverRepository.rejectOffer(offerId)
+                            }
+                        }
+                    )
+                }
+            }
+
+            // Real-Time Floating Current Ride Card from FastAPI Backend (Only shown when active ride is running)
+            val hasActiveRide = activeRide != null &&
+                !activeRide?.id.isNullOrBlank() &&
+                activeRide?.status?.uppercase() in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "STARTED")
+
+            AnimatedVisibility(
+                visible = hasActiveRide && (activeOffer == null || activeOffer?.rideId.isNullOrBlank()),
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 14.dp, end = 14.dp, bottom = 14.dp)
+            ) {
+                activeRide?.let { ride ->
+                    VasantraCurrentRideCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        activeRide = ride,
+                        onNavigateClick = { onNavigate("navigation") },
+                        onEndRideClick = { onNavigate("end_ride") }
+                    )
                 }
             }
         }
@@ -442,13 +485,20 @@ fun VasantraRideRequestCard(
     onAccept: () -> Unit = {},
     onReject: () -> Unit = {}
 ) {
+    val pickupDistKm = offer?.effectivePickupDistanceKm ?: 0.8
+    val pickupTimeMin = offer?.effectivePickupDurationMinutes ?: 3
+    val tripDistKm = offer?.effectiveTripDistanceKm ?: 3.5
+    val tripTimeMin = offer?.effectiveTripDurationMinutes ?: 12
+    val fareRupees = offer?.estimatedDriverEarningsRupees ?: 48.0
+
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            // Header: Category, Tag & Earnings
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -474,29 +524,217 @@ fun VasantraRideRequestCard(
                     Column {
                         Text(
                             text = stringResource(id = R.string.ride_request_tag),
-                            fontSize = 18.sp,
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = if (offer != null) "${"%.1f".format(offer.pickupDistanceKm ?: 0.0)} km away • ${"%.1f".format(offer.distanceKm)} km trip" else stringResource(id = R.string.ride_request_time_distance),
-                            fontSize = 13.sp,
+                            text = offer?.vehicleCategory?.ifBlank { "Electric Auto / Rickshaw" } ?: "Electric Auto / Rickshaw",
+                            fontSize = 12.sp,
                             color = Color(0xFF6B7280),
                             fontWeight = FontWeight.Medium
                         )
                     }
                 }
 
-                Text(
-                    text = if (offer != null) "₹${"%.0f".format(offer.estimatedDriverEarningsRupees)}" else stringResource(id = R.string.sample_fare),
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A)
-                )
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "₹${"%.0f".format(fareRupees)}",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Text(
+                        text = "Estimated Pay",
+                        fontSize = 11.sp,
+                        color = Color(0xFF10B981),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Two Summary Badges for Live Distance & Time
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Badge 1: Driver Live Location -> Pickup
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFECFDF5),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA7F3D0))
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF10B981))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "TO PICKUP",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF047857)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${"%.1f".format(pickupDistKm)} km • $pickupTimeMin min",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF065F46)
+                        )
+                        Text(
+                            text = "from live location",
+                            fontSize = 10.sp,
+                            color = Color(0xFF059669)
+                        )
+                    }
+                }
+
+                // Badge 2: Pickup -> Destination
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFEFF6FF),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBFDBFE))
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF3B82F6))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "TRIP DISTANCE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1D4ED8)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${"%.1f".format(tripDistKm)} km • $tripTimeMin min",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1E40AF)
+                        )
+                        Text(
+                            text = "pickup to drop",
+                            fontSize = 10.sp,
+                            color = Color(0xFF2563EB)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Stepper / Address Route List
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFFF8FAFC),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    // Pickup Address Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF10B981))
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Pickup Location (from your live location)",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = offer?.pickupAddress?.ifBlank { "Pickup Spot Address" } ?: "Commuter Pickup Spot",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "📍 ${"%.1f".format(pickupDistKm)} km away • $pickupTimeMin min away",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF059669)
+                            )
+                        }
+                    }
+
+                    // Vertical Connector Line
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 4.dp, top = 2.dp, bottom = 2.dp)
+                            .width(2.dp)
+                            .height(16.dp)
+                            .background(Color(0xFFCBD5E1))
+                    )
+
+                    // Destination Address Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFEF4444))
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Drop / Destination Location",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = offer?.destinationAddress?.ifBlank { "Destination Area" } ?: "Drop Location Area",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "🏁 ${"%.1f".format(tripDistKm)} km trip • $tripTimeMin min drive",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF2563EB)
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
+            // Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -504,10 +742,10 @@ fun VasantraRideRequestCard(
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
+                        .height(46.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { onReject() },
-                    color = Color(0xFFF3F4F6)
+                    color = Color(0xFFF1F5F9)
                 ) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -515,8 +753,8 @@ fun VasantraRideRequestCard(
                     ) {
                         Text(
                             text = stringResource(id = R.string.action_reject),
-                            color = Color(0xFF1F2937),
-                            fontSize = 16.sp,
+                            color = Color(0xFF334155),
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -525,10 +763,10 @@ fun VasantraRideRequestCard(
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
+                        .height(46.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { onAccept() },
-                    color = Color(0xFF000000)
+                    color = Color(0xFF10B981)
                 ) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -537,7 +775,7 @@ fun VasantraRideRequestCard(
                         Text(
                             text = stringResource(id = R.string.action_accept),
                             color = Color.White,
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -558,7 +796,8 @@ fun VasantraCurrentRideCard(
         modifier = modifier,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0B1320)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E293B))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -1457,6 +1696,32 @@ private fun VasantraDriverTopHeaderPreview() {
             driverName = "Rajesh Kumar",
             driverRating = "4.9 (128)",
             isOnline = true
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun VasantraCurrentRideCardPreview() {
+    DriverGoTheme {
+        VasantraCurrentRideCard(
+            modifier = Modifier.padding(16.dp),
+            activeRide = ActiveRideDto(
+                id = "ride_101",
+                status = "EN_ROUTE",
+                pickupAddress = "MG Road Metro Station, Bengaluru",
+                destinationAddress = "Indiranagar 100ft Road, Bengaluru"
+            )
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun VasantraMoreFeaturesGridPreview() {
+    DriverGoTheme {
+        VasantraMoreFeaturesGrid(
+            modifier = Modifier.padding(16.dp)
         )
     }
 }

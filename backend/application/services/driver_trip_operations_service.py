@@ -127,6 +127,8 @@ class DriverTripOperationsService:
                 category_cache[ride.vehicle_category_id] = result.scalar_one_or_none() or "Vehicle category"
 
             this_distance = distance_km(location.latitude, location.longitude, ride.pickup_latitude, ride.pickup_longitude) if (location and ride.pickup_latitude and ride.pickup_longitude) else None
+            pickup_eta = max(1, round((this_distance / 20.0) * 60)) if this_distance is not None else 3
+            trip_eta = round(ride.estimated_duration_minutes) if ride.estimated_duration_minutes else max(2, round((ride.estimated_distance_km / 22.0) * 60))
             dest_parts = [part.strip() for part in (ride.destination_address or "").split(",") if part.strip()]
             fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents
             earnings_cents = round(fare_cents * 0.8) if fare_cents is not None else 0
@@ -134,12 +136,15 @@ class DriverTripOperationsService:
             response.append({
                 "ride_id": ride.id,
                 "pickup_address": ride.pickup_address,
-                "destination_area": ", ".join(dest_parts[-2:]) if dest_parts else "Area unavailable",
+                "destination_address": ride.destination_address,
+                "destination_area": ", ".join(dest_parts[-2:]) if dest_parts else (ride.destination_address or "Area unavailable"),
                 "vehicle_category": category_cache[ride.vehicle_category_id],
                 "estimated_fare_cents": fare_cents,
                 "estimated_driver_earnings_cents": earnings_cents,
                 "pickup_distance_km": round(this_distance, 1) if this_distance is not None else None,
+                "pickup_duration_minutes": pickup_eta,
                 "estimated_trip_distance_km": ride.estimated_distance_km,
+                "trip_duration_minutes": trip_eta,
                 "expires_at": assignment.expires_at.isoformat() if assignment.expires_at else None,
                 "escalation_level": assignment.escalation_level
             })
