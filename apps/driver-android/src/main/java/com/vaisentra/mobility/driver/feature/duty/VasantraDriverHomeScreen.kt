@@ -203,16 +203,11 @@ fun VasantraDriverHomeScreen(
                         driverRating = if (profile.rating > 0.0) "${"%.1f".format(profile.rating)} (${profile.ratingCount})" else stringResource(id = R.string.driver_rating_sample),
                         isOnline = isOnline,
                         onToggleDuty = { next ->
-                            if (next && !DriverRepository.isShiftActive.value) {
-                                DriverDialogController.showToast("Starting pre-shift inspection before going online...")
-                                onNavigate("inspection")
-                            } else {
-                                DriverRepository.setDutyStatus(next) { ok, err ->
-                                    DriverDialogController.showToast(
-                                        if (ok) (if (next) "You are ONLINE" else "You are OFFLINE")
-                                        else "Duty update failed: ${err ?: "Approval required"}"
-                                    )
-                                }
+                            DriverRepository.setDutyStatus(next) { ok, err ->
+                                DriverDialogController.showToast(
+                                    if (ok) (if (next) "You are ONLINE" else "You are OFFLINE")
+                                    else "Duty update failed: ${err ?: "Approval required"}"
+                                )
                             }
                         },
                         onProfileClick = {

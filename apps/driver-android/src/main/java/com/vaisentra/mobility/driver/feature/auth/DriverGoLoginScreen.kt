@@ -22,6 +22,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import com.vaisentra.mobility.driver.R
 import com.vaisentra.mobility.driver.theme.DriverGoTheme
 
@@ -30,10 +32,14 @@ fun DriverGoLoginScreen(
     modifier: Modifier = Modifier,
     initialPhoneNumber: String = "",
     onNextClick: (String) -> Unit = {},
+    onPasswordLoginClick: ((phone: String, password: String) -> Unit)? = null,
     onTermsClick: () -> Unit = {},
     onForgotPasswordClick: () -> Unit = {}
 ) {
     var phoneNumber by remember { mutableStateOf(initialPhoneNumber) }
+    var isPasswordMode by remember { mutableStateOf(false) }
+    var password by remember { mutableStateOf("") }
+    var isPasswordVisible by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -168,10 +174,71 @@ fun DriverGoLoginScreen(
                     )
                 }
 
+                if (isPasswordMode) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "Password",
+                        color = Color(0xFF555555),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        placeholder = {
+                            Text(
+                                text = "Enter account password",
+                                color = Color(0xFF9E9E9E),
+                                fontSize = 16.sp
+                            )
+                        },
+                        singleLine = true,
+                        visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        shape = RoundedCornerShape(16.dp),
+                        trailingIcon = {
+                            TextButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                                Text(
+                                    text = if (isPasswordVisible) "HIDE" else "SHOW",
+                                    color = Color(0xFF141210),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedBorderColor = Color(0xFF141210),
+                            unfocusedBorderColor = Color(0xFFE2E2E2),
+                            focusedTextColor = Color(0xFF141210),
+                            unfocusedTextColor = Color(0xFF141210)
+                        ),
+                        textStyle = TextStyle(
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF141210)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
-                    onClick = { onNextClick(phoneNumber) },
+                    onClick = {
+                        if (isPasswordMode && onPasswordLoginClick != null) {
+                            onPasswordLoginClick(phoneNumber, password)
+                        } else {
+                            onNextClick(phoneNumber)
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -182,14 +249,34 @@ fun DriverGoLoginScreen(
                     )
                 ) {
                     Text(
-                        text = stringResource(id = R.string.next_button_text),
+                        text = if (isPasswordMode) "Sign In to Cockpit" else stringResource(id = R.string.next_button_text),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = { isPasswordMode = !isPasswordMode },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFF141210)
+                    )
+                ) {
+                    Text(
+                        text = if (isPasswordMode) "Login with SMS OTP instead" else "Login with Password",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF141210)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 TextButton(
                     onClick = { onForgotPasswordClick() },

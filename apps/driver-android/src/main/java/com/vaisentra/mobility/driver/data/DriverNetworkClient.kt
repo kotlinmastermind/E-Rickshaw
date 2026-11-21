@@ -172,10 +172,6 @@ object DriverNetworkClient {
 
         if (response.code == 401) {
             val path = request.url.encodedPath
-            // Skip 401 handling for login, otp endpoints, and debug mock sessions
-            if (authToken?.contains(".mock_") == true) {
-                return@Interceptor response
-            }
             if (!path.contains("/auth/login") && !path.contains("/auth/otp") && !path.contains("/auth/token/refresh")) {
                 Log.w(TAG, "401 Unauthorized encountered on $path. Checking refresh token...")
                 val currentRefresh = refreshToken

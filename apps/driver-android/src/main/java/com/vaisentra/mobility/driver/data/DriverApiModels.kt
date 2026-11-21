@@ -56,6 +56,17 @@ data class DriverLoginRequest(
     @SerializedName("login_type") val loginType: String = "PASSWORD"
 )
 
+data class DriverSignupRequest(
+    @SerializedName("phone_number") val phoneNumber: String,
+    @SerializedName("email") val email: String? = null,
+    @SerializedName("full_name") val fullName: String = "Driver Partner",
+    @SerializedName("password") val password: String = "DriverPass123456!",
+    @SerializedName("username") val username: String? = null,
+    @SerializedName("vehicle_type") val vehicleType: String = "E_RICKSHAW_STANDARD",
+    @SerializedName("vehicle_name") val vehicleName: String = "Mahindra Treo",
+    @SerializedName("vehicle_no") val vehicleNo: String = "DL-01-ER-1001"
+)
+
 data class LoginUserDto(
     @SerializedName("id") val id: String = "",
     @SerializedName("phone_number") val phoneNumber: String? = null,

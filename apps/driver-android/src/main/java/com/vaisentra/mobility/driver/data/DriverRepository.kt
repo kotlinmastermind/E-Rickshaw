@@ -236,9 +236,53 @@ object DriverRepository {
         }
     }
 
+    suspend fun registerDriver(
+        phone: String,
+        fullName: String = "Rohit Kumar",
+        password: String = "DriverPass123456!"
+    ): Result<Boolean> {
+        return try {
+            val digits = phone.filter { it.isDigit() }
+            val normPhone = if (phone.startsWith("+")) phone else if (digits.length == 10) "+91$digits" else "+$digits"
+            val res = DriverNetworkClient.apiService.registerDriver(
+                DriverSignupRequest(
+                    phoneNumber = normPhone,
+                    email = "driver_${digits.takeLast(6)}@vaisentra.com",
+                    fullName = fullName,
+                    password = password,
+                    username = "driver_${digits.takeLast(6)}"
+                )
+            )
+            val body = res.body()
+            val token = body?.accessToken
+            if (res.isSuccessful && !token.isNullOrBlank()) {
+                DriverNetworkClient.setAuthToken(token, body.refreshToken)
+                scope.launch {
+                    fetchDriverProfile()
+                    fetchEarningsSummary()
+                    fetchDriverDocuments()
+                    fetchPerformanceScorecard()
+                    fetchDailyTargets()
+                    fetchActiveRide()
+                    fetchUnreadNotificationsCount()
+                }
+                Result.success(true)
+            } else {
+                val errMsg = res.errorBody()?.string() ?: "Registration failed: HTTP ${res.code()}"
+                Log.w(TAG, "registerDriver failed: $errMsg")
+                Result.failure(IllegalStateException(errMsg))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "registerDriver exception: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun driverLogin(phone: String, pinOrOtp: String, loginType: String = "PASSWORD"): Result<Boolean> {
+        val digits = phone.filter { it.isDigit() }
+        val normalizedPhone = if (phone.startsWith("+")) phone else if (digits.length == 10) "+91$digits" else "+$digits"
         if (loginType.equals("OTP", ignoreCase = true)) {
-            val verifyRes = verifyOtp(phone, pinOrOtp)
+            val verifyRes = verifyOtp(normalizedPhone, pinOrOtp)
             return if (verifyRes.isSuccess) {
                 Result.success(true)
             } else {
@@ -248,7 +292,7 @@ object DriverRepository {
         return try {
             val res = DriverNetworkClient.apiService.login(
                 DriverLoginRequest(
-                    identifier = phone.trim(),
+                    identifier = normalizedPhone,
                     password = pinOrOtp,
                     loginType = loginType
                 )

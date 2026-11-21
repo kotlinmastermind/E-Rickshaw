@@ -28,6 +28,9 @@ interface DriverApiService {
     @POST("api/v1/auth/login")
     suspend fun login(@Body request: DriverLoginRequest): Response<DriverLoginResponse>
 
+    @POST("api/v1/auth/signup/driver")
+    suspend fun registerDriver(@Body request: DriverSignupRequest): Response<DriverLoginResponse>
+
     @POST("api/v1/auth/change-password")
     suspend fun changePassword(@Body request: ChangePasswordRequest): Response<Map<String, Any>>
 
