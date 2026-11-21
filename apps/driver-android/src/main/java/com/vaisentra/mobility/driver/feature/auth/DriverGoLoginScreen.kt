@@ -31,6 +31,7 @@ fun DriverGoLoginScreen(
     initialPhoneNumber: String = "",
     onNextClick: (String) -> Unit = {},
     onTermsClick: () -> Unit = {},
+    onForgotPasswordClick: () -> Unit = {}
 ) {
     var phoneNumber by remember { mutableStateOf(initialPhoneNumber) }
 
@@ -188,7 +189,21 @@ fun DriverGoLoginScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                TextButton(
+                    onClick = { onForgotPasswordClick() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Forgot PIN / Password?",
+                        color = Color(0xFF141210),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
                     text = stringResource(id = R.string.terms_and_privacy_notice),

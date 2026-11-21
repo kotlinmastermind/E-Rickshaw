@@ -22,6 +22,13 @@ object DriverRepository {
     private val _isOnline = MutableStateFlow(false)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
+    private val _isShiftActive = MutableStateFlow(false)
+    val isShiftActive: StateFlow<Boolean> = _isShiftActive.asStateFlow()
+
+    fun setShiftActive(active: Boolean) {
+        _isShiftActive.value = active
+    }
+
     private val _currentRideId = MutableStateFlow("")
     val currentRideId: StateFlow<String> = _currentRideId.asStateFlow()
 

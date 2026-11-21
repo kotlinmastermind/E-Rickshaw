@@ -31,6 +31,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vaisentra.mobility.driver.BuildConfig
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
@@ -71,8 +72,128 @@ fun PilotLoginScreen(onNavigate: (String) -> Unit) {
         },
         onTermsClick = {
             DriverDialogController.showToast("Vaisentra Mobility Driver Partner Terms & Privacy Policy")
+        },
+        onForgotPasswordClick = {
+            onNavigate("auth_recovery")
         }
     )
+}
+
+// Screen 3: Pilot Password & PIN Recovery
+@Composable
+fun PilotPasswordRecoveryScreen(onNavigate: (String) -> Unit) {
+    var identifier by remember { mutableStateOf(DriverRepository.pendingAuthPhone.removePrefix("+91")) }
+    var recoveryCode by remember { mutableStateOf("") }
+    var newPin by remember { mutableStateOf("") }
+    var step by remember { mutableIntStateOf(1) } // 1 = Request Code, 2 = Verify & Reset PIN
+    var isLoading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PilotCanvas)
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        CockpitHeader(
+            title = "Account Recovery",
+            subtitle = if (step == 1) "Request PIN reset code" else "Set your new security PIN",
+            onBack = {
+                if (step == 2) step = 1 else onNavigate("auth_login")
+            }
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        if (step == 1) {
+            CockpitCard {
+                Text(
+                    text = "Enter your registered 10-digit mobile number to receive a 6-digit recovery code via SMS.",
+                    color = PilotTextMuted,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                CockpitTextField(
+                    value = identifier,
+                    onValueChange = { identifier = it },
+                    label = "Registered Mobile Number",
+                    placeholder = "9876543210"
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                CockpitButton(
+                    text = if (isLoading) "SENDING CODE..." else "SEND RECOVERY CODE",
+                    enabled = !isLoading && identifier.trim().length >= 10,
+                    onClick = {
+                        val digits = identifier.filter { it.isDigit() }.take(10)
+                        val fullPhone = "+91$digits"
+                        DriverRepository.pendingAuthPhone = fullPhone
+                        isLoading = true
+                        scope.launch {
+                            val res = DriverRepository.requestOtp(fullPhone)
+                            isLoading = false
+                            if (res.isSuccess) {
+                                DriverDialogController.showToast("Recovery code sent to $fullPhone")
+                                step = 2
+                            } else {
+                                DriverDialogController.showToast(res.exceptionOrNull()?.message ?: "Failed to send recovery code")
+                            }
+                        }
+                    }
+                )
+            }
+        } else {
+            CockpitCard {
+                Text(
+                    text = "Enter the 6-digit code sent to ${DriverRepository.pendingAuthPhone} and configure your new security PIN.",
+                    color = PilotTextMuted,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                CockpitTextField(
+                    value = recoveryCode,
+                    onValueChange = { recoveryCode = it.take(6) },
+                    label = "6-Digit Recovery Code",
+                    placeholder = "123456"
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                CockpitTextField(
+                    value = newPin,
+                    onValueChange = { newPin = it.take(6) },
+                    label = "New Security PIN (4-6 digits)",
+                    placeholder = "Enter new PIN",
+                    visualTransformation = PasswordVisualTransformation()
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                CockpitButton(
+                    text = if (isLoading) "VERIFYING..." else "UPDATE PIN & SIGN IN",
+                    enabled = !isLoading && recoveryCode.length >= 4 && newPin.length >= 4,
+                    onClick = {
+                        isLoading = true
+                        scope.launch {
+                            val res = DriverRepository.verifyOtp(DriverRepository.pendingAuthPhone, recoveryCode)
+                            isLoading = false
+                            if (res.isSuccess) {
+                                DriverDialogController.showToast("PIN reset successfully! Welcome back.")
+                                onNavigate("duty_dashboard")
+                            } else {
+                                DriverDialogController.showToast("Invalid recovery code. Please check and try again.")
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
 }
 
 // Screen 2: Pilot SMS OTP Sign-In -> Uses DriverGoVerificationScreen
@@ -505,48 +626,8 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
             HorizontalDivider(color = PilotBorder)
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Banking & Payouts Navigation
-            Text(text = "PAYMENTS & EARNINGS", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable { onNavigate("payout_accounts") }
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(text = "🏦 Payout Bank Accounts & UPI", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text(text = "Manage linked bank account for instant IMPS settlements", color = PilotTextMuted, fontSize = 11.sp)
-                }
-                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable { onNavigate("driver_ledger") }
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(text = "📑 Driver Financial Ledger", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text(text = "View credit / debit history and deductions", color = PilotTextMuted, fontSize = 11.sp)
-                }
-                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-            HorizontalDivider(color = PilotBorder)
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Documents & Compliance
-            Text(text = "COMPLIANCE & VEHICLE", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            // Section 1: Compliance & Vehicle
+            Text(text = "1. COMPLIANCE & VEHICLE", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
 
             Row(
@@ -581,12 +662,84 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
                 Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
             }
 
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("rc_status") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "📋 Vehicle RC & Road Permit", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Verify roadworthiness, fitness and registration certificate", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("inspection") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "🔍 Pre-Shift Vehicle Inspection", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Daily tire pressure, brakes and battery inspection", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
             Spacer(modifier = Modifier.height(14.dp))
             HorizontalDivider(color = PilotBorder)
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Emergency & Support
-            Text(text = "SAFETY & SUPPORT", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            // Section 2: Performance & Academy
+            Text(text = "2. PERFORMANCE & ACADEMY", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("performance") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "⭐ Pilot Scorecard & Ratings", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Rider feedback, acceptance rate and completion scores", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("academy") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "🎓 Electric Mobility Academy", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Safe driving tutorials, EV range tips and certifications", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            HorizontalDivider(color = PilotBorder)
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Section 3: Safety & Support
+            Text(text = "3. SAFETY & SUPPORT", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(6.dp))
 
             Row(
@@ -599,8 +752,40 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text(text = "🚨 Emergency SOS 112 Contacts", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "🚨 Emergency SOS Contacts", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Text(text = "Configure trusted emergency contact numbers", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("incident") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "⚠️ Report Incident or Hazard", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Log on-road collisions, mechanical faults or disputes", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("found_item") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "🎒 Lost & Found Item in Cab", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Report forgotten passenger belongings for safe return", color = PilotTextMuted, fontSize = 11.sp)
                 }
                 Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
             }
@@ -617,6 +802,88 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
                 Column {
                     Text(text = "🎧 Driver 24x7 Helpdesk", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Text(text = "Raise tickets for fare issues, route problems or app support", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            HorizontalDivider(color = PilotBorder)
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Section 4: Settings & Diagnostics
+            Text(text = "4. SETTINGS & DIAGNOSTICS", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("preferences") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "⚙️ Pilot Preferences & Settings", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Night mode, navigation sound and route corridor settings", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            if (BuildConfig.DEBUG) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onNavigate("gps") }
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(text = "📡 High-Frequency GPS Diagnostics [DEBUG]", color = PilotAmber, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(text = "Live telemetry monitor and satellite fix logger", color = PilotTextMuted, fontSize = 11.sp)
+                    }
+                    Text(text = "›", color = PilotAmber, fontSize = 18.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            HorizontalDivider(color = PilotBorder)
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Banking & Payouts Navigation
+            Text(text = "PAYMENTS & EARNINGS", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("payout_accounts") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "🏦 Payout Bank Accounts & UPI", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Manage linked bank account for instant IMPS settlements", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("driver_ledger") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "📑 Driver Financial Ledger", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "View credit / debit history and deductions", color = PilotTextMuted, fontSize = 11.sp)
                 }
                 Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
             }

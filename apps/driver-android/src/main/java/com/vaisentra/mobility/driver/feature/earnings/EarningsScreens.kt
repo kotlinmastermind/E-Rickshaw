@@ -1,6 +1,7 @@
 package com.vaisentra.mobility.driver.feature.earnings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,7 +28,8 @@ import kotlinx.coroutines.launch
 fun ShiftSummaryScreen(
     onNavigateBack: () -> Unit = {},
     onGoToLedger: () -> Unit = {},
-    onShowToast: (String) -> Unit = {}
+    onShowToast: (String) -> Unit = {},
+    onNavigateAction: ((String) -> Unit)? = null
 ) {
     val earnings by DriverRepository.earnings.collectAsState()
     val scorecard by DriverRepository.scorecard.collectAsState()
@@ -96,6 +98,50 @@ fun ShiftSummaryScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+
+            if (onNavigateAction != null) {
+                item {
+                    CockpitCard {
+                        Text("SHARED POOL & MULTI-STOP TOOLS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onNavigateAction("multi_stop") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Multi-Stop Waypoints", color = CockpitTextPrimary, fontSize = 13.sp)
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = ElectricCyan)
+                        }
+                        HorizontalDivider(color = CockpitBorder)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onNavigateAction("pool_manifest") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Shared Pool Manifest", color = CockpitTextPrimary, fontSize = 13.sp)
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = ElectricCyan)
+                        }
+                        HorizontalDivider(color = CockpitBorder)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onNavigateAction("corridor_waypoints") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Corridor Waypoints", color = CockpitTextPrimary, fontSize = 13.sp)
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = ElectricCyan)
+                        }
+                        HorizontalDivider(color = CockpitBorder)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onNavigateAction("co_passenger_broadcast") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Co-Passenger Broadcast", color = CockpitTextPrimary, fontSize = 13.sp)
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = ElectricCyan)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -108,7 +154,8 @@ fun PilotEarningsScreen(
     onNavigateBack: () -> Unit = {},
     onInstantPayout: () -> Unit = {},
     onManageBanks: () -> Unit = {},
-    onShowToast: (String) -> Unit = {}
+    onShowToast: (String) -> Unit = {},
+    onNavigateAction: ((String) -> Unit)? = null
 ) {
     val earnings by DriverRepository.earnings.collectAsState()
 
@@ -184,6 +231,59 @@ fun PilotEarningsScreen(
                         Spacer(Modifier.height(4.dp))
                         Text("${"%.2f".format(earnings.ratingAverage)} ★", color = AmberWarning, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text("${earnings.ratingCount} Reviews", color = CockpitTextSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            if (onNavigateAction != null) {
+                item {
+                    CockpitCard {
+                        Text("FINANCIAL GOALS & MISSIONS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onNavigateAction("driver_ledger") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Driver Financial Ledger", color = CockpitTextPrimary, fontSize = 13.sp)
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = ElectricCyan)
+                        }
+                        HorizontalDivider(color = CockpitBorder)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onNavigateAction("daily_targets") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Daily Targets & Incentives", color = CockpitTextPrimary, fontSize = 13.sp)
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = ElectricCyan)
+                        }
+                        HorizontalDivider(color = CockpitBorder)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onNavigateAction("weekly_goals") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Weekly Tier Goals", color = CockpitTextPrimary, fontSize = 13.sp)
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = ElectricCyan)
+                        }
+                        HorizontalDivider(color = CockpitBorder)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onNavigateAction("streak_missions") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Streak Missions & Badges", color = CockpitTextPrimary, fontSize = 13.sp)
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = ElectricCyan)
+                        }
+                        HorizontalDivider(color = CockpitBorder)
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { onNavigateAction("shift_summary") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Today's Shift Summary", color = CockpitTextPrimary, fontSize = 13.sp)
+                            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = ElectricCyan)
+                        }
                     }
                 }
             }

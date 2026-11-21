@@ -6,7 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.vaisentra.mobility.driver.navigation.DriverAppNavigation
+import com.vaisentra.mobility.driver.navigation.DriverNavigation
 import com.vaisentra.mobility.driver.theme.CockpitBackground
 import com.vaisentra.mobility.driver.theme.DriverGoTheme
 
@@ -19,7 +19,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = CockpitBackground
                 ) {
-                    DriverAppNavigation()
+                    DriverNavigation()
                 }
             }
         }
