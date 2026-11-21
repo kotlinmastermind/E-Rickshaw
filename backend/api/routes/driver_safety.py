@@ -114,7 +114,7 @@ class EmergencyAlertPayload(BaseModel):
 async def schedule_checkin(payload: CheckinPayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     driver = await driver_for(user, db)
     ride = await db.get(Ride, payload.ride_id)
-    if not ride or ride.driver_id != driver.id:
+    if not ride or ride.assigned_driver_id != driver.id:
         raise HTTPException(status_code=404, detail="Active ride not found")
     return await SafetyAdvancedService(db).schedule_safety_checkin(ride.id, payload.minutes_from_now, user)
 
@@ -122,7 +122,7 @@ async def schedule_checkin(payload: CheckinPayload, user: User = Depends(get_cur
 async def respond_checkin(payload: CheckinResponsePayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     driver = await driver_for(user, db)
     ride = await db.get(Ride, payload.ride_id)
-    if not ride or ride.driver_id != driver.id:
+    if not ride or ride.assigned_driver_id != driver.id:
         raise HTTPException(status_code=404, detail="Active ride not found")
     return await SafetyAdvancedService(db).respond_to_safety_checkin(ride.id, user, payload.response_type)
 
@@ -130,7 +130,7 @@ async def respond_checkin(payload: CheckinResponsePayload, user: User = Depends(
 async def emergency_alert(payload: EmergencyAlertPayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     driver = await driver_for(user, db)
     ride = await db.get(Ride, payload.ride_id)
-    if not ride or ride.driver_id != driver.id:
+    if not ride or ride.assigned_driver_id != driver.id:
         raise HTTPException(status_code=404, detail="Active ride not found")
     if ride.pickup_latitude is None or ride.pickup_longitude is None:
         raise HTTPException(status_code=409, detail="Trip location is unavailable; call 112 directly")
@@ -155,7 +155,7 @@ async def fatigue(payload: FatiguePayload, user: User = Depends(get_current_user
     driver = await driver_for(user, db)
     if payload.ride_id:
         ride = await db.get(Ride, payload.ride_id)
-        if not ride or ride.driver_id != driver.id:
+        if not ride or ride.assigned_driver_id != driver.id:
             raise HTTPException(status_code=404, detail="Active ride not found")
     record = DriverFatigueCheck(driver_id=driver.id, ride_id=payload.ride_id, result=payload.result, note=payload.note)
     db.add(record); await db.commit()
@@ -184,7 +184,7 @@ async def incident(payload: IncidentPayload, user: User = Depends(get_current_us
         raise HTTPException(status_code=400, detail="Select the related ride before filing this report")
     if payload.ride_id:
         ride = await db.get(Ride, payload.ride_id)
-        if not ride or ride.driver_id != driver.id:
+        if not ride or ride.assigned_driver_id != driver.id:
             raise HTTPException(status_code=404, detail="Ride not found")
     report = IncidentReport(ticket_number=f"INC-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3).upper()}",
         ride_id=payload.ride_id, reporter_user_id=user.id, reporter_role="DRIVER", category=payload.category,
@@ -245,4 +245,3 @@ async def articles(user: User = Depends(get_current_user), db: AsyncSession = De
     result = await db.execute(select(HelpArticle).where(HelpArticle.is_published == True).order_by(HelpArticle.updated_at.desc()).limit(50))
     rows = result.scalars().all()
     return [{"id": a.id, "title": a.title, "content": a.content_markdown, "category": a.category} for a in rows if "DRIVER" in ((a.category or "") + " " + (a.context_tags or "")).upper()]
-

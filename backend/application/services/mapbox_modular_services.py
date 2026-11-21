@@ -186,8 +186,8 @@ class LiveRideTrackingService:
 
         # Fetch latest driver location
         latest_loc = None
-        if ride.driver_id:
-            loc_stmt = select(DriverLocation).where(DriverLocation.driver_id == ride.driver_id).order_by(desc(DriverLocation.recorded_at)).limit(1)
+        if ride.assigned_driver_id:
+            loc_stmt = select(DriverLocation).where(DriverLocation.driver_id == ride.assigned_driver_id).order_by(desc(DriverLocation.recorded_at)).limit(1)
             loc_res = await db.execute(loc_stmt)
             latest_loc = loc_res.scalar_one_or_none()
 
@@ -214,7 +214,7 @@ class LiveRideTrackingService:
         return {
             "ride_id": ride_id,
             "status": ride.status,
-            "driver_id": ride.driver_id,
+            "driver_id": ride.assigned_driver_id,
             "driver_latitude": driver_lat,
             "driver_longitude": driver_lng,
             "heading": latest_loc.heading if latest_loc else 0.0,
@@ -422,4 +422,3 @@ class EmergencyLocationService:
         await db.commit()
         await db.refresh(event)
         return event
-

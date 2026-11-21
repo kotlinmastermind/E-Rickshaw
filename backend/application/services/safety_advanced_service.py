@@ -219,7 +219,7 @@ class SafetyAdvancedService:
         if user.role.lower() == "driver":
             result = await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
             profile = result.scalar_one_or_none()
-            allowed = bool((profile and ride.driver_id == profile.id) or ride.driver_id == user.id)
+            allowed = bool((profile and ride.assigned_driver_id == profile.id) or ride.assigned_driver_id == user.id)
         elif user.role.lower() == "customer":
             result = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
             profile = result.scalar_one_or_none()
@@ -247,7 +247,7 @@ class SafetyAdvancedService:
         if current_user.role.lower() == "driver":
             driver_result = await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == current_user.id))
             driver = driver_result.scalar_one_or_none()
-            if not ((driver and ride.driver_id == driver.id) or ride.driver_id == current_user.id):
+            if not ((driver and ride.assigned_driver_id == driver.id) or ride.assigned_driver_id == current_user.id):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
         elif current_user.role.lower() == "customer":
             customer_result = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == current_user.id))
