@@ -1,5 +1,8 @@
 package com.vaisentra.mobility.driver.components
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,7 +15,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
@@ -210,4 +219,67 @@ fun CockpitHeader(
         }
     }
 }
+
+@Composable
+fun DriverAvatar(
+    bitmap: Bitmap? = null,
+    size: Dp = 48.dp,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Color(0xFF374151))
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Driver Profile Photo",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                // Face skin tone background
+                drawCircle(color = Color(0xFFE5C09B))
+                // Hair
+                drawArc(
+                    color = Color(0xFF1F2937),
+                    startAngle = 170f,
+                    sweepAngle = 200f,
+                    useCenter = true,
+                    topLeft = Offset(-this.size.width * 0.05f, -this.size.height * 0.1f),
+                    size = Size(this.size.width * 1.1f, this.size.height * 0.7f)
+                )
+                // Eyes
+                drawCircle(color = Color(0xFF1F2937), radius = this.size.width * 0.04f, center = Offset(this.size.width * 0.38f, this.size.height * 0.45f))
+                drawCircle(color = Color(0xFF1F2937), radius = this.size.width * 0.04f, center = Offset(this.size.width * 0.62f, this.size.height * 0.45f))
+                // Beard / Smile
+                drawArc(
+                    color = Color(0xFF1F2937),
+                    startAngle = 20f,
+                    sweepAngle = 140f,
+                    useCenter = false,
+                    topLeft = Offset(this.size.width * 0.35f, this.size.height * 0.55f),
+                    size = Size(this.size.width * 0.3f, this.size.height * 0.25f),
+                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+                )
+                // Shirt
+                drawArc(
+                    color = Color(0xFF2563EB),
+                    startAngle = 0f,
+                    sweepAngle = 180f,
+                    useCenter = true,
+                    topLeft = Offset(0f, this.size.height * 0.75f),
+                    size = Size(this.size.width, this.size.height * 0.5f)
+                )
+            }
+        }
+    }
+}
+
 

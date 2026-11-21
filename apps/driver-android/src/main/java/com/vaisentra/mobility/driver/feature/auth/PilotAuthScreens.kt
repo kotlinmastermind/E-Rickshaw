@@ -1,12 +1,10 @@
 package com.vaisentra.mobility.driver.feature.auth
 
-import android.graphics.ImageDecoder
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,19 +22,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -301,40 +292,26 @@ fun PilotPasswordRecoveryScreen(onNavigate: (String) -> Unit) {
     }
 }
 
-// Screen 4: Pilot Profile & Account Settings (Photo, Edit Profile, Preferences & Logout)
+// Screen 4: Pilot Profile, Photo & Account Settings (GET & PUT /api/v1/drivers/profile)
 @Composable
 fun PilotProfileScreen(onNavigate: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val profile by DriverRepository.profile.collectAsState()
+    val profilePhotoUri by DriverRepository.profilePhotoUri.collectAsState()
 
-    val prefs = remember {
-        context.getSharedPreferences("drivergo_secure_prefs", android.content.Context.MODE_PRIVATE)
-    }
+    var profileBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var isEditing by remember { mutableStateOf(false) }
+    var editName by remember(profile.fullName) { mutableStateOf(profile.fullName) }
+    var editEmail by remember { mutableStateOf("") }
+    var editPhone by remember(profile.phoneNumber) { mutableStateOf(profile.phoneNumber) }
+    var isSaving by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
 
-    var photoUriString by remember {
-        mutableStateOf(prefs.getString("driver_profile_photo_uri", null))
-    }
-    var profileBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-
-    // Load photo bitmap when URI changes or on launch
-    LaunchedEffect(photoUriString) {
-        val uriStr = photoUriString
-        if (!uriStr.isNullOrBlank()) {
-            try {
-                val uri = Uri.parse(uriStr)
-                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri))
-                } else {
-                    @Suppress("DEPRECATION")
-                    MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
-                }
-                profileBitmap = bitmap.asImageBitmap()
-            } catch (_: Exception) {
-                profileBitmap = null
-            }
-        }
-    }
+    // Account settings preferences state
+    var autoAcceptPool by remember { mutableStateOf(true) }
+    var highSurgeAlerts by remember { mutableStateOf(true) }
+    var voiceNavigation by remember { mutableStateOf(true) }
 
     // Photo picker launcher
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -342,37 +319,32 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
     ) { uri: Uri? ->
         uri?.let {
             try {
-                val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, it))
-                } else {
-                    @Suppress("DEPRECATION")
-                    MediaStore.Images.Media.getBitmap(context.contentResolver, it)
+                val inputStream = context.contentResolver.openInputStream(it)
+                val bitmap = BitmapFactory.decodeStream(inputStream)
+                if (bitmap != null) {
+                    profileBitmap = bitmap
+                    DriverRepository.updateProfilePhoto(it.toString())
+                    DriverDialogController.showToast("Profile photo updated successfully!")
                 }
-                profileBitmap = bitmap.asImageBitmap()
-                photoUriString = it.toString()
-                prefs.edit().putString("driver_profile_photo_uri", it.toString()).apply()
-                DriverDialogController.showToast("Profile photo updated successfully!")
             } catch (e: Exception) {
-                DriverDialogController.showToast("Failed to load image: ${e.message}")
+                DriverDialogController.showToast("Failed to set photo: ${e.message}")
             }
         }
     }
 
-    // Edit profile state
-    var isEditing by remember { mutableStateOf(false) }
-    var editName by remember(profile.fullName) { mutableStateOf(profile.fullName) }
-    var editEmail by remember { mutableStateOf("") }
-    var isSaving by remember { mutableStateOf(false) }
-
-    // Settings state
-    var soundAlertsEnabled by remember {
-        mutableStateOf(prefs.getBoolean("pref_sound_alerts", true))
-    }
-    var autoAcceptEnabled by remember {
-        mutableStateOf(prefs.getBoolean("pref_auto_accept", false))
-    }
-    var appLanguageHindi by remember {
-        mutableStateOf(prefs.getBoolean("pref_lang_hi", false))
+    // Load initial photo
+    LaunchedEffect(profilePhotoUri) {
+        if (!profilePhotoUri.isNullOrBlank()) {
+            try {
+                val uri = Uri.parse(profilePhotoUri)
+                val inputStream = context.contentResolver.openInputStream(uri)
+                profileBitmap = BitmapFactory.decodeStream(inputStream)
+            } catch (_: Exception) {
+                profileBitmap = null
+            }
+        } else {
+            profileBitmap = null
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -387,142 +359,113 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
             .verticalScroll(rememberScrollState())
     ) {
         CockpitHeader(
-            title = "Pilot Profile & Account",
-            subtitle = "Manage personal info, photo & driver settings",
+            title = "Driver Profile & Settings",
+            subtitle = "Fleet Operations & Account Governance",
             onBack = { onNavigate("duty_dashboard") }
         )
+        Spacer(modifier = Modifier.height(14.dp))
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // --- SECTION 1: PHOTO & DRIVER CARD ---
-        CockpitCard {
+        // 1. Photo & Identity Card
+        CockpitCard(glow = profile.approvalStatus == "APPROVED") {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Profile Avatar with Camera badge
                 Box(contentAlignment = Alignment.BottomEnd) {
+                    DriverAvatar(
+                        bitmap = profileBitmap,
+                        size = 96.dp,
+                        onClick = { photoPickerLauncher.launch("image/*") }
+                    )
                     Box(
                         modifier = Modifier
-                            .size(100.dp)
-                            .clip(CircleShape)
-                            .background(PilotSurface)
-                            .border(2.dp, PilotOnlineGreen, CircleShape)
-                            .clickable { photoPickerLauncher.launch("image/*") },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (profileBitmap != null) {
-                            Image(
-                                bitmap = profileBitmap!!,
-                                contentDescription = "Driver Profile Photo",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                drawCircle(color = Color(0xFFE5C09B))
-                                drawArc(
-                                    color = Color(0xFF1F2937),
-                                    startAngle = 170f,
-                                    sweepAngle = 200f,
-                                    useCenter = true,
-                                    topLeft = Offset(-size.width * 0.05f, -size.height * 0.1f),
-                                    size = Size(size.width * 1.1f, size.height * 0.7f)
-                                )
-                                drawCircle(color = Color(0xFF1F2937), radius = size.width * 0.04f, center = Offset(size.width * 0.38f, size.height * 0.45f))
-                                drawCircle(color = Color(0xFF1F2937), radius = size.width * 0.04f, center = Offset(size.width * 0.62f, size.height * 0.45f))
-                                drawArc(
-                                    color = Color(0xFF1F2937),
-                                    startAngle = 20f,
-                                    sweepAngle = 140f,
-                                    useCenter = false,
-                                    topLeft = Offset(size.width * 0.35f, size.height * 0.55f),
-                                    size = Size(size.width * 0.3f, size.height * 0.25f),
-                                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                                )
-                                drawArc(
-                                    color = Color(0xFF2563EB),
-                                    startAngle = 0f,
-                                    sweepAngle = 180f,
-                                    useCenter = true,
-                                    topLeft = Offset(0f, size.height * 0.75f),
-                                    size = Size(size.width, size.height * 0.5f)
-                                )
-                            }
-                        }
-                    }
-
-                    // Change Photo Camera Badge
-                    Box(
-                        modifier = Modifier
-                            .offset(x = 4.dp, y = 4.dp)
                             .size(32.dp)
                             .clip(CircleShape)
                             .background(PilotOnlineGreen)
-                            .border(2.dp, PilotCanvas, CircleShape)
+                            .border(2.dp, PilotSurfaceElevated, CircleShape)
                             .clickable { photoPickerLauncher.launch("image/*") },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = "📷", fontSize = 14.sp)
+                        Text(text = "📷", fontSize = 16.sp)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Text(
-                    text = "Tap photo to change",
-                    color = PilotElectricCyan,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clickable { photoPickerLauncher.launch("image/*") }
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
                     text = profile.fullName.ifBlank { "Driver Partner" },
                     color = PilotTextWhite,
                     fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
+                    fontWeight = FontWeight.Bold
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CockpitBadge(
-                        text = profile.approvalStatus.uppercase(),
-                        backgroundColor = if (profile.approvalStatus.equals("APPROVED", ignoreCase = true)) OnlineGlow else Color(0x33FFB020),
-                        textColor = if (profile.approvalStatus.equals("APPROVED", ignoreCase = true)) PilotOnlineGreen else Color(0xFFFFB020)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = profile.phoneNumber.ifBlank { "Registered Mobile" },
+                        color = PilotTextMuted,
+                        fontSize = 13.sp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = profile.phoneNumber.ifBlank { "+91 Registered" },
-                        color = PilotTextMuted,
-                        fontSize = 12.sp
+                    CockpitBadge(
+                        text = profile.approvalStatus,
+                        backgroundColor = if (profile.approvalStatus == "APPROVED") OnlineGlow else AlertGlow,
+                        textColor = if (profile.approvalStatus == "APPROVED") PilotOnlineGreen else PilotAmber
                     )
                 }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = PilotBorder, thickness = 1.dp)
-            Spacer(modifier = Modifier.height(14.dp))
+                if (profile.rating > 0.0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "★ ${"%.2f".format(profile.rating)} (${profile.ratingCount} reviews)",
+                        color = PilotAmber,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
 
-            // Quick Stats Grid
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                ProfileStatBadge(title = "Rating", value = "${"%.1f".format(profile.rating.coerceAtLeast(4.8))} ★", color = Color(0xFFFACC15))
-                ProfileStatBadge(title = "Trips", value = "${profile.completedTrips}", color = PilotElectricCyan)
-                ProfileStatBadge(title = "Wallet", value = "₹${"%.0f".format(profile.walletBalanceRupees)}", color = PilotOnlineGreen)
-                ProfileStatBadge(title = "Acceptance", value = "${profile.acceptanceRate.toInt().coerceAtLeast(95)}%", color = PilotTextWhite)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    OutlinedButton(
+                        onClick = { photoPickerLauncher.launch("image/*") },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = PilotElectricCyan),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, PilotElectricCyan.copy(alpha = 0.6f))
+                    ) {
+                        Text("Change Photo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    if (profilePhotoUri != null) {
+                        Spacer(modifier = Modifier.width(10.dp))
+                        OutlinedButton(
+                            onClick = {
+                                profileBitmap = null
+                                DriverRepository.updateProfilePhoto(null)
+                                DriverDialogController.showToast("Profile photo removed")
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = PilotAmber),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, PilotAmber.copy(alpha = 0.5f))
+                        ) {
+                            Text("Remove", fontSize = 12.sp)
+                        }
+                    }
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // --- SECTION 2: EDIT PROFILE / DETAILS ---
+        // 2. Personal Details & Edit Form
         CockpitCard {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -530,73 +473,106 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Profile Credentials",
+                    text = "Personal Details",
                     color = PilotTextWhite,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Text(
-                    text = if (isEditing) "Cancel" else "✏️ Edit Details",
-                    color = PilotElectricCyan,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable { isEditing = !isEditing }
-                )
+
+                TextButton(onClick = { isEditing = !isEditing }) {
+                    Text(
+                        text = if (isEditing) "Cancel" else "✏️ Edit Profile",
+                        color = PilotElectricCyan,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            if (isEditing) {
+            if (!isEditing) {
+                val detailItems = listOf(
+                    "Full Name" to profile.fullName.ifBlank { "Driver Partner" },
+                    "Mobile Number" to profile.phoneNumber.ifBlank { "-" },
+                    "Email Address" to profile.email.ifBlank { "Not provided" },
+                    "Commercial Driving License" to profile.licenseNumber.ifBlank { "Pending verification" },
+                    "Driver ID" to profile.id.ifBlank { "-" },
+                    "Assigned Vehicle" to "${profile.assignedVehiclePlate.ifBlank { "Pending" }} ${profile.assignedVehicleModel}".trim(),
+                    "Completed Trips" to "${profile.completedTrips} Trips"
+                )
+
+                detailItems.forEach { (label, value) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 5.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = label, color = PilotTextMuted, fontSize = 12.sp)
+                        Text(text = value, color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.height(6.dp))
                 CockpitTextField(
                     value = editName,
                     onValueChange = { editName = it },
-                    placeholder = "Enter full legal name",
-                    label = "Full Legal Name",
-                    leadingIcon = "👤"
+                    placeholder = "Enter full name",
+                    label = "Full Name"
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 CockpitTextField(
                     value = editEmail,
                     onValueChange = { editEmail = it },
-                    placeholder = "Enter email address (optional)",
-                    label = "Email Address",
-                    leadingIcon = "✉️"
+                    placeholder = "Enter email address",
+                    label = "Email Address (Optional)"
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                CockpitTextField(
+                    value = editPhone,
+                    onValueChange = { editPhone = it },
+                    placeholder = "Enter mobile number",
+                    label = "Registered Mobile Number"
                 )
                 Spacer(modifier = Modifier.height(14.dp))
-                CockpitButton(
-                    text = if (isSaving) "Saving Updates..." else "Save Profile Changes",
-                    enabled = !isSaving && editName.trim().length >= 2,
-                    onClick = {
-                        isSaving = true
-                        scope.launch {
-                            val res = DriverRepository.updateDriverProfile(editName, editEmail)
-                            isSaving = false
-                            if (res.isSuccess) {
-                                isEditing = false
-                                DriverDialogController.showToast("Profile updated successfully!")
-                            } else {
-                                DriverDialogController.showToast("Update failed: ${res.exceptionOrNull()?.message}")
-                            }
-                        }
-                    }
-                )
-            } else {
-                val details = listOf(
-                    "🪪 Commercial License" to profile.licenseNumber.ifBlank { "DL-HR26-2023-XXXX" },
-                    "🆔 Driver Partner ID" to profile.id.ifBlank { "DRV-84920" },
-                    "🚗 Assigned Vehicle" to "${profile.assignedVehiclePlate.ifBlank { "DL 1ER 9042" }} (${profile.assignedVehicleModel.ifBlank { "Mahindra Treo" }})",
-                    "📱 Registered Mobile" to profile.phoneNumber.ifBlank { "+91 98112 34567" }
-                )
-                details.forEach { (label, value) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { isEditing = false },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = PilotTextMuted)
                     ) {
-                        Text(text = label, color = PilotTextMuted, fontSize = 13.sp)
-                        Text(text = value, color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Button(
+                        onClick = {
+                            isSaving = true
+                            scope.launch {
+                                val res = DriverRepository.updateDriverProfile(editName, editEmail, editPhone)
+                                isSaving = false
+                                if (res.isSuccess) {
+                                    isEditing = false
+                                    DriverDialogController.showToast("Profile details updated successfully!")
+                                } else {
+                                    DriverDialogController.showToast(
+                                        "Update failed: ${res.exceptionOrNull()?.message}"
+                                    )
+                                }
+                            }
+                        },
+                        enabled = !isSaving && editName.trim().length >= 2,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PilotOnlineGreen)
+                    ) {
+                        Text(
+                            text = if (isSaving) "Saving..." else "Save Changes",
+                            color = PilotCanvas,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -604,233 +580,251 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // --- SECTION 3: ACCOUNT & APP SETTINGS ---
+        // 3. Account Settings Section
         CockpitCard {
             Text(
-                text = "Account & Preferences",
+                text = "⚙️ Account Settings",
                 color = PilotTextWhite,
-                fontSize = 15.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Setting 1: Language
-            ProfileSettingRow(
-                icon = "🌐",
-                title = "App Language",
-                subtitle = if (appLanguageHindi) "हिन्दी (Hindi)" else "English (US)",
-                trailing = {
-                    Text(
-                        text = if (appLanguageHindi) "English me badlein" else "हिन्दी में बदलें",
-                        color = PilotElectricCyan,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clickable {
-                            val next = !appLanguageHindi
-                            appLanguageHindi = next
-                            prefs.edit().putBoolean("pref_lang_hi", next).apply()
-                            DriverDialogController.showToast("Language changed to ${if (next) "Hindi" else "English"}")
-                        }
-                    )
+            // Duty Preferences
+            Text(text = "DUTY & DISPATCH", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Auto-Accept Eco-Pool Feeder Rides", color = PilotTextWhite, fontSize = 13.sp)
+                    Text(text = "Automatically accept shared shuttle commuters", color = PilotTextMuted, fontSize = 11.sp)
                 }
-            )
+                Switch(
+                    checked = autoAcceptPool,
+                    onCheckedChange = { autoAcceptPool = it },
+                    colors = SwitchDefaults.colors(checkedTrackColor = PilotOnlineGreen)
+                )
+            }
 
-            HorizontalDivider(color = PilotBorder.copy(alpha = 0.5f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Setting 2: Ride & Dispatch Preferences
-            ProfileSettingRow(
-                icon = "⚙️",
-                title = "Ride & Dispatch Preferences",
-                subtitle = "Radius, destination filters & surge modes",
-                onClick = { onNavigate("preferences") }
-            )
-
-            HorizontalDivider(color = PilotBorder.copy(alpha = 0.5f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
-
-            // Setting 3: Payout Accounts & Bank
-            ProfileSettingRow(
-                icon = "💳",
-                title = "Payout Bank & UPI Accounts",
-                subtitle = "Fast settlement to verified bank account",
-                onClick = { onNavigate("payout_accounts") }
-            )
-
-            HorizontalDivider(color = PilotBorder.copy(alpha = 0.5f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
-
-            // Setting 4: Document Vault & RC
-            ProfileSettingRow(
-                icon = "📂",
-                title = "Compliance & Document Vault",
-                subtitle = "Driving license, RC, insurance & permits",
-                onClick = { onNavigate("doc_vault") }
-            )
-
-            HorizontalDivider(color = PilotBorder.copy(alpha = 0.5f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
-
-            // Setting 5: Safety Sentinel & SOS
-            ProfileSettingRow(
-                icon = "🛡️",
-                title = "Safety Sentinel & Emergency SOS",
-                subtitle = "Emergency contacts & automated cabin watchdog",
-                onClick = { onNavigate("emergency_contacts") }
-            )
-
-            HorizontalDivider(color = PilotBorder.copy(alpha = 0.5f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
-
-            // Setting 6: High Volume Sound Alerts
-            ProfileSettingRow(
-                icon = "🔔",
-                title = "Dispatch High-Pitch Sound",
-                subtitle = "Play loud chime on new booking offers",
-                trailing = {
-                    Switch(
-                        checked = soundAlertsEnabled,
-                        onCheckedChange = {
-                            soundAlertsEnabled = it
-                            prefs.edit().putBoolean("pref_sound_alerts", it).apply()
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = PilotOnlineGreen,
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = PilotBorder
-                        )
-                    )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "High-Demand Surge Audio Alerts", color = PilotTextWhite, fontSize = 13.sp)
+                    Text(text = "Audio notification when entering 1.5x+ surge zones", color = PilotTextMuted, fontSize = 11.sp)
                 }
-            )
+                Switch(
+                    checked = highSurgeAlerts,
+                    onCheckedChange = { highSurgeAlerts = it },
+                    colors = SwitchDefaults.colors(checkedTrackColor = PilotOnlineGreen)
+                )
+            }
 
-            HorizontalDivider(color = PilotBorder.copy(alpha = 0.5f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Setting 7: Auto-Accept Offers
-            ProfileSettingRow(
-                icon = "⚡",
-                title = "Auto-Accept Ride Offers",
-                subtitle = "Automatically accept rides within 2 km",
-                trailing = {
-                    Switch(
-                        checked = autoAcceptEnabled,
-                        onCheckedChange = {
-                            autoAcceptEnabled = it
-                            prefs.edit().putBoolean("pref_auto_accept", it).apply()
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = PilotOnlineGreen,
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = PilotBorder
-                        )
-                    )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Navigation Sound & Chimes", color = PilotTextWhite, fontSize = 13.sp)
+                    Text(text = "Play turn-by-turn prompts during active rides", color = PilotTextMuted, fontSize = 11.sp)
                 }
-            )
+                Switch(
+                    checked = voiceNavigation,
+                    onCheckedChange = { voiceNavigation = it },
+                    colors = SwitchDefaults.colors(checkedTrackColor = PilotOnlineGreen)
+                )
+            }
 
-            HorizontalDivider(color = PilotBorder.copy(alpha = 0.5f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+            HorizontalDivider(color = PilotBorder)
+            Spacer(modifier = Modifier.height(14.dp))
 
-            // Setting 8: Driver Helpdesk
-            ProfileSettingRow(
-                icon = "🎧",
-                title = "24/7 Driver Partner Helpdesk",
-                subtitle = "Support tickets, disputes & road assistance",
-                onClick = { onNavigate("helpdesk") }
-            )
+            // Banking & Payouts Navigation
+            Text(text = "PAYMENTS & EARNINGS", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("payout_accounts") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "🏦 Payout Bank Accounts & UPI", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Manage linked bank account for instant IMPS settlements", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("driver_ledger") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "📑 Driver Financial Ledger", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "View credit / debit history and deductions", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            HorizontalDivider(color = PilotBorder)
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Documents & Compliance
+            Text(text = "COMPLIANCE & VEHICLE", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("doc_vault") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "📂 Document Compliance Vault", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "View uploaded Driving License, RC & Insurance", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("doc_expiry") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "⏱️ Document Expiry Watchdog", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Monitor days left before license / permit renewal", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            HorizontalDivider(color = PilotBorder)
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Emergency & Support
+            Text(text = "SAFETY & SUPPORT", color = PilotElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("emergency_contacts") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "🚨 Emergency SOS 112 Contacts", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Configure trusted emergency contact numbers", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onNavigate("helpdesk") }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = "🎧 Driver 24x7 Helpdesk", color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Raise tickets for fare issues, route problems or app support", color = PilotTextMuted, fontSize = 11.sp)
+                }
+                Text(text = "›", color = PilotTextMuted, fontSize = 18.sp)
+            }
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // --- SECTION 4: LOG OUT BUTTON ---
-        CockpitButton(
-            text = "Log Out of Driver Account",
-            isOutlined = true,
-            backgroundColor = Color.Transparent,
-            textColor = Color(0xFFFF5252),
-            icon = "🚪",
-            onClick = {
-                DriverRepository.logout()
-                DriverDialogController.showToast("Logged out successfully.")
-                onNavigate("auth_login")
-            }
-        )
+        // 4. Logout / Session Exit Button
+        Button(
+            onClick = { showLogoutDialog = true },
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF2D1616),
+                contentColor = Color(0xFFFF5252)
+            ),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.4f))
+        ) {
+            Text(
+                text = "🚪 Log Out from Driver Account",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
     }
-}
 
-@Composable
-private fun ProfileStatBadge(
-    title: String,
-    value: String,
-    color: Color
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(horizontal = 4.dp)
-    ) {
-        Text(
-            text = value,
-            color = color,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.ExtraBold
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = title,
-            color = PilotTextMuted,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
-
-@Composable
-private fun ProfileSettingRow(
-    icon: String,
-    title: String,
-    subtitle: String,
-    onClick: (() -> Unit)? = null,
-    trailing: (@Composable () -> Unit)? = null
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .padding(vertical = 8.dp, horizontal = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(PilotSurfaceElevated),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = icon, fontSize = 16.sp)
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
+    // Logout Confirmation Dialog
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = {
+                Text(text = "Log Out?", color = PilotTextWhite, fontWeight = FontWeight.Bold)
+            },
+            text = {
                 Text(
-                    text = title,
-                    color = PilotTextWhite,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = subtitle,
+                    text = "Are you sure you want to log out of your driver account? You will need to verify with OTP again to log in.",
                     color = PilotTextMuted,
-                    fontSize = 11.sp
+                    fontSize = 13.sp
                 )
-            }
-        }
-
-        if (trailing != null) {
-            trailing()
-        } else if (onClick != null) {
-            Text(text = "→", color = PilotTextDim, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLogoutDialog = false
+                        DriverRepository.logout()
+                        DriverDialogController.showToast("Logged out successfully.")
+                        onNavigate("auth_login")
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252))
+                ) {
+                    Text("Log Out", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showLogoutDialog = false }) {
+                    Text("Cancel", color = PilotTextWhite)
+                }
+            },
+            containerColor = PilotSurfaceElevated,
+            shape = RoundedCornerShape(18.dp)
+        )
     }
 }
 

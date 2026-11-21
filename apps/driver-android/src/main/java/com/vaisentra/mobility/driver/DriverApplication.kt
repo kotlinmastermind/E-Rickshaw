@@ -20,6 +20,7 @@ class DriverApplication : Application() {
 
         // Initialize persistent secure preferences
         DriverNetworkClient.init(this)
+        com.vaisentra.mobility.driver.data.DriverRepository.initProfilePhoto()
 
         // Configure default backend endpoint pointing to FastAPI server
         DriverNetworkClient.baseUrl = "https://e-rickshaw-z32z.onrender.com/"

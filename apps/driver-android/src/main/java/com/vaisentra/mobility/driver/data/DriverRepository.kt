@@ -34,6 +34,22 @@ object DriverRepository {
     private val _profile = MutableStateFlow(DriverProfileDto())
     val profile: StateFlow<DriverProfileDto> = _profile.asStateFlow()
 
+    private val _profilePhotoUri = MutableStateFlow<String?>(null)
+    val profilePhotoUri: StateFlow<String?> = _profilePhotoUri.asStateFlow()
+
+    fun initProfilePhoto() {
+        _profilePhotoUri.value = DriverNetworkClient.getProfilePhotoUri()
+    }
+
+    fun updateProfilePhoto(uri: String?) {
+        _profilePhotoUri.value = uri
+        if (uri != null) {
+            DriverNetworkClient.saveProfilePhotoUri(uri)
+        } else {
+            DriverNetworkClient.clearProfilePhotoUri()
+        }
+    }
+
     private val _earnings = MutableStateFlow(DriverEarningsSummaryDto())
     val earnings: StateFlow<DriverEarningsSummaryDto> = _earnings.asStateFlow()
 

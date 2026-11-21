@@ -70,6 +70,7 @@ data class DriverProfileDto(
     @SerializedName("user_id") val userId: String = "",
     @SerializedName("full_name") val fullName: String = "",
     @SerializedName("phone_number") val phoneNumber: String = "",
+    @SerializedName("email") val email: String = "",
     @SerializedName("license_number") val licenseNumber: String = "",
     @SerializedName("approval_status") val approvalStatus: String = "PENDING",
     @SerializedName("rating_average", alternate = ["rating"]) val rating: Double = 0.0,

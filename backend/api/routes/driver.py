@@ -65,6 +65,7 @@ async def get_driver_profile(user: User = Depends(get_current_driver), db: Async
         "user_id": user.id,
         "full_name": user.full_name,
         "phone_number": user.phone_number,
+        "email": user.email,
         "license_number": driver.license_number,
         "approval_status": driver.approval_status,
         "rating_average": driver.rating_average,

@@ -1,5 +1,11 @@
 package com.vaisentra.mobility.driver.feature.duty
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
+import com.vaisentra.mobility.driver.components.DriverAvatar
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -216,6 +222,24 @@ fun VasantraDriverTopHeader(
     onToggleDuty: (Boolean) -> Unit = {},
     onProfileClick: () -> Unit = {}
 ) {
+    val profilePhotoUri by DriverRepository.profilePhotoUri.collectAsState()
+    val context = LocalContext.current
+    var avatarBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(profilePhotoUri) {
+        if (!profilePhotoUri.isNullOrBlank()) {
+            try {
+                val uri = Uri.parse(profilePhotoUri)
+                val inputStream = context.contentResolver.openInputStream(uri)
+                avatarBitmap = BitmapFactory.decodeStream(inputStream)
+            } catch (_: Exception) {
+                avatarBitmap = null
+            }
+        } else {
+            avatarBitmap = null
+        }
+    }
+
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -229,48 +253,10 @@ fun VasantraDriverTopHeader(
                 .clickable { onProfileClick() }
         ) {
             // Profile Avatar
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFF374151))
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    // Face skin tone background
-                    drawCircle(color = Color(0xFFE5C09B))
-                    // Hair
-                    drawArc(
-                        color = Color(0xFF1F2937),
-                        startAngle = 170f,
-                        sweepAngle = 200f,
-                        useCenter = true,
-                        topLeft = Offset(-size.width * 0.05f, -size.height * 0.1f),
-                        size = Size(size.width * 1.1f, size.height * 0.7f)
-                    )
-                    // Eyes
-                    drawCircle(color = Color(0xFF1F2937), radius = size.width * 0.04f, center = Offset(size.width * 0.38f, size.height * 0.45f))
-                    drawCircle(color = Color(0xFF1F2937), radius = size.width * 0.04f, center = Offset(size.width * 0.62f, size.height * 0.45f))
-                    // Beard / Smile
-                    drawArc(
-                        color = Color(0xFF1F2937),
-                        startAngle = 20f,
-                        sweepAngle = 140f,
-                        useCenter = false,
-                        topLeft = Offset(size.width * 0.35f, size.height * 0.55f),
-                        size = Size(size.width * 0.3f, size.height * 0.25f),
-                        style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                    )
-                    // Shirt
-                    drawArc(
-                        color = Color(0xFF2563EB),
-                        startAngle = 0f,
-                        sweepAngle = 180f,
-                        useCenter = true,
-                        topLeft = Offset(0f, size.height * 0.75f),
-                        size = Size(size.width, size.height * 0.5f)
-                    )
-                }
-            }
+            DriverAvatar(
+                bitmap = avatarBitmap,
+                size = 48.dp
+            )
 
             Spacer(modifier = Modifier.width(12.dp))
 

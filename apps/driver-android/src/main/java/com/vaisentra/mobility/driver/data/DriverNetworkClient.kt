@@ -15,6 +15,7 @@ object DriverNetworkClient {
     private const val PREF_NAME = "drivergo_secure_prefs"
     private const val KEY_TOKEN = "driver_access_token"
     private const val KEY_REFRESH_TOKEN = "driver_refresh_token"
+    private const val KEY_PROFILE_PHOTO = "driver_profile_photo_uri"
     private var sharedPrefs: SharedPreferences? = null
 
     fun init(context: Context) {
@@ -69,6 +70,18 @@ object DriverNetworkClient {
             remove(KEY_TOKEN)
             remove(KEY_REFRESH_TOKEN)
         }
+    }
+
+    fun saveProfilePhotoUri(uriString: String) {
+        sharedPrefs?.edit { putString(KEY_PROFILE_PHOTO, uriString) }
+    }
+
+    fun getProfilePhotoUri(): String? {
+        return sharedPrefs?.getString(KEY_PROFILE_PHOTO, null)
+    }
+
+    fun clearProfilePhotoUri() {
+        sharedPrefs?.edit { remove(KEY_PROFILE_PHOTO) }
     }
 
     fun isAuthenticated(): Boolean = !authToken.isNullOrBlank()
