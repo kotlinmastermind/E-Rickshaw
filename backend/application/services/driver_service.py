@@ -376,16 +376,16 @@ class DriverService:
         res = await self.db.execute(stmt)
         rides = res.scalars().all()
 
-        total_earnings_cents = sum(round((r.final_fare_cents or 0) * 0.8) for r in rides)
+        total_earnings_cents = sum(round(((r.final_fare_cents if (r.final_fare_cents and r.final_fare_cents > 0) else (r.estimated_fare_cents or 0)) or 0) * 0.8) for r in rides)
         trips_count = len(rides)
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         today_rides = [
             r for r in rides
-            if r.completed_at and r.completed_at.replace(tzinfo=timezone.utc if r.completed_at.tzinfo is None else None) >= today_start
+            if r.completed_at and (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) >= today_start
         ]
-        today_earnings_cents = sum(round((r.final_fare_cents or 0) * 0.8) for r in today_rides)
+        today_earnings_cents = sum(round(((r.final_fare_cents if (r.final_fare_cents and r.final_fare_cents > 0) else (r.estimated_fare_cents or 0)) or 0) * 0.8) for r in today_rides)
         today_completed_trips = len(today_rides)
         today_distance_km = round(
             sum((r.actual_distance_km if r.actual_distance_km is not None else (r.estimated_distance_km or 0.0)) for r in today_rides),
@@ -395,10 +395,11 @@ class DriverService:
 
         recent_trips = []
         for r in rides[:15]:
+            fare = (r.final_fare_cents if (r.final_fare_cents and r.final_fare_cents > 0) else (r.estimated_fare_cents or 0)) or 0
             recent_trips.append({
                 "ride_id": r.id,
                 "date": r.completed_at.strftime("%b %d, %I:%M %p") if r.completed_at else "Recently",
-                "fare_rupees": round((r.final_fare_cents or 0) * 0.8 / 100),
+                "fare_rupees": round(fare * 0.8 / 100),
                 "pickup": r.pickup_address,
                 "destination": r.destination_address
             })
@@ -406,12 +407,15 @@ class DriverService:
         return {
             "total_earnings_cents": total_earnings_cents,
             "today_earnings_cents": today_earnings_cents,
+            "today_net_cents": today_earnings_cents,
+            "today_net_rupees": round(today_earnings_cents / 100, 2),
             "weekly_earnings_cents": weekly_earnings_cents,
             "currency": "INR",
             "completed_trips": trips_count,
             "today_completed_trips": today_completed_trips,
             "today_distance_km": today_distance_km,
             "wallet_balance_cents": driver.wallet_balance_cents,
+            "wallet_balance_rupees": round(driver.wallet_balance_cents / 100, 2),
             "rating_average": driver.rating_average,
             "rating_count": driver.rating_count,
             "recent_trips": recent_trips

@@ -98,6 +98,7 @@ fun VasantraDriverHomeScreen(
         if (isOnline) {
             DriverRepository.fetchActiveOffers()
             DriverRepository.fetchActiveRide()
+            var loopTicks = 0
             while (true) {
                 delay(3500)
                 if (DriverRepository.isOnline.value) {
@@ -105,6 +106,12 @@ fun VasantraDriverHomeScreen(
                         DriverRepository.fetchActiveOffers()
                     }
                     DriverRepository.fetchActiveRide()
+                    loopTicks++
+                    // Every 5 ticks (~17-20 seconds), refresh live earnings & target metrics from backend
+                    if (loopTicks % 5 == 0) {
+                        DriverRepository.fetchEarningsSummary()
+                        DriverRepository.fetchDailyTargets()
+                    }
                 }
             }
         }
@@ -166,7 +173,8 @@ fun VasantraDriverHomeScreen(
 
                     VasantraEarningsSummaryCard(
                         modifier = Modifier.fillMaxWidth(),
-                        earnings = earnings
+                        earnings = earnings,
+                        onClick = { onNavigate("earnings") }
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -190,6 +198,14 @@ fun VasantraDriverHomeScreen(
                         modifier = Modifier.fillMaxWidth(),
                         dailyTarget = dailyTarget,
                         onBonusClick = { onNavigate("bonus") }
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    VasantraMoreFeaturesGrid(
+                        modifier = Modifier.fillMaxWidth(),
+                        onViewAllClick = { onNavigate("catalog") },
+                        onFeatureClick = { route -> onNavigate(route) }
                     )
 
                     Spacer(modifier = Modifier.height(20.dp))
@@ -959,13 +975,15 @@ fun VasantraCurrentRideCard(
 @Composable
 fun VasantraEarningsSummaryCard(
     modifier: Modifier = Modifier,
-    earnings: DriverEarningsSummaryDto = DriverEarningsSummaryDto()
+    earnings: DriverEarningsSummaryDto = DriverEarningsSummaryDto(),
+    onClick: () -> Unit = {}
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9))
     ) {
         Row(
             modifier = Modifier
@@ -1148,7 +1166,8 @@ fun VasantraQuickActionItem(
         modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9))
     ) {
         Column(
             modifier = Modifier
@@ -1478,7 +1497,8 @@ fun VasantraFeatureItem(
         modifier = modifier.clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9))
     ) {
         Column(
             modifier = Modifier

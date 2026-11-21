@@ -201,22 +201,24 @@ data class CashCollectRequest(
 // --- Financials, Payouts & Ledger ---
 data class DriverEarningsSummaryDto(
     @SerializedName("total_earnings_cents") val totalEarningsCents: Long = 0L,
-    @SerializedName("today_earnings_cents") val todayEarningsCents: Long = 0L,
-    @SerializedName("weekly_earnings_cents") val weeklyEarningsCents: Long = 0L,
+    @SerializedName("today_earnings_cents", alternate = ["today_net_cents", "today_earnings"]) val todayEarningsCents: Long = 0L,
+    @SerializedName("today_net_rupees", alternate = ["today_earnings_rupees"]) val directTodayNetRupees: Double? = null,
+    @SerializedName("weekly_earnings_cents", alternate = ["weekly_net_cents", "weekly_earnings"]) val weeklyEarningsCents: Long = 0L,
     @SerializedName("currency") val currency: String = "INR",
     @SerializedName("completed_trips") val completedTripsToday: Int = 0,
-    @SerializedName("today_completed_trips") val todayCompletedTrips: Int = 0,
-    @SerializedName("today_distance_km") val todayDistanceKm: Double = 0.0,
-    @SerializedName("wallet_balance_cents") val walletBalanceCents: Long = 0L,
+    @SerializedName("today_completed_trips", alternate = ["today_trips", "trips_today"]) val todayCompletedTrips: Int = 0,
+    @SerializedName("today_distance_km", alternate = ["today_km", "distance_today_km"]) val todayDistanceKm: Double = 0.0,
+    @SerializedName("wallet_balance_cents", alternate = ["wallet_balance"]) val walletBalanceCents: Long = 0L,
+    @SerializedName("wallet_balance_rupees") val directWalletBalanceRupees: Double? = null,
     @SerializedName("rating_average") val ratingAverage: Double = 0.0,
     @SerializedName("rating_count") val ratingCount: Int = 0,
     val onlineHoursToday: Double = 0.0,
     val pendingPayoutRupees: Double = 0.0
 ) {
-    val todayGrossRupees: Double get() = todayEarningsCents / 100.0
-    val todayNetRupees: Double get() = todayEarningsCents / 100.0
+    val todayGrossRupees: Double get() = directTodayNetRupees ?: (todayEarningsCents / 100.0)
+    val todayNetRupees: Double get() = directTodayNetRupees ?: (todayEarningsCents / 100.0)
     val weeklyRupees: Double get() = weeklyEarningsCents / 100.0
-    val walletBalanceRupees: Double get() = walletBalanceCents / 100.0
+    val walletBalanceRupees: Double get() = directWalletBalanceRupees ?: (walletBalanceCents / 100.0)
     val displayTodayNetRupees: Double get() = todayNetRupees
     val displayWalletBalanceRupees: Double get() = walletBalanceRupees
 }

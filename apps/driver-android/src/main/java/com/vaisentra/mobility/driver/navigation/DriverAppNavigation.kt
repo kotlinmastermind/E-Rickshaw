@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.vaisentra.mobility.driver.components.*
+import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.feature.auth.*
 import com.vaisentra.mobility.driver.feature.duty.*
 import com.vaisentra.mobility.driver.feature.earnings.*
@@ -469,8 +470,6 @@ fun DriverAppNavigation() {
         val showBottomBar = currentScreen !in listOf(
             DriverScreen.PILOT_LOGIN,
             DriverScreen.PILOT_OTP,
-            DriverScreen.PILOT_PROFILE,
-            DriverScreen.DOCUMENT_VAULT,
             DriverScreen.DOC_EXPIRY_WATCHDOG
         )
         if (showBottomBar) {
@@ -492,51 +491,49 @@ fun DriverBottomBar(
     onNavigate: (DriverScreen) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val activeTab = when (currentScreen) {
+    val unreadNotifications by DriverRepository.unreadNotificationCount.collectAsState()
+
+    val tabIndex = when (currentScreen) {
         DriverScreen.DUTY_DASHBOARD, DriverScreen.VEHICLE_INSPECTION, DriverScreen.VEHICLE_RC_STATUS,
         DriverScreen.SHIFT_START, DriverScreen.SHIFT_END, DriverScreen.FATIGUE_CHECK,
-        DriverScreen.GPS_PING, DriverScreen.HEATMAP_SURGE, DriverScreen.ROAD_HAZARDS -> DriverScreen.DUTY_DASHBOARD
+        DriverScreen.GPS_PING, DriverScreen.HEATMAP_SURGE, DriverScreen.ROAD_HAZARDS -> 0
 
         DriverScreen.INCOMING_OFFER, DriverScreen.OFFER_QUEUE, DriverScreen.PICKUP_NAV,
         DriverScreen.ARRIVED_PICKUP, DriverScreen.WAITING_TIMER, DriverScreen.BOARDING_OTP,
         DriverScreen.IN_TRIP_NAV, DriverScreen.MULTI_STOP, DriverScreen.POOL_MANIFEST,
-        DriverScreen.CORRIDOR_WAYPOINTS, DriverScreen.CO_PASSENGER_BROADCAST -> DriverScreen.OFFER_QUEUE
+        DriverScreen.CORRIDOR_WAYPOINTS, DriverScreen.CO_PASSENGER_BROADCAST -> 1
 
         DriverScreen.TRIP_COMPLETED_FARE, DriverScreen.CASH_COLLECTION, DriverScreen.UPI_SETTLEMENT,
         DriverScreen.SHIFT_SUMMARY, DriverScreen.PILOT_EARNINGS, DriverScreen.PAYOUT_ACCOUNTS,
         DriverScreen.INSTANT_PAYOUT, DriverScreen.DRIVER_LEDGER, DriverScreen.DAILY_TARGETS,
-        DriverScreen.WEEKLY_GOALS, DriverScreen.STREAK_MISSIONS -> DriverScreen.PILOT_EARNINGS
+        DriverScreen.WEEKLY_GOALS, DriverScreen.STREAK_MISSIONS -> 2
 
-        DriverScreen.ROUTE_DEVIATION, DriverScreen.SPEEDOMETER, DriverScreen.AUDIO_SHIELD,
-        DriverScreen.EMERGENCY_SOS, DriverScreen.BATTERY_SWAP_DEPOT, DriverScreen.DRIVER_INCIDENT,
-        DriverScreen.EMERGENCY_CONTACTS -> DriverScreen.EMERGENCY_SOS
+        DriverScreen.NOTIFICATIONS_CENTER, DriverScreen.ROUTE_DEVIATION, DriverScreen.SPEEDOMETER,
+        DriverScreen.AUDIO_SHIELD, DriverScreen.EMERGENCY_SOS, DriverScreen.BATTERY_SWAP_DEPOT,
+        DriverScreen.DRIVER_INCIDENT, DriverScreen.EMERGENCY_CONTACTS, DriverScreen.DRIVER_HELPDESK -> 3
 
-        DriverScreen.PERFORMANCE_SCORECARD, DriverScreen.ACADEMY_TRAINING, DriverScreen.FOUND_ITEM,
-        DriverScreen.DRIVER_HELPDESK, DriverScreen.NOTIFICATIONS_CENTER, DriverScreen.DRIVER_PREFERENCES -> DriverScreen.NOTIFICATIONS_CENTER
+        DriverScreen.PILOT_PROFILE, DriverScreen.DOCUMENT_VAULT, DriverScreen.DRIVER_PREFERENCES,
+        DriverScreen.PERFORMANCE_SCORECARD, DriverScreen.ACADEMY_TRAINING, DriverScreen.FOUND_ITEM -> 4
 
-        else -> DriverScreen.DUTY_DASHBOARD
+        else -> 0
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-            .background(CockpitSurface)
-            .border(1.dp, CockpitBorder, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-            .padding(horizontal = 8.dp, vertical = 6.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceAround,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            DriverBottomNavItem("🏠", "Duty", DriverScreen.DUTY_DASHBOARD, activeTab, onNavigate)
-            DriverBottomNavItem("🚘", "Trips", DriverScreen.OFFER_QUEUE, activeTab, onNavigate)
-            DriverBottomNavItem("💰", "Earnings", DriverScreen.PILOT_EARNINGS, activeTab, onNavigate)
-            DriverBottomNavItem("🚨", "Safety", DriverScreen.EMERGENCY_SOS, activeTab, onNavigate, isWarning = true)
-            DriverBottomNavItem("🔔", "Inbox", DriverScreen.NOTIFICATIONS_CENTER, activeTab, onNavigate)
+    VasantraBottomNavigationBar(
+        modifier = modifier,
+        selectedTab = tabIndex,
+        unreadCount = unreadNotifications,
+        onTabSelected = { index ->
+            val targetScreen = when (index) {
+                0 -> DriverScreen.DUTY_DASHBOARD
+                1 -> DriverScreen.OFFER_QUEUE
+                2 -> DriverScreen.PILOT_EARNINGS
+                3 -> DriverScreen.NOTIFICATIONS_CENTER
+                4 -> DriverScreen.PILOT_PROFILE
+                else -> DriverScreen.DUTY_DASHBOARD
+            }
+            onNavigate(targetScreen)
         }
-    }
+    )
 }
 
 @Composable

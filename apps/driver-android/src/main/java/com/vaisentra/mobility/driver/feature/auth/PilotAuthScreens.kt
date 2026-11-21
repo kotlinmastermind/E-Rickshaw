@@ -698,7 +698,7 @@ fun DocumentVaultScreen(onNavigate: (String) -> Unit) {
             .background(PilotCanvas)
             .padding(16.dp)
     ) {
-        CockpitHeader(title = "Document Vault", subtitle = "Compliance records in backend", onBack = { onNavigate("pilot_profile") })
+        CockpitHeader(title = "Document Vault", subtitle = "Compliance records in backend", onBack = { onNavigate("duty_dashboard") })
         Spacer(modifier = Modifier.height(12.dp))
 
         if (liveDocs.isEmpty()) {
