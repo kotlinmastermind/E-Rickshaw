@@ -114,8 +114,21 @@ data class DriverDocumentDto(
     @SerializedName("verification_status", alternate = ["status"]) val status: String = "PENDING",
     @SerializedName("rejection_reason") val rejectionReason: String? = null,
     @SerializedName("created_at") val createdAt: String = "",
-    @SerializedName("expiry_date") val expiryDate: String = "",
-    @SerializedName("days_until_expiry") val daysUntilExpiry: Int = 0
+    @SerializedName("expiry_date", alternate = ["expires_at"]) val expiryDate: String = "",
+    @SerializedName("days_until_expiry") val daysUntilExpiry: Int = 0,
+    @SerializedName("document_number", alternate = ["documentNumber", "number"]) val documentNumber: String? = null
+)
+
+data class DriverVehicleDto(
+    @SerializedName("vehicle_id", alternate = ["id"]) val vehicleId: String = "",
+    @SerializedName("model") val model: String = "",
+    @SerializedName("license_plate") val licensePlate: String = "",
+    @SerializedName("color") val color: String = "",
+    @SerializedName("year") val year: Int = 2025,
+    @SerializedName("rc_number") val rcNumber: String? = null,
+    @SerializedName("permit_number") val permitNumber: String? = null,
+    @SerializedName("is_active_vehicle") val isActiveVehicle: Boolean = false,
+    @SerializedName("is_active") val isActive: Boolean = false
 )
 
 // --- Active Ride & Notifications ---

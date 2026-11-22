@@ -46,6 +46,9 @@ interface DriverApiService {
     @GET("api/v1/drivers/documents")
     suspend fun getDocuments(): Response<List<DriverDocumentDto>>
 
+    @GET("api/v1/driver-onboarding/vehicles")
+    suspend fun getDriverVehicles(): Response<List<DriverVehicleDto>>
+
     // --- Duty, Availability & Telemetry ---
     @POST("api/v1/drivers/availability")
     suspend fun toggleAvailability(@Body payload: DutyStatusUpdateRequest): Response<Map<String, Any>>

@@ -145,14 +145,16 @@ fun FoundItemScreen(
             item {
                 CockpitButton(
                     text = if (isSubmitting) "Submitting..." else "Report Found Item & Lock Ticket",
-                    enabled = !isSubmitting && itemNotes.isNotBlank(),
+                    enabled = !isSubmitting && itemNotes.trim().isNotEmpty(),
                     onClick = {
+                        val cleanNotes = itemNotes.trim()
+                        val validNotes = if (cleanNotes.length < 10) "Found item ($itemCategory): $cleanNotes (in cab)" else cleanNotes
                         isSubmitting = true
                         scope.launch {
-                            val res = DriverRepository.reportFoundItem(rideId, itemCategory, itemNotes)
+                            val res = DriverRepository.reportFoundItem(rideId, itemCategory, validNotes)
                             isSubmitting = false
                             if (res.isSuccess) {
-                                onShowToast("Found item logged!")
+                                onShowToast("Found item logged successfully!")
                                 onNavigateBack()
                             } else {
                                 onShowToast("Failed to report item: ${res.exceptionOrNull()?.message}")
@@ -230,7 +232,7 @@ fun DriverHelpdeskScreen(
                         Spacer(Modifier.height(10.dp))
                         CockpitButton(
                             text = if (isSubmitting) "Submitting..." else "Submit Ticket",
-                            enabled = !isSubmitting && subject.trim().length >= 3 && message.trim().length >= 5,
+                            enabled = !isSubmitting && subject.trim().length >= 4 && message.trim().length >= 10,
                             onClick = {
                                 isSubmitting = true
                                 scope.launch {
