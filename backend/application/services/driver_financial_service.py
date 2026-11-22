@@ -19,7 +19,8 @@ from backend.domain.models import (
     DriverShift, DriverWeeklyGoal, DriverPayoutAccount, DriverPayoutSchedule,
     DriverLedgerEntry, DriverIncentiveProgress, DriverOperatingExpense,
     DriverFinancialSupportRequest, DriverPayoutReconciliation,
-    DriverPayoutRequest, CommissionRule, AdministrativeAuditLog
+    DriverPayoutRequest, CommissionRule, AdministrativeAuditLog,
+    Wallet, WalletTransaction
 )
 
 # Standard Luxury Service Zones for Comparative Earnings (Feature 274)
@@ -709,8 +710,10 @@ class DriverFinancialService:
     # -------------------------------------------------------------------------
     async def get_wallet_ledger(self, user_id_or_driver_id: str, limit: int = 50) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        now = datetime.now(timezone.utc)
+        from backend.application.services.wallet_service import WalletService
+        wallet = await WalletService.get_or_create_wallet(self.db, driver.user_id)
 
+        # 1. Fetch from driver_ledger_entries (Table: driver_ledger_entries)
         stmt = (
             select(DriverLedgerEntry)
             .where(DriverLedgerEntry.driver_id == driver.id)
@@ -720,53 +723,62 @@ class DriverFinancialService:
         res = await self.db.execute(stmt)
         entries = res.scalars().all()
 
-        # Seed realistic luxury ledger entries if empty
-        if not entries:
-            seed_data = [
-                ("CREDIT", "RIDE_NET_FARE", 168000, 450000, "Trip: The Oberoi → Airport T3 Private Portico"),
-                ("CREDIT", "RIDE_TIP", 25000, 282000, "Passenger VIP Tip (100% Chauffeur Retention)"),
-                ("CREDIT", "TOLL_REIMBURSEMENT", 15000, 257000, "Bandra-Worli Sea Link Toll Reimbursement"),
-                ("DEBIT", "PAYOUT_WITHDRAWAL", 200000, 242000, "Automated Monday Bank Settlement (HDFC Bank)"),
-                ("CREDIT", "INCENTIVE_BONUS", 50000, 442000, "Weekend Sovereign Velocity Quest Reward")
-            ]
-            for idx, (etype, cat, amt, bal, desc_text) in enumerate(seed_data):
-                entry = DriverLedgerEntry(
-                    driver_id=driver.id,
-                    entry_type=etype,
-                    category=cat,
-                    amount_cents=amt,
-                    balance_after_cents=bal,
-                    reference_id=f"GC-TXN-{secrets.token_hex(4).upper()}",
-                    description=desc_text,
-                    created_at=now - timedelta(hours=(idx + 1) * 6)
-                )
-                self.db.add(entry)
-            await self.db.commit()
+        # 2. Fetch from wallet_transactions (Table: wallet_transactions)
+        wt_stmt = (
+            select(WalletTransaction)
+            .where(WalletTransaction.wallet_id == wallet.id)
+            .order_by(WalletTransaction.created_at.desc())
+            .limit(limit)
+        )
+        wt_res = await self.db.execute(wt_stmt)
+        wallet_txs = wt_res.scalars().all()
 
-            stmt2 = select(DriverLedgerEntry).where(DriverLedgerEntry.driver_id == driver.id).order_by(DriverLedgerEntry.created_at.desc())
-            res2 = await self.db.execute(stmt2)
-            entries = res2.scalars().all()
+        combined: List[Dict[str, Any]] = []
+        for e in entries:
+            combined.append({
+                "id": e.id,
+                "entry_type": e.entry_type,
+                "category": e.category,
+                "amount_cents": e.amount_cents,
+                "amount_rupees": round(e.amount_cents / 100, 2),
+                "balance_after_cents": e.balance_after_cents,
+                "balance_after_rupees": round(e.balance_after_cents / 100, 2),
+                "reference_id": e.reference_id,
+                "description": e.description,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "_sort_time": e.created_at or datetime.now(timezone.utc)
+            })
+
+        existing_ref_ids = {e.get("reference_id") for e in combined if e.get("reference_id")}
+        for wt in wallet_txs:
+            if wt.id not in existing_ref_ids and wt.reference_id not in existing_ref_ids:
+                combined.append({
+                    "id": wt.id,
+                    "entry_type": wt.transaction_type,
+                    "category": wt.source or "WALLET_TRANSACTION",
+                    "amount_cents": wt.amount_cents,
+                    "amount_rupees": round(wt.amount_cents / 100, 2),
+                    "balance_after_cents": wt.balance_after_cents,
+                    "balance_after_rupees": round(wt.balance_after_cents / 100, 2),
+                    "reference_id": wt.reference_id,
+                    "description": wt.description or f"Wallet {wt.transaction_type.lower()}: {wt.source}",
+                    "created_at": wt.created_at.isoformat() if wt.created_at else None,
+                    "_sort_time": wt.created_at or datetime.now(timezone.utc)
+                })
+
+        combined.sort(key=lambda x: x["_sort_time"], reverse=True)
+        final_list = combined[:limit]
+        for item in final_list:
+            item.pop("_sort_time", None)
+
+        active_balance_cents = wallet.balance_cents if wallet and wallet.balance_cents > 0 else driver.wallet_balance_cents
 
         return {
             "driver_id": driver.id,
-            "current_balance_cents": driver.wallet_balance_cents,
-            "current_balance_rupees": round(driver.wallet_balance_cents / 100, 2),
-            "entries_count": len(entries),
-            "ledger": [
-                {
-                    "id": e.id,
-                    "entry_type": e.entry_type,
-                    "category": e.category,
-                    "amount_cents": e.amount_cents,
-                    "amount_rupees": round(e.amount_cents / 100, 2),
-                    "balance_after_cents": e.balance_after_cents,
-                    "balance_after_rupees": round(e.balance_after_cents / 100, 2),
-                    "reference_id": e.reference_id,
-                    "description": e.description,
-                    "created_at": e.created_at.isoformat()
-                }
-                for e in entries
-            ]
+            "current_balance_cents": active_balance_cents,
+            "current_balance_rupees": round(active_balance_cents / 100, 2),
+            "entries_count": len(final_list),
+            "ledger": final_list
         }
 
     # -------------------------------------------------------------------------

@@ -567,9 +567,11 @@ fun DriverLedgerScreen(
     onShowToast: (String) -> Unit = {}
 ) {
     val liveLedger by DriverRepository.ledger.collectAsState()
+    val earnings by DriverRepository.earnings.collectAsState()
 
     LaunchedEffect(Unit) {
         DriverRepository.fetchAccountLedger()
+        DriverRepository.fetchEarningsSummary()
     }
 
     Column(
@@ -584,16 +586,58 @@ fun DriverLedgerScreen(
             onBack = onNavigateBack
         )
 
-        if (liveLedger.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                Text("No ledger entries yet.", color = CockpitTextMuted, fontSize = 14.sp)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                CockpitCard(glow = true) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("RUNNING WALLET BALANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            val displayBal = liveLedger.firstOrNull()?.balanceAfterRupees ?: earnings.walletBalanceRupees
+                            Text("₹${"%.2f".format(displayBal)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            CockpitBadge("LIVE AUDIT", ElectricCyan)
+                            Spacer(Modifier.height(4.dp))
+                            Text("Table: driver_ledger_entries", color = ElectricCyan, fontSize = 9.sp)
+                        }
+                    }
+                }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("TRANSACTION HISTORY (${liveLedger.size})", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Sync: wallet_transactions", color = CockpitTextMuted, fontSize = 10.sp)
+                }
+            }
+
+            if (liveLedger.isEmpty()) {
+                item {
+                    CockpitCard {
+                        Text(
+                            text = "No ledger entries yet in Supabase. Completed rides, tips, incentives, and payouts will appear here live.",
+                            color = CockpitTextMuted,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            } else {
                 items(liveLedger) { item ->
+                    val isCredit = item.type.uppercase() == "CREDIT"
+                    val amtColor = if (isCredit) EmeraldPrimary else CrimsonAlert
+                    val sign = if (isCredit) "+" else "-"
+
                     CockpitCard {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -601,12 +645,44 @@ fun DriverLedgerScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(item.title.ifBlank { item.category }, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text(item.timestamp, color = CockpitTextMuted, fontSize = 10.sp)
+                                Text(
+                                    text = item.title.ifBlank { item.category },
+                                    color = CockpitTextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    CockpitBadge(
+                                        text = item.category.ifBlank { item.type },
+                                        backgroundColor = if (isCredit) EmeraldPrimary.copy(alpha = 0.15f) else CrimsonAlert.copy(alpha = 0.15f),
+                                        textColor = amtColor
+                                    )
+                                    if (item.timestamp.isNotBlank()) {
+                                        Text(
+                                            text = item.timestamp.take(19).replace("T", " "),
+                                            color = CockpitTextMuted,
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                }
                             }
-                            val amtColor = if (item.type == "CREDIT") EmeraldPrimary else CrimsonAlert
-                            val sign = if (item.type == "CREDIT") "+" else "-"
-                            Text("$sign₹${"%.2f".format(item.amountRupees)}", color = amtColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "$sign₹${"%.2f".format(item.amountRupees)}",
+                                    color = amtColor,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                                if (item.balanceAfterRupees > 0.0) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = "Bal: ₹${"%.2f".format(item.balanceAfterRupees)}",
+                                        color = CockpitTextMuted,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
