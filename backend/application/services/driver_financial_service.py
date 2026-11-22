@@ -1181,7 +1181,9 @@ class DriverFinancialService:
         if not reason:
             raise HTTPException(status_code=400, detail="Please state the specific reason for financial assistance.")
 
+        import uuid
         req = DriverFinancialSupportRequest(
+            id=str(uuid.uuid4()),
             driver_id=driver.id,
             support_type=stype,
             amount_cents=int(amt_rupees * 100),
@@ -1198,7 +1200,7 @@ class DriverFinancialService:
             "status": req.status,
             "support_type": req.support_type,
             "amount_rupees": round(req.amount_cents / 100, 2),
-            "repayment_terms_weeks": req.repayment_terms_weeks,
+            "repayment_terms_weeks": getattr(req, "repayment_terms_weeks", weeks),
             "message": "Financial support request submitted to Chauffeur Welfare Board for expedited review."
         }
 
@@ -1218,10 +1220,10 @@ class DriverFinancialService:
                 "support_type": r.support_type,
                 "amount_rupees": round(r.amount_cents / 100, 2),
                 "reason": r.reason,
-                "repayment_terms_weeks": r.repayment_terms_weeks,
+                "repayment_terms_weeks": getattr(r, "repayment_terms_weeks", 4),
                 "status": r.status,
-                "admin_notes": r.admin_notes,
-                "created_at": r.created_at.isoformat()
+                "admin_notes": getattr(r, "admin_notes", None),
+                "created_at": r.created_at.isoformat() if r.created_at else None
             }
             for r in requests
         ]

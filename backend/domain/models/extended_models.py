@@ -1040,6 +1040,8 @@ class DriverFinancialSupportRequest(Base):
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="PENDING")
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    repayment_terms_weeks: Mapped[int] = mapped_column(Integer, default=4, server_default="4")
+    admin_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
