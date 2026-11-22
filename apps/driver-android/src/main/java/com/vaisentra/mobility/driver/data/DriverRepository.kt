@@ -1067,9 +1067,8 @@ object DriverRepository {
         ifsc: String = "HDFC0001234",
         onResult: (Boolean) -> Unit = {}
     ) {
-        val current = _earnings.value
         val amountCents = (amountRupees * 100).toLong()
-        if (amountCents <= 0L || current.walletBalanceCents < amountCents) {
+        if (amountCents <= 0L) {
             onResult(false)
             return
         }
@@ -1086,6 +1085,8 @@ object DriverRepository {
                     fetchEarningsSummary()
                     onResult(true)
                 } else {
+                    val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                    Log.w(TAG, "requestInstantPayout failed: $err")
                     onResult(false)
                 }
             } catch (e: Exception) {
@@ -1206,15 +1207,20 @@ object DriverRepository {
             val res = DriverNetworkClient.apiService.addPayoutAccount(
                 AddPayoutAccountRequest(
                     accountType = "BANK_ACCOUNT",
-                    accountNumber = accountNo,
-                    routingNumber = ifsc,
-                    accountHolderName = holderName
+                    accountNumber = accountNo.trim(),
+                    ifscCode = ifsc.trim().uppercase(),
+                    routingNumber = ifsc.trim().uppercase(),
+                    beneficiaryName = holderName.trim(),
+                    accountHolderName = holderName.trim()
                 )
             )
             if (res.isSuccessful) {
                 fetchPayoutAccounts()
                 Result.success(true)
-            } else Result.failure(IllegalStateException("addPayoutAccount failed: HTTP ${res.code()}"))
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }

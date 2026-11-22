@@ -475,8 +475,8 @@ class DispatchAdvancedService:
         amount_cents: int,
         bank_details: Dict[str, str]
     ) -> DriverPayoutRequest:
-        if amount_cents < 500000:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Minimum payout request is ₹5,000 (500000 cents)")
+        if amount_cents < 10000:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Minimum payout request is ₹100 (10000 cents)")
 
         driver_prof = await DispatchAdvancedService._resolve_driver_profile(session, driver_id_or_user_id)
         if not driver_prof:

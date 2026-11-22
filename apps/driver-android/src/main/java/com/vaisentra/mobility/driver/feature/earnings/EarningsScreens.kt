@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
@@ -295,7 +296,7 @@ fun PilotEarningsScreen(
  * Screen 40: Payout Bank & UPI Accounts (GET/POST /api/v1/drivers/financials/payout-accounts)
  */
 @Composable
-fun PayoutAccountsScreen(
+fun  PayoutAccountsScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
@@ -360,7 +361,14 @@ fun PayoutAccountsScreen(
             }
 
             item {
-                Text("SAVED PAYOUT ACCOUNTS (${accounts.size})", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("SAVED PAYOUT ACCOUNTS (${accounts.size})", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Table: driver_payout_accounts", color = ElectricCyan, fontSize = 10.sp)
+                }
             }
 
             if (accounts.isEmpty()) {
@@ -508,13 +516,18 @@ fun InstantPayoutScreen(
                             }
                         }
                     }
-                    if (primaryAccount != null) {
-                        Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            "Destination: $resolvedMask ($resolvedIfsc)",
+                            if (primaryAccount != null) "Destination: $resolvedMask ($resolvedIfsc)" else "Destination: Pending account link",
                             color = CockpitTextSecondary,
                             fontSize = 11.sp
                         )
+                        Text("Table: driver_payout_requests", color = ElectricCyan, fontSize = 10.sp)
                     }
                 }
             }
@@ -612,5 +625,40 @@ private fun SummaryRow(label: String, value: String, color: Color = CockpitTextP
     ) {
         Text(label, color = CockpitTextSecondary, fontSize = 12.sp)
         Text(value, color = color, fontSize = 13.sp, fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal)
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PayoutAccountsScreenPreview() {
+    DriverGoTheme {
+        PayoutAccountsScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun InstantPayoutScreenPreview() {
+    DriverGoTheme {
+        InstantPayoutScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun DriverLedgerScreenPreview() {
+    DriverGoTheme {
+        DriverLedgerScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun SummaryRowPreview() {
+    DriverGoTheme {
+        SummaryRow(
+            label = "Today Earnings",
+            value = "₹450.00"
+        )
     }
 }

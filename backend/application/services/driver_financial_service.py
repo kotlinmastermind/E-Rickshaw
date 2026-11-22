@@ -782,22 +782,6 @@ class DriverFinancialService:
         res = await self.db.execute(stmt)
         accounts = res.scalars().all()
 
-        if not accounts:
-            primary_acc = DriverPayoutAccount(
-                driver_id=driver.id,
-                account_type="BANK_ACCOUNT",
-                bank_name="HDFC Bank",
-                account_number_mask="******4921",
-                ifsc_code="HDFC0001234",
-                beneficiary_name=driver.user.full_name if driver.user else "Master Chauffeur",
-                verification_status="VERIFIED",
-                is_primary=True,
-                penny_drop_reference="PENNY-HDFC-99120"
-            )
-            self.db.add(primary_acc)
-            await self.db.commit()
-            accounts = [primary_acc]
-
         return [
             {
                 "id": a.id,
@@ -817,23 +801,44 @@ class DriverFinancialService:
 
     async def add_payout_account(self, user_id_or_driver_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        acc_type = data.get("account_type", "BANK_ACCOUNT").upper()
-        ifsc = data.get("ifsc_code", "").strip().upper()
-        raw_acc = data.get("account_number", "").strip()
-        upi = data.get("upi_vpa", "").strip()
-        holder = data.get("beneficiary_name", "").strip() or (driver.user.full_name if driver.user else "Master Chauffeur")
+        acc_type = (data.get("account_type") or "BANK_ACCOUNT").strip().upper()
+        ifsc = (data.get("ifsc_code") or data.get("routing_number") or "").strip().upper()
+        raw_acc = (data.get("account_number") or "").strip()
+        upi = (data.get("upi_vpa") or "").strip()
+        holder = (data.get("beneficiary_name") or data.get("account_holder_name") or "").strip() or "Pilot Partner"
 
-        # IFSC validation (RBI standard: 4 alphabets, 0, 6 characters)
+        # Determine Bank Name from IFSC or payload
+        inferred_bank = data.get("bank_name")
+        if not inferred_bank:
+            if ifsc.startswith("HDFC"):
+                inferred_bank = "HDFC Bank"
+            elif ifsc.startswith("SBIN"):
+                inferred_bank = "State Bank of India"
+            elif ifsc.startswith("ICIC"):
+                inferred_bank = "ICICI Bank"
+            elif ifsc.startswith("PUNB") or ifsc.startswith("PNB"):
+                inferred_bank = "Punjab National Bank"
+            elif ifsc.startswith("AXIS") or ifsc.startswith("UTIB"):
+                inferred_bank = "Axis Bank"
+            elif ifsc.startswith("BARB"):
+                inferred_bank = "Bank of Baroda"
+            elif ifsc.startswith("KKBK"):
+                inferred_bank = "Kotak Mahindra Bank"
+            else:
+                inferred_bank = "Scheduled Commercial Bank"
+
+        # IFSC validation (RBI standard: 4 alphabets, 0, 6 characters or flexible pilot input)
         if acc_type == "BANK_ACCOUNT":
-            if len(ifsc) != 11 or not ifsc[:4].isalpha():
-                raise HTTPException(status_code=400, detail="Invalid Indian Financial System Code (IFSC). Format: 4 letters, 0, 6 alphanumeric (e.g. HDFC0001234).")
-            if len(raw_acc) < 8 or len(raw_acc) > 20:
-                raise HTTPException(status_code=400, detail="Account number must contain between 8 and 20 digits.")
-            acc_mask = f"******{raw_acc[-4:]}"
+            if len(ifsc) < 8 or len(ifsc) > 11:
+                raise HTTPException(status_code=400, detail="Invalid IFSC code format (e.g. PUNB0123400, HDFC0001234).")
+            if len(raw_acc) < 6 or len(raw_acc) > 25:
+                raise HTTPException(status_code=400, detail="Account number must contain between 6 and 25 digits.")
+            acc_mask = f"******{raw_acc[-4:]}" if len(raw_acc) >= 4 else raw_acc
         else:
             if "@" not in upi:
-                raise HTTPException(status_code=400, detail="Invalid UPI ID. Format: username@bank (e.g. chauffeur@okhdfcbank).")
+                raise HTTPException(status_code=400, detail="Invalid UPI ID. Format: username@bank (e.g. pilot@okaxis).")
             acc_mask = upi
+            inferred_bank = "UPI Instant Destination"
 
         # Check existing accounts to determine if first
         stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.driver_id == driver.id)
@@ -844,7 +849,7 @@ class DriverFinancialService:
         acc = DriverPayoutAccount(
             driver_id=driver.id,
             account_type=acc_type,
-            bank_name=data.get("bank_name", "Scheduled Commercial Bank"),
+            bank_name=inferred_bank,
             account_number_mask=acc_mask,
             ifsc_code=ifsc or "UPI0000000",
             upi_vpa=upi if acc_type == "UPI" else None,

@@ -48,8 +48,10 @@ class AddPayoutAccountPayload(BaseModel):
     bank_name: Optional[str] = None
     account_number: Optional[str] = None
     ifsc_code: Optional[str] = None
+    routing_number: Optional[str] = None
     upi_vpa: Optional[str] = None
     beneficiary_name: Optional[str] = None
+    account_holder_name: Optional[str] = None
     is_primary: bool = False
 
 class UpdatePayoutSchedulePayload(BaseModel):
