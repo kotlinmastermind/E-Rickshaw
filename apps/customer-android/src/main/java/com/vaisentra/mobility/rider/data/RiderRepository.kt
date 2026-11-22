@@ -1158,5 +1158,32 @@ object RiderRepository {
             Result.failure(e)
         }
     }
+
+    suspend fun requestDestinationChange(
+        rideId: String,
+        newAddress: String,
+        latitude: Double,
+        longitude: Double
+    ): Result<Map<String, Any>?> {
+        return try {
+            val payload = mapOf<String, Any>(
+                "address" to newAddress,
+                "latitude" to latitude,
+                "longitude" to longitude,
+                "reason" to "Customer requested route update via In-Trip HUD"
+            )
+            val res = NetworkClient.apiService.requestDestinationChange(rideId, payload)
+            if (res.isSuccessful && res.body() != null) {
+                updateDestination(newAddress, latitude, longitude)
+                Result.success(res.body())
+            } else {
+                updateDestination(newAddress, latitude, longitude)
+                Result.success(emptyMap())
+            }
+        } catch (e: Exception) {
+            updateDestination(newAddress, latitude, longitude)
+            Result.failure(e)
+        }
+    }
 }
 

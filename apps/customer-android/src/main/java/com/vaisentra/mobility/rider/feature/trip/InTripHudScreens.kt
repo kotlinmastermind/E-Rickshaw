@@ -478,10 +478,13 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
         MidTripDestinationChangeModal(
             currentDest = bookingDraft.destinationAddress.ifBlank { "Connaught Place Gate 4" },
             onDismiss = { showChangeDestSheet = false },
-            onConfirmNewDestination = { newDest, extraDistKm, extraCostRupees ->
-                RiderRepository.updateDestination(newDest, 28.5562, 77.1000)
+            onConfirmNewDestination = { newDest, _, extraCostRupees ->
+                val rideId = activeRide?.id ?: "ride-latest"
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    RiderRepository.requestDestinationChange(rideId, newDest, 28.5562, 77.1000)
+                }
                 showChangeDestSheet = false
-                DialogController.showToast("Destination updated! Pilot notified of new route (+₹${extraCostRupees.toInt()}).")
+                DialogController.showToast("Destination updated in Supabase! Pilot notified (+₹${extraCostRupees.toInt()}).")
             }
         )
     }

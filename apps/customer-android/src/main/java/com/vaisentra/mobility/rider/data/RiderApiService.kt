@@ -253,6 +253,12 @@ interface RiderApiService {
 
     @GET("api/v1/wallets/export")
     suspend fun exportWalletCsv(): Response<okhttp3.ResponseBody>
+
+    @POST("api/v1/rides/{ride_id}/destination-change")
+    suspend fun requestDestinationChange(
+        @Path("ride_id") rideId: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any>
+    ): Response<Map<String, Any>>
 }
 
 data class MapSearchRequest(
