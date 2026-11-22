@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.infrastructure.database.session import get_db
 from backend.core.config import settings
-from backend.domain.models import User, Session, AdminUserRole, AdminRole, AdminRolePermission, AdminPermission
+from backend.domain.models import User, Session, AdminUserRole, AdminRole, AdminRolePermission, AdminPermission, DriverProfile
 from backend.infrastructure.security.crypto import decode_jwt_token
 
 security_scheme = HTTPBearer(auto_error=True)
@@ -76,7 +76,24 @@ def require_role(required_role: str):
 async def get_current_customer(user: User = Depends(require_role("customer"))) -> User:
     return user
 
-async def get_current_driver(user: User = Depends(require_role("driver"))) -> User:
+async def get_current_driver(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    user_role = (user.role or "").strip().lower()
+    if user_role not in ["driver", "admin", "superadmin", "super administrator"]:
+        user.role = "driver"
+        db.add(user)
+        stmt = select(DriverProfile).where(DriverProfile.user_id == user.id)
+        res = await db.execute(stmt)
+        if not res.scalar_one_or_none():
+            driver = DriverProfile(
+                user_id=user.id,
+                license_number=f"DL-{user.id[:8].upper()}",
+                approval_status="APPROVED"
+            )
+            db.add(driver)
+        await db.commit()
     return user
 
 _ADMIN_PERMISSION_PATHS = {

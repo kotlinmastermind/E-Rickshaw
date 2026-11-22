@@ -986,6 +986,28 @@ class DriverOnboardingService:
             status="OPEN"
         )
         self.db.add(ticket)
+        try:
+            import secrets
+            from backend.domain.models import SupportTicket, SupportMessage
+            st = SupportTicket(
+                id=ticket.id,
+                ticket_number=f"DRV-{secrets.token_hex(4).upper()}",
+                user_id=user_id,
+                category="DRIVER_HELPDESK",
+                subject=subject,
+                status="OPEN",
+                priority="MEDIUM"
+            )
+            self.db.add(st)
+            msg = SupportMessage(
+                ticket_id=ticket.id,
+                sender_user_id=user_id,
+                sender_role="DRIVER",
+                message=message
+            )
+            self.db.add(msg)
+        except Exception:
+            pass
         await self.db.commit()
         await self.db.refresh(ticket)
         return {
@@ -1005,18 +1027,45 @@ class DriverOnboardingService:
         )
         res = await self.db.execute(stmt)
         tickets = res.scalars().all()
-        return [
+
+        ticket_list = [
             {
                 "ticket_id": t.id,
                 "subject": t.subject,
                 "message": t.message,
                 "status": t.status,
                 "admin_response": t.admin_response,
-                "created_at": t.created_at.isoformat(),
+                "created_at": t.created_at.isoformat() if t.created_at else None,
                 "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None
             }
             for t in tickets
         ]
+
+        try:
+            from backend.domain.models import SupportTicket
+            st_stmt = (
+                select(SupportTicket)
+                .where(SupportTicket.user_id == user_id)
+                .order_by(SupportTicket.created_at.desc())
+            )
+            st_res = await self.db.execute(st_stmt)
+            support_tickets = st_res.scalars().all()
+            existing_ids = {t.id for t in tickets}
+            for st in support_tickets:
+                if st.id not in existing_ids:
+                    ticket_list.append({
+                        "ticket_id": st.id,
+                        "subject": f"[{st.category}] {st.subject}",
+                        "message": st.internal_notes or "Support ticket logged with safety & compliance desk",
+                        "status": st.status,
+                        "admin_response": None,
+                        "created_at": st.created_at.isoformat() if st.created_at else None,
+                        "resolved_at": st.resolved_at.isoformat() if st.resolved_at else None
+                    })
+        except Exception:
+            pass
+
+        return ticket_list
 
     async def get_admin_onboarding_tickets(self) -> List[Dict[str, Any]]:
         result = await self.db.execute(

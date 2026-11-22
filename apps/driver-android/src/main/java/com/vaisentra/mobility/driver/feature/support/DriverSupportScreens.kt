@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
@@ -291,7 +292,14 @@ fun DriverHelpdeskScreen(
             if (showCreateForm) {
                 item {
                     CockpitCard {
-                        Text("NEW SUPPORT TICKET", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("NEW SUPPORT TICKET", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Target: driver_onboarding_tickets", color = PilotElectricCyan, fontSize = 10.sp)
+                        }
                         Spacer(Modifier.height(8.dp))
                         CockpitTextField(
                             value = subject,
@@ -308,7 +316,7 @@ fun DriverHelpdeskScreen(
                         )
                         Spacer(Modifier.height(10.dp))
                         CockpitButton(
-                            text = if (isSubmitting) "Submitting..." else "Submit Ticket",
+                            text = if (isSubmitting) "Submitting to Supabase..." else "Submit Ticket",
                             enabled = !isSubmitting && subject.trim().length >= 4 && message.trim().length >= 10,
                             onClick = {
                                 isSubmitting = true
@@ -319,7 +327,7 @@ fun DriverHelpdeskScreen(
                                         subject = ""
                                         message = ""
                                         showCreateForm = false
-                                        onShowToast("Support ticket created!")
+                                        onShowToast("Support ticket created in Supabase!")
                                     } else {
                                         onShowToast("Failed: ${res.exceptionOrNull()?.message}")
                                     }
@@ -331,29 +339,84 @@ fun DriverHelpdeskScreen(
                 }
             }
 
+            item {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("REGISTERED HELPDESK TICKETS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Table: driver_onboarding_tickets", color = PilotElectricCyan, fontSize = 10.sp)
+                }
+            }
+
             if (tickets.isEmpty()) {
                 item {
                     CockpitCard {
-                        Text("No support tickets found.", color = CockpitTextMuted, fontSize = 13.sp)
+                        Text(
+                            text = "No support tickets found in Supabase. Raise a new ticket above to get 24x7 pilot partner support.",
+                            color = CockpitTextMuted,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             } else {
                 items(tickets) { ticket ->
-                    val statusColor = if (ticket.status.equals("RESOLVED", ignoreCase = true) ||
+                    val isResolved = ticket.status.equals("RESOLVED", ignoreCase = true) ||
                         ticket.status.equals("CLOSED", ignoreCase = true)
-                    ) EmeraldPrimary else AmberWarning
-                    CockpitCard {
+                    val statusColor = if (isResolved) PilotOnlineGreen else PilotAmber
+
+                    CockpitCard(cornerRadius = 14.dp) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(ticket.ticketId.take(10), color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Text(ticket.subject, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("Created: ${ticket.createdAt}", color = CockpitTextSecondary, fontSize = 11.sp)
+                            Text(
+                                text = ticket.ticketId.take(12).ifBlank { "TICKET-ID" },
+                                color = CockpitTextMuted,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            CockpitBadge(
+                                text = ticket.status,
+                                backgroundColor = statusColor.copy(alpha = 0.2f),
+                                textColor = statusColor
+                            )
+                        }
+
+                        Spacer(Modifier.height(6.dp))
+                        Text(ticket.subject, color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+
+                        if (ticket.message.isNotBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(ticket.message, color = CockpitTextSecondary, fontSize = 12.sp)
+                        }
+
+                        if (!ticket.adminResponse.isNullOrBlank()) {
+                            Spacer(Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(CockpitCardBackground)
+                                    .padding(8.dp)
+                            ) {
+                                Column {
+                                    Text("OPERATIONS TEAM RESPONSE", color = PilotElectricCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(ticket.adminResponse, color = CockpitTextPrimary, fontSize = 12.sp)
+                                }
                             }
-                            CockpitBadge(ticket.status, statusColor)
+                        }
+
+                        if (ticket.createdAt.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "Created: ${ticket.createdAt.take(19).replace("T", " ")}",
+                                color = CockpitTextMuted,
+                                fontSize = 10.sp
+                            )
                         }
                     }
                 }
@@ -432,5 +495,21 @@ fun NotificationsCenterScreen(
                 }
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun DriverHelpdeskScreenPreview() {
+    DriverGoTheme {
+        DriverHelpdeskScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun NotificationsCenterScreenPreview() {
+    DriverGoTheme {
+        NotificationsCenterScreen()
     }
 }
