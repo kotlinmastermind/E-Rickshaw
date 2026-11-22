@@ -12,12 +12,16 @@ from backend.application.services.cascading_dispatch_service import CascadingDis
 router = APIRouter(prefix="/drivers", tags=["Driver Operations"])
 
 class DispatchPreferencesPayload(BaseModel):
-    minimum_fare_cents: int = Field(0, ge=0, le=100000000)
-    maximum_pickup_distance_km: float = Field(20, gt=0, le=200)
-    vehicle_categories: List[str] = Field(default_factory=list, max_length=20)
-    preferred_drop_zones: List[str] = Field(default_factory=list, max_length=50)
-    voice_guidance_enabled: bool = True
-    reroute_on_closure_enabled: bool = True
+    minimum_fare_cents: Optional[int] = Field(0, ge=0, le=100000000)
+    maximum_pickup_distance_km: Optional[float] = Field(20, gt=0, le=200)
+    vehicle_categories: Optional[List[str]] = Field(default_factory=list, max_length=20)
+    preferred_drop_zones: Optional[List[str]] = Field(default_factory=list, max_length=50)
+    voice_guidance_enabled: Optional[bool] = None
+    voice_navigation: Optional[bool] = None
+    reroute_on_closure_enabled: Optional[bool] = None
+    auto_accept_pool: Optional[bool] = None
+    high_surge_alerts: Optional[bool] = None
+    preferred_corridor: Optional[str] = None
 
 class RejectOfferPayload(BaseModel):
     reason: str = Field(..., pattern="^(TOO_FAR|FARE_TOO_LOW|WRONG_CATEGORY|UNAVAILABLE|OTHER|DISPATCH_TIMEOUT|PILOT_DECLINED|PASSENGER_MISMATCH|LOW_BATTERY)$")
@@ -27,12 +31,15 @@ async def get_dispatch_offers(user: User = Depends(get_current_driver), db: Asyn
     return await DriverTripOperationsService(db).get_offers(user.id)
 
 @router.get("/dispatch/preferences")
+@router.get("/preferences")
 async def get_dispatch_preferences(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
     return await DriverTripOperationsService(db).get_preferences(user.id)
 
 @router.put("/dispatch/preferences")
+@router.put("/preferences")
+@router.patch("/preferences")
 async def update_dispatch_preferences(payload: DispatchPreferencesPayload, user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
-    return await DriverTripOperationsService(db).update_preferences(user.id, payload.model_dump())
+    return await DriverTripOperationsService(db).update_preferences(user.id, payload.model_dump(exclude_unset=True))
 
 @router.post("/dispatch/offers/{ride_id}/reject")
 async def reject_dispatch_offer(ride_id: str, payload: RejectOfferPayload, user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):

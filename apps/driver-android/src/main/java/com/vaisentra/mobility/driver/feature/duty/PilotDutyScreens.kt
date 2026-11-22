@@ -276,11 +276,24 @@ fun ShiftEndScreen(onNavigate: (String) -> Unit) {
 @Composable
 fun DriverPreferencesScreen(onNavigate: (String) -> Unit) {
     val scope = rememberCoroutineScope()
-    var autoAcceptPool by remember { mutableStateOf(true) }
-    var preferEastDelhi by remember { mutableStateOf(true) }
+    val driverPrefs by DriverRepository.driverPreferences.collectAsState()
+    var autoAcceptPool by remember(driverPrefs.autoAcceptPool) { mutableStateOf(driverPrefs.autoAcceptPool) }
+    var preferEastDelhi by remember(driverPrefs.preferredCorridor) {
+        mutableStateOf(driverPrefs.preferredCorridor.contains("Anand Vihar", ignoreCase = true))
+    }
     var currentServerUrl by remember { mutableStateOf(DriverNetworkClient.baseUrl) }
     var healthStatus by remember { mutableStateOf("Checking...") }
     var isChecking by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchDriverPreferences()
+    }
+
+    LaunchedEffect(driverPrefs) {
+        autoAcceptPool = driverPrefs.autoAcceptPool
+        preferEastDelhi = driverPrefs.preferredCorridor.contains("Anand Vihar", ignoreCase = true)
+    }
 
     LaunchedEffect(currentServerUrl) {
         isChecking = true
@@ -322,7 +335,15 @@ fun DriverPreferencesScreen(onNavigate: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(text = "Auto-Accept Eco-Pool Feeder Rides", color = PilotTextWhite, fontSize = 13.sp)
-                Switch(checked = autoAcceptPool, onCheckedChange = { autoAcceptPool = it })
+                Switch(
+                    checked = autoAcceptPool,
+                    onCheckedChange = { newValue ->
+                        autoAcceptPool = newValue
+                        scope.launch {
+                            DriverRepository.updateDriverPreferences(autoAcceptPool = newValue)
+                        }
+                    }
+                )
             }
             Spacer(modifier = Modifier.height(12.dp))
             Row(
@@ -331,7 +352,16 @@ fun DriverPreferencesScreen(onNavigate: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(text = "Preferred Corridor: Anand Vihar / CP", color = PilotTextWhite, fontSize = 13.sp)
-                Switch(checked = preferEastDelhi, onCheckedChange = { preferEastDelhi = it })
+                Switch(
+                    checked = preferEastDelhi,
+                    onCheckedChange = { newValue ->
+                        preferEastDelhi = newValue
+                        scope.launch {
+                            val corridor = if (newValue) "Anand Vihar / CP" else "All Operational Zones"
+                            DriverRepository.updateDriverPreferences(preferredCorridor = corridor)
+                        }
+                    }
+                )
             }
         }
 
@@ -448,10 +478,24 @@ fun DriverPreferencesScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(20.dp))
 
         CockpitButton(
-            text = "Save Preferences & Return",
+            text = if (isSaving) "Saving Preferences..." else "Save Preferences & Return",
+            enabled = !isSaving,
             onClick = {
-                DriverDialogController.showToast("Preferences saved.")
-                onNavigate("duty_dashboard")
+                isSaving = true
+                scope.launch {
+                    val corridor = if (preferEastDelhi) "Anand Vihar / CP" else "All Operational Zones"
+                    val res = DriverRepository.updateDriverPreferences(
+                        autoAcceptPool = autoAcceptPool,
+                        preferredCorridor = corridor
+                    )
+                    isSaving = false
+                    if (res.isSuccess) {
+                        DriverDialogController.showToast("Dispatch preferences saved to server!")
+                        onNavigate("duty_dashboard")
+                    } else {
+                        DriverDialogController.showToast("Failed to save: ${res.exceptionOrNull()?.message}")
+                    }
+                }
             }
         )
     }

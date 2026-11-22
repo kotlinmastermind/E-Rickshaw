@@ -353,6 +353,9 @@ class DriverDispatchPreferences(Base):
     navigation_provider: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     voice_guidance_enabled: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     reroute_on_closure_enabled: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    auto_accept_pool: Mapped[Optional[bool]] = mapped_column(Boolean, default=True, nullable=True)
+    high_surge_alerts: Mapped[Optional[bool]] = mapped_column(Boolean, default=True, nullable=True)
+    preferred_corridor: Mapped[Optional[str]] = mapped_column(String(128), default="Anand Vihar / CP", nullable=True)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

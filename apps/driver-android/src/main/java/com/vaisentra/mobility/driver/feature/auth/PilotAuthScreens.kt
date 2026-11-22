@@ -329,9 +329,16 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
     var showLogoutDialog by remember { mutableStateOf(false) }
 
     // Account settings preferences state
-    var autoAcceptPool by remember { mutableStateOf(true) }
-    var highSurgeAlerts by remember { mutableStateOf(true) }
-    var voiceNavigation by remember { mutableStateOf(true) }
+    val driverPrefs by DriverRepository.driverPreferences.collectAsState()
+    var autoAcceptPool by remember(driverPrefs.autoAcceptPool) { mutableStateOf(driverPrefs.autoAcceptPool) }
+    var highSurgeAlerts by remember(driverPrefs.highSurgeAlerts) { mutableStateOf(driverPrefs.highSurgeAlerts) }
+    var voiceNavigation by remember(driverPrefs.voiceNavigation) { mutableStateOf(driverPrefs.voiceNavigation) }
+
+    LaunchedEffect(driverPrefs) {
+        autoAcceptPool = driverPrefs.autoAcceptPool
+        highSurgeAlerts = driverPrefs.highSurgeAlerts
+        voiceNavigation = driverPrefs.voiceNavigation
+    }
 
     // Photo picker launcher
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -370,6 +377,7 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
 
     LaunchedEffect(Unit) {
         DriverRepository.fetchDriverProfile()
+        DriverRepository.fetchDriverPreferences()
     }
 
     Column(
@@ -628,7 +636,17 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
                 }
                 Switch(
                     checked = autoAcceptPool,
-                    onCheckedChange = { autoAcceptPool = it },
+                    onCheckedChange = { newValue ->
+                        autoAcceptPool = newValue
+                        scope.launch {
+                            val res = DriverRepository.updateDriverPreferences(autoAcceptPool = newValue)
+                            if (res.isSuccess) {
+                                DriverDialogController.showToast("Eco-Pool Auto-Accept ${if (newValue) "Enabled" else "Disabled"}")
+                            } else {
+                                DriverDialogController.showToast("Failed to sync: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
+                    },
                     colors = SwitchDefaults.colors(checkedTrackColor = PilotOnlineGreen)
                 )
             }
@@ -646,7 +664,17 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
                 }
                 Switch(
                     checked = highSurgeAlerts,
-                    onCheckedChange = { highSurgeAlerts = it },
+                    onCheckedChange = { newValue ->
+                        highSurgeAlerts = newValue
+                        scope.launch {
+                            val res = DriverRepository.updateDriverPreferences(highSurgeAlerts = newValue)
+                            if (res.isSuccess) {
+                                DriverDialogController.showToast("Surge Audio Alerts ${if (newValue) "Enabled" else "Disabled"}")
+                            } else {
+                                DriverDialogController.showToast("Failed to sync: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
+                    },
                     colors = SwitchDefaults.colors(checkedTrackColor = PilotOnlineGreen)
                 )
             }
@@ -664,7 +692,17 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
                 }
                 Switch(
                     checked = voiceNavigation,
-                    onCheckedChange = { voiceNavigation = it },
+                    onCheckedChange = { newValue ->
+                        voiceNavigation = newValue
+                        scope.launch {
+                            val res = DriverRepository.updateDriverPreferences(voiceNavigation = newValue)
+                            if (res.isSuccess) {
+                                DriverDialogController.showToast("Navigation Sound ${if (newValue) "Enabled" else "Disabled"}")
+                            } else {
+                                DriverDialogController.showToast("Failed to sync: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
+                    },
                     colors = SwitchDefaults.colors(checkedTrackColor = PilotOnlineGreen)
                 )
             }

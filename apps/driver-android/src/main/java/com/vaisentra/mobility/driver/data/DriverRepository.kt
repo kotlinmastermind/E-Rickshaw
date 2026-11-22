@@ -269,6 +269,9 @@ object DriverRepository {
     private val _roadRestrictions = MutableStateFlow<List<RoadRestrictionDto>>(emptyList())
     val roadRestrictions: StateFlow<List<RoadRestrictionDto>> = _roadRestrictions.asStateFlow()
 
+    private val _driverPreferences = MutableStateFlow(DriverPreferencesState())
+    val driverPreferences: StateFlow<DriverPreferencesState> = _driverPreferences.asStateFlow()
+
     private val _payoutAccounts = MutableStateFlow<List<PayoutAccountDto>>(emptyList())
     val payoutAccounts: StateFlow<List<PayoutAccountDto>> = _payoutAccounts.asStateFlow()
 
@@ -1507,4 +1510,69 @@ object DriverRepository {
             Result.failure(e)
         }
     }
+
+    suspend fun fetchDriverPreferences(): Result<DriverPreferencesState> {
+        return try {
+            val res = DriverNetworkClient.apiService.getDriverPreferences()
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                val prefs = DriverPreferencesState(
+                    autoAcceptPool = (body["auto_accept_pool"] as? Boolean) ?: true,
+                    highSurgeAlerts = (body["high_surge_alerts"] as? Boolean) ?: true,
+                    voiceNavigation = (body["voice_guidance_enabled"] as? Boolean)
+                        ?: (body["voice_navigation"] as? Boolean) ?: true,
+                    preferredCorridor = (body["preferred_corridor"] as? String) ?: "Anand Vihar / CP"
+                )
+                _driverPreferences.value = prefs
+                Result.success(prefs)
+            } else {
+                Result.failure(IllegalStateException("getDriverPreferences HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateDriverPreferences(
+        autoAcceptPool: Boolean? = null,
+        highSurgeAlerts: Boolean? = null,
+        voiceNavigation: Boolean? = null,
+        preferredCorridor: String? = null
+    ): Result<Boolean> {
+        return try {
+            val current = _driverPreferences.value
+            val updated = current.copy(
+                autoAcceptPool = autoAcceptPool ?: current.autoAcceptPool,
+                highSurgeAlerts = highSurgeAlerts ?: current.highSurgeAlerts,
+                voiceNavigation = voiceNavigation ?: current.voiceNavigation,
+                preferredCorridor = preferredCorridor ?: current.preferredCorridor
+            )
+            _driverPreferences.value = updated
+
+            val payload = mutableMapOf<String, Any>()
+            autoAcceptPool?.let { payload["auto_accept_pool"] = it }
+            highSurgeAlerts?.let { payload["high_surge_alerts"] = it }
+            voiceNavigation?.let {
+                payload["voice_guidance_enabled"] = it
+                payload["voice_navigation"] = it
+            }
+            preferredCorridor?.let { payload["preferred_corridor"] = it }
+
+            val res = DriverNetworkClient.apiService.updateDriverPreferences(payload)
+            if (res.isSuccessful) {
+                Result.success(true)
+            } else {
+                Result.failure(IllegalStateException("updateDriverPreferences HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
+
+data class DriverPreferencesState(
+    val autoAcceptPool: Boolean = true,
+    val highSurgeAlerts: Boolean = true,
+    val voiceNavigation: Boolean = true,
+    val preferredCorridor: String = "Anand Vihar / CP"
+)

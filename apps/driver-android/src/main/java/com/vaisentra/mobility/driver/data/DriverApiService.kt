@@ -225,6 +225,13 @@ interface DriverApiService {
 
     @POST("api/v1/drivers/auto-accept")
     suspend fun setAutoAccept(@Body body: AutoAcceptRequest): Response<Map<String, Any>>
+
+    @GET("api/v1/drivers/preferences")
+    suspend fun getDriverPreferences(): Response<Map<String, Any>>
+
+    @PUT("api/v1/drivers/preferences")
+    suspend fun updateDriverPreferences(@Body body: Map<String, Any>): Response<Map<String, Any>>
+
     @PUT("api/v1/drivers/profile")
     suspend fun updateDriverProfile(@Body body: DriverProfileUpdateRequest): Response<Map<String, Any>>
 

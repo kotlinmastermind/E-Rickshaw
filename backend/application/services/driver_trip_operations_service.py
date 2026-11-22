@@ -43,7 +43,19 @@ class DriverTripOperationsService:
         result = await self.db.execute(select(DriverDispatchPreferences).where(DriverDispatchPreferences.driver_id == driver_id))
         pref = result.scalar_one_or_none()
         if pref is None:
-            pref = DriverDispatchPreferences(driver_id=driver_id)
+            pref = DriverDispatchPreferences(
+                driver_id=driver_id,
+                minimum_fare_cents=0,
+                maximum_pickup_distance_km=20.0,
+                vehicle_categories_json="[]",
+                navigation_provider="GOOGLE_MAPS",
+                voice_guidance_enabled=True,
+                reroute_on_closure_enabled=True,
+                auto_accept_pool=True,
+                high_surge_alerts=True,
+                preferred_corridor="Anand Vihar / CP",
+                updated_at=utc_now()
+            )
             self.db.add(pref)
             await self.db.flush()
         return pref
@@ -59,22 +71,42 @@ class DriverTripOperationsService:
             categories = json.loads(pref.vehicle_categories_json or "[]")
         except (TypeError, json.JSONDecodeError):
             categories = []
-        return {"minimum_fare_cents": pref.minimum_fare_cents,
-                "maximum_pickup_distance_km": pref.maximum_pickup_distance_km,
-                "vehicle_categories": categories,
-                "navigation_provider": pref.navigation_provider,
-                "voice_guidance_enabled": pref.voice_guidance_enabled,
-                "reroute_on_closure_enabled": pref.reroute_on_closure_enabled}
+        return {
+            "minimum_fare_cents": pref.minimum_fare_cents or 0,
+            "maximum_pickup_distance_km": pref.maximum_pickup_distance_km or 20.0,
+            "vehicle_categories": categories,
+            "navigation_provider": pref.navigation_provider or "GOOGLE_MAPS",
+            "voice_guidance_enabled": True if pref.voice_guidance_enabled is None else pref.voice_guidance_enabled,
+            "reroute_on_closure_enabled": True if pref.reroute_on_closure_enabled is None else pref.reroute_on_closure_enabled,
+            "auto_accept_pool": True if pref.auto_accept_pool is None else pref.auto_accept_pool,
+            "high_surge_alerts": True if pref.high_surge_alerts is None else pref.high_surge_alerts,
+            "preferred_corridor": pref.preferred_corridor or "Anand Vihar / CP"
+        }
 
     async def update_preferences(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         driver = await self._driver(user_id)
         pref = await self._preferences(driver.id)
-        pref.minimum_fare_cents = payload["minimum_fare_cents"]
-        pref.maximum_pickup_distance_km = payload["maximum_pickup_distance_km"]
-        pref.vehicle_categories_json = json.dumps(payload["vehicle_categories"])
-        pref.navigation_provider = payload["navigation_provider"]
-        pref.voice_guidance_enabled = payload["voice_guidance_enabled"]
-        pref.reroute_on_closure_enabled = payload["reroute_on_closure_enabled"]
+        if "minimum_fare_cents" in payload and payload["minimum_fare_cents"] is not None:
+            pref.minimum_fare_cents = payload["minimum_fare_cents"]
+        if "maximum_pickup_distance_km" in payload and payload["maximum_pickup_distance_km"] is not None:
+            pref.maximum_pickup_distance_km = payload["maximum_pickup_distance_km"]
+        if "vehicle_categories" in payload and payload["vehicle_categories"] is not None:
+            pref.vehicle_categories_json = json.dumps(payload["vehicle_categories"])
+        if "navigation_provider" in payload and payload["navigation_provider"] is not None:
+            pref.navigation_provider = payload["navigation_provider"]
+        if "voice_guidance_enabled" in payload and payload["voice_guidance_enabled"] is not None:
+            pref.voice_guidance_enabled = payload["voice_guidance_enabled"]
+        if "voice_navigation" in payload and payload["voice_navigation"] is not None:
+            pref.voice_guidance_enabled = payload["voice_navigation"]
+        if "reroute_on_closure_enabled" in payload and payload["reroute_on_closure_enabled"] is not None:
+            pref.reroute_on_closure_enabled = payload["reroute_on_closure_enabled"]
+        if "auto_accept_pool" in payload and payload["auto_accept_pool"] is not None:
+            pref.auto_accept_pool = payload["auto_accept_pool"]
+        if "high_surge_alerts" in payload and payload["high_surge_alerts"] is not None:
+            pref.high_surge_alerts = payload["high_surge_alerts"]
+        if "preferred_corridor" in payload and payload["preferred_corridor"] is not None:
+            pref.preferred_corridor = payload["preferred_corridor"]
+        pref.updated_at = utc_now()
         await self.db.commit()
         return self._preferences_dict(pref)
 
