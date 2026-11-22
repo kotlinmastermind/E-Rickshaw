@@ -165,6 +165,9 @@ interface RiderApiService {
         @Body body: Map<String, Any>
     ): Response<Map<String, Any>>
 
+    @GET("api/v1/customers/preferences")
+    suspend fun getCustomerPreferences(): Response<Map<String, Any>>
+
     @PUT("api/v1/customers/preferences")
     suspend fun updatePreferences(
         @Body body: Map<String, Any>

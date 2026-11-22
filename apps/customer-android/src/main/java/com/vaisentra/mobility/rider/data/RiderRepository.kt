@@ -68,6 +68,9 @@ object RiderRepository {
     private val _fareRules = MutableStateFlow<List<FareRuleDto>>(emptyList())
     val fareRules: StateFlow<List<FareRuleDto>> = _fareRules.asStateFlow()
 
+    private val _customerPreferences = MutableStateFlow<Map<String, Any>>(emptyMap())
+    val customerPreferences: StateFlow<Map<String, Any>> = _customerPreferences.asStateFlow()
+
     suspend fun fetchFareRules() {
         try {
             val res = NetworkClient.apiService.getFareRules()
@@ -727,15 +730,73 @@ object RiderRepository {
         }
     }
 
+    suspend fun fetchCustomerPreferences(): Result<Map<String, Any>> {
+        return try {
+            val res = NetworkClient.apiService.getCustomerPreferences()
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                _customerPreferences.value = body
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveCustomerPreferences(
+        tempCelsius: Float? = null,
+        quietRide: Boolean? = null,
+        preferredMusic: String? = null,
+        wheelchair: Boolean? = null,
+        petFriendly: Boolean? = null,
+        extraLegroom: Boolean? = null,
+        corporateNotes: String? = null
+    ): Result<Boolean> {
+        return try {
+            val payload = mutableMapOf<String, Any>()
+            tempCelsius?.let { payload["temperature_celsius"] = it }
+            quietRide?.let { payload["quiet_ride"] = it }
+            preferredMusic?.let { payload["preferred_music"] = it }
+            wheelchair?.let { payload["wheelchair_access_required"] = it }
+            petFriendly?.let { payload["pet_friendly_preferred"] = it }
+            extraLegroom?.let { payload["extra_legroom_required"] = it }
+            corporateNotes?.let { payload["accessibility_notes"] = it }
+
+            val res = NetworkClient.apiService.updatePreferences(payload)
+            if (res.isSuccessful) {
+                fetchCustomerPreferences()
+                Result.success(true)
+            } else {
+                Result.failure(IllegalStateException("HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun lockTariffPrice(durationHours: Int = 24): Result<Map<String, Any>?> {
+        return try {
+            val rideId = activeRide.value?.id
+            val payload = mutableMapOf<String, Any>(
+                "lock_duration_hours" to durationHours,
+                "category_id" to "E_AUTO"
+            )
+            if (!rideId.isNullOrBlank()) {
+                payload["ride_id"] = rideId
+            }
+            val res = NetworkClient.apiService.lockPrice(payload)
+            if (res.isSuccessful) Result.success(res.body()) else Result.failure(Exception("HTTP ${res.code()}"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun savePreferences(temp: String, quietRide: Boolean): Result<Boolean> {
         return try {
-            val res = NetworkClient.apiService.updatePreferences(
-                mapOf(
-                    "temperature_target" to temp,
-                    "quiet_ride_enabled" to quietRide
-                )
-            )
-            Result.success(res.isSuccessful)
+            val tempFloat = temp.replace("°C", "").replace("C", "").trim().toFloatOrNull() ?: 22f
+            saveCustomerPreferences(tempCelsius = tempFloat, quietRide = quietRide)
         } catch (e: Exception) {
             Result.failure(e)
         }
