@@ -227,4 +227,13 @@ interface DriverApiService {
     suspend fun setAutoAccept(@Body body: AutoAcceptRequest): Response<Map<String, Any>>
     @PUT("api/v1/drivers/profile")
     suspend fun updateDriverProfile(@Body body: DriverProfileUpdateRequest): Response<Map<String, Any>>
+
+    @PUT("api/v1/drivers/avatar")
+    suspend fun updateDriverAvatar(@Body body: AvatarUpdateRequest): Response<Map<String, Any>>
+
+    @DELETE("api/v1/drivers/avatar")
+    suspend fun deleteDriverAvatar(): Response<Map<String, Any>>
+
+    @POST("api/v1/auth/avatar")
+    suspend fun updateAuthAvatar(@Body body: AvatarUpdateRequest): Response<Map<String, Any>>
 }

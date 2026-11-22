@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
@@ -253,4 +254,47 @@ fun CorporateProfileScreen(onNavigate: (String) -> Unit) {
         }
     }
 }
+
+@Preview
+@Composable
+fun CorporateProfileScreenPreview() {
+    RiderGoTheme {
+        CorporateProfileScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun CabinComfortScreenPreview() {
+    RiderGoTheme {
+        CabinComfortScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun AccessibilityFilterScreenPreview() {
+    RiderGoTheme {
+        AccessibilityFilterScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun PriceLockScreenPreview() {
+    RiderGoTheme {
+        PriceLockScreen(onNavigate = {})
+    }
+}
+
+@Preview
+@Composable
+fun PromoVouchersScreenPreview() {
+    RiderGoTheme {
+        PromoVouchersScreen(onNavigate = {})
+    }
+}
+
+
+
 

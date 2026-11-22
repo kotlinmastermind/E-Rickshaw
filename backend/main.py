@@ -250,6 +250,11 @@ app.include_router(analytics_bi.router, prefix=settings.API_V1_STR)
 app.include_router(dispatch.router, prefix=settings.API_V1_STR)
 
 # --- Dynamic Admin Web Panel Hosting on Render ---
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(os.path.join(STATIC_DIR, "avatars"), exist_ok=True)
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 STATIC_ADMIN_DIR = os.path.join(os.path.dirname(__file__), "static", "admin")
 if os.path.exists(STATIC_ADMIN_DIR):
     assets_dir = os.path.join(STATIC_ADMIN_DIR, "assets")

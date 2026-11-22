@@ -54,6 +54,10 @@ class DriverProfileUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
     phone_number: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+class DriverAvatarPayload(BaseModel):
+    avatar_url: str = Field(..., min_length=1)
 
 @router.get("/profile")
 async def get_driver_profile(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
@@ -71,7 +75,8 @@ async def get_driver_profile(user: User = Depends(get_current_driver), db: Async
         "rating_average": driver.rating_average,
         "rating_count": driver.rating_count,
         "total_trips": driver.total_trips,
-        "wallet_balance_cents": driver.wallet_balance_cents
+        "wallet_balance_cents": driver.wallet_balance_cents,
+        "avatar_url": user.avatar_url
     }
 
 @router.get("/scorecard")
@@ -99,8 +104,30 @@ async def update_driver_profile(
         user.email = payload.email
     if payload.phone_number is not None:
         user.phone_number = payload.phone_number
+    if payload.avatar_url is not None:
+        user.avatar_url = payload.avatar_url
     await db.commit()
-    return {"message": "Driver profile updated."}
+    return {"message": "Driver profile updated.", "avatar_url": user.avatar_url}
+
+@router.put("/avatar")
+@router.post("/avatar")
+async def update_driver_avatar(
+    payload: DriverAvatarPayload,
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    user.avatar_url = payload.avatar_url.strip()
+    await db.commit()
+    return {"message": "Profile photo updated successfully.", "avatar_url": user.avatar_url}
+
+@router.delete("/avatar")
+async def delete_driver_avatar(
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    user.avatar_url = None
+    await db.commit()
+    return {"message": "Profile photo removed successfully.", "avatar_url": None}
 
 @router.post("/documents")
 async def upload_document(

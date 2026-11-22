@@ -1,8 +1,14 @@
 package com.vaisentra.mobility.driver.data
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import com.vaisentra.mobility.driver.components.DriverDialogController
 import com.vaisentra.mobility.driver.components.DriverPopupType
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -10,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * DriverGo Central Repository bridging UI Screens and Popups with FastAPI + Supabase Backend
@@ -86,7 +93,10 @@ object DriverRepository {
     }
 
     fun initProfilePhoto() {
-        _profilePhotoUri.value = DriverNetworkClient.getProfilePhotoUri()
+        val cached = DriverNetworkClient.getProfilePhotoUri()
+        if (!cached.isNullOrBlank()) {
+            _profilePhotoUri.value = cached
+        }
     }
 
     fun updateProfilePhoto(uri: String?) {
@@ -95,6 +105,119 @@ object DriverRepository {
             DriverNetworkClient.saveProfilePhotoUri(uri)
         } else {
             DriverNetworkClient.clearProfilePhotoUri()
+        }
+    }
+
+    suspend fun loadAvatarBitmap(context: Context, source: String?): Bitmap? = withContext(Dispatchers.IO) {
+        if (source.isNullOrBlank()) return@withContext null
+        try {
+            when {
+                source.startsWith("data:image") -> {
+                    val base64Part = source.substringAfter("base64,")
+                    val decodedBytes = Base64.decode(base64Part, Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+                }
+                source.startsWith("http://") || source.startsWith("https://") -> {
+                    val url = java.net.URL(source)
+                    val connection = url.openConnection() as java.net.HttpURLConnection
+                    connection.connectTimeout = 8000
+                    connection.readTimeout = 8000
+                    connection.doInput = true
+                    connection.connect()
+                    connection.inputStream.use { input ->
+                        BitmapFactory.decodeStream(input)
+                    }
+                }
+                source.startsWith("content://") || source.startsWith("file://") -> {
+                    context.contentResolver.openInputStream(Uri.parse(source))?.use { input ->
+                        BitmapFactory.decodeStream(input)
+                    }
+                }
+                else -> {
+                    try {
+                        val decodedBytes = Base64.decode(source, Base64.DEFAULT)
+                        BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+                    } catch (_: Exception) {
+                        context.contentResolver.openInputStream(Uri.parse(source))?.use { input ->
+                            BitmapFactory.decodeStream(input)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to decode avatar bitmap: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun uploadProfilePhotoBitmap(context: Context, bitmap: Bitmap): Result<Boolean> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val maxDim = 320
+                val scale = minOf(1f, maxDim.toFloat() / maxOf(bitmap.width, bitmap.height))
+                val scaledWidth = (bitmap.width * scale).toInt().coerceAtLeast(1)
+                val scaledHeight = (bitmap.height * scale).toInt().coerceAtLeast(1)
+                val scaledBitmap = if (scale < 1f) Bitmap.createScaledBitmap(bitmap, scaledWidth, scaledHeight, true) else bitmap
+
+                val stream = ByteArrayOutputStream()
+                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+                val bytes = stream.toByteArray()
+                val base64DataUri = "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+
+                _profilePhotoUri.value = base64DataUri
+                DriverNetworkClient.saveProfilePhotoUri(base64DataUri)
+                _profile.value = _profile.value.copy(avatarUrl = base64DataUri)
+
+                val updateRes = DriverNetworkClient.apiService.updateDriverProfile(
+                    DriverProfileUpdateRequest(avatarUrl = base64DataUri)
+                )
+                if (updateRes.isSuccessful) {
+                    Log.i(TAG, "Profile photo synced to database successfully via PUT /drivers/profile")
+                    Result.success(true)
+                } else {
+                    val avatarRes = DriverNetworkClient.apiService.updateDriverAvatar(
+                        AvatarUpdateRequest(avatarUrl = base64DataUri)
+                    )
+                    if (avatarRes.isSuccessful) {
+                        Log.i(TAG, "Profile photo synced to database successfully via /drivers/avatar")
+                        Result.success(true)
+                    } else {
+                        val authRes = DriverNetworkClient.apiService.updateAuthAvatar(
+                            AvatarUpdateRequest(avatarUrl = base64DataUri)
+                        )
+                        if (authRes.isSuccessful) {
+                            Log.i(TAG, "Profile photo synced to database successfully via /auth/avatar")
+                            Result.success(true)
+                        } else {
+                            Result.failure(IllegalStateException("Server update failed: HTTP ${updateRes.code()}"))
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "uploadProfilePhotoBitmap failed: ${e.message}", e)
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun removeProfilePhoto(): Result<Boolean> {
+        return withContext(Dispatchers.IO) {
+            try {
+                _profilePhotoUri.value = null
+                DriverNetworkClient.clearProfilePhotoUri()
+                _profile.value = _profile.value.copy(avatarUrl = null)
+                try {
+                    DriverNetworkClient.apiService.deleteDriverAvatar()
+                } catch (_: Exception) {}
+                try {
+                    DriverNetworkClient.apiService.updateDriverProfile(
+                        DriverProfileUpdateRequest(avatarUrl = "")
+                    )
+                } catch (_: Exception) {}
+                Result.success(true)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
     }
 
@@ -430,6 +553,10 @@ object DriverRepository {
             val body = res.body()
             if (res.isSuccessful && body != null) {
                 _profile.value = body
+                if (!body.avatarUrl.isNullOrBlank()) {
+                    _profilePhotoUri.value = body.avatarUrl
+                    DriverNetworkClient.saveProfilePhotoUri(body.avatarUrl)
+                }
                 Result.success(body)
             } else {
                 Result.failure(IllegalStateException("getProfile failed: HTTP ${res.code()}"))

@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.BuildConfig
 import com.vaisentra.mobility.driver.components.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.delay
@@ -336,33 +338,34 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            try {
-                val inputStream = context.contentResolver.openInputStream(it)
-                val bitmap = BitmapFactory.decodeStream(inputStream)
-                if (bitmap != null) {
-                    profileBitmap = bitmap
-                    DriverRepository.updateProfilePhoto(it.toString())
-                    DriverDialogController.showToast("Profile photo updated successfully!")
+            scope.launch {
+                try {
+                    val bitmap = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(it)?.use { stream ->
+                            BitmapFactory.decodeStream(stream)
+                        }
+                    }
+                    if (bitmap != null) {
+                        profileBitmap = bitmap
+                        val res = DriverRepository.uploadProfilePhotoBitmap(context, bitmap)
+                        if (res.isSuccess) {
+                            DriverDialogController.showToast("Profile photo saved to database successfully!")
+                        } else {
+                            DriverDialogController.showToast("Saved locally: ${res.exceptionOrNull()?.message}")
+                        }
+                    } else {
+                        DriverDialogController.showToast("Unable to decode selected photo.")
+                    }
+                } catch (e: Exception) {
+                    DriverDialogController.showToast("Failed to set photo: ${e.message}")
                 }
-            } catch (e: Exception) {
-                DriverDialogController.showToast("Failed to set photo: ${e.message}")
             }
         }
     }
 
-    // Load initial photo
+    // Load initial photo (supports Base64, web URL, or local content URI)
     LaunchedEffect(profilePhotoUri) {
-        if (!profilePhotoUri.isNullOrBlank()) {
-            try {
-                val uri = Uri.parse(profilePhotoUri)
-                val inputStream = context.contentResolver.openInputStream(uri)
-                profileBitmap = BitmapFactory.decodeStream(inputStream)
-            } catch (_: Exception) {
-                profileBitmap = null
-            }
-        } else {
-            profileBitmap = null
-        }
+        profileBitmap = DriverRepository.loadAvatarBitmap(context, profilePhotoUri)
     }
 
     LaunchedEffect(Unit) {
@@ -467,8 +470,10 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
                         OutlinedButton(
                             onClick = {
                                 profileBitmap = null
-                                DriverRepository.updateProfilePhoto(null)
-                                DriverDialogController.showToast("Profile photo removed")
+                                scope.launch {
+                                    DriverRepository.removeProfilePhoto()
+                                    DriverDialogController.showToast("Profile photo removed from database")
+                                }
                             },
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = PilotAmber),

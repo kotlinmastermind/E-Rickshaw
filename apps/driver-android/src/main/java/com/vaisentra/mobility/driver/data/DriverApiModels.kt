@@ -101,7 +101,8 @@ data class DriverProfileDto(
     @SerializedName("badge_number") val badgeNumber: String = "",
     @SerializedName("assigned_vehicle_plate") val assignedVehiclePlate: String = "",
     @SerializedName("assigned_vehicle_model") val assignedVehicleModel: String = "",
-    @SerializedName("acceptance_rate") val acceptanceRate: Double = 0.0
+    @SerializedName("acceptance_rate") val acceptanceRate: Double = 0.0,
+    @SerializedName("avatar_url", alternate = ["avatarUrl", "profile_picture", "profilePicture"]) val avatarUrl: String? = null
 ) {
     val onboardingStatus: String get() = approvalStatus
     val walletBalanceRupees: Double get() = walletBalanceCents / 100.0
@@ -511,5 +512,10 @@ data class RideBreakdownDto(
 data class DriverProfileUpdateRequest(
     @SerializedName("full_name") val fullName: String? = null,
     @SerializedName("email") val email: String? = null,
-    @SerializedName("phone_number") val phoneNumber: String? = null
+    @SerializedName("phone_number") val phoneNumber: String? = null,
+    @SerializedName("avatar_url") val avatarUrl: String? = null
+)
+
+data class AvatarUpdateRequest(
+    @SerializedName("avatar_url") val avatarUrl: String
 )

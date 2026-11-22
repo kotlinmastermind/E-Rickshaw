@@ -361,17 +361,7 @@ fun VasantraDriverTopHeader(
     var avatarBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(profilePhotoUri) {
-        if (!profilePhotoUri.isNullOrBlank()) {
-            try {
-                val uri = Uri.parse(profilePhotoUri)
-                val inputStream = context.contentResolver.openInputStream(uri)
-                avatarBitmap = BitmapFactory.decodeStream(inputStream)
-            } catch (_: Exception) {
-                avatarBitmap = null
-            }
-        } else {
-            avatarBitmap = null
-        }
+        avatarBitmap = DriverRepository.loadAvatarBitmap(context, profilePhotoUri)
     }
 
     Row(
