@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -167,8 +167,12 @@ async def get_driver_document_content(
     db: AsyncSession = Depends(get_db)
 ):
     service = DriverService(db)
-    path, mime_type, filename = await service.get_document_file_path(user.id, document_id)
-    return FileResponse(path=path, media_type=mime_type, filename=filename)
+    content_bytes, mime_type, filename = await service.get_document_bytes_and_meta(user.id, document_id)
+    return Response(
+        content=content_bytes,
+        media_type=mime_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'}
+    )
 
 @router.get("/documents/{document_id}/signed-url")
 async def get_driver_document_signed_url(

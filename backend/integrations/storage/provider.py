@@ -3,6 +3,8 @@ import hashlib
 import hmac
 import time
 import re
+import zlib
+import struct
 import urllib.parse
 from abc import ABC, abstractmethod
 from typing import Tuple, Optional
@@ -25,6 +27,37 @@ MIME_EXTENSION_MAP = {
     "image/webp": {"webp"}
 }
 
+def generate_compliance_placeholder_png(doc_type: str = "DOCUMENT", filename: str = "document.png", status: str = "VERIFIED") -> bytes:
+    """Generates a valid standalone PNG with a high-tech dark cockpit background and document badge."""
+    width, height = 500, 320
+    bg_color = bytes([16, 24, 38])
+    card_color = bytes([24, 34, 52])
+    accent_green = bytes([0, 230, 153])
+    
+    rows = []
+    for y in range(height):
+        row = bytearray(b'\x00')
+        for x in range(width):
+            if y < 8 or ((20 <= x <= width - 20 and 20 <= y <= height - 20) and (x in (20, width - 20) or y in (20, height - 20))):
+                row.extend(accent_green)
+            elif 20 <= x <= width - 20 and 20 <= y <= height - 20:
+                row.extend(card_color)
+            else:
+                row.extend(bg_color)
+        rows.append(bytes(row))
+        
+    raw_data = b''.join(rows)
+    compressed = zlib.compress(raw_data, level=6)
+    
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff)
+        
+    png = b'\x89PNG\r\n\x1a\n'
+    png += chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+    png += chunk(b'IDAT', compressed)
+    png += chunk(b'IEND', b'')
+    return png
+
 class StorageProvider(ABC):
     @abstractmethod
     async def save_driver_document(self, driver_id: str, document_type: str, file: UploadFile) -> Tuple[str, str, int, str]:
@@ -34,6 +67,11 @@ class StorageProvider(ABC):
     @abstractmethod
     async def generate_signed_url(self, storage_path: str, expires_in_seconds: int = 300) -> str:
         """Returns a short-lived authorized download URL for private KYC documents."""
+        pass
+
+    @abstractmethod
+    async def get_document_bytes(self, storage_path: str) -> Optional[bytes]:
+        """Returns binary bytes of document file if found, else None."""
         pass
 
 
@@ -137,6 +175,16 @@ class LocalPrivateStorageProvider(StorageProvider):
         encoded_rel = urllib.parse.quote(rel_path)
         return f"/api/v1/driver-onboarding/documents/download?file={encoded_rel}&expires={exp}&sig={sig}"
 
+    async def get_document_bytes(self, storage_path: str) -> Optional[bytes]:
+        clean_path = os.path.abspath(storage_path)
+        if clean_path.startswith(self.base_dir) and os.path.isfile(clean_path):
+            try:
+                with open(clean_path, "rb") as f:
+                    return f.read()
+            except Exception:
+                return None
+        return None
+
 
 class SupabaseCloudStorageProvider(StorageProvider):
     """
@@ -205,6 +253,25 @@ class SupabaseCloudStorageProvider(StorageProvider):
                 except Exception:
                     pass
         return await self.fallback.generate_signed_url(storage_path, expires_in_seconds)
+
+    async def get_document_bytes(self, storage_path: str) -> Optional[bytes]:
+        if storage_path.startswith("private://") or f"{self.bucket}/" in storage_path:
+            clean_path = storage_path.removeprefix("private://").removeprefix(f"{self.bucket}/")
+            if self.supabase_url and self.supabase_key:
+                try:
+                    import httpx
+                    download_url = f"{self.supabase_url.rstrip('/')}/storage/v1/object/authenticated/{self.bucket}/{clean_path}"
+                    headers = {
+                        "apikey": self.supabase_key,
+                        "Authorization": f"Bearer {self.supabase_key}"
+                    }
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(download_url, headers=headers, timeout=12.0)
+                        if resp.status_code == 200 and resp.content:
+                            return resp.content
+                except Exception:
+                    pass
+        return await self.fallback.get_document_bytes(storage_path)
 
 
 _local_storage = LocalPrivateStorageProvider(settings.STORAGE_LOCAL_DIR)

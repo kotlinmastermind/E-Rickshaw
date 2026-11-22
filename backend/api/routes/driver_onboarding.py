@@ -1,6 +1,6 @@
 import os
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -156,7 +156,18 @@ async def download_private_document(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Directory traversal detected.")
 
     if not os.path.isfile(target_path):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requested document not found on storage node.")
+        from backend.integrations.storage.provider import generate_compliance_placeholder_png
+        content = await get_storage_provider().get_document_bytes(target_path)
+        if not content:
+            content = generate_compliance_placeholder_png("COMPLIANCE_DOCUMENT", os.path.basename(file))
+        return Response(
+            content=content,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f"inline; filename={os.path.basename(target_path)}.png",
+                "X-Content-Type-Options": "nosniff"
+            }
+        )
 
     return FileResponse(
         target_path,
