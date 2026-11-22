@@ -9,7 +9,7 @@ from backend.domain.models import (
     DriverProfile, DriverDocument, DriverAvailability, DriverLocation,
     Vehicle, DriverVehicleAssignment, Ride, Payment, RideLocationHistory,
     VehicleCategory, DriverVehicleInspection, DriverRating, RideAssignment,
-    IncidentReport
+    IncidentReport, DriverWallet
 )
 from backend.integrations.storage.provider import get_storage_provider, generate_compliance_placeholder_png
 from backend.core.config import settings
@@ -32,11 +32,21 @@ class DriverService:
             self.db.add(driver)
             await self.db.flush()
 
+            wallet = DriverWallet(driver_id=driver.id, balance_cents=0, currency="INR")
+            self.db.add(wallet)
+
             avail = DriverAvailability(driver_id=driver.id, is_online=False, is_busy=False)
             self.db.add(avail)
             await self.db.commit()
             await self.db.refresh(driver)
         else:
+            w_stmt = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
+            w_res = await self.db.execute(w_stmt)
+            if not w_res.scalar_one_or_none():
+                wallet = DriverWallet(driver_id=driver.id, balance_cents=0, currency="INR")
+                self.db.add(wallet)
+                await self.db.flush()
+
             avail_stmt = select(DriverAvailability).where(DriverAvailability.driver_id == driver.id)
             avail_res = await self.db.execute(avail_stmt)
             if not avail_res.scalar_one_or_none():
@@ -714,18 +724,24 @@ class DriverService:
                 "destination": r.destination_address
             })
 
+        w_stmt = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
+        w_res = await self.db.execute(w_stmt)
+        dw = w_res.scalar_one_or_none()
+        current_balance = dw.balance_cents if dw else driver.wallet_balance_cents
+        currency_code = dw.currency if dw else "INR"
+
         return {
             "total_earnings_cents": total_earnings_cents,
             "today_earnings_cents": today_earnings_cents,
             "today_net_cents": today_earnings_cents,
             "today_net_rupees": round(today_earnings_cents / 100, 2),
             "weekly_earnings_cents": weekly_earnings_cents,
-            "currency": "INR",
+            "currency": currency_code,
             "completed_trips": trips_count,
             "today_completed_trips": today_completed_trips,
             "today_distance_km": today_distance_km,
-            "wallet_balance_cents": driver.wallet_balance_cents,
-            "wallet_balance_rupees": round(driver.wallet_balance_cents / 100, 2),
+            "wallet_balance_cents": current_balance,
+            "wallet_balance_rupees": round(current_balance / 100, 2),
             "rating_average": driver.rating_average,
             "rating_count": driver.rating_count,
             "recent_trips": recent_trips

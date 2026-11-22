@@ -7,13 +7,13 @@ import logging
 from typing import Optional, Dict, Any, List, Set
 from dataclasses import dataclass
 
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.application.services.h3_geospatial_service import h3_service
 from backend.application.services.live_location_service import LiveLocationService, FRESHNESS_THRESHOLD_SECONDS
 from backend.infrastructure.cache.redis_client import redis_client
-from backend.domain.models import DriverProfile, DriverAvailability, DriverVehicleAssignment, Vehicle
+from backend.domain.models import DriverProfile, DriverAvailability, DriverVehicleAssignment, Vehicle, DriverWallet
 
 logger = logging.getLogger("backend.dispatch.eligibility")
 
@@ -198,11 +198,12 @@ class DriverEligibilityService:
                 DriverProfile.approval_status,
                 DriverProfile.rating_average,
                 DriverProfile.total_trips,
-                DriverProfile.wallet_balance_cents,
+                func.coalesce(DriverWallet.balance_cents, 0).label("wallet_balance_cents"),
                 DriverAvailability.is_online,
                 DriverAvailability.is_busy,
                 Vehicle.category_id.label("vehicle_category_id")
             )
+            .outerjoin(DriverWallet, DriverWallet.driver_id == DriverProfile.id)
             .join(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
             .outerjoin(
                 DriverVehicleAssignment,

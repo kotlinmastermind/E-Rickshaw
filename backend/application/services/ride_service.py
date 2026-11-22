@@ -8,7 +8,7 @@ from fastapi import HTTPException, status
 from backend.domain.models import (
     Ride, RideStatusEvent, RideAssignment, FareEstimate, FareRule, VehicleCategory,
     CustomerProfile, DriverProfile, DriverAvailability, DriverLocation,
-    Payment, DriverRating, Vehicle
+    Payment, DriverRating, Vehicle, DriverWallet
 )
 from backend.domain.state_machine.ride_state_machine import (
     RideStateMachine, RideStatus, ActorRole, RideTransitionError
@@ -519,9 +519,17 @@ class RideService:
         )
         await self.db.execute(avail_stmt)
 
-        # Update driver stats
+        # Update driver stats and driver_wallets table
         driver.total_trips += 1
         driver_earnings = round(ride.final_fare_cents * 0.8)
+        stmt_w = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
+        d_wallet = (await self.db.execute(stmt_w)).scalar_one_or_none()
+        if not d_wallet:
+            d_wallet = DriverWallet(driver_id=driver.id, balance_cents=driver_earnings, currency="INR")
+            self.db.add(d_wallet)
+        else:
+            d_wallet.balance_cents += driver_earnings
+            d_wallet.updated_at = now
         driver.wallet_balance_cents += driver_earnings
 
         # Sync with WalletService and PromoPassService

@@ -11,7 +11,7 @@ from backend.domain.models import (
     User, CustomerProfile, DriverProfile, Ride, DriverRating,
     Wallet, WalletTransaction, ReferralRecord, Notification,
     LoyaltyPointsLedger, CustomerMilestoneBadge, PersonalizedOffer,
-    CustomerSurvey, ServiceRecoveryCredit
+    CustomerSurvey, ServiceRecoveryCredit, DriverWallet
 )
 
 class LoyaltyFeedbackService:
@@ -206,11 +206,19 @@ class LoyaltyFeedbackService:
         ride.tip_adjusted_at = now
 
         # Credit driver wallet
-        if ride.assigned_driver_id:
+        if ride.assigned_driver_id and tip_difference > 0:
             stmt_drv = select(DriverProfile).where(DriverProfile.id == ride.assigned_driver_id)
             res_drv = await self.db.execute(stmt_drv)
             driver = res_drv.scalar_one_or_none()
-            if driver and tip_difference > 0:
+            if driver:
+                stmt_dw = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
+                d_wallet = (await self.db.execute(stmt_dw)).scalar_one_or_none()
+                if not d_wallet:
+                    d_wallet = DriverWallet(driver_id=driver.id, balance_cents=tip_difference, currency="INR")
+                    self.db.add(d_wallet)
+                else:
+                    d_wallet.balance_cents += tip_difference
+                    d_wallet.updated_at = now
                 driver.wallet_balance_cents = (driver.wallet_balance_cents or 0) + tip_difference
 
         # Debit customer wallet if wallet exists

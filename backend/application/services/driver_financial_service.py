@@ -20,7 +20,7 @@ from backend.domain.models import (
     DriverLedgerEntry, DriverIncentiveProgress, DriverOperatingExpense,
     DriverFinancialSupportRequest, DriverPayoutReconciliation,
     DriverPayoutRequest, CommissionRule, AdministrativeAuditLog,
-    Wallet, WalletTransaction
+    Wallet, WalletTransaction, DriverWallet
 )
 
 # Standard Luxury Service Zones for Comparative Earnings (Feature 274)
@@ -97,11 +97,19 @@ class DriverFinancialService:
                     user_id=user.id,
                     license_number=f"DL01-{secrets.token_hex(4).upper()}",
                     rating_average=4.95,
-                    total_trips=12,
-                    wallet_balance_cents=450000
+                    total_trips=12
                 )
                 self.db.add(driver)
                 await self.db.flush()
+
+                # Initialize DriverWallet in driver_wallets table
+                wallet = DriverWallet(
+                    driver_id=driver.id,
+                    balance_cents=450000,
+                    currency="INR"
+                )
+                self.db.add(wallet)
+                await self.db.commit()
             else:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found.")
         return driver
@@ -202,11 +210,16 @@ class DriverFinancialService:
                 "tips_cents": wt
             })
 
+        stmt_w = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
+        d_wallet = (await self.db.execute(stmt_w)).scalar_one_or_none()
+        current_balance = d_wallet.balance_cents if d_wallet else driver.wallet_balance_cents
+        currency_code = d_wallet.currency if d_wallet else "INR"
+
         return {
             "driver_id": driver.id,
-            "currency": "INR",
-            "wallet_balance_cents": driver.wallet_balance_cents,
-            "wallet_balance_rupees": round(driver.wallet_balance_cents / 100, 2),
+            "currency": currency_code,
+            "wallet_balance_cents": current_balance,
+            "wallet_balance_rupees": round(current_balance / 100, 2),
             "today": {
                 "trips_count": len(today_rides),
                 "gross_fare_cents": today_gross_cents,
@@ -771,10 +784,13 @@ class DriverFinancialService:
         for item in final_list:
             item.pop("_sort_time", None)
 
-        active_balance_cents = wallet.balance_cents if wallet and wallet.balance_cents > 0 else driver.wallet_balance_cents
+        stmt_dw = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
+        d_wallet = (await self.db.execute(stmt_dw)).scalar_one_or_none()
+        active_balance_cents = d_wallet.balance_cents if d_wallet else (wallet.balance_cents if wallet and wallet.balance_cents > 0 else 0)
 
         return {
             "driver_id": driver.id,
+            "currency": d_wallet.currency if d_wallet else "INR",
             "current_balance_cents": active_balance_cents,
             "current_balance_rupees": round(active_balance_cents / 100, 2),
             "entries_count": len(final_list),

@@ -113,7 +113,32 @@ class DriverProfile(Base):
     rating_average: Mapped[float] = mapped_column(Float, default=5.0)
     rating_count: Mapped[int] = mapped_column(Integer, default=0)
     total_trips: Mapped[int] = mapped_column(Integer, default=0)
-    wallet_balance_cents: Mapped[int] = mapped_column(Integer, default=0)
+    
+    wallet: Mapped[Optional["DriverWallet"]] = relationship("DriverWallet", back_populates="driver", uselist=False, cascade="all, delete-orphan", lazy="selectin")
+
+    @property
+    def wallet_balance_cents(self) -> int:
+        if self.wallet:
+            return self.wallet.balance_cents
+        return 0
+
+    @wallet_balance_cents.setter
+    def wallet_balance_cents(self, val: int):
+        if self.wallet:
+            self.wallet.balance_cents = int(val)
+
+    def __init__(self, **kwargs):
+        wb = kwargs.pop("wallet_balance_cents", None)
+        super().__init__(**kwargs)
+        if wb is not None:
+            if not self.wallet:
+                self.wallet = DriverWallet(
+                    driver_id=self.id or "",
+                    balance_cents=int(wb),
+                    currency="INR"
+                )
+            else:
+                self.wallet.balance_cents = int(wb)
     
     # Part 6 Security Credentials (Features 131, 141)
     security_badge_id: Mapped[str] = mapped_column(String(32), default="")
@@ -654,6 +679,18 @@ class WalletTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     wallet: Mapped["Wallet"] = relationship(back_populates="transactions")
+
+
+class DriverWallet(Base):
+    __tablename__ = "driver_wallets"
+
+    driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id", ondelete="CASCADE"), primary_key=True)
+    balance_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    driver: Mapped["DriverProfile"] = relationship("DriverProfile", back_populates="wallet")
 
 
 class SupportTicket(Base):
