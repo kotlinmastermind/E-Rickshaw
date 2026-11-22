@@ -245,14 +245,18 @@ fun PickupNavScreen(
 ) {
     val rideId by DriverRepository.currentRideId.collectAsState()
     val activeRide by DriverRepository.activeRide.collectAsState()
+    val liveLocation by DriverRepository.driverLocation.collectAsState()
     var isUpdating by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         DriverRepository.fetchActiveRide()
     }
 
+    val driverLat = if (liveLocation.latitude != 0.0) liveLocation.latitude else 28.6139
+    val driverLng = if (liveLocation.longitude != 0.0) liveLocation.longitude else 77.2090
     val targetLat = activeRide?.pickupLatitude ?: 28.6289
     val targetLng = activeRide?.pickupLongitude ?: 77.3712
+    val currentSpeed = liveLocation.speedKmh.toInt().coerceAtLeast(0)
 
     Column(
         modifier = Modifier
@@ -262,7 +266,7 @@ fun PickupNavScreen(
     ) {
         CockpitHeader(
             title = "En-Route to Pickup",
-            subtitle = "Ride: ${rideId.ifBlank { "Active" }}",
+            subtitle = "Ride: ${rideId.ifBlank { "Active Pickup" }}",
             onBack = onNavigateBack
         )
 
@@ -271,44 +275,130 @@ fun PickupNavScreen(
                 .fillMaxSize()
                 .weight(1f)
         ) {
+            // 1. Live Mapbox Vector Map
             DriverMapboxLiveView(
                 modifier = Modifier.fillMaxSize(),
-                driverLat = 28.6139,
-                driverLng = 77.2090,
+                driverLat = driverLat,
+                driverLng = driverLng,
                 targetLat = targetLat,
                 targetLng = targetLng,
                 targetLabel = activeRide?.pickupAddress?.ifBlank { "Passenger Pickup" } ?: "Passenger Pickup",
                 isNavigating = true,
-                headingDegrees = 45.0
+                headingDegrees = liveLocation.heading
             )
 
-            Column(
+            // 2. Floating Turn-by-Turn Top Card
+            Surface(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.Bottom
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .align(Alignment.TopCenter),
+                color = CockpitCardBackground.copy(alpha = 0.95f),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CockpitBorder)
             ) {
-                CockpitButton(
-                    text = if (isUpdating) "UPDATING..." else "ARRIVED AT PICKUP POINT",
-                    enabled = !isUpdating,
-                    onClick = {
-                        if (rideId.isBlank()) {
-                            onShowToast("No active ride found.")
-                            return@CockpitButton
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(ElectricCyan.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Navigation,
+                            contentDescription = "Navigate",
+                            tint = ElectricCyan,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Head to Passenger Pickup", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(
+                            activeRide?.pickupAddress?.ifBlank { "Approaching pickup location" } ?: "Approaching pickup location",
+                            color = CockpitTextSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 1
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            "$currentSpeed",
+                            color = EmeraldPrimary,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 18.sp
+                        )
+                        Text("km/h", color = CockpitTextMuted, fontSize = 9.sp)
+                    }
+                }
+            }
+
+            // 3. Floating Bottom Arrive Action Card
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .align(Alignment.BottomCenter),
+                color = CockpitCardBackground.copy(alpha = 0.95f),
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CockpitBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("PICKUP POINT", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                activeRide?.pickupAddress?.ifBlank { "Airport Terminal / MG Road" } ?: "Airport Terminal / MG Road",
+                                color = CockpitTextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                maxLines = 1
+                            )
                         }
-                        isUpdating = true
-                        DriverRepository.markArrived(rideId, targetLat, targetLng) { ok ->
-                            isUpdating = false
-                            if (ok) {
-                                onShowToast("Status updated to ARRIVED")
-                                onArrived()
-                            } else {
-                                onShowToast("Failed to mark arrived.")
+                        Surface(
+                            color = AmberWarning.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                "EN-ROUTE",
+                                color = AmberWarning,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    CockpitButton(
+                        text = if (isUpdating) "UPDATING..." else "ARRIVED AT PICKUP POINT",
+                        enabled = !isUpdating,
+                        onClick = {
+                            if (rideId.isBlank()) {
+                                onShowToast("No active ride found.")
+                                return@CockpitButton
                             }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                            isUpdating = true
+                            DriverRepository.markArrived(rideId, targetLat, targetLng) { ok ->
+                                isUpdating = false
+                                if (ok) {
+                                    onShowToast("Status updated to ARRIVED")
+                                    onArrived()
+                                } else {
+                                    onShowToast("Failed to mark arrived.")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }
@@ -639,9 +729,20 @@ fun InTripNavScreen(
     onShowToast: (String) -> Unit = {}
 ) {
     val rideId by DriverRepository.currentRideId.collectAsState()
-    var currentSpeed by remember { mutableIntStateOf(26) }
+    val activeRide by DriverRepository.activeRide.collectAsState()
+    val liveLocation by DriverRepository.driverLocation.collectAsState()
     var isFinishing by remember { mutableStateOf(false) }
     val speedLimit = 35
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchActiveRide()
+    }
+
+    val driverLat = if (liveLocation.latitude != 0.0) liveLocation.latitude else 28.6139
+    val driverLng = if (liveLocation.longitude != 0.0) liveLocation.longitude else 77.2090
+    val targetLat = activeRide?.destinationLatitude ?: 28.5355
+    val targetLng = activeRide?.destinationLongitude ?: 77.3910
+    val currentSpeed = liveLocation.speedKmh.toInt().coerceAtLeast(0)
 
     Column(
         modifier = Modifier
@@ -650,54 +751,141 @@ fun InTripNavScreen(
             .statusBarsPadding()
     ) {
         CockpitHeader(
-            title = "Trip In Progress",
-            subtitle = "Ride: ${rideId.ifBlank { "Active" }}",
+            title = "Trip In Progress (Live Nav)",
+            subtitle = "Ride: ${rideId.ifBlank { "Active Trip" }}",
             onBack = onNavigateBack
         )
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .weight(1f)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                CockpitCard {
+            // 1. Fullscreen Mapbox Live Map
+            DriverMapboxLiveView(
+                modifier = Modifier.fillMaxSize(),
+                driverLat = driverLat,
+                driverLng = driverLng,
+                targetLat = targetLat,
+                targetLng = targetLng,
+                targetLabel = activeRide?.destinationAddress?.ifBlank { "Passenger Destination" } ?: "Passenger Destination",
+                isNavigating = true,
+                headingDegrees = liveLocation.heading
+            )
+
+            // 2. Floating Top Turn-by-Turn Instruction HUD
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .align(Alignment.TopCenter),
+                color = CockpitCardBackground.copy(alpha = 0.95f),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CockpitBorder)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(ElectricCyan.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TurnRight,
+                            contentDescription = "Turn",
+                            tint = ElectricCyan,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("In 250m turn right", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            activeRide?.destinationAddress?.ifBlank { "Towards Destination" } ?: "Towards Destination",
+                            color = CockpitTextSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 1
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            "$currentSpeed",
+                            color = if (currentSpeed > speedLimit) CrimsonAlert else EmeraldPrimary,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 20.sp
+                        )
+                        Text("km/h (Max $speedLimit)", color = CockpitTextMuted, fontSize = 9.sp)
+                    }
+                }
+            }
+
+            // 3. Floating Bottom Trip Action Card
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .align(Alignment.BottomCenter),
+                color = CockpitCardBackground.copy(alpha = 0.95f),
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CockpitBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text("CURRENT SPEED", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text("$currentSpeed km/h", color = if (currentSpeed > speedLimit) CrimsonAlert else EmeraldPrimary, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
-                            Text("Limit: $speedLimit km/h", color = CockpitTextSecondary, fontSize = 11.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("DROP-OFF DESTINATION", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                activeRide?.destinationAddress?.ifBlank { "City Center Destination" } ?: "City Center Destination",
+                                color = CockpitTextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                maxLines = 1
+                            )
+                        }
+                        Surface(
+                            color = EmeraldPrimary.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                "METER ACTIVE",
+                                color = EmeraldPrimary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
                         }
                     }
+
+                    CockpitButton(
+                        text = if (isFinishing) "COMPLETING TRIP..." else "ARRIVED & COLLECT FARE",
+                        enabled = !isFinishing,
+                        onClick = {
+                            if (rideId.isBlank()) {
+                                onShowToast("No active ride ID.")
+                                return@CockpitButton
+                            }
+                            isFinishing = true
+                            DriverRepository.finishTrip(rideId) { ok ->
+                                isFinishing = false
+                                if (ok) {
+                                    onShowToast("Trip completed! Calculating final fare...")
+                                    onEndTrip()
+                                } else {
+                                    onShowToast("Could not finish trip.")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
-
-            CockpitButton(
-                text = if (isFinishing) "COMPLETING..." else "COMPLETE TRIP & COLLECT FARE",
-                enabled = !isFinishing,
-                onClick = {
-                    if (rideId.isBlank()) {
-                        onShowToast("No active ride ID.")
-                        return@CockpitButton
-                    }
-                    isFinishing = true
-                    DriverRepository.finishTrip(rideId) { ok ->
-                        isFinishing = false
-                        if (ok) {
-                            onShowToast("Trip ended. Calculating final fare...")
-                            onEndTrip()
-                        } else {
-                            onShowToast("Could not finish trip.")
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
         }
     }
 }
