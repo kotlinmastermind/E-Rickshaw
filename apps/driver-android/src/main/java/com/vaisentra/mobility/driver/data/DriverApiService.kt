@@ -112,16 +112,16 @@ interface DriverApiService {
     suspend fun acceptRide(@Path("ride_id") rideId: String): Response<Map<String, Any>>
 
     @POST("api/v1/drivers/dispatch/offers/{ride_id}/reject")
-    suspend fun rejectOffer(@Path("ride_id") rideId: String, @Body body: Map<String, String>): Response<Map<String, Any>>
+    suspend fun rejectOffer(@Path("ride_id") rideId: String, @Body body: RejectOfferRequest = RejectOfferRequest()): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/arrived")
-    suspend fun markArrived(@Path("ride_id") rideId: String, @Body body: Map<String, Double> = emptyMap()): Response<Map<String, Any>>
+    suspend fun markArrived(@Path("ride_id") rideId: String, @Body body: CoordinatePayloadRequest = CoordinatePayloadRequest()): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/start")
-    suspend fun startTripWithOtp(@Path("ride_id") rideId: String, @Body body: Map<String, String>): Response<Map<String, Any>>
+    suspend fun startTripWithOtp(@Path("ride_id") rideId: String, @Body body: StartTripOtpRequest): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/finish")
-    suspend fun finishTrip(@Path("ride_id") rideId: String, @Body body: Map<String, Double> = emptyMap()): Response<Map<String, Any>>
+    suspend fun finishTrip(@Path("ride_id") rideId: String, @Body body: FinishTripRequest = FinishTripRequest()): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/actions/no-show")
     suspend fun claimNoShow(@Path("ride_id") rideId: String, @Body body: ClaimNoShowRequest = ClaimNoShowRequest()): Response<Map<String, Any>>
@@ -202,7 +202,7 @@ interface DriverApiService {
     suspend fun getSharedTripForRide(@Path("ride_id") rideId: String): Response<SharedPoolTripDto>
 
     @POST("api/v1/pools/{trip_id}/messages")
-    suspend fun sendPoolMessage(@Path("trip_id") tripId: String, @Body body: Map<String, String>): Response<Map<String, Any>>
+    suspend fun sendPoolMessage(@Path("trip_id") tripId: String, @Body body: ChatMessagePayloadRequest): Response<Map<String, Any>>
 
     @GET("api/v1/rides/{ride_id}/stops")
     suspend fun getRideStops(@Path("ride_id") rideId: String): Response<List<RideStopDto>>
@@ -211,7 +211,7 @@ interface DriverApiService {
     suspend fun arriveAtRideStop(@Path("ride_id") rideId: String, @Path("stop_id") stopId: String): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/chat/messages")
-    suspend fun sendRideChatMessage(@Path("ride_id") rideId: String, @Body body: Map<String, String>): Response<Map<String, Any>>
+    suspend fun sendRideChatMessage(@Path("ride_id") rideId: String, @Body body: ChatMessagePayloadRequest): Response<Map<String, Any>>
 
     @GET("api/v1/driver-onboarding/training/curriculum")
     suspend fun getTrainingCurriculum(): Response<List<TrainingModuleDto>>

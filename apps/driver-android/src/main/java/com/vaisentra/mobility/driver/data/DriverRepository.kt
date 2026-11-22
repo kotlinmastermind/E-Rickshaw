@@ -913,7 +913,7 @@ object DriverRepository {
         }
         scope.launch {
             try {
-                val res = DriverNetworkClient.apiService.rejectOffer(rideId, mapOf("reason" to reason))
+                val res = DriverNetworkClient.apiService.rejectOffer(rideId, RejectOfferRequest(reason = reason))
                 if (!res.isSuccessful) {
                     Log.w(TAG, "rejectOffer failed with HTTP ${res.code()}")
                 }
@@ -932,7 +932,7 @@ object DriverRepository {
         }
         scope.launch {
             try {
-                val payload = if (lat != null && lng != null) mapOf("latitude" to lat, "longitude" to lng) else emptyMap()
+                val payload = CoordinatePayloadRequest(latitude = lat, longitude = lng)
                 val res = DriverNetworkClient.apiService.markArrived(rideId, payload)
                 if (!res.isSuccessful) {
                     Log.w(TAG, "markArrived failed with HTTP ${res.code()}: ${res.errorBody()?.string()}")
@@ -952,7 +952,7 @@ object DriverRepository {
         }
         scope.launch {
             try {
-                val res = DriverNetworkClient.apiService.startTripWithOtp(rideId, mapOf("otp_code" to otp))
+                val res = DriverNetworkClient.apiService.startTripWithOtp(rideId, StartTripOtpRequest(otpCode = otp))
                 if (res.isSuccessful) {
                     fetchActiveRide()
                     onSuccess()
@@ -980,10 +980,10 @@ object DriverRepository {
         }
         scope.launch {
             try {
-                val body = buildMap {
-                    actualDistanceKm?.let { put("actual_distance_km", it) }
-                    actualDurationMinutes?.let { put("actual_duration_minutes", it) }
-                }
+                val body = FinishTripRequest(
+                    actualDistanceKm = actualDistanceKm,
+                    actualDurationMinutes = actualDurationMinutes
+                )
                 val res = DriverNetworkClient.apiService.finishTrip(rideId, body)
                 if (res.isSuccessful) {
                     DriverWebSocketClient.disconnectRideTracking()
@@ -1476,11 +1476,11 @@ object DriverRepository {
         if (text.isBlank()) return Result.failure(IllegalStateException("Message cannot be empty"))
         return try {
             if (!tripId.isNullOrBlank()) {
-                val res = DriverNetworkClient.apiService.sendPoolMessage(tripId, mapOf("message" to text))
+                val res = DriverNetworkClient.apiService.sendPoolMessage(tripId, ChatMessagePayloadRequest(message = text, messageText = text))
                 if (res.isSuccessful) return Result.success(true)
             }
             if (rideId.isNotBlank()) {
-                val res = DriverNetworkClient.apiService.sendRideChatMessage(rideId, mapOf("message_text" to text))
+                val res = DriverNetworkClient.apiService.sendRideChatMessage(rideId, ChatMessagePayloadRequest(message = text, messageText = text))
                 if (res.isSuccessful) return Result.success(true)
                 return Result.failure(IllegalStateException("sendRideChatMessage failed: HTTP ${res.code()}"))
             }

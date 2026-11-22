@@ -579,3 +579,29 @@ data class EmergencyPingRequest(
 data class RerouteRideRequest(
     @SerializedName("reason") val reason: String = "TRAFFIC"
 )
+
+data class RejectOfferRequest(
+    @SerializedName("reason") val reason: String = "PILOT_DECLINED"
+)
+
+data class CoordinatePayloadRequest(
+    @SerializedName("latitude") val latitude: Double? = null,
+    @SerializedName("longitude") val longitude: Double? = null
+)
+
+data class FinishTripRequest(
+    @SerializedName("actual_distance_km") val actualDistanceKm: Double? = null,
+    @SerializedName("actual_duration_minutes") val actualDurationMinutes: Double? = null,
+    @SerializedName("latitude") val latitude: Double? = null,
+    @SerializedName("longitude") val longitude: Double? = null
+)
+
+data class StartTripOtpRequest(
+    @SerializedName("otp_code") val otpCode: String
+)
+
+data class ChatMessagePayloadRequest(
+    @SerializedName("message_text") val messageText: String? = null,
+    @SerializedName("message") val message: String? = null
+)
+

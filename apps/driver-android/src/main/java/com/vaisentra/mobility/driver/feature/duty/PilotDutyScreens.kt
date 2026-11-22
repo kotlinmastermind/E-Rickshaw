@@ -248,7 +248,7 @@ fun VehicleRcStatusScreen(onNavigate: (String) -> Unit) {
 @Composable
 fun ShiftStartScreen(onNavigate: (String) -> Unit) {
     var odoReading by remember { mutableStateOf("") }
-    var batterySoc by remember { mutableStateOf("95") }
+    var batterySoc by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
     var lastClosingInfo by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -266,7 +266,7 @@ fun ShiftStartScreen(onNavigate: (String) -> Unit) {
                 }
             }
             if (odoReading.isBlank()) {
-                odoReading = "48210"
+                odoReading = ""
             }
         }
     }
@@ -346,7 +346,7 @@ fun ShiftEndScreen(onNavigate: (String) -> Unit) {
                 shiftStartedAt = data["shift_start_time"]?.toString() ?: data["started_at"]?.toString()
             }
             if (closingOdo.isBlank()) {
-                closingOdo = "48292"
+                closingOdo = ""
             }
         }
     }
