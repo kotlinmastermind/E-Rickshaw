@@ -273,4 +273,19 @@ interface DriverApiService {
 
     @POST("api/v1/auth/avatar")
     suspend fun updateAuthAvatar(@Body body: AvatarUpdateRequest): Response<Map<String, Any>>
+
+    @GET("api/v1/drivers/financials/support-requests")
+    suspend fun getFinancialSupportRequests(): Response<List<FinancialSupportDto>>
+
+    @POST("api/v1/drivers/financials/support-requests")
+    suspend fun submitFinancialSupportRequest(@Body body: SubmitFinancialSupportRequest): Response<Map<String, Any>>
+
+    @GET("api/v1/drivers/safety/overview")
+    suspend fun getSafetyOverview(): Response<Map<String, Any>>
+
+    @POST("api/v1/drivers/safety/ratings/{rating_id}/appeal")
+    suspend fun appealDriverRating(
+        @Path("rating_id") ratingId: String,
+        @Body body: RatingAppealRequest
+    ): Response<Map<String, Any>>
 }

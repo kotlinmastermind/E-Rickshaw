@@ -290,6 +290,15 @@ object DriverRepository {
     private val _rideBreakdown = MutableStateFlow<RideBreakdownDto?>(null)
     val rideBreakdown: StateFlow<RideBreakdownDto?> = _rideBreakdown.asStateFlow()
 
+    private val _financialSupportRequests = MutableStateFlow<List<FinancialSupportDto>>(emptyList())
+    val financialSupportRequests: StateFlow<List<FinancialSupportDto>> = _financialSupportRequests.asStateFlow()
+
+    private val _driverRatings = MutableStateFlow<List<DriverRatingItemDto>>(emptyList())
+    val driverRatings: StateFlow<List<DriverRatingItemDto>> = _driverRatings.asStateFlow()
+
+    private val _ratingAppeals = MutableStateFlow<List<Map<String, Any>>>(emptyList())
+    val ratingAppeals: StateFlow<List<Map<String, Any>>> = _ratingAppeals.asStateFlow()
+
     @Volatile
     var pendingAuthPhone: String = ""
 
@@ -1764,6 +1773,97 @@ object DriverRepository {
                 Result.success(true)
             } else {
                 Result.failure(IllegalStateException("updateDriverPreferences HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchFinancialSupportRequests(): Result<List<FinancialSupportDto>> {
+        return try {
+            val res = DriverNetworkClient.apiService.getFinancialSupportRequests()
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                _financialSupportRequests.value = body
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("getFinancialSupportRequests HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitFinancialSupportRequest(
+        supportType: String,
+        amountRupees: Double,
+        reason: String,
+        repaymentTermsWeeks: Int = 4
+    ): Result<Map<String, Any>> {
+        return try {
+            val req = SubmitFinancialSupportRequest(
+                supportType = supportType,
+                amountRupees = amountRupees,
+                reason = reason,
+                repaymentTermsWeeks = repaymentTermsWeeks
+            )
+            val res = DriverNetworkClient.apiService.submitFinancialSupportRequest(req)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                fetchFinancialSupportRequests()
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchSafetyOverviewAndRatings(): Result<Map<String, Any>> {
+        return try {
+            val res = DriverNetworkClient.apiService.getSafetyOverview()
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                @Suppress("UNCHECKED_CAST")
+                val ratingsRaw = body["ratings"] as? List<Map<String, Any>> ?: emptyList()
+                @Suppress("UNCHECKED_CAST")
+                val appealsRaw = body["rating_appeals"] as? List<Map<String, Any>> ?: emptyList()
+                _ratingAppeals.value = appealsRaw
+
+                val parsedRatings = ratingsRaw.map { r ->
+                    DriverRatingItemDto(
+                        id = r["id"] as? String ?: "",
+                        rating = (r["rating"] as? Number)?.toFloat() ?: 5f,
+                        cleanliness = (r["cleanliness"] as? Number)?.toFloat(),
+                        comfort = (r["comfort"] as? Number)?.toFloat(),
+                        tags = r["tags"] as? String,
+                        feedback = r["feedback"] as? String,
+                        createdAt = r["created_at"] as? String
+                    )
+                }
+                _driverRatings.value = parsedRatings
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("getSafetyOverview HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun appealDriverRating(ratingId: String, reason: String): Result<Map<String, Any>> {
+        return try {
+            val req = RatingAppealRequest(reason = reason)
+            val res = DriverNetworkClient.apiService.appealDriverRating(ratingId, req)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                fetchSafetyOverviewAndRatings()
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
             }
         } catch (e: Exception) {
             Result.failure(e)

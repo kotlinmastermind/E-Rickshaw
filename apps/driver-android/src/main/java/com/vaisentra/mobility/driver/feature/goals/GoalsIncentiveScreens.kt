@@ -18,7 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
-import com.vaisentra.mobility.driver.data.DriverRepository
+import com.vaisentra.mobility.driver.data.*
 import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.launch
 
@@ -222,11 +222,18 @@ fun PerformanceScorecardScreen(
     onShowToast: (String) -> Unit = {}
 ) {
     val scorecard by DriverRepository.scorecard.collectAsState()
+    val ratings by DriverRepository.driverRatings.collectAsState()
+    val appeals by DriverRepository.ratingAppeals.collectAsState()
     val scope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
 
+    var selectedRatingForAppeal by remember { mutableStateOf<DriverRatingItemDto?>(null) }
+    var appealReason by remember { mutableStateOf("") }
+    var isSubmittingAppeal by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         DriverRepository.fetchPerformanceScorecard()
+        DriverRepository.fetchSafetyOverviewAndRatings()
     }
 
     Column(
@@ -237,7 +244,7 @@ fun PerformanceScorecardScreen(
     ) {
         CockpitHeader(
             title = "Pilot Scorecard",
-            subtitle = "Live Supabase quality metrics & performance benchmarks",
+            subtitle = "Live Supabase quality metrics & rating appeals",
             onBack = onNavigateBack
         )
 
@@ -304,6 +311,112 @@ fun PerformanceScorecardScreen(
                 }
             }
 
+            // Section: Active Rating Appeals if any
+            if (appeals.isNotEmpty()) {
+                item {
+                    CockpitCard {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("ACTIVE RATING DISPUTES & APPEALS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            CockpitBadge("${appeals.size} FILED", AmberWarning)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        appeals.forEach { a ->
+                            val status = a["status"] as? String ?: "PENDING"
+                            val statusColor = when (status.uppercase()) {
+                                "APPROVED", "ACCEPTED" -> EmeraldPrimary
+                                "REJECTED" -> CrimsonAlert
+                                else -> AmberWarning
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Appeal ID: ${(a["rating_id"] as? String ?: "").take(8)}...", color = CockpitTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("Status: $status", color = statusColor, fontSize = 11.sp)
+                                }
+                                CockpitBadge(status.uppercase(), statusColor)
+                            }
+                            Divider(color = CockpitBorder.copy(alpha = 0.5f), thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
+                        }
+                    }
+                }
+            }
+
+            // Section: Recent Ratings & Reviews with Appeal action
+            item {
+                CockpitCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("RECENT CUSTOMER RATINGS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("${ratings.size} Reviews", color = CockpitTextSecondary, fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
+
+                    if (ratings.isEmpty()) {
+                        Box(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                            Text("All recent rides have 5.0★ clean ratings. No negative feedback.", color = CockpitTextMuted, fontSize = 12.sp)
+                        }
+                    } else {
+                        ratings.take(10).forEach { r ->
+                            val isLowRating = r.rating < 4.0f
+                            val isAppealed = appeals.any { (it["rating_id"] as? String) == r.id }
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp)
+                                    .background(CockpitBackground.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                    .padding(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${r.rating.toInt()} ★", color = if (isLowRating) AmberWarning else EmeraldPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(r.createdAt?.take(10) ?: "Trip Review", color = CockpitTextMuted, fontSize = 11.sp)
+                                    }
+                                    if (isAppealed) {
+                                        CockpitBadge("APPEALED", AmberWarning)
+                                    } else if (isLowRating) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                selectedRatingForAppeal = r
+                                                appealReason = ""
+                                            },
+                                            modifier = Modifier.height(28.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                            shape = RoundedCornerShape(6.dp),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, AmberWarning),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AmberWarning)
+                                        ) {
+                                            Text("Dispute / Appeal", color = AmberWarning, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    } else {
+                                        CockpitBadge("VERIFIED", EmeraldPrimary)
+                                    }
+                                }
+
+                                if (!r.feedback.isNullOrBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("\"${r.feedback}\"", color = CockpitTextPrimary, fontSize = 12.sp)
+                                }
+                                if (r.cleanliness != null) {
+                                    Text("Cleanliness: ${r.cleanliness} ★", color = ElectricCyan, fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             item {
                 CockpitButton(
                     text = if (isRefreshing) "Syncing with Supabase..." else "↻ Refresh Live Database Metrics",
@@ -312,6 +425,7 @@ fun PerformanceScorecardScreen(
                         isRefreshing = true
                         scope.launch {
                             val res = DriverRepository.fetchPerformanceScorecard()
+                            DriverRepository.fetchSafetyOverviewAndRatings()
                             isRefreshing = false
                             if (res.isSuccess) {
                                 onShowToast("Scorecard metrics synced with live Supabase database!")
@@ -325,6 +439,103 @@ fun PerformanceScorecardScreen(
                 )
             }
         }
+    }
+
+    // Modal Dialog: Dispute / Appeal Rating
+    val ratingToAppeal = selectedRatingForAppeal
+    if (ratingToAppeal != null) {
+        AlertDialog(
+            onDismissRequest = { if (!isSubmittingAppeal) selectedRatingForAppeal = null },
+            title = {
+                Column {
+                    Text("Dispute & Appeal Rating", color = CockpitTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Chauffeur Arbitration Board Review", color = CockpitTextMuted, fontSize = 11.sp)
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text("Rating: ${ratingToAppeal.rating.toInt()} ★ (${ratingToAppeal.createdAt?.take(10) ?: "Trip"})", color = AmberWarning, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+
+                    Text("SELECT COMMON DISPUTE REASON:", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
+                    val quickTags = listOf("Unfair traffic delay", "Passenger refused toll", "False complaint", "Route dispute")
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        quickTags.take(2).forEach { tag ->
+                            OutlinedButton(
+                                onClick = { appealReason = tag },
+                                modifier = Modifier.weight(1f).height(30.dp),
+                                contentPadding = PaddingValues(2.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                border = androidx.compose.foundation.BorderStroke(0.8.dp, if (appealReason == tag) ElectricCyan else CockpitBorder)
+                            ) {
+                                Text(tag, fontSize = 9.sp, color = if (appealReason == tag) ElectricCyan else CockpitTextSecondary, maxLines = 1)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        quickTags.drop(2).forEach { tag ->
+                            OutlinedButton(
+                                onClick = { appealReason = tag },
+                                modifier = Modifier.weight(1f).height(30.dp),
+                                contentPadding = PaddingValues(2.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                border = androidx.compose.foundation.BorderStroke(0.8.dp, if (appealReason == tag) ElectricCyan else CockpitBorder)
+                            ) {
+                                Text(tag, fontSize = 9.sp, color = if (appealReason == tag) ElectricCyan else CockpitTextSecondary, maxLines = 1)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    CockpitTextField(
+                        value = appealReason,
+                        onValueChange = { appealReason = it },
+                        placeholder = "State specific justification (minimum 20 characters)...",
+                        label = "Appeal Justification",
+                        modifier = Modifier.height(90.dp)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${appealReason.length} / 20 characters minimum",
+                        color = if (appealReason.length >= 20) EmeraldPrimary else CockpitTextMuted,
+                        fontSize = 10.sp
+                    )
+                }
+            },
+            confirmButton = {
+                CockpitButton(
+                    text = if (isSubmittingAppeal) "Submitting..." else "Submit Formal Appeal",
+                    enabled = !isSubmittingAppeal && appealReason.length >= 20,
+                    onClick = {
+                        isSubmittingAppeal = true
+                        scope.launch {
+                            val res = DriverRepository.appealDriverRating(ratingToAppeal.id, appealReason)
+                            isSubmittingAppeal = false
+                            if (res.isSuccess) {
+                                onShowToast("Appeal submitted successfully for telemetric review!")
+                                selectedRatingForAppeal = null
+                            } else {
+                                onShowToast("Failed: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
+                    },
+                    backgroundColor = EmeraldPrimary,
+                    textColor = CockpitBackground,
+                    modifier = Modifier.height(40.dp)
+                )
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { selectedRatingForAppeal = null },
+                    enabled = !isSubmittingAppeal
+                ) {
+                    Text("Cancel", color = CockpitTextMuted)
+                }
+            },
+            containerColor = CockpitCardBackground
+        )
     }
 }
 

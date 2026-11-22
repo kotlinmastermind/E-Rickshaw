@@ -619,3 +619,36 @@ data class ChatMessagePayloadRequest(
     @SerializedName("message") val message: String? = null
 )
 
+data class FinancialSupportDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("support_type") val supportType: String = "EMERGENCY_REPAIR",
+    @SerializedName("amount_rupees") val amountRupees: Double = 0.0,
+    @SerializedName("repayment_terms_weeks") val repaymentTermsWeeks: Int = 4,
+    @SerializedName("reason") val reason: String = "",
+    @SerializedName("status") val status: String = "PENDING",
+    @SerializedName("created_at") val createdAt: String? = null
+)
+
+data class SubmitFinancialSupportRequest(
+    @SerializedName("support_type") val supportType: String,
+    @SerializedName("amount_rupees") val amountRupees: Double,
+    @SerializedName("reason") val reason: String,
+    @SerializedName("repayment_terms_weeks") val repaymentTermsWeeks: Int = 4
+)
+
+data class DriverRatingItemDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("rating") val rating: Float = 5f,
+    @SerializedName("cleanliness") val cleanliness: Float? = null,
+    @SerializedName("comfort") val comfort: Float? = null,
+    @SerializedName("tags") val tags: String? = null,
+    @SerializedName("feedback") val feedback: String? = null,
+    @SerializedName("created_at") val createdAt: String? = null,
+    @SerializedName("appeal_status") val appealStatus: String? = null
+)
+
+data class RatingAppealRequest(
+    @SerializedName("reason") val reason: String
+)
+
+
