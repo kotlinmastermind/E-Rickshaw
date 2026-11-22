@@ -9,6 +9,9 @@ import android.util.Log
 import com.vaisentra.mobility.driver.components.DriverDialogController
 import com.vaisentra.mobility.driver.components.DriverPopupType
 import java.io.ByteArrayOutputStream
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -547,6 +550,94 @@ object DriverRepository {
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    suspend fun uploadDriverDocument(
+        documentType: String,
+        uri: Uri,
+        context: Context
+    ): Result<Boolean> {
+        return try {
+            val contentResolver = context.contentResolver
+            val mimeType = contentResolver.getType(uri) ?: "image/jpeg"
+            val inputStream = contentResolver.openInputStream(uri)
+                ?: return Result.failure(IllegalStateException("Cannot read selected file."))
+            val bytes = inputStream.use { it.readBytes() }
+            if (bytes.isEmpty()) {
+                return Result.failure(IllegalStateException("Selected file is empty."))
+            }
+
+            var fileName = "${documentType.lowercase()}_${System.currentTimeMillis()}"
+            val cursor = contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex >= 0) {
+                        val retrievedName = it.getString(nameIndex)
+                        if (!retrievedName.isNullOrBlank()) {
+                            fileName = retrievedName
+                        }
+                    }
+                }
+            }
+            if (!fileName.contains(".")) {
+                val ext = when {
+                    mimeType.contains("pdf", ignoreCase = true) -> "pdf"
+                    mimeType.contains("png", ignoreCase = true) -> "png"
+                    mimeType.contains("webp", ignoreCase = true) -> "webp"
+                    else -> "jpg"
+                }
+                fileName = "$fileName.$ext"
+            }
+
+            val requestFile = bytes.toRequestBody(mimeType.toMediaTypeOrNull(), 0, bytes.size)
+            val filePart = MultipartBody.Part.createFormData("file", fileName, requestFile)
+            val docTypeBody = documentType.toRequestBody("text/plain".toMediaTypeOrNull())
+
+            val res = DriverNetworkClient.apiService.uploadDocument(docTypeBody, filePart)
+            if (res.isSuccessful) {
+                fetchDriverDocuments()
+                Result.success(true)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchDocumentContentBytes(documentId: String): Result<ByteArray> {
+        return try {
+            val res = DriverNetworkClient.apiService.getDocumentContent(documentId)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                val bytes = body.bytes()
+                Result.success(bytes)
+            } else {
+                Result.failure(IllegalStateException("Failed to load document content: HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchDocumentSignedUrl(documentId: String): Result<String> {
+        return try {
+            val res = DriverNetworkClient.apiService.getDocumentSignedUrl(documentId)
+            val body = res.body()
+            val signedUrl = body?.get("signed_url") as? String
+            if (res.isSuccessful && !signedUrl.isNullOrBlank()) {
+                val fullUrl = if (signedUrl.startsWith("http")) signedUrl else "${DriverNetworkClient.baseUrl.removeSuffix("/")}$signedUrl"
+                Result.success(fullUrl)
+            } else {
+                val fallback = "${DriverNetworkClient.baseUrl.removeSuffix("/")}/api/v1/drivers/documents/$documentId/content"
+                Result.success(fallback)
+            }
+        } catch (e: Exception) {
+            val fallback = "${DriverNetworkClient.baseUrl.removeSuffix("/")}/api/v1/drivers/documents/$documentId/content"
+            Result.success(fallback)
         }
     }
 

@@ -117,7 +117,10 @@ data class DriverDocumentDto(
     @SerializedName("created_at") val createdAt: String = "",
     @SerializedName("expiry_date", alternate = ["expires_at"]) val expiryDate: String = "",
     @SerializedName("days_until_expiry") val daysUntilExpiry: Int = 0,
-    @SerializedName("document_number", alternate = ["documentNumber", "number"]) val documentNumber: String? = null
+    @SerializedName("document_number", alternate = ["documentNumber", "number"]) val documentNumber: String? = null,
+    @SerializedName("view_url", alternate = ["document_url", "url"]) val viewUrl: String? = null,
+    @SerializedName("file_size_bytes") val fileSizeBytes: Long = 0L,
+    @SerializedName("mime_type") val mimeType: String? = null
 )
 
 data class DriverVehicleDto(

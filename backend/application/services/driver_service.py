@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import json
-from typing import Dict, Any, List, Optional
+import os
+from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, desc
 from fastapi import HTTPException, status, UploadFile
@@ -9,6 +10,7 @@ from backend.domain.models import (
     Vehicle, DriverVehicleAssignment, Ride, Payment, RideLocationHistory
 )
 from backend.integrations.storage.provider import get_storage_provider
+from backend.core.config import settings
 
 class DriverService:
     def __init__(self, db: AsyncSession):
@@ -77,17 +79,59 @@ class DriverService:
         stmt = select(DriverDocument).where(DriverDocument.driver_id == driver.id).order_by(DriverDocument.created_at.desc())
         res = await self.db.execute(stmt)
         docs = res.scalars().all()
-        return [
-            {
+        now_dt = datetime.now(timezone.utc).date()
+        result = []
+        for d in docs:
+            days_left = max(0, (d.expires_at.date() - now_dt).days) if d.expires_at else 0
+            exp_str = d.expires_at.strftime("%Y-%m-%d") if d.expires_at else ""
+            result.append({
                 "id": d.id,
                 "document_type": d.document_type,
                 "file_name": d.file_name,
                 "verification_status": d.verification_status,
                 "rejection_reason": d.rejection_reason,
-                "created_at": d.created_at.isoformat()
-            }
-            for d in docs
-        ]
+                "created_at": d.created_at.isoformat() if d.created_at else "",
+                "expiry_date": exp_str,
+                "days_until_expiry": days_left,
+                "file_size_bytes": d.file_size_bytes or 0,
+                "mime_type": d.mime_type or "application/octet-stream",
+                "view_url": f"/api/v1/drivers/documents/{d.id}/content"
+            })
+        return result
+
+    async def get_document_file_path(self, user_id: str, document_id: str) -> Tuple[str, str, str]:
+        driver = await self.get_or_create_profile(user_id)
+        stmt = select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.driver_id == driver.id)
+        res = await self.db.execute(stmt)
+        doc = res.scalar_one_or_none()
+        if not doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver document not found.")
+        clean_path = os.path.abspath(doc.storage_path)
+        if not os.path.isfile(clean_path):
+            base_dir = os.path.abspath(settings.STORAGE_LOCAL_DIR)
+            alt_path = os.path.abspath(os.path.join(base_dir, driver.id, os.path.basename(doc.storage_path)))
+            if os.path.isfile(alt_path):
+                clean_path = alt_path
+            else:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document file content not found on server storage.")
+        return clean_path, doc.mime_type or "application/octet-stream", doc.file_name
+
+    async def get_document_signed_url(self, user_id: str, document_id: str) -> Dict[str, Any]:
+        driver = await self.get_or_create_profile(user_id)
+        stmt = select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.driver_id == driver.id)
+        res = await self.db.execute(stmt)
+        doc = res.scalar_one_or_none()
+        if not doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver document not found.")
+        storage = get_storage_provider()
+        signed_url = await storage.generate_signed_url(doc.storage_path, expires_in_seconds=3600)
+        return {
+            "document_id": doc.id,
+            "document_type": doc.document_type,
+            "file_name": doc.file_name,
+            "signed_url": signed_url,
+            "expires_in_seconds": 3600
+        }
 
     async def get_availability(self, user_id: str) -> Dict[str, Any]:
         driver = await self.get_or_create_profile(user_id)

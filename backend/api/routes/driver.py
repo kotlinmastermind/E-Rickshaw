@@ -1,5 +1,6 @@
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.infrastructure.database.session import get_db
@@ -150,6 +151,25 @@ async def upload_document(
 async def get_documents(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
     service = DriverService(db)
     return await service.get_documents(user.id)
+
+@router.get("/documents/{document_id}/content")
+async def get_driver_document_content(
+    document_id: str,
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    service = DriverService(db)
+    path, mime_type, filename = await service.get_document_file_path(user.id, document_id)
+    return FileResponse(path=path, media_type=mime_type, filename=filename)
+
+@router.get("/documents/{document_id}/signed-url")
+async def get_driver_document_signed_url(
+    document_id: str,
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    service = DriverService(db)
+    return await service.get_document_signed_url(user.id, document_id)
 
 @router.get("/availability")
 async def get_driver_availability(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):

@@ -1,5 +1,8 @@
 package com.vaisentra.mobility.driver.data
 
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.*
 
@@ -46,6 +49,20 @@ interface DriverApiService {
 
     @GET("api/v1/drivers/documents")
     suspend fun getDocuments(): Response<List<DriverDocumentDto>>
+
+    @Multipart
+    @POST("api/v1/drivers/documents")
+    suspend fun uploadDocument(
+        @Part("document_type") documentType: RequestBody,
+        @Part file: MultipartBody.Part
+    ): Response<Map<String, Any>>
+
+    @GET("api/v1/drivers/documents/{document_id}/signed-url")
+    suspend fun getDocumentSignedUrl(@Path("document_id") documentId: String): Response<Map<String, Any>>
+
+    @Streaming
+    @GET("api/v1/drivers/documents/{document_id}/content")
+    suspend fun getDocumentContent(@Path("document_id") documentId: String): Response<ResponseBody>
 
     @GET("api/v1/driver-onboarding/vehicles")
     suspend fun getDriverVehicles(): Response<List<DriverVehicleDto>>
