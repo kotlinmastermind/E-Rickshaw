@@ -325,6 +325,23 @@ data class VehicleInspectionRequest(
     @SerializedName("notes") val notes: String? = null
 )
 
+data class PreShiftInspectionRequest(
+    @SerializedName("vehicle_id") val vehicleId: String? = null,
+    @SerializedName("tyre_pressure_ok") val tyrePressureOk: Boolean = true,
+    @SerializedName("lights_ok") val lightsOk: Boolean = true,
+    @SerializedName("brake_buzzer_ok") val brakeBuzzerOk: Boolean = true,
+    @SerializedName("notes") val notes: String? = null
+)
+
+data class VehicleUpdateDto(
+    @SerializedName("model") val model: String? = null,
+    @SerializedName("license_plate") val licensePlate: String? = null,
+    @SerializedName("color") val color: String? = null,
+    @SerializedName("year") val year: Int? = null,
+    @SerializedName("rc_number") val rcNumber: String? = null,
+    @SerializedName("permit_number") val permitNumber: String? = null
+)
+
 data class RecordingConsentRequest(
     @SerializedName("ride_id") val rideId: String,
     @SerializedName("role") val role: String = "DRIVER",
@@ -515,4 +532,46 @@ data class DriverProfileUpdateRequest(
 
 data class AvatarUpdateRequest(
     @SerializedName("avatar_url") val avatarUrl: String
+)
+
+data class DriverPreferencesRequest(
+    @SerializedName("auto_accept_pool") val autoAcceptPool: Boolean? = null,
+    @SerializedName("auto_accept_shuttle") val autoAcceptShuttle: Boolean? = null,
+    @SerializedName("high_demand_surge_alerts") val highDemandSurgeAlerts: Boolean? = null,
+    @SerializedName("high_surge_alerts") val highSurgeAlerts: Boolean? = null,
+    @SerializedName("voice_guidance_enabled") val voiceGuidanceEnabled: Boolean? = null,
+    @SerializedName("voice_navigation") val voiceNavigation: Boolean? = null,
+    @SerializedName("preferred_corridor") val preferredCorridor: String? = null,
+    @SerializedName("minimum_fare_cents") val minimumFareCents: Int? = null,
+    @SerializedName("maximum_pickup_distance_km") val maximumPickupDistanceKm: Float? = null,
+    @SerializedName("vehicle_categories") val vehicleCategories: List<String>? = null,
+    @SerializedName("preferred_drop_zones") val preferredDropZones: List<String>? = null,
+    @SerializedName("reroute_on_closure_enabled") val rerouteOnClosureEnabled: Boolean? = null
+)
+
+data class ClaimNoShowRequest(
+    @SerializedName("reason") val reason: String = "PASSENGER_NO_SHOW",
+    @SerializedName("notes") val notes: String? = null
+)
+
+data class AddPayoutAccountRequest(
+    @SerializedName("account_type") val accountType: String = "BANK_ACCOUNT",
+    @SerializedName("account_number") val accountNumber: String,
+    @SerializedName("routing_number") val routingNumber: String,
+    @SerializedName("account_holder_name") val accountHolderName: String
+)
+
+data class GenerateUpiRequest(
+    @SerializedName("ride_id") val rideId: String,
+    @SerializedName("amount_cents") val amountCents: Int
+)
+
+data class EmergencyPingRequest(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double,
+    @SerializedName("note") val note: String? = null
+)
+
+data class RerouteRideRequest(
+    @SerializedName("reason") val reason: String = "TRAFFIC"
 )

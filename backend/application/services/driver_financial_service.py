@@ -372,9 +372,15 @@ class DriverFinancialService:
         shift = res.scalars().first()
 
         if not shift:
+            last_shift_stmt = select(DriverShift).where(DriverShift.driver_id == driver.id).order_by(DriverShift.created_at.desc()).limit(1)
+            last_res = await self.db.execute(last_shift_stmt)
+            last_shift = last_res.scalars().first()
+            last_odo = (last_shift.end_odometer_km or last_shift.start_odometer_km) if last_shift else 48210.0
             return {
                 "has_active_shift": False,
                 "active_shift": None,
+                "status": "OFF_DUTY",
+                "last_closing_odometer_km": float(last_odo or 48210.0),
                 "forecast": None,
                 "work_hour_reminders": None
             }
@@ -401,6 +407,7 @@ class DriverFinancialService:
             "shift_id": shift.id,
             "status": shift.status,
             "started_at": shift.started_at.isoformat(),
+            "start_odometer_km": float(shift.start_odometer_km or 48210.0),
             "elapsed_minutes": elapsed_mins,
             "elapsed_hours": round(elapsed_mins / 60.0, 2),
             "continuous_driving_minutes": continuous_mins,

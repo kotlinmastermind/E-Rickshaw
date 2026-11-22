@@ -518,11 +518,17 @@ object DriverRepository {
 
     suspend fun startShiftOdometer(km: Double, soc: Int = 92, vehicleId: String? = null): Result<Boolean> {
         return try {
+            val targetVehicleId = vehicleId ?: _assignedVehicle.value?.vehicleId
             val res = DriverNetworkClient.apiService.startShift(
-                StartShiftRequest(vehicleId = vehicleId, startOdometerKm = km)
+                StartShiftRequest(vehicleId = targetVehicleId, startOdometerKm = km)
             )
-            if (res.isSuccessful) Result.success(true)
-            else Result.failure(IllegalStateException("startShift failed: HTTP ${res.code()}"))
+            if (res.isSuccessful) {
+                setDutyStatus(true)
+                Result.success(true)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException("startShift failed: $err"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -531,8 +537,27 @@ object DriverRepository {
     suspend fun endShiftOdometer(km: Double, soc: Int = 85): Result<Boolean> {
         return try {
             val res = DriverNetworkClient.apiService.endShift(EndShiftRequest(endOdometerKm = km))
-            if (res.isSuccessful) Result.success(true)
-            else Result.failure(IllegalStateException("endShift failed: HTTP ${res.code()}"))
+            if (res.isSuccessful) {
+                setDutyStatus(false)
+                Result.success(true)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException("endShift failed: $err"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchShiftStatus(): Result<Map<String, Any>> {
+        return try {
+            val res = DriverNetworkClient.apiService.getShiftStatus()
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("getShiftStatus HTTP ${res.code()}"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -664,7 +689,7 @@ object DriverRepository {
         return try {
             val res = DriverNetworkClient.apiService.getDriverVehicles()
             val body = res.body()
-            if (res.isSuccessful && body != null) {
+            if (res.isSuccessful && !body.isNullOrEmpty()) {
                 _vehicles.value = body
                 val activeVeh = body.firstOrNull { it.isActiveVehicle || it.isActive } ?: body.firstOrNull()
                 _assignedVehicle.value = activeVeh
@@ -679,7 +704,66 @@ object DriverRepository {
                 }
                 Result.success(body)
             } else {
-                Result.failure(IllegalStateException("getDriverVehicles failed: HTTP ${res.code()}"))
+                // Try fetching assigned vehicle directly
+                val vRes = DriverNetworkClient.apiService.getActiveVehicle()
+                val vBody = vRes.body()
+                if (vRes.isSuccessful && vBody != null) {
+                    _vehicles.value = listOf(vBody)
+                    _assignedVehicle.value = vBody
+                    val currentProf = _profile.value
+                    _profile.value = currentProf.copy(
+                        assignedVehiclePlate = vBody.licensePlate,
+                        assignedVehicleModel = vBody.model
+                    )
+                    Result.success(listOf(vBody))
+                } else {
+                    Result.success(_vehicles.value)
+                }
+            }
+        } catch (e: Exception) {
+            // Fallback attempt
+            try {
+                val vRes = DriverNetworkClient.apiService.getActiveVehicle()
+                val vBody = vRes.body()
+                if (vRes.isSuccessful && vBody != null) {
+                    _vehicles.value = listOf(vBody)
+                    _assignedVehicle.value = vBody
+                    Result.success(listOf(vBody))
+                } else {
+                    Result.failure(e)
+                }
+            } catch (ex: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun updateActiveVehicle(
+        plate: String,
+        model: String,
+        rc: String,
+        permit: String,
+        color: String = "Electric Green",
+        year: Int = 2025
+    ): Result<Boolean> {
+        return try {
+            val res = DriverNetworkClient.apiService.updateActiveVehicle(
+                VehicleUpdateDto(
+                    licensePlate = plate.trim().uppercase(),
+                    model = model.trim(),
+                    rcNumber = rc.trim().uppercase(),
+                    permitNumber = permit.trim().uppercase(),
+                    color = color.trim(),
+                    year = year
+                )
+            )
+            if (res.isSuccessful) {
+                fetchDriverVehicles()
+                fetchDriverProfile()
+                Result.success(true)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -1074,7 +1158,7 @@ object DriverRepository {
     suspend fun rerouteActiveRide(rideId: String, reason: String): Result<Boolean> {
         if (rideId.isBlank()) return Result.failure(IllegalStateException("No active ride"))
         return try {
-            val res = DriverNetworkClient.apiService.rerouteRide(rideId, mapOf("reason" to reason))
+            val res = DriverNetworkClient.apiService.rerouteRide(rideId, RerouteRideRequest(reason = reason))
             if (res.isSuccessful) Result.success(true)
             else Result.failure(IllegalStateException("rerouteRide failed: HTTP ${res.code()}"))
         } catch (e: Exception) {
@@ -1117,11 +1201,11 @@ object DriverRepository {
     suspend fun addPayoutBankAccount(accountNo: String, ifsc: String, holderName: String): Result<Boolean> {
         return try {
             val res = DriverNetworkClient.apiService.addPayoutAccount(
-                mapOf(
-                    "account_type" to "BANK_ACCOUNT",
-                    "account_number" to accountNo,
-                    "ifsc_code" to ifsc,
-                    "beneficiary_name" to holderName
+                AddPayoutAccountRequest(
+                    accountType = "BANK_ACCOUNT",
+                    accountNumber = accountNo,
+                    routingNumber = ifsc,
+                    accountHolderName = holderName
                 )
             )
             if (res.isSuccessful) {
@@ -1150,7 +1234,7 @@ object DriverRepository {
         if (rideId.isBlank()) return Result.failure(IllegalStateException("No active ride"))
         return try {
             val res = DriverNetworkClient.apiService.generateUpiCheckout(
-                mapOf("ride_id" to rideId, "amount_cents" to (amountRupees * 100).toInt())
+                GenerateUpiRequest(rideId = rideId, amountCents = (amountRupees * 100).toInt())
             )
             val body = res.body()
             val url = (body?.get("upi_intent_url") ?: body?.get("qr_code_payload")) as? String
@@ -1163,15 +1247,14 @@ object DriverRepository {
 
     suspend fun reportFoundItem(rideId: String, category: String, notes: String): Result<Boolean> {
         return try {
-            val payload = mutableMapOf<String, Any>(
-                "category" to "OTHER",
-                "description" to "Found item ($category): $notes"
-            )
             val cleanRide = rideId.trim()
-            if (cleanRide.isNotBlank() && cleanRide != "general" && cleanRide.length > 10) {
-                payload["ride_id"] = cleanRide
-            }
-            val res = DriverNetworkClient.apiService.reportSafetyIncident(payload)
+            val req = SafetyIncidentRequest(
+                rideId = if (cleanRide.isNotBlank() && cleanRide != "general" && cleanRide.length > 10) cleanRide else null,
+                category = "OTHER",
+                severity = "LOW",
+                description = "Found item ($category): $notes"
+            )
+            val res = DriverNetworkClient.apiService.reportSafetyIncident(req)
             if (res.isSuccessful) Result.success(true)
             else Result.failure(IllegalStateException("reportSafetyIncident failed: HTTP ${res.code()}"))
         } catch (e: Exception) {
@@ -1184,34 +1267,43 @@ object DriverRepository {
         tyrePressureOk: Boolean,
         lightsOk: Boolean,
         brakeOk: Boolean,
-        photos: Map<String, String> = mapOf("front_url" to "pending-capture")
+        notes: String? = null
     ): Result<Boolean> {
         val targetVehicleId = vehicleId.ifBlank {
-            _assignedVehicle.value?.vehicleId ?: _profile.value.assignedVehiclePlate.ifBlank { "22a1b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c" }
+            _assignedVehicle.value?.vehicleId ?: _profile.value.assignedVehiclePlate
         }
         return try {
-            val checklist = mapOf(
-                "TIRES_RIMS" to if (tyrePressureOk) "PASS" else "FAIL",
-                "BRAKES" to if (brakeOk) "PASS" else "FAIL",
-                "LIGHTS" to if (lightsOk) "PASS" else "FAIL"
-            )
-            val res = DriverNetworkClient.apiService.submitVehicleInspection(
-                VehicleInspectionRequest(
-                    vehicleId = targetVehicleId,
-                    checklistResults = checklist,
-                    photos = photos,
-                    notes = "Pre-shift inspection"
+            val res = DriverNetworkClient.apiService.submitPreShiftInspection(
+                PreShiftInspectionRequest(
+                    vehicleId = targetVehicleId.ifBlank { null },
+                    tyrePressureOk = tyrePressureOk,
+                    lightsOk = lightsOk,
+                    brakeBuzzerOk = brakeOk,
+                    notes = notes ?: "Pre-shift inspection signed off"
                 )
             )
             if (res.isSuccessful) {
                 Result.success(true)
             } else {
-                Log.w(TAG, "submitVehicleInspection HTTP ${res.code()}: logged pre-shift check locally.")
-                Result.success(true)
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
             }
         } catch (e: Exception) {
-            Log.w(TAG, "submitVehicleInspection error: ${e.message}, logged pre-shift check locally.")
-            Result.success(true)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchLatestPreShiftInspection(): Result<Map<String, Any>> {
+        return try {
+            val res = DriverNetworkClient.apiService.getLatestPreShiftInspection()
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("getLatestPreShiftInspection failed: HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
@@ -1240,7 +1332,7 @@ object DriverRepository {
                 }
             }
             val pingRes = DriverNetworkClient.apiService.sendEmergencyPing(
-                mapOf("latitude" to 28.6139, "longitude" to 77.2090, "note" to notes)
+                EmergencyPingRequest(latitude = 28.6139, longitude = 77.2090, note = notes)
             )
             if (pingRes.isSuccessful) Result.success("Emergency SOS ping dispatched!")
             else Result.failure(IllegalStateException("SOS failed: HTTP ${pingRes.code()}"))
@@ -1619,16 +1711,17 @@ object DriverRepository {
             )
             _driverPreferences.value = updated
 
-            val payload = mutableMapOf<String, Any>()
-            autoAcceptPool?.let { payload["auto_accept_pool"] = it }
-            highSurgeAlerts?.let { payload["high_surge_alerts"] = it }
-            voiceNavigation?.let {
-                payload["voice_guidance_enabled"] = it
-                payload["voice_navigation"] = it
-            }
-            preferredCorridor?.let { payload["preferred_corridor"] = it }
+            val req = DriverPreferencesRequest(
+                autoAcceptPool = autoAcceptPool,
+                autoAcceptShuttle = autoAcceptPool,
+                highDemandSurgeAlerts = highSurgeAlerts,
+                highSurgeAlerts = highSurgeAlerts,
+                voiceGuidanceEnabled = voiceNavigation,
+                voiceNavigation = voiceNavigation,
+                preferredCorridor = preferredCorridor
+            )
 
-            val res = DriverNetworkClient.apiService.updateDriverPreferences(payload)
+            val res = DriverNetworkClient.apiService.updateDriverPreferences(req)
             if (res.isSuccessful) {
                 Result.success(true)
             } else {

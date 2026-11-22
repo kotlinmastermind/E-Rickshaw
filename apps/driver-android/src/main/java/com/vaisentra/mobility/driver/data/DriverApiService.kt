@@ -67,6 +67,12 @@ interface DriverApiService {
     @GET("api/v1/driver-onboarding/vehicles")
     suspend fun getDriverVehicles(): Response<List<DriverVehicleDto>>
 
+    @GET("api/v1/drivers/vehicle")
+    suspend fun getActiveVehicle(): Response<DriverVehicleDto>
+
+    @PUT("api/v1/drivers/vehicle")
+    suspend fun updateActiveVehicle(@Body body: VehicleUpdateDto): Response<Map<String, Any>>
+
     // --- Duty, Availability & Telemetry ---
     @POST("api/v1/drivers/availability")
     suspend fun toggleAvailability(@Body payload: DutyStatusUpdateRequest): Response<Map<String, Any>>
@@ -74,11 +80,20 @@ interface DriverApiService {
     @POST("api/v1/drivers/location")
     suspend fun pingLocation(@Body request: DriverLocationPingRequest): Response<Map<String, Any>>
 
-    @POST("api/v1/drivers/financials/shift/start")
+    @POST("api/v1/drivers/financials/shifts/start")
     suspend fun startShift(@Body request: StartShiftRequest): Response<Map<String, Any>>
 
-    @POST("api/v1/drivers/financials/shift/end")
+    @POST("api/v1/drivers/financials/shifts/end")
     suspend fun endShift(@Body request: EndShiftRequest): Response<Map<String, Any>>
+
+    @GET("api/v1/drivers/financials/shifts/status")
+    suspend fun getShiftStatus(): Response<Map<String, Any>>
+
+    @POST("api/v1/drivers/duty/vehicle-inspection")
+    suspend fun submitPreShiftInspection(@Body body: PreShiftInspectionRequest): Response<Map<String, Any>>
+
+    @GET("api/v1/drivers/duty/vehicle-inspection/latest")
+    suspend fun getLatestPreShiftInspection(): Response<Map<String, Any>>
 
     // --- Dispatch Offers, Active Ride & Notifications ---
     @GET("api/v1/drivers/dispatch/offers")
@@ -109,7 +124,7 @@ interface DriverApiService {
     suspend fun finishTrip(@Path("ride_id") rideId: String, @Body body: Map<String, Double> = emptyMap()): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/actions/no-show")
-    suspend fun claimNoShow(@Path("ride_id") rideId: String, @Body body: @JvmSuppressWildcards Map<String, Any> = emptyMap()): Response<Map<String, Any>>
+    suspend fun claimNoShow(@Path("ride_id") rideId: String, @Body body: ClaimNoShowRequest = ClaimNoShowRequest()): Response<Map<String, Any>>
 
     @POST("api/v1/payments/cash-collect")
     suspend fun collectCash(@Body request: CashCollectRequest): Response<Map<String, Any>>
@@ -141,7 +156,7 @@ interface DriverApiService {
     suspend fun stopWaiting(@Path("ride_id") rideId: String): Response<Map<String, Any>>
 
     @POST("api/v1/drivers/financials/payout-accounts")
-    suspend fun addPayoutAccount(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun addPayoutAccount(@Body body: AddPayoutAccountRequest): Response<Map<String, Any>>
 
     @GET("api/v1/drivers/financials/payout-accounts")
     suspend fun getPayoutAccounts(): Response<List<PayoutAccountDto>>
@@ -150,14 +165,14 @@ interface DriverApiService {
     suspend fun reportRouteAnomaly(@Body body: RouteAnomalyRequest): Response<Map<String, Any>>
 
     @POST("api/v1/payments/upi-checkout")
-    suspend fun generateUpiCheckout(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun generateUpiCheckout(@Body body: GenerateUpiRequest): Response<Map<String, Any>>
 
     // --- Safety & Onboarding ---
     @POST("api/v1/driver-onboarding/vehicle-inspection")
     suspend fun submitVehicleInspection(@Body body: VehicleInspectionRequest): Response<Map<String, Any>>
 
     @POST("api/v1/drivers/safety/incidents")
-    suspend fun reportSafetyIncident(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun reportSafetyIncident(@Body body: SafetyIncidentRequest): Response<Map<String, Any>>
 
     @POST("api/v1/safety/recording/consent")
     suspend fun updateRecordingConsent(@Body body: RecordingConsentRequest): Response<Map<String, Any>>
@@ -169,7 +184,7 @@ interface DriverApiService {
     suspend fun triggerDriverEmergencyAlert(@Body body: EmergencyAlertRequest): Response<Map<String, Any>>
 
     @POST("api/v1/location/emergency-ping")
-    suspend fun sendEmergencyPing(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun sendEmergencyPing(@Body body: EmergencyPingRequest): Response<Map<String, Any>>
 
     @POST("api/v1/drivers/safety/incidents")
     suspend fun submitDriverSafetyIncident(@Body body: SafetyIncidentRequest): Response<Map<String, Any>>
@@ -221,7 +236,7 @@ interface DriverApiService {
     suspend fun clearRoadRestriction(@Path("restriction_id") restrictionId: String): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/actions/reroute")
-    suspend fun rerouteRide(@Path("ride_id") rideId: String, @Body body: @JvmSuppressWildcards Map<String, Any> = emptyMap()): Response<Map<String, Any>>
+    suspend fun rerouteRide(@Path("ride_id") rideId: String, @Body body: RerouteRideRequest = RerouteRideRequest()): Response<Map<String, Any>>
 
     @POST("api/v1/drivers/financials/payout-accounts/{account_id}/primary")
     suspend fun setPrimaryPayoutAccount(@Path("account_id") accountId: String): Response<Map<String, Any>>
@@ -242,7 +257,7 @@ interface DriverApiService {
     suspend fun getDriverPreferences(): Response<Map<String, Any>>
 
     @PUT("api/v1/drivers/preferences")
-    suspend fun updateDriverPreferences(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun updateDriverPreferences(@Body body: DriverPreferencesRequest): Response<Map<String, Any>>
 
     @PUT("api/v1/drivers/profile")
     suspend fun updateDriverProfile(@Body body: DriverProfileUpdateRequest): Response<Map<String, Any>>

@@ -140,7 +140,7 @@ interface RiderApiService {
     @POST("api/v1/loyalty-feedback/rides/{ride_id}/rate")
     suspend fun rateDriver(
         @Path("ride_id") rideId: String,
-        @Body body: @JvmSuppressWildcards Map<String, Any>
+        @Body body: Map<String, @JvmSuppressWildcards Any>
     ): Response<Map<String, Any>>
 
     @POST("api/v1/loyalty-feedback/rides/{ride_id}/tip")
@@ -152,18 +152,18 @@ interface RiderApiService {
     @POST("api/v1/rides/{ride_id}/disputes")
     suspend fun submitDispute(
         @Path("ride_id") rideId: String,
-        @Body body: @JvmSuppressWildcards Map<String, Any>
+        @Body body: Map<String, @JvmSuppressWildcards Any>
     ): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/lost-property")
     suspend fun reportLostProperty(
         @Path("ride_id") rideId: String,
-        @Body body: @JvmSuppressWildcards Map<String, Any>
+        @Body body: Map<String, @JvmSuppressWildcards Any>
     ): Response<Map<String, Any>>
 
     @POST("api/v1/rides/schedule")
     suspend fun scheduleRide(
-        @Body body: @JvmSuppressWildcards Map<String, Any>
+        @Body body: Map<String, @JvmSuppressWildcards Any>
     ): Response<Map<String, Any>>
 
     @GET("api/v1/customers/preferences")
@@ -171,7 +171,7 @@ interface RiderApiService {
 
     @PUT("api/v1/customers/preferences")
     suspend fun updatePreferences(
-        @Body body: @JvmSuppressWildcards Map<String, Any>
+        @Body body: Map<String, @JvmSuppressWildcards Any>
     ): Response<Map<String, Any>>
 
     @POST("api/v1/pools/{trip_id}/messages")
@@ -212,19 +212,19 @@ interface RiderApiService {
 
     // --- Disconnected Features API Hooks ---
     @POST("api/v1/fares/price-lock")
-    suspend fun lockPrice(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun lockPrice(@Body body: Map<String, @JvmSuppressWildcards Any>): Response<Map<String, Any>>
 
     @POST("api/v1/promos/validate")
-    suspend fun validatePromo(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun validatePromo(@Body body: Map<String, @JvmSuppressWildcards Any>): Response<Map<String, Any>>
 
     @POST("api/v1/safety/recording/consent")
-    suspend fun setAudioRecordingConsent(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun setAudioRecordingConsent(@Body body: Map<String, @JvmSuppressWildcards Any>): Response<Map<String, Any>>
 
     @POST("api/v1/safety/anomaly/route")
-    suspend fun reportRouteAnomaly(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun reportRouteAnomaly(@Body body: Map<String, @JvmSuppressWildcards Any>): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/share")
-    suspend fun shareRide(@Path("ride_id") rideId: String, @Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun shareRide(@Path("ride_id") rideId: String, @Body body: Map<String, @JvmSuppressWildcards Any>): Response<Map<String, Any>>
 
     @GET("api/v1/support/tickets/{ticket_id}/messages")
     suspend fun getTicketMessages(@Path("ticket_id") ticketId: String): Response<List<Map<String, Any>>>
@@ -243,10 +243,10 @@ interface RiderApiService {
 
     // --- Advanced Wallets & Fintech ---
     @POST("api/v1/wallets/auto-topup/config")
-    suspend fun configureAutoTopup(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun configureAutoTopup(@Body body: Map<String, @JvmSuppressWildcards Any>): Response<Map<String, Any>>
 
     @POST("api/v1/wallets/gift-cards/purchase")
-    suspend fun purchaseGiftCard(@Body body: @JvmSuppressWildcards Map<String, Any>): Response<Map<String, Any>>
+    suspend fun purchaseGiftCard(@Body body: Map<String, @JvmSuppressWildcards Any>): Response<Map<String, Any>>
 
     @POST("api/v1/wallets/gift-cards/redeem")
     suspend fun redeemGiftCard(@Body body: Map<String, String>): Response<Map<String, Any>>

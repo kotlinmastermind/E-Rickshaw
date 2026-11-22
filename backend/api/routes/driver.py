@@ -27,6 +27,21 @@ class DispatchPreferencesPayload(BaseModel):
 class RejectOfferPayload(BaseModel):
     reason: str = Field(..., pattern="^(TOO_FAR|FARE_TOO_LOW|WRONG_CATEGORY|UNAVAILABLE|OTHER|DISPATCH_TIMEOUT|PILOT_DECLINED|PASSENGER_MISMATCH|LOW_BATTERY)$")
 
+class VehicleUpdatePayload(BaseModel):
+    model: Optional[str] = None
+    license_plate: Optional[str] = None
+    color: Optional[str] = None
+    year: Optional[int] = None
+    rc_number: Optional[str] = None
+    permit_number: Optional[str] = None
+
+class PreShiftInspectionRequestPayload(BaseModel):
+    vehicle_id: Optional[str] = None
+    tyre_pressure_ok: bool = True
+    lights_ok: bool = True
+    brake_buzzer_ok: bool = True
+    notes: Optional[str] = None
+
 @router.get("/dispatch/offers")
 async def get_dispatch_offers(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
     return await DriverTripOperationsService(db).get_offers(user.id)
@@ -170,6 +185,47 @@ async def get_driver_document_signed_url(
 ):
     service = DriverService(db)
     return await service.get_document_signed_url(user.id, document_id)
+
+@router.get("/vehicle")
+@router.get("/vehicles/active")
+async def get_active_vehicle(
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    return await DriverService(db).get_active_vehicle(user.id)
+
+@router.put("/vehicle")
+@router.post("/vehicle")
+async def update_active_vehicle(
+    payload: VehicleUpdatePayload,
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    return await DriverService(db).update_active_vehicle(user.id, payload.model_dump(exclude_unset=True))
+
+@router.post("/duty/vehicle-inspection")
+@router.post("/vehicle-inspection")
+async def submit_preshift_vehicle_inspection(
+    payload: PreShiftInspectionRequestPayload,
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    return await DriverService(db).submit_preshift_inspection(
+        user_id=user.id,
+        tyre_pressure_ok=payload.tyre_pressure_ok,
+        lights_ok=payload.lights_ok,
+        brake_buzzer_ok=payload.brake_buzzer_ok,
+        vehicle_id=payload.vehicle_id,
+        notes=payload.notes
+    )
+
+@router.get("/duty/vehicle-inspection/latest")
+@router.get("/vehicle-inspection/latest")
+async def get_latest_preshift_inspection(
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    return await DriverService(db).get_latest_preshift_inspection(user.id)
 
 @router.get("/availability")
 async def get_driver_availability(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):

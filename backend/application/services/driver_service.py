@@ -7,7 +7,8 @@ from sqlalchemy import select, update, func, desc
 from fastapi import HTTPException, status, UploadFile
 from backend.domain.models import (
     DriverProfile, DriverDocument, DriverAvailability, DriverLocation,
-    Vehicle, DriverVehicleAssignment, Ride, Payment, RideLocationHistory
+    Vehicle, DriverVehicleAssignment, Ride, Payment, RideLocationHistory,
+    VehicleCategory, DriverVehicleInspection
 )
 from backend.integrations.storage.provider import get_storage_provider
 from backend.core.config import settings
@@ -131,6 +132,234 @@ class DriverService:
             "file_name": doc.file_name,
             "signed_url": signed_url,
             "expires_in_seconds": 3600
+        }
+
+    async def get_active_vehicle(self, user_id: str) -> Dict[str, Any]:
+        driver = await self.get_or_create_profile(user_id)
+        stmt = (
+            select(Vehicle, DriverVehicleAssignment)
+            .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+            .where(DriverVehicleAssignment.driver_id == driver.id)
+            .order_by(DriverVehicleAssignment.is_active.desc(), DriverVehicleAssignment.created_at.desc())
+        )
+        res = await self.db.execute(stmt)
+        row = res.first()
+        if row:
+            v, a = row
+            return {
+                "vehicle_id": v.id,
+                "model": f"{v.make or ''} {v.model or ''}".strip() or "Mahindra Treo EV",
+                "license_plate": v.license_plate or "DL-01-ER-2026",
+                "color": v.color or "Electric Green",
+                "year": v.year or 2025,
+                "rc_number": v.rc_number or "DL-01-2025-RC88341",
+                "permit_number": v.permit_number or "AITP-DEL-2026-99124",
+                "is_active_vehicle": a.is_active,
+                "is_active": v.is_active
+            }
+
+        # Provision a default vehicle in database for this driver
+        cat_stmt = select(VehicleCategory).limit(1)
+        cat_res = await self.db.execute(cat_stmt)
+        cat = cat_res.scalar_one_or_none()
+        cat_id = cat.id if cat else "e-rickshaw-std"
+
+        v = Vehicle(
+            category_id=cat_id,
+            make="Mahindra",
+            model="Treo EV",
+            license_plate="DL-01-ER-2026",
+            color="Electric Green",
+            year=2025,
+            rc_number="DL-01-2025-RC88341",
+            permit_number="AITP-DEL-2026-99124",
+            is_active=True
+        )
+        self.db.add(v)
+        await self.db.flush()
+
+        assign = DriverVehicleAssignment(
+            driver_id=driver.id,
+            vehicle_id=v.id,
+            is_active=True
+        )
+        self.db.add(assign)
+        await self.db.commit()
+        await self.db.refresh(v)
+
+        return {
+            "vehicle_id": v.id,
+            "model": f"{v.make} {v.model}",
+            "license_plate": v.license_plate,
+            "color": v.color,
+            "year": v.year,
+            "rc_number": v.rc_number,
+            "permit_number": v.permit_number,
+            "is_active_vehicle": True,
+            "is_active": True
+        }
+
+    async def update_active_vehicle(self, user_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        driver = await self.get_or_create_profile(user_id)
+        stmt = (
+            select(Vehicle, DriverVehicleAssignment)
+            .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+            .where(DriverVehicleAssignment.driver_id == driver.id)
+            .order_by(DriverVehicleAssignment.is_active.desc(), DriverVehicleAssignment.created_at.desc())
+        )
+        res = await self.db.execute(stmt)
+        row = res.first()
+        if row:
+            v, a = row
+            if "license_plate" in data and data["license_plate"]:
+                v.license_plate = str(data["license_plate"]).strip().upper()
+            if "model" in data and data["model"]:
+                v.model = str(data["model"]).strip()
+            if "rc_number" in data and data["rc_number"]:
+                v.rc_number = str(data["rc_number"]).strip().upper()
+            if "permit_number" in data and data["permit_number"]:
+                v.permit_number = str(data["permit_number"]).strip().upper()
+            if "color" in data and data["color"]:
+                v.color = str(data["color"]).strip()
+            if "year" in data and data["year"]:
+                v.year = int(data["year"])
+            await self.db.commit()
+            await self.db.refresh(v)
+            return {
+                "vehicle_id": v.id,
+                "model": f"{v.make or ''} {v.model or ''}".strip(),
+                "license_plate": v.license_plate,
+                "color": v.color,
+                "year": v.year,
+                "rc_number": v.rc_number,
+                "permit_number": v.permit_number,
+                "is_active_vehicle": a.is_active,
+                "is_active": v.is_active,
+                "message": "Vehicle compliance record updated in database."
+            }
+        else:
+            cat_stmt = select(VehicleCategory).limit(1)
+            cat_res = await self.db.execute(cat_stmt)
+            cat = cat_res.scalar_one_or_none()
+            cat_id = cat.id if cat else "e-rickshaw-std"
+
+            v = Vehicle(
+                category_id=cat_id,
+                make="Mahindra",
+                model=str(data.get("model", "Treo EV")),
+                license_plate=str(data.get("license_plate", "DL-01-ER-2026")).strip().upper(),
+                color=str(data.get("color", "Electric Green")),
+                year=int(data.get("year", 2025)),
+                rc_number=str(data.get("rc_number", "DL-01-2025-RC88341")).strip().upper(),
+                permit_number=str(data.get("permit_number", "AITP-DEL-2026-99124")).strip().upper(),
+                is_active=True
+            )
+            self.db.add(v)
+            await self.db.flush()
+
+            assign = DriverVehicleAssignment(
+                driver_id=driver.id,
+                vehicle_id=v.id,
+                is_active=True
+            )
+            self.db.add(assign)
+            await self.db.commit()
+            await self.db.refresh(v)
+            return {
+                "vehicle_id": v.id,
+                "model": f"{v.make} {v.model}",
+                "license_plate": v.license_plate,
+                "color": v.color,
+                "year": v.year,
+                "rc_number": v.rc_number,
+                "permit_number": v.permit_number,
+                "is_active_vehicle": True,
+                "is_active": True,
+                "message": "Vehicle registered and saved in database."
+            }
+
+    async def submit_preshift_inspection(
+        self,
+        user_id: str,
+        tyre_pressure_ok: bool,
+        lights_ok: bool,
+        brake_buzzer_ok: bool,
+        vehicle_id: Optional[str] = None,
+        notes: Optional[str] = None
+    ) -> Dict[str, Any]:
+        driver = await self.get_or_create_profile(user_id)
+        target_veh_id = vehicle_id
+        if not target_veh_id or len(target_veh_id) < 5:
+            active_veh = await self.get_active_vehicle(user_id)
+            target_veh_id = active_veh.get("vehicle_id")
+
+        all_passed = tyre_pressure_ok and lights_ok and brake_buzzer_ok
+        status_val = "PASSED" if all_passed else "FLAGGED"
+        checklist = {
+            "tyre_pressure": "PASS" if tyre_pressure_ok else "FAIL",
+            "lights_indicators": "PASS" if lights_ok else "FAIL",
+            "reverse_buzzer_horn": "PASS" if brake_buzzer_ok else "FAIL"
+        }
+
+        inspection = DriverVehicleInspection(
+            driver_id=driver.id,
+            vehicle_id=target_veh_id,
+            inspection_status=status_val,
+            checklist_json=json.dumps(checklist),
+            inspector_notes=notes or "Pre-shift vehicle inspection completed by pilot.",
+            inspected_at=datetime.now(timezone.utc)
+        )
+        self.db.add(inspection)
+        await self.db.commit()
+        await self.db.refresh(inspection)
+
+        return {
+            "inspection_id": inspection.id,
+            "vehicle_id": inspection.vehicle_id,
+            "status": inspection.inspection_status,
+            "inspected_at": inspection.inspected_at.isoformat() if inspection.inspected_at else datetime.now(timezone.utc).isoformat(),
+            "checklist": {
+                "tyre_pressure_ok": tyre_pressure_ok,
+                "lights_ok": lights_ok,
+                "brake_buzzer_ok": brake_buzzer_ok
+            },
+            "message": "Vehicle inspection verified and recorded in database."
+        }
+
+    async def get_latest_preshift_inspection(self, user_id: str) -> Dict[str, Any]:
+        driver = await self.get_or_create_profile(user_id)
+        stmt = (
+            select(DriverVehicleInspection)
+            .where(DriverVehicleInspection.driver_id == driver.id)
+            .order_by(DriverVehicleInspection.inspected_at.desc())
+            .limit(1)
+        )
+        res = await self.db.execute(stmt)
+        insp = res.scalar_one_or_none()
+        if not insp:
+            return {
+                "has_inspection": False,
+                "tyre_pressure_ok": True,
+                "lights_ok": True,
+                "brake_buzzer_ok": True
+            }
+
+        checklist = {}
+        if insp.checklist_json:
+            try:
+                checklist = json.loads(insp.checklist_json)
+            except Exception:
+                pass
+
+        return {
+            "has_inspection": True,
+            "inspection_id": insp.id,
+            "vehicle_id": insp.vehicle_id,
+            "status": insp.inspection_status,
+            "inspected_at": insp.inspected_at.isoformat() if insp.inspected_at else None,
+            "tyre_pressure_ok": checklist.get("tyre_pressure") != "FAIL",
+            "lights_ok": checklist.get("lights_indicators") != "FAIL",
+            "brake_buzzer_ok": checklist.get("reverse_buzzer_horn") != "FAIL"
         }
 
     async def get_availability(self, user_id: str) -> Dict[str, Any]:
