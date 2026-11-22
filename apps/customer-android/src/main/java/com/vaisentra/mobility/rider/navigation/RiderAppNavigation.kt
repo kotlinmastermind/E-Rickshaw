@@ -35,8 +35,11 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun RiderAppNavigation() {
-    var currentRoute by remember { mutableStateOf("splash") }
-    val backStack = remember { mutableStateListOf("splash") }
+    val initialRoute = remember {
+        if (!NetworkClient.authToken.isNullOrBlank()) "map_home" else "splash"
+    }
+    var currentRoute by remember { mutableStateOf(initialRoute) }
+    val backStack = remember { mutableStateListOf(initialRoute) }
     // Yeh state PhoneAuthScreen se OtpVerifyScreen tak phone number le jayegi
     var authPhone by remember { mutableStateOf("") }
 
@@ -46,15 +49,17 @@ fun RiderAppNavigation() {
                 RiderRepository.fetchCurrentUserMe()
             }
             if (userMe != null) {
-                if (userMe.hasPin) {
+                if (userMe.hasPin && currentRoute != "app_lock") {
                     backStack.clear()
                     backStack.add("app_lock")
                     currentRoute = "app_lock"
-                } else {
-                    backStack.clear()
-                    backStack.add("map_home")
-                    currentRoute = "map_home"
                 }
+            } else {
+                // Token was invalid or expired
+                NetworkClient.clearAuthToken()
+                backStack.clear()
+                backStack.add("auth_phone")
+                currentRoute = "auth_phone"
             }
         }
     }

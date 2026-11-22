@@ -199,7 +199,11 @@ fun resolveRoute(route: String): DriverScreen? {
  * or in-progress trip from the backend before setting the initial screen.
  */
 fun resolveStartRoute(): DriverScreen {
-    return DriverScreen.PILOT_LOGIN
+    return if (DriverNetworkClient.isAuthenticated()) {
+        DriverScreen.DUTY_DASHBOARD
+    } else {
+        DriverScreen.PILOT_LOGIN
+    }
 }
 
 /**

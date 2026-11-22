@@ -29,6 +29,31 @@ object DriverRepository {
     private const val TAG = "DriverRepository"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    fun parseApiErrorMessage(raw: String?, defaultMessage: String = "An error occurred"): String {
+        if (raw.isNullOrBlank()) return defaultMessage
+        return try {
+            val json = org.json.JSONObject(raw)
+            if (json.has("error")) {
+                val errorObj = json.optJSONObject("error")
+                if (errorObj != null && errorObj.has("message")) {
+                    errorObj.getString("message")
+                } else if (errorObj != null && errorObj.has("detail")) {
+                    errorObj.getString("detail")
+                } else {
+                    json.optString("error", defaultMessage)
+                }
+            } else if (json.has("detail")) {
+                json.getString("detail")
+            } else if (json.has("message")) {
+                json.getString("message")
+            } else {
+                defaultMessage
+            }
+        } catch (_: Exception) {
+            if (raw.length < 120 && !raw.trim().startsWith("{")) raw else defaultMessage
+        }
+    }
+
     private val _isBackendOnline = MutableStateFlow(true)
     val isBackendOnline: StateFlow<Boolean> = _isBackendOnline.asStateFlow()
 
@@ -406,14 +431,14 @@ object DriverRepository {
             if (res.isSuccessful && !token.isNullOrBlank()) {
                 DriverNetworkClient.setAuthToken(token, body.refreshToken)
                 scope.launch {
-                    fetchDriverProfile()
-                    fetchDriverVehicles()
-                    fetchEarningsSummary()
-                    fetchDriverDocuments()
-                    fetchPerformanceScorecard()
-                    fetchDailyTargets()
-                    fetchActiveRide()
-                    fetchUnreadNotificationsCount()
+                    launch { fetchDriverProfile() }
+                    launch { fetchDriverVehicles() }
+                    launch { fetchEarningsSummary() }
+                    launch { fetchDriverDocuments() }
+                    launch { fetchPerformanceScorecard() }
+                    launch { fetchDailyTargets() }
+                    launch { fetchActiveRide() }
+                    launch { fetchUnreadNotificationsCount() }
                 }
                 Result.success(true)
             } else {
@@ -451,14 +476,14 @@ object DriverRepository {
             if (res.isSuccessful && !token.isNullOrBlank()) {
                 DriverNetworkClient.setAuthToken(token, body.refreshToken)
                 scope.launch {
-                    fetchDriverProfile()
-                    fetchDriverVehicles()
-                    fetchEarningsSummary()
-                    fetchDriverDocuments()
-                    fetchPerformanceScorecard()
-                    fetchDailyTargets()
-                    fetchActiveRide()
-                    fetchUnreadNotificationsCount()
+                    launch { fetchDriverProfile() }
+                    launch { fetchDriverVehicles() }
+                    launch { fetchEarningsSummary() }
+                    launch { fetchDriverDocuments() }
+                    launch { fetchPerformanceScorecard() }
+                    launch { fetchDailyTargets() }
+                    launch { fetchActiveRide() }
+                    launch { fetchUnreadNotificationsCount() }
                 }
                 Result.success(true)
             } else {
@@ -1799,8 +1824,8 @@ object DriverRepository {
         amountRupees: Double,
         reason: String,
         repaymentTermsWeeks: Int = 4
-    ): Result<Map<String, Any>> {
-        return try {
+    ): Result<Map<String, Any>> = withContext(Dispatchers.IO) {
+        return@withContext try {
             val req = SubmitFinancialSupportRequest(
                 supportType = supportType,
                 amountRupees = amountRupees,
@@ -1813,7 +1838,8 @@ object DriverRepository {
                 fetchFinancialSupportRequests()
                 Result.success(body)
             } else {
-                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                val rawErr = res.errorBody()?.string()
+                val err = parseApiErrorMessage(rawErr, "Failed to submit welfare request (HTTP ${res.code()})")
                 Result.failure(IllegalStateException(err))
             }
         } catch (e: Exception) {

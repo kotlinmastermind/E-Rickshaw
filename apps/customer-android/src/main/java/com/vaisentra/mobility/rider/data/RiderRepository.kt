@@ -13,6 +13,31 @@ object RiderRepository {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    fun parseApiErrorMessage(raw: String?, defaultMessage: String = "An error occurred"): String {
+        if (raw.isNullOrBlank()) return defaultMessage
+        return try {
+            val json = org.json.JSONObject(raw)
+            if (json.has("error")) {
+                val errorObj = json.optJSONObject("error")
+                if (errorObj != null && errorObj.has("message")) {
+                    errorObj.getString("message")
+                } else if (errorObj != null && errorObj.has("detail")) {
+                    errorObj.getString("detail")
+                } else {
+                    json.optString("error", defaultMessage)
+                }
+            } else if (json.has("detail")) {
+                json.getString("detail")
+            } else if (json.has("message")) {
+                json.getString("message")
+            } else {
+                defaultMessage
+            }
+        } catch (_: Exception) {
+            if (raw.length < 120 && !raw.trim().startsWith("{")) raw else defaultMessage
+        }
+    }
+
     private val _categories = MutableStateFlow<List<VehicleCategoryDto>>(emptyList())
     val categories: StateFlow<List<VehicleCategoryDto>> = _categories.asStateFlow()
 
@@ -337,7 +362,8 @@ object RiderRepository {
                 startActiveRideSyncLoop(ride.id)
                 Result.success(ride)
             } else {
-                val errBody = response.errorBody()?.string() ?: "Booking failed: HTTP ${response.code()}"
+                val raw = response.errorBody()?.string()
+                val errBody = parseApiErrorMessage(raw, "Booking failed: HTTP ${response.code()}")
                 Result.failure(Exception(errBody))
             }
         } catch (e: Exception) {
@@ -855,7 +881,8 @@ object RiderRepository {
             if (res.isSuccessful) {
                 Result.success(true)
             } else {
-                val errBody = res.errorBody()?.string() ?: "Server error: HTTP ${res.code()}"
+                val raw = res.errorBody()?.string()
+                val errBody = parseApiErrorMessage(raw, "Server error: HTTP ${res.code()}")
                 Result.failure(Exception(errBody))
             }
         } catch (e: Exception) {
@@ -873,7 +900,8 @@ object RiderRepository {
             if (res.isSuccessful) {
                 Result.success(true)
             } else {
-                val errBody = res.errorBody()?.string() ?: "Galat PIN (HTTP ${res.code()})"
+                val raw = res.errorBody()?.string()
+                val errBody = parseApiErrorMessage(raw, "Galat PIN (HTTP ${res.code()})")
                 Result.failure(Exception(errBody))
             }
         } catch (e: Exception) {

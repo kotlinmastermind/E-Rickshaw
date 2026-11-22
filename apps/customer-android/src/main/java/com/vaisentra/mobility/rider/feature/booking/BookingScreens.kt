@@ -164,10 +164,12 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
 
     LaunchedEffect(Unit) {
         fetchDeviceGpsAndSyncRef = { fetchDeviceGpsAndSync(it) }
-        RiderRepository.fetchVehicleCategories()
-        RiderRepository.fetchFareRules()
-        RiderRepository.fetchWalletBalance()
-        RiderRepository.fetchSavedPlaces()
+        launch(Dispatchers.IO) {
+            launch { RiderRepository.fetchVehicleCategories() }
+            launch { RiderRepository.fetchFareRules() }
+            launch { RiderRepository.fetchWalletBalance() }
+            launch { RiderRepository.fetchSavedPlaces() }
+        }
 
         val hasFine = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_FINE_LOCATION
@@ -192,9 +194,9 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
         }
     }
 
-    LaunchedEffect(currentLat, currentLng) {
+    LaunchedEffect(Unit) {
         while (true) {
-            kotlinx.coroutines.delay(kotlin.time.Duration.parse("10s"))
+            kotlinx.coroutines.delay(10_000L)
             RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
         }
     }
