@@ -251,6 +251,9 @@ object DriverRepository {
     private val _emergencyContacts = MutableStateFlow<List<EmergencyContactDto>>(emptyList())
     val emergencyContacts: StateFlow<List<EmergencyContactDto>> = _emergencyContacts.asStateFlow()
 
+    private val _driverIncidents = MutableStateFlow<List<DriverIncidentDto>>(emptyList())
+    val driverIncidents: StateFlow<List<DriverIncidentDto>> = _driverIncidents.asStateFlow()
+
     private val _sharedPoolTrip = MutableStateFlow<SharedPoolTripDto?>(null)
     val sharedPoolTrip: StateFlow<SharedPoolTripDto?> = _sharedPoolTrip.asStateFlow()
 
@@ -1341,6 +1344,21 @@ object DriverRepository {
         }
     }
 
+    suspend fun fetchDriverIncidents(): Result<List<DriverIncidentDto>> {
+        return try {
+            val res = DriverNetworkClient.apiService.getDriverIncidents()
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                _driverIncidents.value = body
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("getDriverIncidents failed: HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun submitDriverIncident(
         rideId: String?,
         category: String,
@@ -1360,6 +1378,7 @@ object DriverRepository {
             )
             if (res.isSuccessful) {
                 val ticket = res.body()?.get("ticket_number") as? String ?: "Submitted"
+                fetchDriverIncidents()
                 Result.success(ticket)
             } else {
                 val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"

@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
@@ -411,13 +412,20 @@ fun DriverIncidentScreen(
     val types = listOf(
         "Passenger Dispute / Fare Refusal" to "PASSENGER_DISPUTE",
         "Vehicle Breakdown / Flat Tyre" to "VEHICLE_BREAKDOWN",
-        "Minor Road Collision / Scratch" to "ROAD_COLLISION"
+        "Minor Road Collision / Scratch" to "ROAD_COLLISION",
+        "Customer Misconduct / Rude Behavior" to "CUSTOMER_BEHAVIOR",
+        "Unsafe Road Condition / Waterlogging" to "ROAD_HAZARD"
     )
     var selectedIndex by remember { mutableIntStateOf(0) }
     var descriptionText by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
     val rideId by DriverRepository.currentRideId.collectAsState()
+    val liveIncidents by DriverRepository.driverIncidents.collectAsState()
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchDriverIncidents()
+    }
 
     Column(
         modifier = Modifier
@@ -427,7 +435,7 @@ fun DriverIncidentScreen(
     ) {
         CockpitHeader(
             title = "Report Incident",
-            subtitle = "File formal report to safety compliance team",
+            subtitle = "Supabase compliance & safety reports",
             onBack = onNavigateBack
         )
 
@@ -447,7 +455,7 @@ fun DriverIncidentScreen(
                             RadioButton(
                                 selected = selectedIndex == idx,
                                 onClick = { selectedIndex = idx },
-                                colors = RadioButtonDefaults.colors(selectedColor = ElectricCyan)
+                                colors = RadioButtonDefaults.colors(selectedColor = PilotElectricCyan)
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(label, color = CockpitTextPrimary, fontSize = 13.sp)
@@ -467,7 +475,7 @@ fun DriverIncidentScreen(
 
             item {
                 CockpitButton(
-                    text = if (isSubmitting) "Submitting..." else "Submit Incident Report",
+                    text = if (isSubmitting) "Submitting to Supabase..." else "Submit Incident Report",
                     enabled = !isSubmitting,
                     onClick = {
                         if (descriptionText.trim().length < 10) {
@@ -484,8 +492,9 @@ fun DriverIncidentScreen(
                             )
                             isSubmitting = false
                             if (res.isSuccess) {
+                                descriptionText = ""
                                 onShowToast("Incident report submitted (${res.getOrNull()}).")
-                                onNavigateBack()
+                                DriverRepository.fetchDriverIncidents()
                             } else {
                                 onShowToast("Failed to submit: ${res.exceptionOrNull()?.message}")
                             }
@@ -493,6 +502,84 @@ fun DriverIncidentScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            item {
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("FILED INCIDENT REPORTS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Table: incident_reports", color = PilotElectricCyan, fontSize = 10.sp)
+                }
+            }
+
+            if (liveIncidents.isEmpty()) {
+                item {
+                    CockpitCard {
+                        Text(
+                            text = "No incidents reported yet. Any roadside disputes, breakdowns, or collisions filed will be securely logged in Supabase.",
+                            color = CockpitTextMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            } else {
+                items(liveIncidents) { inc ->
+                    val isResolved = inc.status.uppercase() == "RESOLVED"
+                    val isInvestigating = inc.status.uppercase() == "INVESTIGATING"
+                    val badgeColor = when {
+                        isResolved -> PilotOnlineGreen
+                        isInvestigating -> PilotAmber
+                        else -> PilotElectricCyan
+                    }
+
+                    CockpitCard(cornerRadius = 12.dp) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = inc.ticketNumber.ifBlank { "INC-REPORT" },
+                                color = CockpitTextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            CockpitBadge(
+                                text = inc.status,
+                                backgroundColor = badgeColor.copy(alpha = 0.2f),
+                                textColor = badgeColor
+                            )
+                        }
+
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "${inc.category.replace("_", " ")} • Severity: ${inc.severity}",
+                            color = PilotAmber,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = inc.description,
+                            color = CockpitTextSecondary,
+                            fontSize = 12.sp
+                        )
+
+                        if (!inc.createdAt.isNullOrBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "Reported: ${inc.createdAt.take(19).replace("T", " ")}",
+                                color = CockpitTextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -606,3 +693,51 @@ fun EmergencyContactsScreen(
 }
 
 private data class SwapDepotItem(val name: String, val distance: String, val status: String, val tint: Color)
+
+@Preview(showBackground = true)
+@Composable
+fun RouteDeviationScreenPreview() {
+    DriverGoTheme {
+        RouteDeviationScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun SpeedometerScreenPreview() {
+    DriverGoTheme {
+        SpeedometerScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun AudioShieldScreenPreview() {
+    DriverGoTheme {
+        AudioShieldScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun EmergencySosScreenPreview() {
+    DriverGoTheme {
+        EmergencySosScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun BatterySwapDepotScreenPreview() {
+    DriverGoTheme {
+        BatterySwapDepotScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun DriverIncidentScreenPreview() {
+    DriverGoTheme {
+        DriverIncidentScreen()
+    }
+}

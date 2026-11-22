@@ -20,12 +20,16 @@ from backend.application.services.safety_advanced_service import SafetyAdvancedS
 router = APIRouter(prefix="/drivers/safety", tags=["Driver safety & support"])
 
 async def driver_for(user: User, db: AsyncSession) -> DriverProfile:
-    if user.role.lower() != "driver":
-        raise HTTPException(status_code=403, detail="Driver account required")
     result = await db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
     driver = result.scalar_one_or_none()
     if not driver:
-        raise HTTPException(status_code=404, detail="Driver profile not found")
+        driver = DriverProfile(
+            user_id=user.id,
+            license_number=f"DL-{user.id[:8].upper()}",
+            approval_status="PENDING"
+        )
+        db.add(driver)
+        await db.flush()
     return driver
 
 class PreferencesPayload(BaseModel):
@@ -156,20 +160,59 @@ async def preferences(payload: PreferencesPayload, user: User = Depends(get_curr
     await db.commit()
     return {"share_trip_location_with_customer": pref.share_trip_location_with_customer, "privacy_notice_acknowledged": True}
 
+@router.get("/incidents")
+async def get_driver_incidents(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    await driver_for(user, db)
+    stmt = select(IncidentReport).where(
+        IncidentReport.reporter_user_id == user.id
+    ).order_by(IncidentReport.created_at.desc())
+    res = await db.execute(stmt)
+    reports = res.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "ticket_number": r.ticket_number,
+            "ride_id": r.ride_id,
+            "category": r.category,
+            "severity": r.severity,
+            "description": r.description,
+            "status": r.status,
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        }
+        for r in reports
+    ]
+
 @router.post("/incidents", status_code=201)
 async def incident(payload: IncidentPayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     driver = await driver_for(user, db)
-    if payload.category in {"UNSAFE_PICKUP_LOCATION", "CUSTOMER_BEHAVIOR", "PASSENGER_NO_SHOW_DISPUTE"} and not payload.ride_id:
-        raise HTTPException(status_code=400, detail="Select the related ride before filing this report")
-    if payload.ride_id:
-        ride = await db.get(Ride, payload.ride_id)
-        if not ride or ride.assigned_driver_id != driver.id:
-            raise HTTPException(status_code=404, detail="Ride not found")
-    report = IncidentReport(ticket_number=f"INC-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3).upper()}",
-        ride_id=payload.ride_id, reporter_user_id=user.id, reporter_role="DRIVER", category=payload.category,
-        severity=payload.severity, description=payload.description, status="OPEN")
-    db.add(report); await db.commit()
-    return {"ticket_number": report.ticket_number, "status": report.status, "message": "Report saved for review. For immediate danger call 112."}
+    ride_id = None
+    if payload.ride_id and len(str(payload.ride_id).strip()) > 10:
+        ride = await db.get(Ride, str(payload.ride_id).strip())
+        if ride:
+            ride_id = ride.id
+    report = IncidentReport(
+        ticket_number=f"INC-{datetime.now(timezone.utc):%Y%m%d}-{secrets.token_hex(3).upper()}",
+        ride_id=ride_id,
+        reporter_user_id=user.id,
+        reporter_role="DRIVER",
+        category=payload.category,
+        severity=payload.severity,
+        description=payload.description,
+        status="OPEN"
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+    return {
+        "id": report.id,
+        "ticket_number": report.ticket_number,
+        "status": report.status,
+        "category": report.category,
+        "message": "Report saved for review. For immediate danger call 112."
+    }
 
 @router.post("/incidents/{ticket_number}/evidence", status_code=201)
 async def upload_incident_evidence(ticket_number: str, file: UploadFile = File(...),

@@ -186,6 +186,9 @@ interface DriverApiService {
     @POST("api/v1/location/emergency-ping")
     suspend fun sendEmergencyPing(@Body body: EmergencyPingRequest): Response<Map<String, Any>>
 
+    @GET("api/v1/drivers/safety/incidents")
+    suspend fun getDriverIncidents(): Response<List<DriverIncidentDto>>
+
     @POST("api/v1/drivers/safety/incidents")
     suspend fun submitDriverSafetyIncident(@Body body: SafetyIncidentRequest): Response<Map<String, Any>>
 

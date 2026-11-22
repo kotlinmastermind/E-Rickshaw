@@ -381,6 +381,17 @@ data class EmergencyContactCreateRequest(
     @SerializedName("notify_on_arrival") val notifyOnArrival: Boolean = true
 )
 
+data class DriverIncidentDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("ticket_number") val ticketNumber: String = "",
+    @SerializedName("ride_id") val rideId: String? = null,
+    @SerializedName("category") val category: String = "",
+    @SerializedName("severity") val severity: String = "MEDIUM",
+    @SerializedName("description") val description: String = "",
+    @SerializedName("status") val status: String = "OPEN",
+    @SerializedName("created_at") val createdAt: String? = null
+)
+
 data class PoolManifestEntryDto(
     @SerializedName("booking_id") val bookingId: String? = null,
     @SerializedName("ride_id") val rideId: String? = null,
