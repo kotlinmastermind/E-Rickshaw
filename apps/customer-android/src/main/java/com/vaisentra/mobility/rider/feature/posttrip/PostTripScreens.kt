@@ -276,6 +276,9 @@ fun PastTripsHistoryScreen(onNavigate: (String) -> Unit) {
 // Screen 40: GST Tax Invoice & Download
 @Composable
 fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
+    var recipientGstin by remember { mutableStateOf("07AAECV9988D1Z2") }
+    var companyName by remember { mutableStateOf("Vaisentra Corp Labs") }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -284,41 +287,125 @@ fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
             .verticalScroll(rememberScrollState())
     ) {
         NeoHeader(title = "Tax Invoice", subtitle = "Govt Compliant IRN Signed Slip", onBack = { onNavigate("ride_receipt") })
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        NeoCard {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = "INVOICE #INV-2026-9281", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                NeoBadge(text = "IRN GENERATED", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+        // Premium Official Tax Invoice Voucher Card
+        NeoCard(borderColor = SapphireGlow) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text(text = "TAX INVOICE", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "#INV-2026-9281", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                }
+                NeoBadge(text = "IRN GENERATED ✓", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
             }
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(text = "Supplier: Vaisentra Mobility Technologies Pvt Ltd", color = TextMuted, fontSize = 11.sp)
-            Text(text = "GSTIN: 07AABCV1234F1Z8", color = TextMuted, fontSize = 11.sp)
-            Text(text = "Tax Category: Transport of Passengers via EV (SAC 996412)", color = TextMuted, fontSize = 11.sp)
+            Spacer(modifier = Modifier.height(12.dp))
+            Divider(color = BorderSubtle)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(text = "SUPPLIER DETAILS", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Text(text = "Vaisentra Mobility Technologies Pvt Ltd", color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "GSTIN: 07AABCV1234F1Z8 • SAC Code: 996412", color = TextMuted, fontSize = 11.sp)
+            Text(text = "Reg. Office: Cyber City, Tower 9, Gurugram NCR", color = TextDim, fontSize = 10.sp)
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Divider(color = BorderSubtle)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(text = "RECIPIENT (B2B CORPORATE)", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = companyName, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                NeoBadge(text = "ITC ELIGIBLE", backgroundColor = SurfaceDark, textColor = EmeraldGreen)
+            }
+            Text(text = "Recipient GSTIN: $recipientGstin", color = ElectricCyan, fontSize = 11.sp)
+
             Spacer(modifier = Modifier.height(14.dp))
             Divider(color = BorderSubtle)
             Spacer(modifier = Modifier.height(14.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = "Taxable Value:", color = TextMuted, fontSize = 12.sp)
-                Text(text = "₹122.90", color = TextWhite, fontSize = 12.sp)
+
+            // Line items breakdown
+            Text(text = "TAX BREAKUP & TARIFF", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            val items = listOf(
+                "Base Fare (First 1.5 km)" to "₹20.00",
+                "Distance Fare (2.46 km @ ₹12/km)" to "₹29.52",
+                "Trip Duration (14 mins @ ₹1/min)" to "₹14.00",
+                "Electric Mobility Green Fee" to "₹10.00",
+                "Dynamic Surge Charge (1.0x Normal)" to "₹0.00",
+                "Taxable Service Value" to "₹122.90",
+                "CGST @ 2.5%" to "₹3.07",
+                "SGST @ 2.5%" to "₹3.07"
+            )
+
+            items.forEach { (desc, amt) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = desc, color = if (desc.startsWith("Taxable")) TextWhite else TextMuted, fontSize = 11.sp, fontWeight = if (desc.startsWith("Taxable")) FontWeight.Bold else FontWeight.Normal)
+                    Text(text = amt, color = TextWhite, fontSize = 11.sp, fontWeight = if (desc.startsWith("Taxable")) FontWeight.Bold else FontWeight.Normal)
+                }
             }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            Divider(color = BorderSubtle)
+            Spacer(modifier = Modifier.height(10.dp))
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = "CGST (2.5%) + SGST (2.5%):", color = TextMuted, fontSize = 12.sp)
-                Text(text = "₹6.14", color = TextWhite, fontSize = 12.sp)
+                Text(text = "Total Invoice Value (INR):", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(text = "₹129.04", color = ElectricCyan, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(text = "Total Invoice Value:", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text(text = "₹129.04", color = ElectricCyan, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(SurfaceDark)
+                    .padding(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "🔐", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Digitally signed with SHA-256 e-Sign token under Indian IT Act 2000.",
+                        color = TextDim,
+                        fontSize = 9.sp
+                    )
+                }
             }
         }
+
         Spacer(modifier = Modifier.height(16.dp))
-        NeoButton(text = "Download PDF Tax Invoice", onClick = {
-            val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
-            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                RiderRepository.fetchTaxInvoice(rideId)
-            }
-            DialogController.showToast("Tax Invoice fetched from FastAPI /rides/$rideId/tax-invoice")
-        }, icon = "📥")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            NeoButton(
+                text = "Download PDF Slip",
+                onClick = {
+                    val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        RiderRepository.fetchTaxInvoice(rideId)
+                    }
+                    DialogController.showToast("GST Tax Invoice saved to Downloads!")
+                },
+                modifier = Modifier.weight(1f),
+                icon = "📥",
+                backgroundColor = SapphirePrimary
+            )
+            NeoButton(
+                text = "Email Invoice",
+                onClick = {
+                    DialogController.showToast("Invoice sent to your corporate email!")
+                },
+                modifier = Modifier.weight(1f),
+                icon = "✉️",
+                backgroundColor = SurfaceElevated
+            )
+        }
     }
 }
 

@@ -6,7 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,21 +28,30 @@ import kotlinx.coroutines.launch
 @Composable
 fun EcoPoolBookingScreen(onNavigate: (String) -> Unit) {
     var seats by remember { mutableStateOf(1) }
+    val maxDetourMin = 10
+    val currentDetourMin = 5
+    val baseFareSolitary = 120.0
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(CanvasBlack)
             .padding(16.dp)
+            .verticalScroll(androidx.compose.foundation.rememberScrollState())
     ) {
-        NeoHeader(title = "Eco-Pool Shared E-Rickshaw", subtitle = "Ultra-low cost high-density corridors", onBack = { onNavigate("fare_matrix") })
-        Spacer(modifier = Modifier.height(16.dp))
+        NeoHeader(
+            title = "Eco-Pool Shared E-Rickshaw",
+            subtitle = "Ultra-low cost high-density corridors",
+            onBack = { onNavigate("fare_matrix") }
+        )
+        Spacer(modifier = Modifier.height(14.dp))
 
         NeoCard {
             Text(text = "Anand Vihar ⇌ Connaught Place Express", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             NeoBadge(text = "HIGH-FREQUENCY FEEDER CORRIDOR", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -53,6 +65,7 @@ fun EcoPoolBookingScreen(onNavigate: (String) -> Unit) {
                                 .size(40.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (seats == s) SapphirePrimary else SurfaceCard)
+                                .border(1.dp, if (seats == s) BorderFocus else BorderSubtle, RoundedCornerShape(10.dp))
                                 .clickable { seats = s }
                                 .padding(4.dp),
                             contentAlignment = Alignment.Center
@@ -63,17 +76,128 @@ fun EcoPoolBookingScreen(onNavigate: (String) -> Unit) {
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             val perSeat = 35.0
             val total = perSeat * seats
+            val savings = (baseFareSolitary * seats) - total
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(text = "Total Tariff ($seats Seats):", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text(text = "₹${total.toInt()}.00", color = ElectricCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Column {
+                    Text(text = "Total Shared Tariff:", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "You save ₹${savings.toInt()} (35% OFF)", color = EmeraldGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Text(text = "₹${total.toInt()}.00", color = ElectricCyan, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
             }
         }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Domain J: Detour Constraint & Multi-Rider Timeline Visualizer
+        NeoCard(borderColor = SapphireGlow) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "DETOUR OPTIMIZATION ENGINE", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                NeoBadge(text = "MAX 10 MIN DETOUR", backgroundColor = SurfaceDark, textColor = AmberGold)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Detour Constraint: Extra detour ≤ min(3.0 km, 20% distance), max 10 mins delay guaranteed.",
+                color = TextMuted,
+                fontSize = 11.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Detour Progress Indicator
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = "Estimated Detour Buffer:", color = TextDim, fontSize = 11.sp)
+                    Text(text = "$currentDetourMin / $maxDetourMin mins", color = AmberGold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(SurfaceDark)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(currentDetourMin.toFloat() / maxDetourMin.toFloat())
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(AmberGold)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+            Text(text = "RIDE STOPS TIMELINE:", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Multi-node corridor stops
+            val stops = listOf(
+                Triple("🟢 You (Boarding Point)", "Anand Vihar Metro Gate 1", "08:15 AM"),
+                Triple("🟡 Priya (+1.1 km detour)", "Karkardooma Court Metro", "+3 mins"),
+                Triple("🟡 Amit (+0.6 km detour)", "Laxmi Nagar Feeder Pillar", "+2 mins"),
+                Triple("🔴 Common Destination", "Connaught Place Gate 4", "08:35 AM")
+            )
+
+            stops.forEachIndexed { idx, (title, loc, eta) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(SurfaceElevated),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "${idx + 1}", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = title, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text(text = loc, color = TextMuted, fontSize = 10.sp)
+                    }
+                    Text(text = eta, color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(SurfaceElevated)
+                    .padding(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "🌱", fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Eco-Bonus: Pooling saves 0.42 kg CO₂ and gives 15 Green Club credits!",
+                        color = EmeraldGreen,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         NeoButton(text = "Confirm Shared Pool Seat", onClick = {
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {

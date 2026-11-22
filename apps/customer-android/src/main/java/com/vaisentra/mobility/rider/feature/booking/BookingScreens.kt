@@ -636,12 +636,26 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
 // =============================================================================
 // SCREEN 9: MULTI-STOP ROUTE PLANNER
 // =============================================================================
+// SCREEN 9: MULTI-STOP ROUTE ENGINE WITH DYNAMIC REORDERING & WAITING POLICY
+// =============================================================================
 @Composable
 fun MultiStopRouteScreen(onNavigate: (String) -> Unit) {
     val bookingDraft by RiderRepository.bookingDraft.collectAsState()
-    var stop1 by remember { mutableStateOf(bookingDraft.pickupAddress) }
-    var stop2 by remember { mutableStateOf("") }
-    var stop3 by remember { mutableStateOf(bookingDraft.destinationAddress) }
+    var pickupAddress by remember { mutableStateOf(bookingDraft.pickupAddress.ifBlank { "Current Pickup Location" }) }
+    var destinationAddress by remember { mutableStateOf(bookingDraft.destinationAddress.ifBlank { "Final Destination" }) }
+    val waypoints = remember {
+        mutableStateListOf(
+            "Metro Station Gate 2",
+            "Apollo Pharmacy Sector 62"
+        )
+    }
+
+    // Dynamic distance and fare estimation based on number of stops
+    val baseDistanceKm = 4.2
+    val extraPerStopKm = 1.4
+    val totalDistanceKm = baseDistanceKm + (waypoints.size * extraPerStopKm)
+    val estimatedMinutes = (totalDistanceKm * 2.8).toInt() + (waypoints.size * 5)
+    val estimatedFare = 25.0 + (totalDistanceKm * 12.0) + (waypoints.size * 10.0)
 
     Column(
         modifier = Modifier
@@ -652,20 +666,168 @@ fun MultiStopRouteScreen(onNavigate: (String) -> Unit) {
     ) {
         NeoHeader(
             title = "Multi-Stop Planner",
-            subtitle = "Up to 3 intermediate waypoints with Mapbox Matrix",
+            subtitle = "Up to 4 intermediate waypoints with waiting billing",
             onBack = { onNavigate("destination_search") }
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         NeoCard {
-            NeoTextField(value = stop1, onValueChange = { stop1 = it }, placeholder = "Pickup Location", label = "Point A (Pickup)", leadingIcon = "🟢")
-            Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(value = stop2, onValueChange = { stop2 = it }, placeholder = "Intermediate Stop (10 min dwell)", label = "Point B (Waypoint)", leadingIcon = "🟡")
-            Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(value = stop3, onValueChange = { stop3 = it }, placeholder = "Final Destination", label = "Point C (Final Drop)", leadingIcon = "🔴")
-            Spacer(modifier = Modifier.height(20.dp))
-            NeoButton(text = "Calculate Mapbox Multi-Stop Tariff", onClick = { onNavigate("fare_matrix") }, icon = "🗺️")
+            // Point A (Pickup)
+            NeoTextField(
+                value = pickupAddress,
+                onValueChange = { pickupAddress = it },
+                placeholder = "Pickup Location",
+                label = "Point A (Pickup)",
+                leadingIcon = "🟢"
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Dynamic Intermediate Waypoints
+            Text(
+                text = "INTERMEDIATE WAYPOINTS (${waypoints.size}/4)",
+                color = ElectricCyan,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            waypoints.forEachIndexed { index, stopText ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        NeoTextField(
+                            value = stopText,
+                            onValueChange = { waypoints[index] = it },
+                            placeholder = "Stop ${index + 1} address",
+                            label = "Stop ${index + 1}",
+                            leadingIcon = "🟡"
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    // Reorder Controls (Move Up / Move Down)
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        if (index > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(SurfaceDark)
+                                    .clickable {
+                                        val temp = waypoints[index]
+                                        waypoints[index] = waypoints[index - 1]
+                                        waypoints[index - 1] = temp
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) { Text(text = "▲", color = ElectricCyan, fontSize = 10.sp) }
+                        }
+                        if (index < waypoints.size - 1) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(SurfaceDark)
+                                    .clickable {
+                                        val temp = waypoints[index]
+                                        waypoints[index] = waypoints[index + 1]
+                                        waypoints[index + 1] = temp
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) { Text(text = "▼", color = ElectricCyan, fontSize = 10.sp) }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+                    // Remove button
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF3B151E))
+                            .clickable { waypoints.removeAt(index) },
+                        contentAlignment = Alignment.Center
+                    ) { Text(text = "✕", color = CrimsonRed, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+
+            if (waypoints.size < 4) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceElevated)
+                        .clickable { waypoints.add("Waypoint ${waypoints.size + 1}") }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "+ Add Intermediate Stop (${4 - waypoints.size} remaining)", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            // Point C (Final Drop)
+            NeoTextField(
+                value = destinationAddress,
+                onValueChange = { destinationAddress = it },
+                placeholder = "Final Destination",
+                label = "Point ${('A'.code + waypoints.size + 1).toChar()} (Final Drop)",
+                leadingIcon = "🔴"
+            )
         }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Waiting Time Policy Card
+        NeoCard(borderColor = SapphireGlow) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "WAITING TIME POLICY", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                NeoBadge(text = "3 MINS FREE DWELL", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Each intermediate stop includes 3 mins complimentary dwell. Thereafter, live waiting charge of ₹2.00/min is billed to trip meter.",
+                color = TextMuted,
+                fontSize = 11.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(text = "Total Distance:", color = TextDim, fontSize = 11.sp)
+                    Text(text = String.format("%.1f km", totalDistanceKm), color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+                Column {
+                    Text(text = "Est. Journey Time:", color = TextDim, fontSize = 11.sp)
+                    Text(text = "$estimatedMinutes mins", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+                Column {
+                    Text(text = "Estimated Fare:", color = TextDim, fontSize = 11.sp)
+                    Text(text = "₹${estimatedFare.toInt()}.00", color = ElectricCyan, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        NeoButton(
+            text = "Confirm Multi-Stop Route & Compare Fares →",
+            onClick = {
+                RiderRepository.updateDestination(destinationAddress, 28.6328, 77.2197)
+                onNavigate("fare_matrix")
+            },
+            icon = "🗺️",
+            backgroundColor = SapphirePrimary
+        )
     }
 }
 

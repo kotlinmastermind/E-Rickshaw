@@ -282,6 +282,12 @@ fun BoardingOtpScreen(onNavigate: (String) -> Unit) {
 // Screen 28: Live Telemetry & Speedometer HUD
 @Composable
 fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
+    val activeRide by RiderRepository.activeRide.collectAsState()
+    val bookingDraft by RiderRepository.bookingDraft.collectAsState()
+    var showChangeDestSheet by remember { mutableStateOf(false) }
+    var isRouteDeviated by remember { mutableStateOf(false) }
+    var deviationMeters by remember { mutableStateOf(0) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -295,7 +301,49 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
             actionIcon = "🚨",
             onAction = { DialogController.show(RiderPopupType.SOS_112) }
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Live Route Deviation / Anomaly Alert Banner (Domain I)
+        if (isRouteDeviated) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF3B151E))
+                    .border(1.5.dp, CrimsonRed, RoundedCornerShape(16.dp))
+                    .padding(14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "⚠️", fontSize = 24.sp)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "ROUTE DEVIATION DETECTED", color = CrimsonRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(text = "+$deviationMeters m off planned corridor. Are you safe?", color = TextWhite, fontSize = 12.sp)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(SurfaceDark)
+                                .clickable { isRouteDeviated = false }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(text = "I'm Safe ✓", color = EmeraldGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CrimsonRed)
+                                .clickable { DialogController.show(RiderPopupType.SOS_112) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(text = "SOS", color = TextWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // Speedometer Digital Dial
         Box(
@@ -304,25 +352,42 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
                 .clip(RoundedCornerShape(24.dp))
                 .background(SurfaceCard)
                 .border(1.dp, BorderFocus, RoundedCornerShape(24.dp))
-                .padding(24.dp),
+                .padding(20.dp),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(text = "CURRENT SPEED", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.Bottom) {
-                    Text(text = "28", color = ElectricCyan, fontSize = 54.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(text = "28", color = ElectricCyan, fontSize = 52.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = "km/h", color = TextDim, fontSize = 16.sp, modifier = Modifier.padding(bottom = 10.dp))
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 NeoBadge(text = "SPEED LIMIT: 35 KM/H (CONFORMANT ✓)", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
         NeoCard {
-            Text(text = "Live Journey Metrics", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Live Journey Metrics", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Change Dest 🔄",
+                    color = ElectricCyan,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(SapphireGlow)
+                        .clickable { showChangeDestSheet = true }
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
             Spacer(modifier = Modifier.height(10.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
@@ -338,9 +403,23 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
                     Text(text = "₹129.04", color = ElectricCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "Destination: ", color = TextMuted, fontSize = 11.sp)
+                Text(
+                    text = bookingDraft.destinationAddress.ifBlank { "Connaught Place Gate 4" },
+                    color = TextWhite,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             NeoButton(
                 text = "Share Live Trip",
@@ -358,6 +437,31 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
             )
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            NeoButton(
+                text = "Simulate 500m Deviation",
+                onClick = {
+                    isRouteDeviated = true
+                    deviationMeters = 540
+                    val rideId = activeRide?.id ?: "ride-latest"
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        RiderRepository.reportRouteAnomaly(rideId, 28.6350, 77.2250)
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                backgroundColor = SurfaceDark,
+                icon = "📐"
+            )
+            NeoButton(
+                text = "In-Trip Chat",
+                onClick = { onNavigate("in_trip_chat") },
+                modifier = Modifier.weight(1f),
+                backgroundColor = SurfaceElevated,
+                icon = "💬"
+            )
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         NeoButton(
             text = "Complete Trip & View Receipt →",
@@ -368,6 +472,144 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
             backgroundColor = EmeraldGreen
         )
     }
+
+    // Domain H: Dynamic Mid-Trip Destination Change Modal
+    if (showChangeDestSheet) {
+        MidTripDestinationChangeModal(
+            currentDest = bookingDraft.destinationAddress.ifBlank { "Connaught Place Gate 4" },
+            onDismiss = { showChangeDestSheet = false },
+            onConfirmNewDestination = { newDest, extraDistKm, extraCostRupees ->
+                RiderRepository.updateDestination(newDest, 28.5562, 77.1000)
+                showChangeDestSheet = false
+                DialogController.showToast("Destination updated! Pilot notified of new route (+₹${extraCostRupees.toInt()}).")
+            }
+        )
+    }
+}
+
+// Domain H: Mid-Trip Destination Change Dialog
+@Composable
+private fun MidTripDestinationChangeModal(
+    currentDest: String,
+    onDismiss: () -> Unit,
+    onConfirmNewDestination: (String, Double, Double) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedNewDest by remember { mutableStateOf("") }
+    var extraDistance by remember { mutableStateOf(1.8) }
+    var extraFare by remember { mutableStateOf(35.0) }
+
+    val quickDestinations = listOf(
+        Triple("Rajiv Chowk Metro", 1.2, 25.0),
+        Triple("Building 9A, DLF Cyber City", 4.5, 75.0),
+        Triple("Terminal 3, IGI Airport", 8.2, 140.0),
+        Triple("Noida Sector 62 Metro", 5.0, 85.0)
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceElevated,
+        shape = RoundedCornerShape(20.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(text = "🔄", fontSize = 22.sp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(text = "Change Destination Mid-Trip", color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "Live recalculation & pilot corridor sync", color = TextMuted, fontSize = 11.sp)
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(text = "CURRENT DESTINATION:", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(text = currentDest, color = ElectricCyan, fontSize = 12.sp, maxLines = 1)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                NeoTextField(
+                    value = searchQuery,
+                    onValueChange = {
+                        searchQuery = it
+                        selectedNewDest = it
+                    },
+                    placeholder = "Search new place...",
+                    label = "New Destination Address",
+                    leadingIcon = "📍"
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(text = "QUICK PRESETS:", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    quickDestinations.forEach { (place, dist, cost) ->
+                        val isChosen = selectedNewDest == place
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isChosen) SapphireGlow else SurfaceCard)
+                                .border(1.dp, if (isChosen) BorderFocus else BorderSubtle, RoundedCornerShape(10.dp))
+                                .clickable {
+                                    selectedNewDest = place
+                                    extraDistance = dist
+                                    extraFare = cost
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = place, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                Text(text = "+₹${cost.toInt()} (+${dist}km)", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+
+                if (selectedNewDest.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceDark)
+                            .border(1.dp, EmeraldGreen, RoundedCornerShape(12.dp))
+                            .padding(10.dp)
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(text = "Revised Trip Estimate:", color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(text = "₹${(129.04 + extraFare).toInt()}.00", color = EmeraldGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Text(text = "Base rate ₹12/km + ₹1/min waiting apply to delta distance.", color = TextMuted, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            NeoButton(
+                text = "Confirm & Reroute →",
+                enabled = selectedNewDest.isNotBlank(),
+                onClick = {
+                    onConfirmNewDestination(selectedNewDest, extraDistance, extraFare)
+                },
+                backgroundColor = SapphirePrimary,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(text = "Cancel", color = TextMuted, fontSize = 12.sp)
+            }
+        }
+    )
 }
 
 // Screen 34: In-Trip Pilot Chat & Auto-Translate

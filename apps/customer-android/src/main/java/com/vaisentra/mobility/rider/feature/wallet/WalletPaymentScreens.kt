@@ -206,39 +206,116 @@ fun WalletAutoTopupScreen(onNavigate: (String) -> Unit) {
 fun SplitFareScreen(onNavigate: (String) -> Unit) {
     var phone1 by remember { mutableStateOf("+91 98765 43210") }
     var phone2 by remember { mutableStateOf("+91 99887 76655") }
+    var isDispatched by remember { mutableStateOf(false) }
+
+    val coRiderStatuses = remember {
+        mutableStateListOf(
+            Triple("Rahul Sharma (You)", "₹43.02", "Paid (Host) ✓"),
+            Triple("Priya Singh", "₹43.01", "Accepted & Paid ✓"),
+            Triple("Amit Verma", "₹43.01", "Pending Approval ⏳")
+        )
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(CanvasBlack)
             .padding(16.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         NeoHeader(title = "Split Ride Invoice", subtitle = "Automated UPI share request", onBack = { onNavigate("map_home") })
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         NeoCard {
-            Text(text = "Trip Total: ₹129.04", color = ElectricCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(6.dp))
+            Text(text = "Trip Total: ₹129.04", color = ElectricCyan, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
             Text(text = "Splitting 3 ways = ₹43.01 per passenger", color = TextMuted, fontSize = 13.sp)
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             NeoTextField(value = phone1, onValueChange = { phone1 = it }, placeholder = "Passenger 1 Phone", label = "Co-Passenger 1")
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             NeoTextField(value = phone2, onValueChange = { phone2 = it }, placeholder = "Passenger 2 Phone", label = "Co-Passenger 2")
-            Spacer(modifier = Modifier.height(20.dp))
-            NeoButton(text = "Dispatch Split Payment Link", onClick = {
-                val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    try {
-                        com.vaisentra.mobility.rider.data.NetworkClient.apiService.splitFare(
-                            com.vaisentra.mobility.rider.data.SplitFareRequest(
-                                rideId = rideId,
-                                coPassengerPhones = listOf(phone1, phone2)
+            Spacer(modifier = Modifier.height(16.dp))
+            NeoButton(
+                text = if (isDispatched) "Re-dispatch Split Payment Links" else "Dispatch Split Payment Link",
+                onClick = {
+                    isDispatched = true
+                    val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        try {
+                            com.vaisentra.mobility.rider.data.NetworkClient.apiService.splitFare(
+                                com.vaisentra.mobility.rider.data.SplitFareRequest(
+                                    rideId = rideId,
+                                    coPassengerPhones = listOf(phone1, phone2)
+                                )
                             )
-                        )
-                    } catch (_: Exception) {}
+                        } catch (_: Exception) {}
+                    }
+                    DialogController.show(RiderPopupType.SPLIT_FARE)
+                },
+                backgroundColor = SapphirePrimary
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Domain K: Live Co-Rider Split Approval Status HUD
+        NeoCard(borderColor = SapphireGlow) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "CO-PASSENGER APPROVAL HUD", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                NeoBadge(text = "LIVE STATUS", backgroundColor = SurfaceDark, textColor = EmeraldGreen)
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+
+            coRiderStatuses.forEach { (name, share, status) ->
+                val isPaid = status.contains("✓")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(text = name, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(text = "Share: $share", color = TextDim, fontSize = 11.sp)
+                    }
+                    NeoBadge(
+                        text = status,
+                        backgroundColor = if (isPaid) EmeraldGlow else SapphireGlow,
+                        textColor = if (isPaid) EmeraldGreen else AmberGold
+                    )
                 }
-                DialogController.show(RiderPopupType.SPLIT_FARE)
-            })
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceElevated)
+                        .clickable { DialogController.showToast("Split link copied to clipboard!") }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "📋 Copy Link", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceElevated)
+                        .clickable { DialogController.showToast("WhatsApp invitation sent to co-riders!") }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "💬 WhatsApp", color = EmeraldGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
