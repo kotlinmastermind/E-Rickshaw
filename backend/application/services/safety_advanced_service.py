@@ -391,11 +391,15 @@ class SafetyAdvancedService:
         }
 
     async def delete_emergency_contact(self, user_id: str, contact_id: str) -> Dict[str, Any]:
-        contact = await self.db.get(EmergencyContact, contact_id)
-        if not contact or contact.user_id != user_id:
+        stmt = select(EmergencyContact).where(EmergencyContact.id == str(contact_id).strip())
+        res = await self.db.execute(stmt)
+        contact = res.scalar_one_or_none()
+        if not contact:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Emergency contact not found.")
+        if contact.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this emergency contact.")
 
-        contact.is_active = False
+        await self.db.delete(contact)
         await self.db.commit()
         return {"success": True, "message": "Emergency contact removed."}
 

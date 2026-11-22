@@ -587,8 +587,12 @@ fun EmergencyContactsScreen(
                             IconButton(onClick = {
                                 scope.launch {
                                     val res = DriverRepository.deleteEmergencyContact(contact.id)
-                                    if (res.isSuccess) onShowToast("Contact removed")
-                                    else onShowToast("Could not remove contact")
+                                    if (res.isSuccess) {
+                                        onShowToast("Contact removed")
+                                    } else {
+                                        val msg = res.exceptionOrNull()?.message ?: "Could not remove contact"
+                                        onShowToast(msg)
+                                    }
                                 }
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = CrimsonAlert)

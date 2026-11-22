@@ -1406,15 +1406,22 @@ object DriverRepository {
     }
 
     suspend fun deleteEmergencyContact(contactId: String): Result<Boolean> {
+        if (contactId.isBlank()) {
+            return Result.failure(IllegalArgumentException("Contact ID cannot be blank"))
+        }
         return try {
             val res = DriverNetworkClient.apiService.deleteEmergencyContact(contactId)
             if (res.isSuccessful) {
+                _emergencyContacts.value = _emergencyContacts.value.filter { it.id != contactId }
                 fetchEmergencyContacts()
                 Result.success(true)
             } else {
-                Result.failure(IllegalStateException("deleteEmergencyContact failed: HTTP ${res.code()}"))
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Log.w(TAG, "deleteEmergencyContact failed: HTTP ${res.code()} - $err")
+                Result.failure(IllegalStateException(err))
             }
         } catch (e: Exception) {
+            Log.e(TAG, "Exception calling deleteEmergencyContact: ${e.message}")
             Result.failure(e)
         }
     }
