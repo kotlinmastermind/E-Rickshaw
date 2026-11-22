@@ -979,35 +979,16 @@ class DriverOnboardingService:
     # =========================================================================
     async def create_onboarding_ticket(self, user_id: str, subject: str, message: str) -> Dict[str, Any]:
         driver = await self.get_or_create_driver(user_id)
+        import uuid
+        ticket_id = str(uuid.uuid4())
         ticket = DriverOnboardingTicket(
+            id=ticket_id,
             driver_id=driver.id,
             subject=subject,
             message=message,
             status="OPEN"
         )
         self.db.add(ticket)
-        try:
-            import secrets
-            from backend.domain.models import SupportTicket, SupportMessage
-            st = SupportTicket(
-                id=ticket.id,
-                ticket_number=f"DRV-{secrets.token_hex(4).upper()}",
-                user_id=user_id,
-                category="DRIVER_HELPDESK",
-                subject=subject,
-                status="OPEN",
-                priority="MEDIUM"
-            )
-            self.db.add(st)
-            msg = SupportMessage(
-                ticket_id=ticket.id,
-                sender_user_id=user_id,
-                sender_role="DRIVER",
-                message=message
-            )
-            self.db.add(msg)
-        except Exception:
-            pass
         await self.db.commit()
         await self.db.refresh(ticket)
         return {

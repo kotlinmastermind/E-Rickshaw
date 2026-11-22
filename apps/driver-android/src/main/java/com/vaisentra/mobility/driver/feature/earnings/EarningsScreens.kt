@@ -738,3 +738,11 @@ fun SummaryRowPreview() {
         )
     }
 }
+
+@Preview(showBackground = true)
+@Composable
+fun ShiftSummaryScreenPreview() {
+    DriverGoTheme {
+        ShiftSummaryScreen()
+    }
+}
