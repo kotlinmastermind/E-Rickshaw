@@ -24,7 +24,6 @@ enum class DriverPopupType {
     INCOMING_OFFER,
     RIDER_CANCELLED,
     LOW_BATTERY_SWAP,
-    FATIGUE_BREAK,
     OVERSPEEDING_ALERT,
     CASH_COLLECT,
     NO_SHOW_EXPIRY,
@@ -95,7 +94,6 @@ fun DriverGoDialogHost() {
                 DriverPopupType.INCOMING_OFFER -> IncomingOfferModal()
                 DriverPopupType.RIDER_CANCELLED -> RiderCancelledModal()
                 DriverPopupType.LOW_BATTERY_SWAP -> LowBatterySwapModal()
-                DriverPopupType.FATIGUE_BREAK -> FatigueBreakModal()
                 DriverPopupType.OVERSPEEDING_ALERT -> OverspeedingModal()
                 DriverPopupType.CASH_COLLECT -> CashCollectModal()
                 DriverPopupType.NO_SHOW_EXPIRY -> NoShowExpiryModal()
@@ -221,29 +219,6 @@ private fun LowBatterySwapModal() {
             backgroundColor = PilotAmber,
             textColor = PilotCanvas
         )
-    }
-}
-
-// 4. Mandatory Fatigue Break
-@Composable
-private fun FatigueBreakModal() {
-    val scope = rememberCoroutineScope()
-    CockpitCard(borderColor = PilotAmber) {
-        Text(text = "☕ Mandatory Fatigue Cooldown", color = PilotAmber, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "You have completed 4.5 hours of continuous transit duty. A 15-minute rest cooldown is required by fleet safety regulations.", color = PilotTextMuted, fontSize = 13.sp)
-        Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Start 15-Min Safety Rest", onClick = {
-            scope.launch {
-                val res = DriverRepository.submitFatigueCheckResult("NEEDS_REST", "Pilot initiated 15-min cooldown modal")
-                DriverDialogController.dismiss()
-                if (res.isSuccess) {
-                    DriverDialogController.showToast("Fatigue break logged. Resume duty in 15 mins.")
-                } else {
-                    DriverDialogController.showToast("Failed to log fatigue break. Check connection.")
-                }
-            }
-        })
     }
 }
 

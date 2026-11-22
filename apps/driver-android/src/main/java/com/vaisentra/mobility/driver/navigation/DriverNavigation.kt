@@ -56,7 +56,6 @@ enum class DriverScreen(val title: String, val category: String) {
     VEHICLE_RC_STATUS("8. Vehicle RC & Permit", "Duty & Vehicle"),
     SHIFT_START("9. Shift Start & Odometer", "Duty & Vehicle"),
     DUTY_DASHBOARD("10. Duty Cockpit Dashboard", "Duty & Vehicle"),
-    FATIGUE_CHECK("12. Pilot Fatigue Sentinel", "Duty & Vehicle"),
     SHIFT_END("35. Shift End & Closing Meter", "Duty & Vehicle"),
     DRIVER_PREFERENCES("50. Pilot Preferences", "Duty & Vehicle"),
 
@@ -135,7 +134,6 @@ fun resolveRoute(route: String): DriverScreen? {
         "rc_status", "vehicle_rc" -> DriverScreen.VEHICLE_RC_STATUS
         "shift_start" -> DriverScreen.SHIFT_START
         "shift_end" -> DriverScreen.SHIFT_END
-        "fatigue", "fatigue_check" -> DriverScreen.FATIGUE_CHECK
         "preferences", "settings" -> DriverScreen.DRIVER_PREFERENCES
 
         // Telemetry & Maps
@@ -357,7 +355,7 @@ fun DriverNavigation() {
 
     val tabIndex = when (currentRoute) {
         DriverScreen.DUTY_DASHBOARD.name, DriverScreen.VEHICLE_INSPECTION.name, DriverScreen.VEHICLE_RC_STATUS.name,
-        DriverScreen.SHIFT_START.name, DriverScreen.SHIFT_END.name, DriverScreen.FATIGUE_CHECK.name,
+        DriverScreen.SHIFT_START.name, DriverScreen.SHIFT_END.name,
         DriverScreen.GPS_PING.name, DriverScreen.HEATMAP_SURGE.name, DriverScreen.ROAD_HAZARDS.name -> 0
 
         DriverScreen.INCOMING_OFFER.name, DriverScreen.OFFER_QUEUE.name, DriverScreen.MULTI_STOP.name,
@@ -536,10 +534,6 @@ fun DriverNavigation() {
                         router.navigateRoute(route)
                     }
                 })
-            }
-
-            composable(DriverScreen.FATIGUE_CHECK.name) {
-                FatigueCheckScreen(onNavigate = { router.popBack() })
             }
 
             composable(DriverScreen.SHIFT_END.name) {

@@ -1042,11 +1042,6 @@ object DriverRepository {
         }
     }
 
-    suspend fun reportFatigueState(hoursDriven: Double): Result<Boolean> {
-        val resultStatus = if (hoursDriven >= 4.5) "NEEDS_REST" else "FIT"
-        return submitFatigueCheckResult(resultStatus, "Continuous driving: $hoursDriven hrs")
-    }
-
     suspend fun reportRouteDeviation(rideId: String, lat: Double, lng: Double): Result<Boolean> {
         if (rideId.isBlank()) return Result.failure(IllegalStateException("No active ride"))
         return try {
@@ -1070,22 +1065,6 @@ object DriverRepository {
             val url = (body?.get("upi_intent_url") ?: body?.get("qr_code_payload")) as? String
             if (res.isSuccessful && !url.isNullOrBlank()) Result.success(url)
             else Result.failure(IllegalStateException("generateDynamicUpi failed: HTTP ${res.code()}"))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun submitFatigueCheckResult(result: String, note: String = "Shift pause logged"): Result<Boolean> {
-        return try {
-            val res = DriverNetworkClient.apiService.submitFatigueCheck(
-                FatigueCheckRequest(
-                    result = result,
-                    rideId = _currentRideId.value.ifBlank { null },
-                    note = note
-                )
-            )
-            if (res.isSuccessful) Result.success(true)
-            else Result.failure(IllegalStateException("submitFatigueCheck failed: HTTP ${res.code()}"))
         } catch (e: Exception) {
             Result.failure(e)
         }

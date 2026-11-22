@@ -197,38 +197,6 @@ fun ShiftStartScreen(onNavigate: (String) -> Unit) {
     }
 }
 
-// Screen 12: Driver Fatigue & Rest Check
-@Composable
-fun FatigueCheckScreen(onNavigate: (String) -> Unit) {
-    val scope = rememberCoroutineScope()
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(PilotCanvas)
-            .padding(16.dp)
-    ) {
-        CockpitHeader(title = "Driver Fatigue Monitor", subtitle = "Fleet safety rest intervals", onBack = { onNavigate("duty_dashboard") })
-        Spacer(modifier = Modifier.height(16.dp))
-
-        CockpitCard(borderColor = PilotAmber) {
-            Text(text = "Fatigue Safety Check", color = PilotAmber, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = "To guarantee passenger safety, pilots should take a 15-minute rest pause after every 4.5 hours of continuous transit.", color = PilotTextMuted, fontSize = 13.sp)
-            Spacer(modifier = Modifier.height(16.dp))
-            CockpitButton(text = "Start 15-Min Break Now", onClick = {
-                scope.launch {
-                    val res = DriverRepository.submitFatigueCheckResult("NEEDS_REST", "Driver initiated 15-min rest break")
-                    if (res.isSuccess) {
-                        DriverDialogController.show(DriverPopupType.FATIGUE_BREAK)
-                    } else {
-                        DriverDialogController.showToast("Failed to log fatigue check")
-                    }
-                }
-            }, backgroundColor = PilotAmber, textColor = PilotCanvas)
-        }
-    }
-}
-
 // Screen 35: Shift End & Closing Odometer
 @Composable
 fun ShiftEndScreen(onNavigate: (String) -> Unit) {

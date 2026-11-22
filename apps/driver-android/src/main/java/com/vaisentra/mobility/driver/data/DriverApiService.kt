@@ -112,7 +112,7 @@ interface DriverApiService {
     @GET("api/v1/drivers/daily-target")
     suspend fun getDailyTargets(): Response<DailyIncentiveDto>
 
-    // --- Heatmap, Waiting, Payout Accounts, Fatigue, Anomaly & UPI QR ---
+    // --- Heatmap, Waiting, Payout Accounts, Anomaly & UPI QR ---
     @GET("api/v1/drivers/heat-map")
     suspend fun getHeatMap(): Response<HeatMapResponseDto>
 
@@ -128,9 +128,6 @@ interface DriverApiService {
     @GET("api/v1/drivers/financials/payout-accounts")
     suspend fun getPayoutAccounts(): Response<List<PayoutAccountDto>>
 
-    @POST("api/v1/drivers/safety/fatigue")
-    suspend fun logFatigue(@Body body: FatigueCheckRequest): Response<Map<String, Any>>
-
     @POST("api/v1/safety/anomaly/route")
     suspend fun reportRouteAnomaly(@Body body: RouteAnomalyRequest): Response<Map<String, Any>>
 
@@ -138,9 +135,6 @@ interface DriverApiService {
     suspend fun generateUpiCheckout(@Body body: Map<String, Any>): Response<Map<String, Any>>
 
     // --- Safety & Onboarding ---
-    @POST("api/v1/drivers/safety/fatigue-check")
-    suspend fun submitFatigueCheck(@Body body: FatigueCheckRequest): Response<Map<String, Any>>
-
     @POST("api/v1/driver-onboarding/vehicle-inspection")
     suspend fun submitVehicleInspection(@Body body: VehicleInspectionRequest): Response<Map<String, Any>>
 

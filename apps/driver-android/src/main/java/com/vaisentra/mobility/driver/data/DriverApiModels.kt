@@ -309,12 +309,6 @@ data class DailyIncentiveDto(
 }
 
 // --- Safety & Onboarding Payloads ---
-data class FatigueCheckRequest(
-    @SerializedName("result") val result: String, // FIT | NEEDS_REST | UNFIT
-    @SerializedName("ride_id") val rideId: String? = null,
-    @SerializedName("note") val note: String? = null
-)
-
 data class RouteAnomalyRequest(
     @SerializedName("ride_id") val rideId: String,
     @SerializedName("current_lat") val currentLat: Double,

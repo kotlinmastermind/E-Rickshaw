@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.deps import get_current_user
-from backend.domain.models import (DriverProfile, DriverSafetyPreferences, DriverFatigueCheck,
+from backend.domain.models import (DriverProfile, DriverSafetyPreferences,
     DriverRating, DriverRatingAppeal, IncidentReport, Ride, SupportTicket, User, Vehicle,
     DriverVehicleAssignment, DriverVehicleInspection, HelpArticle, SupportMessage, IncidentEvidence, Notification)
 from backend.infrastructure.database.session import get_db
@@ -27,11 +27,6 @@ async def driver_for(user: User, db: AsyncSession) -> DriverProfile:
     if not driver:
         raise HTTPException(status_code=404, detail="Driver profile not found")
     return driver
-
-class FatiguePayload(BaseModel):
-    result: str = Field(pattern="^(FIT|NEEDS_REST|UNFIT)$")
-    ride_id: Optional[str] = None
-    note: Optional[str] = Field(default=None, max_length=1000)
 
 class PreferencesPayload(BaseModel):
     share_trip_location_with_customer: bool
@@ -74,7 +69,6 @@ async def overview(user: User = Depends(get_current_user), db: AsyncSession = De
         "safety_preferences": {"share_trip_location_with_customer": prefs.share_trip_location_with_customer if prefs else False,
             "privacy_notice_acknowledged": bool(prefs and prefs.privacy_notice_acknowledged_at),
             "notice": "Trip location is shared only while an active trip is tracked and only when enabled. This setting does not control emergency services."},
-        "fatigue_check_required": True,
         "ratings": [{"id": r.id, "rating": r.rating, "cleanliness": r.cleanliness_score, "comfort": r.comfort_score,
             "service_quality": r.service_quality_score, "navigation": r.navigation_score, "created_at": r.created_at.isoformat(),
             "feedback": r.feedback} for r in ratings],
@@ -148,21 +142,6 @@ def _coaching(ratings):
     averages = {k: sum(getattr(r, k) for r in recent) / len(recent) for k in labels}
     weak = sorted(averages, key=averages.get)
     return [f"Focus on {labels[k]}: recent category average {averages[k]:.1f}/5." for k in weak[:2] if averages[k] < 4.5] or ["Recent feedback is consistently strong. Maintain your current service standards."]
-
-@router.post("/fatigue-check", status_code=201)
-@router.post("/fatigue", status_code=201)
-async def fatigue(payload: FatiguePayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    driver = await driver_for(user, db)
-    if payload.ride_id:
-        ride = await db.get(Ride, payload.ride_id)
-        if not ride or ride.assigned_driver_id != driver.id:
-            raise HTTPException(status_code=404, detail="Active ride not found")
-    record = DriverFatigueCheck(driver_id=driver.id, ride_id=payload.ride_id, result=payload.result, note=payload.note)
-    db.add(record); await db.commit()
-    guidance = "You are responsible for deciding whether it is safe to drive."
-    if record.result in {"NEEDS_REST", "UNFIT"}:
-        guidance = "Do not accept trips while tired or impaired. Go offline, park safely, and rest. Call 112 if anyone is in immediate danger."
-    return {"id": record.id, "result": record.result, "created_at": record.created_at.isoformat(), "guidance": guidance}
 
 @router.put("/preferences")
 async def preferences(payload: PreferencesPayload, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
