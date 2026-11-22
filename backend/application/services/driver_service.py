@@ -3,7 +3,7 @@ import json
 import os
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, desc
+from sqlalchemy import select, update, func, desc, or_
 from fastapi import HTTPException, status, UploadFile
 from backend.domain.models import (
     DriverProfile, DriverDocument, DriverAvailability, DriverLocation,
@@ -103,7 +103,10 @@ class DriverService:
 
     async def get_document_bytes_and_meta(self, user_id: str, document_id: str) -> Tuple[bytes, str, str]:
         driver = await self.get_or_create_profile(user_id)
-        stmt = select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.driver_id == driver.id)
+        stmt = select(DriverDocument).where(
+            DriverDocument.id == document_id,
+            or_(DriverDocument.driver_id == driver.id, DriverDocument.driver_id == user_id)
+        )
         res = await self.db.execute(stmt)
         doc = res.scalar_one_or_none()
         if not doc:
@@ -147,13 +150,19 @@ class DriverService:
 
     async def get_document_signed_url(self, user_id: str, document_id: str) -> Dict[str, Any]:
         driver = await self.get_or_create_profile(user_id)
-        stmt = select(DriverDocument).where(DriverDocument.id == document_id, DriverDocument.driver_id == driver.id)
+        stmt = select(DriverDocument).where(
+            DriverDocument.id == document_id,
+            or_(DriverDocument.driver_id == driver.id, DriverDocument.driver_id == user_id)
+        )
         res = await self.db.execute(stmt)
         doc = res.scalar_one_or_none()
         if not doc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver document not found.")
         storage = get_storage_provider()
-        signed_url = await storage.generate_signed_url(doc.storage_path, expires_in_seconds=3600)
+        try:
+            signed_url = await storage.generate_signed_url(doc.storage_path, expires_in_seconds=3600)
+        except Exception:
+            signed_url = f"/api/v1/drivers/documents/{doc.id}/content"
         return {
             "document_id": doc.id,
             "document_type": doc.document_type,

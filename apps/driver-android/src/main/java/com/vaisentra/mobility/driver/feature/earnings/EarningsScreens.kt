@@ -406,17 +406,26 @@ fun  PayoutAccountsScreen(
                             if (acc.isPrimary) {
                                 CockpitBadge("PRIMARY", EmeraldPrimary)
                             } else {
-                                CockpitButton(
-                                    text = "Set Primary",
-                                    isOutlined = true,
+                                OutlinedButton(
                                     onClick = {
                                         scope.launch {
                                             val res = DriverRepository.setPrimaryPayoutAccount(acc.id)
-                                            if (res.isSuccess) onShowToast("Primary payout account updated")
-                                            else onShowToast("Failed to set primary")
+                                            if (res.isSuccess) {
+                                                onShowToast("Primary payout account updated")
+                                                DriverRepository.fetchPayoutAccounts()
+                                            } else {
+                                                onShowToast("Failed to set primary: ${res.exceptionOrNull()?.message ?: ""}")
+                                            }
                                         }
-                                    }
-                                )
+                                    },
+                                    modifier = Modifier.height(32.dp).wrapContentWidth(),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldPrimary),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldPrimary)
+                                ) {
+                                    Text("Set Primary", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -736,13 +745,5 @@ fun SummaryRowPreview() {
             label = "Today Earnings",
             value = "₹450.00"
         )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun ShiftSummaryScreenPreview() {
-    DriverGoTheme {
-        ShiftSummaryScreen()
     }
 }

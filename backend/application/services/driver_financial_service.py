@@ -790,7 +790,9 @@ class DriverFinancialService:
     # -------------------------------------------------------------------------
     async def get_payout_accounts(self, user_id_or_driver_id: str) -> List[Dict[str, Any]]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.driver_id == driver.id).order_by(DriverPayoutAccount.is_primary.desc())
+        stmt = select(DriverPayoutAccount).where(
+            or_(DriverPayoutAccount.driver_id == driver.id, DriverPayoutAccount.driver_id == user_id_or_driver_id)
+        ).order_by(DriverPayoutAccount.is_primary.desc())
         res = await self.db.execute(stmt)
         accounts = res.scalars().all()
 
@@ -890,7 +892,9 @@ class DriverFinancialService:
 
     async def set_primary_payout_account(self, user_id_or_driver_id: str, account_id: str) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.driver_id == driver.id)
+        stmt = select(DriverPayoutAccount).where(
+            or_(DriverPayoutAccount.driver_id == driver.id, DriverPayoutAccount.driver_id == user_id_or_driver_id)
+        )
         res = await self.db.execute(stmt)
         accounts = res.scalars().all()
 

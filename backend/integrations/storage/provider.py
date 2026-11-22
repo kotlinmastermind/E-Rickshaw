@@ -167,9 +167,9 @@ class LocalPrivateStorageProvider(StorageProvider):
         exp = now + expires_in_seconds
         clean_path = os.path.abspath(storage_path)
         if not clean_path.startswith(self.base_dir):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Invalid storage reference.")
-
-        rel_path = os.path.relpath(clean_path, self.base_dir).replace("\\", "/")
+            rel_path = os.path.basename(clean_path)
+        else:
+            rel_path = os.path.relpath(clean_path, self.base_dir).replace("\\", "/")
         sig_payload = f"{rel_path}:{exp}".encode("utf-8")
         sig = hmac.new(settings.SECRET_KEY.encode("utf-8"), sig_payload, hashlib.sha256).hexdigest()
         encoded_rel = urllib.parse.quote(rel_path)
