@@ -1253,13 +1253,19 @@ object DriverRepository {
             val cleanRide = rideId.trim()
             val req = SafetyIncidentRequest(
                 rideId = if (cleanRide.isNotBlank() && cleanRide != "general" && cleanRide.length > 10) cleanRide else null,
-                category = "OTHER",
+                category = "FOUND_LOST_ITEM",
                 severity = "LOW",
-                description = "Found item ($category): $notes"
+                description = "Found item in cab ($category): $notes"
             )
-            val res = DriverNetworkClient.apiService.reportSafetyIncident(req)
-            if (res.isSuccessful) Result.success(true)
-            else Result.failure(IllegalStateException("reportSafetyIncident failed: HTTP ${res.code()}"))
+            val res = DriverNetworkClient.apiService.submitDriverSafetyIncident(req)
+            if (res.isSuccessful) {
+                fetchDriverIncidents()
+                Result.success(true)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Log.w(TAG, "reportFoundItem failed: HTTP ${res.code()} - $err")
+                Result.failure(IllegalStateException(err))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }

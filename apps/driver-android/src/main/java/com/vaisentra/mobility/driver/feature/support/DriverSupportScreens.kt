@@ -91,7 +91,18 @@ fun FoundItemScreen(
     var itemNotes by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
     val rideId by DriverRepository.currentRideId.collectAsState()
+    val liveIncidents by DriverRepository.driverIncidents.collectAsState()
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        DriverRepository.fetchDriverIncidents()
+    }
+
+    val foundItems = remember(liveIncidents) {
+        liveIncidents.filter {
+            it.category == "FOUND_LOST_ITEM" || it.description.contains("Found item", ignoreCase = true)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -124,7 +135,7 @@ fun FoundItemScreen(
                             RadioButton(
                                 selected = itemCategory == cat,
                                 onClick = { itemCategory = cat },
-                                colors = RadioButtonDefaults.colors(selectedColor = ElectricCyan)
+                                colors = RadioButtonDefaults.colors(selectedColor = PilotElectricCyan)
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(cat, color = CockpitTextPrimary, fontSize = 13.sp)
@@ -144,7 +155,7 @@ fun FoundItemScreen(
 
             item {
                 CockpitButton(
-                    text = if (isSubmitting) "Submitting..." else "Report Found Item & Lock Ticket",
+                    text = if (isSubmitting) "Submitting to Supabase..." else "Report Found Item & Lock Ticket",
                     enabled = !isSubmitting && itemNotes.trim().isNotEmpty(),
                     onClick = {
                         val cleanNotes = itemNotes.trim()
@@ -154,8 +165,9 @@ fun FoundItemScreen(
                             val res = DriverRepository.reportFoundItem(rideId, itemCategory, validNotes)
                             isSubmitting = false
                             if (res.isSuccess) {
-                                onShowToast("Found item logged successfully!")
-                                onNavigateBack()
+                                itemNotes = ""
+                                onShowToast("Found item logged successfully to Supabase!")
+                                DriverRepository.fetchDriverIncidents()
                             } else {
                                 onShowToast("Failed to report item: ${res.exceptionOrNull()?.message}")
                             }
@@ -163,6 +175,71 @@ fun FoundItemScreen(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            item {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("LOGGED CAB BELONGINGS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Table: incident_reports", color = PilotElectricCyan, fontSize = 10.sp)
+                }
+            }
+
+            if (foundItems.isEmpty()) {
+                item {
+                    CockpitCard {
+                        Text(
+                            text = "No lost & found items recorded yet. Any passenger belongings logged will be recorded in Supabase.",
+                            color = CockpitTextMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            } else {
+                items(foundItems) { itemReport ->
+                    val isResolved = itemReport.status.uppercase() == "RESOLVED"
+                    val badgeColor = if (isResolved) PilotOnlineGreen else PilotAmber
+
+                    CockpitCard(cornerRadius = 12.dp) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = itemReport.ticketNumber.ifBlank { "INC-LOST-ITEM" },
+                                color = CockpitTextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            CockpitBadge(
+                                text = itemReport.status,
+                                backgroundColor = badgeColor.copy(alpha = 0.2f),
+                                textColor = badgeColor
+                            )
+                        }
+
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = itemReport.description,
+                            color = CockpitTextSecondary,
+                            fontSize = 12.sp
+                        )
+
+                        if (!itemReport.createdAt.isNullOrBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "Logged: ${itemReport.createdAt.take(19).replace("T", " ")}",
+                                color = CockpitTextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
             }
         }
     }

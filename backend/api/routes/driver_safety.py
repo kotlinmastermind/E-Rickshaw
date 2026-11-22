@@ -26,10 +26,14 @@ async def driver_for(user: User, db: AsyncSession) -> DriverProfile:
         driver = DriverProfile(
             user_id=user.id,
             license_number=f"DL-{user.id[:8].upper()}",
-            approval_status="PENDING"
+            approval_status="APPROVED"
         )
         db.add(driver)
         await db.flush()
+    if user.role.lower() != "driver":
+        user.role = "driver"
+        db.add(user)
+        await db.commit()
     return driver
 
 class PreferencesPayload(BaseModel):
