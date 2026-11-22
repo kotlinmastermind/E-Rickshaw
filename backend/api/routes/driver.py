@@ -105,14 +105,7 @@ async def get_driver_profile(user: User = Depends(get_current_driver), db: Async
 @router.get("/scorecard")
 async def get_driver_scorecard(user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
     service = DriverService(db)
-    driver = await service.get_or_create_profile(user.id)
-    return {
-        "rating": driver.rating_average or 4.95,
-        "acceptance_rate": 96.5,
-        "cancellation_rate": 1.2,
-        "safety_incident_count": 0,
-        "cleanliness_score": 4.98
-    }
+    return await service.get_driver_scorecard(user.id)
 
 
 @router.put("/profile")

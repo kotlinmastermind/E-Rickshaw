@@ -655,3 +655,11 @@ fun DriverPreferencesScreenPreview() {
         DriverPreferencesScreen(onNavigate = {})
     }
 }
+
+@Preview(showBackground = true)
+@Composable
+fun DutyDashboardScreenPreview() {
+    DriverGoTheme {
+        DutyDashboardScreen(onNavigate = {})
+    }
+}

@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
+import kotlinx.coroutines.launch
 
 /**
  * Screen 36: Daily Targets & Incentive Bonus
@@ -221,6 +222,8 @@ fun PerformanceScorecardScreen(
     onShowToast: (String) -> Unit = {}
 ) {
     val scorecard by DriverRepository.scorecard.collectAsState()
+    val scope = rememberCoroutineScope()
+    var isRefreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         DriverRepository.fetchPerformanceScorecard()
@@ -234,7 +237,7 @@ fun PerformanceScorecardScreen(
     ) {
         CockpitHeader(
             title = "Pilot Scorecard",
-            subtitle = "Quality metrics, safety audits & performance rating",
+            subtitle = "Live Supabase quality metrics & performance benchmarks",
             onBack = onNavigateBack
         )
 
@@ -252,8 +255,19 @@ fun PerformanceScorecardScreen(
                         Column {
                             Text("CUSTOMER RATING", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.height(4.dp))
-                            Text("${"%.2f".format(scorecard.rating)} ★", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
-                            Text("Cleanliness: ${"%.2f".format(scorecard.cleanlinessScore)} / 5.0", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            if (scorecard.rating > 0.0) {
+                                Text("${"%.2f".format(scorecard.rating)} ★", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
+                                Text("${scorecard.ratingCount} Verified Reviews in Supabase", color = CockpitTextMuted, fontSize = 11.sp)
+                            } else {
+                                Text("New Pilot ★", color = EmeraldPrimary, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+                                Text("0 reviews in Supabase (Clean Record)", color = CockpitTextMuted, fontSize = 11.sp)
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            if (scorecard.cleanlinessScore > 0.0) {
+                                Text("Cleanliness: ${"%.2f".format(scorecard.cleanlinessScore)} / 5.0", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Text("Cleanliness: Not rated yet", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                         Icon(Icons.Default.Stars, contentDescription = null, tint = AmberWarning, modifier = Modifier.size(48.dp))
                     }
@@ -262,14 +276,53 @@ fun PerformanceScorecardScreen(
 
             item {
                 CockpitCard {
-                    Text("CORE PERFORMANCE BENCHMARKS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("CORE PERFORMANCE BENCHMARKS (SUPABASE LIVE)", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(10.dp))
-                    ScoreRow("Customer Satisfaction Rating", "${"%.2f".format(scorecard.rating)} ★", EmeraldPrimary)
-                    ScoreRow("Dispatch Acceptance Rate", "${"%.1f".format(scorecard.acceptanceRate)}%", EmeraldPrimary)
-                    ScoreRow("Driver Cancellation Rate", "${"%.1f".format(scorecard.cancellationRate)}%", EmeraldPrimary)
-                    ScoreRow("Safety Incidents", "${scorecard.safetyIncidentCount}", if (scorecard.safetyIncidentCount == 0) EmeraldPrimary else CrimsonAlert)
-                    ScoreRow("Cabin Cleanliness Score", "${"%.2f".format(scorecard.cleanlinessScore)}", EmeraldPrimary)
+                    val ratingDisplay = if (scorecard.rating > 0.0) "${"%.2f".format(scorecard.rating)} ★" else "No reviews yet"
+                    ScoreRow("Customer Satisfaction Rating", ratingDisplay, EmeraldPrimary)
+                    
+                    val acceptanceDisplay = if (scorecard.totalOffers > 0) {
+                        "${"%.1f".format(scorecard.acceptanceRate)}% (${scorecard.acceptedOffers}/${scorecard.totalOffers} accepted)"
+                    } else {
+                        "100.0% (0 missed offers)"
+                    }
+                    ScoreRow("Dispatch Acceptance Rate", acceptanceDisplay, EmeraldPrimary)
+                    
+                    val cancelDisplay = if (scorecard.totalTrips > 0) "${"%.1f".format(scorecard.cancellationRate)}%" else "0.0% (0 cancellations)"
+                    ScoreRow("Driver Cancellation Rate", cancelDisplay, EmeraldPrimary)
+                    
+                    ScoreRow(
+                        "Safety Incidents",
+                        if (scorecard.safetyIncidentCount == 0) "0 (Zero Incidents ✓)" else "${scorecard.safetyIncidentCount} Incidents",
+                        if (scorecard.safetyIncidentCount == 0) EmeraldPrimary else CrimsonAlert
+                    )
+                    
+                    val cleanDisplay = if (scorecard.cleanlinessScore > 0.0) "${"%.2f".format(scorecard.cleanlinessScore)}" else "Not rated yet"
+                    ScoreRow("Cabin Cleanliness Score", cleanDisplay, EmeraldPrimary)
+                    
+                    ScoreRow("Total Completed Trips", "${scorecard.totalTrips} Trips", CockpitTextPrimary)
                 }
+            }
+
+            item {
+                CockpitButton(
+                    text = if (isRefreshing) "Syncing with Supabase..." else "↻ Refresh Live Database Metrics",
+                    enabled = !isRefreshing,
+                    onClick = {
+                        isRefreshing = true
+                        scope.launch {
+                            val res = DriverRepository.fetchPerformanceScorecard()
+                            isRefreshing = false
+                            if (res.isSuccess) {
+                                onShowToast("Scorecard metrics synced with live Supabase database!")
+                            } else {
+                                onShowToast("Sync failed: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
+                    },
+                    backgroundColor = EmeraldPrimary,
+                    textColor = CockpitBackground
+                )
             }
         }
     }

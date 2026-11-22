@@ -294,7 +294,11 @@ data class ScorecardDto(
     @SerializedName("acceptance_rate") val acceptanceRate: Double = 0.0,
     @SerializedName("cancellation_rate") val cancellationRate: Double = 0.0,
     @SerializedName("safety_incident_count") val safetyIncidentCount: Int = 0,
-    @SerializedName("cleanliness_score") val cleanlinessScore: Double = 0.0
+    @SerializedName("cleanliness_score") val cleanlinessScore: Double = 0.0,
+    @SerializedName("total_trips") val totalTrips: Int = 0,
+    @SerializedName("rating_count") val ratingCount: Int = 0,
+    @SerializedName("total_offers") val totalOffers: Int = 0,
+    @SerializedName("accepted_offers") val acceptedOffers: Int = 0
 )
 
 data class DailyIncentiveDto(

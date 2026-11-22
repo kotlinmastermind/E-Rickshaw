@@ -8,7 +8,8 @@ from fastapi import HTTPException, status, UploadFile
 from backend.domain.models import (
     DriverProfile, DriverDocument, DriverAvailability, DriverLocation,
     Vehicle, DriverVehicleAssignment, Ride, Payment, RideLocationHistory,
-    VehicleCategory, DriverVehicleInspection
+    VehicleCategory, DriverVehicleInspection, DriverRating, RideAssignment,
+    IncidentReport
 )
 from backend.integrations.storage.provider import get_storage_provider
 from backend.core.config import settings
@@ -692,4 +693,71 @@ class DriverService:
             "rating_average": driver.rating_average,
             "rating_count": driver.rating_count,
             "recent_trips": recent_trips
+        }
+
+    async def get_driver_scorecard(self, user_id: str) -> Dict[str, Any]:
+        driver = await self.get_or_create_profile(user_id)
+
+        # 1. Customer Rating & Cabin Cleanliness from Supabase driver_ratings table
+        stmt_ratings = select(DriverRating).where(DriverRating.driver_id == driver.id)
+        res_ratings = await self.db.execute(stmt_ratings)
+        ratings = res_ratings.scalars().all()
+
+        if ratings:
+            avg_rating = round(sum(r.rating for r in ratings) / len(ratings), 2)
+            clean_scores = [r.cleanliness_score for r in ratings if r.cleanliness_score is not None and r.cleanliness_score > 0]
+            avg_cleanliness = round(sum(clean_scores) / len(clean_scores), 2) if clean_scores else 5.0
+            rating_count = len(ratings)
+        else:
+            avg_rating = round(driver.rating_average, 2) if (driver.rating_count and driver.rating_count > 0) else 0.0
+            avg_cleanliness = 0.0
+            rating_count = driver.rating_count or 0
+
+        # 2. Dispatch Acceptance Rate from Supabase ride_assignments table
+        stmt_total_offers = select(func.count(RideAssignment.id)).where(RideAssignment.driver_id == driver.id)
+        total_offers = (await self.db.execute(stmt_total_offers)).scalar() or 0
+
+        stmt_accepted_offers = select(func.count(RideAssignment.id)).where(
+            RideAssignment.driver_id == driver.id,
+            RideAssignment.is_accepted == True
+        )
+        accepted_offers = (await self.db.execute(stmt_accepted_offers)).scalar() or 0
+
+        acceptance_rate = round((accepted_offers / total_offers) * 100.0, 1) if total_offers > 0 else 0.0
+
+        # 3. Driver Cancellation Rate from Supabase rides table
+        stmt_total_assigned_rides = select(func.count(Ride.id)).where(Ride.assigned_driver_id == driver.id)
+        total_assigned_rides = (await self.db.execute(stmt_total_assigned_rides)).scalar() or 0
+
+        stmt_cancelled_rides = select(func.count(Ride.id)).where(
+            Ride.assigned_driver_id == driver.id,
+            Ride.status == "CANCELLED"
+        )
+        cancelled_rides = (await self.db.execute(stmt_cancelled_rides)).scalar() or 0
+
+        cancellation_rate = round((cancelled_rides / total_assigned_rides) * 100.0, 1) if total_assigned_rides > 0 else 0.0
+
+        # 4. Safety Incidents from Supabase incident_reports table
+        stmt_driver_incidents = select(func.count(IncidentReport.id)).where(
+            IncidentReport.reporter_user_id == user_id
+        )
+        safety_incident_count = (await self.db.execute(stmt_driver_incidents)).scalar() or 0
+
+        if driver.id:
+            stmt_ride_incidents = select(func.count(IncidentReport.id)).select_from(IncidentReport).join(
+                Ride, IncidentReport.ride_id == Ride.id
+            ).where(Ride.assigned_driver_id == driver.id)
+            ride_incidents = (await self.db.execute(stmt_ride_incidents)).scalar() or 0
+            safety_incident_count = max(safety_incident_count, ride_incidents)
+
+        return {
+            "rating": avg_rating,
+            "acceptance_rate": acceptance_rate,
+            "cancellation_rate": cancellation_rate,
+            "safety_incident_count": safety_incident_count,
+            "cleanliness_score": avg_cleanliness,
+            "total_trips": driver.total_trips or 0,
+            "rating_count": rating_count,
+            "total_offers": total_offers,
+            "accepted_offers": accepted_offers
         }
