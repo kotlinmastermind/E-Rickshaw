@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from fastapi import HTTPException, status
 from backend.core.config import settings
-from backend.domain.models import Payment, Ride, CustomerProfile, DriverProfile, PaymentWebhookInbox
+from backend.domain.models import Payment, Ride, CustomerProfile, DriverProfile, PaymentWebhookInbox, DriverWallet, DriverLedgerEntry
 from backend.integrations.payments.provider import get_payment_provider, CashPaymentProvider
 
 class PaymentService:
@@ -305,11 +305,40 @@ class PaymentService:
         if ride.status != "COMPLETED":
             ride.status = "COMPLETED"
 
+        # Deduct platform commission (15%) from Driver Wallet and record in Driver Ledger
+        fare_cents = payment.amount_cents
+        commission_cents = int(round(fare_cents * 0.15))
+
+        wallet_res = await self.db.execute(select(DriverWallet).where(DriverWallet.driver_id == driver_prof.id))
+        wallet = wallet_res.scalar_one_or_none()
+        if not wallet:
+            wallet = DriverWallet(driver_id=driver_prof.id, balance_cents=0, currency="INR")
+            self.db.add(wallet)
+            await self.db.flush()
+
+        wallet.balance_cents -= commission_cents
+
+        import uuid
+        ledger_entry = DriverLedgerEntry(
+            id=str(uuid.uuid4()),
+            driver_id=driver_prof.id,
+            entry_type="DEBIT",
+            category="COMMISSION",
+            amount_cents=-commission_cents,
+            balance_after_cents=wallet.balance_cents,
+            reference_id=ride.id,
+            description=f"Platform commission (15%) for cash ride #{ride.id[:8]}",
+            created_at=now
+        )
+        self.db.add(ledger_entry)
+
         await self.db.commit()
 
         return {
             "payment_id": payment.id,
             "status": payment.status,
             "cash_collected": True,
-            "amount_cents": payment.amount_cents
+            "amount_cents": payment.amount_cents,
+            "commission_deducted_cents": commission_cents,
+            "driver_wallet_balance_cents": wallet.balance_cents
         }

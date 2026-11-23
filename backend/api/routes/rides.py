@@ -775,11 +775,11 @@ async def get_ride_history(
 
     items = []
     for r in rides:
-        driver_name = "EV Pilot"
-        driver_phone = "+91 98112 34567"
-        driver_rating = 4.9
-        vehicle_plate = "DL-1ER-4921"
-        vehicle_model = "Standard E-Rickshaw"
+        driver_name = None
+        driver_phone = None
+        driver_rating = None
+        vehicle_plate = None
+        vehicle_model = None
 
         if r.assigned_driver_id:
             d_res = await db.execute(
@@ -787,12 +787,13 @@ async def get_ride_history(
             )
             drv = d_res.scalar_one_or_none()
             if drv:
-                driver_rating = drv.rating_average or 4.9
+                driver_rating = drv.rating_average or 5.0
+                vehicle_plate = drv.license_number or None
                 u_res = await db.execute(select(User).where(User.id == drv.user_id))
                 u_driver = u_res.scalar_one_or_none()
                 if u_driver:
-                    driver_name = u_driver.full_name or "EV Pilot"
-                    driver_phone = u_driver.phone_number or "+91 98112 34567"
+                    driver_name = u_driver.full_name or "Verified Pilot"
+                    driver_phone = u_driver.phone_number or None
 
         items.append({
             "id": r.id,

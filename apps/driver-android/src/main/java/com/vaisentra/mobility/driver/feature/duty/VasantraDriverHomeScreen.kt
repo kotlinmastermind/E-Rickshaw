@@ -160,7 +160,7 @@ fun VasantraDriverHomeScreen(
             DriverRepository.fetchActiveRide()
             var loopTicks = 0
             while (true) {
-                delay(3500)
+                delay(5000)
                 if (DriverRepository.isOnline.value) {
                     if (DriverRepository.activeRide.value == null) {
                         DriverRepository.fetchActiveOffers()

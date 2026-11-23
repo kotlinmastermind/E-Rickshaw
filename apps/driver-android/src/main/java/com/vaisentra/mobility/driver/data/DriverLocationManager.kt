@@ -44,6 +44,12 @@ object DriverLocationManager {
     private val scope = CoroutineScope(Dispatchers.IO)
     private var isTracking = false
 
+    private var lastBackendPingMs: Long = 0L
+    private var lastGeocodedLat: Double = 0.0
+    private var lastGeocodedLng: Double = 0.0
+    private var lastGeocodedTimeMs: Long = 0L
+    @Volatile private var isGeocodingInProgress: Boolean = false
+
     fun init(context: Context) {
         if (fusedClient == null) {
             fusedClient = LocationServices.getFusedLocationProviderClient(context.applicationContext)
@@ -63,8 +69,8 @@ object DriverLocationManager {
             }
 
             val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L)
-                .setMinUpdateIntervalMillis(2500L)
-                .setMinUpdateDistanceMeters(2f)
+                .setMinUpdateIntervalMillis(3000L)
+                .setMinUpdateDistanceMeters(3f)
                 .build()
 
             val callback = object : LocationCallback() {
@@ -77,7 +83,7 @@ object DriverLocationManager {
             locationCallback = callback
             client.requestLocationUpdates(request, callback, Looper.getMainLooper())
             isTracking = true
-            Log.d(TAG, "Driver GPS live tracking active")
+            Log.d(TAG, "Driver GPS live tracking active (optimized background telemetry)")
         } catch (e: SecurityException) {
             Log.w(TAG, "Location permission missing: ${e.message}")
         } catch (e: Exception) {
@@ -123,60 +129,84 @@ object DriverLocationManager {
         val speedKmh = if (loc.hasSpeed()) (loc.speed * 3.6).toDouble() else 0.0
         val accuracy = if (loc.hasAccuracy()) loc.accuracy else 5.0f
 
-        val prevAddress = _currentLocation.value.address
-        var address = prevAddress
+        val currentAddress = _currentLocation.value.address
 
-        // Resolve friendly address / locality
-        try {
-            val geocoder = Geocoder(context, Locale.getDefault())
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                geocoder.getFromLocation(lat, lng, 1) { addresses ->
-                    if (addresses.isNotEmpty()) {
-                        val addr = addresses[0]
-                        val feature = addr.featureName
-                        val subLoc = addr.subLocality ?: addr.locality ?: addr.subAdminArea
-                        val resolved = listOfNotNull(feature, subLoc).distinct().joinToString(", ")
-                        if (resolved.isNotBlank()) {
-                            _currentLocation.value = _currentLocation.value.copy(address = resolved)
-                            DriverRepository.updateCurrentLocation(lat, lng, heading, (speedKmh / 3.6), resolved)
-                        }
-                    }
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                val addresses = geocoder.getFromLocation(lat, lng, 1)
-                if (!addresses.isNullOrEmpty()) {
-                    val addr = addresses[0]
-                    val feature = addr.featureName
-                    val subLoc = addr.subLocality ?: addr.locality ?: addr.subAdminArea
-                    val resolved = listOfNotNull(feature, subLoc).distinct().joinToString(", ")
-                    if (resolved.isNotBlank()) {
-                        address = resolved
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            // Fallback gracefully
-        }
-
+        // 1. Instantly update in-memory state on UI thread (ZERO BLOCKING)
         val updated = DriverLiveLocation(
             latitude = lat,
             longitude = lng,
             heading = heading,
             speedKmh = speedKmh,
             accuracyMeters = accuracy,
-            address = address,
+            address = currentAddress,
             isLiveGps = true,
             lastUpdatedTimestamp = System.currentTimeMillis()
         )
         _currentLocation.value = updated
 
-        // Sync with Central DriverRepository
-        DriverRepository.updateCurrentLocation(lat, lng, heading, (speedKmh / 3.6), address)
+        // 2. Sync with Central DriverRepository
+        DriverRepository.updateCurrentLocation(lat, lng, heading, (speedKmh / 3.6), currentAddress)
 
-        // Ping real FastAPI backend if driver is currently online
+        // 3. Asynchronous throttled reverse-geocoding (Dispatched to IO thread)
+        val now = System.currentTimeMillis()
+        val distMoved = FloatArray(1)
+        Location.distanceBetween(lastGeocodedLat, lastGeocodedLng, lat, lng, distMoved)
+        val shouldGeocode = !isGeocodingInProgress && (distMoved[0] > 60f || (now - lastGeocodedTimeMs > 45000L))
+
+        if (shouldGeocode) {
+            isGeocodingInProgress = true
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val appContext = context.applicationContext
+                    val geocoder = Geocoder(appContext, Locale.getDefault())
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        geocoder.getFromLocation(lat, lng, 1) { addresses ->
+                            isGeocodingInProgress = false
+                            if (addresses.isNotEmpty()) {
+                                val addr = addresses[0]
+                                val feature = addr.featureName
+                                val subLoc = addr.subLocality ?: addr.locality ?: addr.subAdminArea
+                                val resolved = listOfNotNull(feature, subLoc).distinct().joinToString(", ")
+                                if (resolved.isNotBlank()) {
+                                    lastGeocodedLat = lat
+                                    lastGeocodedLng = lng
+                                    lastGeocodedTimeMs = System.currentTimeMillis()
+                                    _currentLocation.value = _currentLocation.value.copy(address = resolved)
+                                    DriverRepository.updateCurrentLocation(lat, lng, heading, (speedKmh / 3.6), resolved)
+                                }
+                            }
+                        }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        val addresses = geocoder.getFromLocation(lat, lng, 1)
+                        isGeocodingInProgress = false
+                        if (!addresses.isNullOrEmpty()) {
+                            val addr = addresses[0]
+                            val feature = addr.featureName
+                            val subLoc = addr.subLocality ?: addr.locality ?: addr.subAdminArea
+                            val resolved = listOfNotNull(feature, subLoc).distinct().joinToString(", ")
+                            if (resolved.isNotBlank()) {
+                                lastGeocodedLat = lat
+                                lastGeocodedLng = lng
+                                lastGeocodedTimeMs = System.currentTimeMillis()
+                                _currentLocation.value = _currentLocation.value.copy(address = resolved)
+                                DriverRepository.updateCurrentLocation(lat, lng, heading, (speedKmh / 3.6), resolved)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    isGeocodingInProgress = false
+                }
+            }
+        }
+
+        // 4. Throttled ping to backend (Every 6-8 seconds to eliminate network congestion)
         if (DriverRepository.isOnline.value) {
-            DriverRepository.pingLocation(lat, lng, heading, (speedKmh / 3.6), accuracy.toDouble())
+            val minPingIntervalMs = if (DriverRepository.activeRide.value != null) 5000L else 8000L
+            if (now - lastBackendPingMs >= minPingIntervalMs) {
+                lastBackendPingMs = now
+                DriverRepository.pingLocation(lat, lng, heading, (speedKmh / 3.6), accuracy.toDouble())
+            }
         }
 
         return updated
