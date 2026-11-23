@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, and_, or_
+from sqlalchemy.orm import joinedload
 from fastapi import HTTPException, status
 from backend.domain.models import (
     Ride, RideStatusEvent, RideAssignment, FareEstimate, FareRule, VehicleCategory,
@@ -707,9 +708,16 @@ class RideService:
         return {"message": "Thank you for your distinguished review.", "rating": rating}
 
     async def get_ride_by_id(self, ride_id: str) -> Ride:
-        stmt = select(Ride).where(Ride.id == ride_id)
+        stmt = (
+            select(Ride)
+            .options(
+                joinedload(Ride.driver).joinedload(DriverProfile.user),
+                joinedload(Ride.customer).joinedload(CustomerProfile.user)
+            )
+            .where(Ride.id == ride_id)
+        )
         res = await self.db.execute(stmt)
-        ride = res.scalar_one_or_none()
+        ride = res.unique().scalar_one_or_none()
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
         return ride

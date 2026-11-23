@@ -653,68 +653,75 @@ async def get_current_active_ride(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Retrieve the current active ride for the authenticated customer or driver."""
+    """Retrieve the current active ride for the authenticated customer or driver using eager joins."""
     from sqlalchemy import and_, desc
+    from sqlalchemy.orm import joinedload
 
     active_statuses = ["REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS"]
 
     if user.role == "driver":
-        driver_res = await db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
-        driver = driver_res.scalar_one_or_none()
-        if not driver:
-            return {"active_ride": None}
-        stmt = select(Ride).where(
-            and_(
-                Ride.assigned_driver_id == driver.id,
-                Ride.status.in_(active_statuses)
+        stmt = (
+            select(Ride)
+            .join(DriverProfile, Ride.assigned_driver_id == DriverProfile.id)
+            .options(
+                joinedload(Ride.driver).joinedload(DriverProfile.user),
+                joinedload(Ride.customer).joinedload(CustomerProfile.user)
             )
-        ).order_by(desc(Ride.requested_at)).limit(1)
+            .where(
+                and_(
+                    DriverProfile.user_id == user.id,
+                    Ride.status.in_(active_statuses)
+                )
+            )
+            .order_by(desc(Ride.requested_at))
+            .limit(1)
+        )
     else:
-        cust_res = await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
-        customer = cust_res.scalar_one_or_none()
-        if not customer:
-            return {"active_ride": None}
-        stmt = select(Ride).where(
-            and_(
-                Ride.customer_id == customer.id,
-                Ride.status.in_(active_statuses)
+        stmt = (
+            select(Ride)
+            .join(CustomerProfile, Ride.customer_id == CustomerProfile.id)
+            .options(
+                joinedload(Ride.driver).joinedload(DriverProfile.user),
+                joinedload(Ride.customer).joinedload(CustomerProfile.user)
             )
-        ).order_by(desc(Ride.requested_at)).limit(1)
+            .where(
+                and_(
+                    CustomerProfile.user_id == user.id,
+                    Ride.status.in_(active_statuses)
+                )
+            )
+            .order_by(desc(Ride.requested_at))
+            .limit(1)
+        )
 
     result = await db.execute(stmt)
-    ride = result.scalar_one_or_none()
+    ride = result.unique().scalar_one_or_none()
     if not ride:
         return {"active_ride": None}
 
     driver_info = None
-    if ride.assigned_driver_id:
-        drv_res = await db.execute(select(DriverProfile).where(DriverProfile.id == ride.assigned_driver_id))
-        drv = drv_res.scalar_one_or_none()
-        if drv:
-            u_res = await db.execute(select(User).where(User.id == drv.user_id))
-            u = u_res.scalar_one_or_none()
-            driver_info = {
-                "driver_id": drv.id,
-                "name": u.full_name if u else "Executive Chauffeur",
-                "phone": u.phone_number if u else "",
-                "license_number": drv.license_number,
-                "rating": drv.rating_average,
-                "total_trips": drv.total_trips
-            }
+    if ride.driver:
+        drv = ride.driver
+        u = drv.user
+        driver_info = {
+            "driver_id": drv.id,
+            "name": u.full_name if (u and u.full_name) else "Executive Chauffeur",
+            "phone": u.phone_number if (u and u.phone_number) else "",
+            "license_number": drv.license_number,
+            "rating": drv.rating_average,
+            "total_trips": drv.total_trips
+        }
 
     passenger_info = None
-    if ride.customer_id:
-        cust_profile_res = await db.execute(select(CustomerProfile).where(CustomerProfile.id == ride.customer_id))
-        cust_profile = cust_profile_res.scalar_one_or_none()
-        if cust_profile:
-            u_cust_res = await db.execute(select(User).where(User.id == cust_profile.user_id))
-            u_cust = u_cust_res.scalar_one_or_none()
-            passenger_info = {
-                "customer_id": cust_profile.id,
-                "name": u_cust.full_name if (u_cust and u_cust.full_name) else "Commuter",
-                "phone": u_cust.phone_number if u_cust else "",
-                "rating": cust_profile.rating_average or 5.0
-            }
+    if ride.customer:
+        cust_profile = ride.customer
+        u_cust = cust_profile.user
+        passenger_info = {
+            "customer_id": cust_profile.id,
+            "name": u_cust.full_name if (u_cust and u_cust.full_name) else "Commuter",
+            "phone": u_cust.phone_number if (u_cust and u_cust.phone_number) else "",
+            "rating": cust_profile.rating_average or 5.0
+        }
 
     return {
         "active_ride": {
@@ -747,31 +754,27 @@ async def get_ride_history(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    from sqlalchemy.orm import joinedload
     if user.role == "driver":
-        drv_res = await db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
-        driver = drv_res.scalar_one_or_none()
-        if not driver:
-            return []
         stmt_rides = (
             select(Ride)
-            .where(Ride.assigned_driver_id == driver.id)
+            .join(DriverProfile, Ride.assigned_driver_id == DriverProfile.id)
+            .options(joinedload(Ride.driver).joinedload(DriverProfile.user))
+            .where(DriverProfile.user_id == user.id)
             .order_by(Ride.requested_at.desc())
             .limit(limit)
         )
     else:
-        stmt = select(CustomerProfile).where(CustomerProfile.user_id == user.id)
-        res = await db.execute(stmt)
-        customer = res.scalar_one_or_none()
-        if not customer:
-            return []
         stmt_rides = (
             select(Ride)
-            .where(Ride.customer_id == customer.id)
+            .join(CustomerProfile, Ride.customer_id == CustomerProfile.id)
+            .options(joinedload(Ride.driver).joinedload(DriverProfile.user))
+            .where(CustomerProfile.user_id == user.id)
             .order_by(Ride.requested_at.desc())
             .limit(limit)
         )
     res_rides = await db.execute(stmt_rides)
-    rides = res_rides.scalars().all()
+    rides = res_rides.unique().scalars().all()
 
     items = []
     for r in rides:
@@ -781,19 +784,14 @@ async def get_ride_history(
         vehicle_plate = None
         vehicle_model = None
 
-        if r.assigned_driver_id:
-            d_res = await db.execute(
-                select(DriverProfile).where(DriverProfile.id == r.assigned_driver_id)
-            )
-            drv = d_res.scalar_one_or_none()
-            if drv:
-                driver_rating = drv.rating_average or 5.0
-                vehicle_plate = drv.license_number or None
-                u_res = await db.execute(select(User).where(User.id == drv.user_id))
-                u_driver = u_res.scalar_one_or_none()
-                if u_driver:
-                    driver_name = u_driver.full_name or "Verified Pilot"
-                    driver_phone = u_driver.phone_number or None
+        if r.driver:
+            drv = r.driver
+            driver_rating = drv.rating_average or 5.0
+            vehicle_plate = drv.license_number or None
+            u_driver = drv.user
+            if u_driver:
+                driver_name = u_driver.full_name or "Verified Pilot"
+                driver_phone = u_driver.phone_number or None
 
         items.append({
             "id": r.id,
@@ -835,22 +833,17 @@ async def get_ride_details(
                 raise HTTPException(status_code=403, detail="Only trip participants can view ride details.")
     
     driver_info = None
-    if ride.assigned_driver_id:
-        stmt = select(DriverProfile).where(DriverProfile.id == ride.assigned_driver_id)
-        res = await db.execute(stmt)
-        drv = res.scalar_one_or_none()
-        if drv:
-            stmt_u = select(User).where(User.id == drv.user_id)
-            res_u = await db.execute(stmt_u)
-            u = res_u.scalar_one_or_none()
-            driver_info = {
-                "driver_id": drv.id,
-                "name": u.full_name if u else "Executive Chauffeur",
-                "phone": u.phone_number if u else "",
-                "license_number": drv.license_number,
-                "rating": drv.rating_average,
-                "total_trips": drv.total_trips
-            }
+    if ride.driver:
+        drv = ride.driver
+        u = drv.user
+        driver_info = {
+            "driver_id": drv.id,
+            "name": u.full_name if (u and u.full_name) else "Executive Chauffeur",
+            "phone": u.phone_number if (u and u.phone_number) else "",
+            "license_number": drv.license_number,
+            "rating": drv.rating_average,
+            "total_trips": drv.total_trips
+        }
 
     return {
         "id": ride.id,

@@ -103,19 +103,20 @@ fun VasantraDriverHomeScreen(
     onNavigate: (String) -> Unit = {}
 ) {
     val isOnline by DriverRepository.isOnline.collectAsState()
-    val driverLocation by DriverRepository.driverLocation.collectAsState()
     val activeOffer by DriverRepository.activeOffer.collectAsState()
     val activeRide by DriverRepository.activeRide.collectAsState()
     val profile by DriverRepository.profile.collectAsState()
     val earnings by DriverRepository.earnings.collectAsState()
     val dailyTarget by DriverRepository.dailyTarget.collectAsState()
-    val unreadNotifications by DriverRepository.unreadNotificationCount.collectAsState()
-    var selectedTab by remember { mutableIntStateOf(0) }
 
-    val hasActiveRide = activeRide != null &&
+    val hasActiveRide = remember(activeRide?.id, activeRide?.status) {
+        activeRide != null &&
         !activeRide?.id.isNullOrBlank() &&
         activeRide?.status?.uppercase() in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "STARTED")
-    val hasActiveOffer = activeOffer != null && !activeOffer?.rideId.isNullOrBlank()
+    }
+    val hasActiveOffer = remember(activeOffer?.rideId) {
+        activeOffer != null && !activeOffer?.rideId.isNullOrBlank()
+    }
 
     val context = LocalContext.current
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -227,7 +228,6 @@ fun VasantraDriverHomeScreen(
                             .fillMaxWidth()
                             .height(205.dp),
                         isOnline = isOnline,
-                        location = driverLocation,
                         onRecenterClick = {
                             DriverLocationManager.refreshCurrentLocation(context) { loc ->
                                 DriverRepository.pingLocation(
@@ -322,10 +322,6 @@ fun VasantraDriverHomeScreen(
             }
 
             // Real-Time Floating Current Ride Card from FastAPI Backend (Only shown when active ride is running)
-            val hasActiveRide = activeRide != null &&
-                !activeRide?.id.isNullOrBlank() &&
-                activeRide?.status?.uppercase() in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "STARTED")
-
             AnimatedVisibility(
                 visible = hasActiveRide && (activeOffer == null || activeOffer?.rideId.isNullOrBlank()),
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -457,30 +453,11 @@ fun VasantraDriverTopHeader(
 fun VasantraMapSection(
     modifier: Modifier = Modifier,
     isOnline: Boolean = true,
-    location: DriverLiveLocation = DriverLiveLocation(),
+    location: DriverLiveLocation? = null,
     onRecenterClick: () -> Unit = {}
 ) {
+    val liveLoc = location ?: DriverRepository.driverLocation.collectAsState().value
     var showNativeMap by remember { mutableStateOf(false) }
-
-    val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.5f,
-        targetValue = 0.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "PulseAlpha"
-    )
-    val pulseRadius by infiniteTransition.animateFloat(
-        initialValue = 18f,
-        targetValue = 46f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "PulseRadius"
-    )
 
     Card(
         modifier = modifier,
@@ -498,71 +475,15 @@ fun VasantraMapSection(
                 ) {
                     DriverMapboxLiveView(
                         modifier = Modifier.fillMaxSize(),
-                        driverLat = location.latitude,
-                        driverLng = location.longitude,
-                        headingDegrees = location.heading,
+                        driverLat = liveLoc.latitude,
+                        driverLng = liveLoc.longitude,
+                        headingDegrees = liveLoc.heading,
                         onRecenterClicked = onRecenterClick
                     )
                 }
             } else {
-                // Vasantra Stylized Live Radar Map
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    drawRect(color = Color(0xFFE5EEF5))
-
-                    val roadColor = Color.White
-                    val greenAreaColor = Color(0xFFDCFCE7)
-
-                    // Map grid streets
-                    drawLine(color = roadColor, start = Offset(0f, size.height * 0.25f), end = Offset(size.width, size.height * 0.4f), strokeWidth = 14.dp.toPx())
-                    drawLine(color = roadColor, start = Offset(0f, size.height * 0.65f), end = Offset(size.width, size.height * 0.5f), strokeWidth = 12.dp.toPx())
-                    drawLine(color = roadColor, start = Offset(size.width * 0.3f, 0f), end = Offset(size.width * 0.45f, size.height), strokeWidth = 14.dp.toPx())
-                    drawLine(color = roadColor, start = Offset(size.width * 0.75f, 0f), end = Offset(size.width * 0.85f, size.height), strokeWidth = 10.dp.toPx())
-
-                    // Green area (Park)
-                    val parkPath = Path().apply {
-                        moveTo(size.width * 0.05f, size.height * 0.05f)
-                        lineTo(size.width * 0.25f, size.height * 0.08f)
-                        lineTo(size.width * 0.2f, size.height * 0.3f)
-                        lineTo(size.width * 0.02f, size.height * 0.25f)
-                        close()
-                    }
-                    drawPath(path = parkPath, color = greenAreaColor)
-
-                    val parkPath2 = Path().apply {
-                        moveTo(size.width * 0.38f, size.height * 0.2f)
-                        lineTo(size.width * 0.45f, size.height * 0.35f)
-                        lineTo(size.width * 0.35f, size.height * 0.55f)
-                        close()
-                    }
-                    drawPath(path = parkPath2, color = greenAreaColor)
-
-                    // Demand Surge / Hotspot Marker Dot
-                    drawCircle(color = Color(0xFFF97316), radius = 6.dp.toPx(), center = Offset(size.width * 0.2f, size.height * 0.55f))
-
-                    // Real Live Driver Center Location Marker with Animated Radar Pulse
-                    val center = Offset(size.width * 0.5f, size.height * 0.52f)
-
-                    // Outer animated pulse ring
-                    drawCircle(
-                        color = Color(0xFF2563EB).copy(alpha = pulseAlpha),
-                        radius = pulseRadius.dp.toPx(),
-                        center = center
-                    )
-                    drawCircle(color = Color(0x333B82F6), radius = 24.dp.toPx(), center = center)
-                    drawCircle(color = Color(0x553B82F6), radius = 16.dp.toPx(), center = center)
-
-                    // Directional Navigation Arrow rotating with device heading
-                    rotate(degrees = location.heading.toFloat(), pivot = center) {
-                        val navArrow = Path().apply {
-                            moveTo(center.x, center.y - 14.dp.toPx())
-                            lineTo(center.x + 10.dp.toPx(), center.y + 10.dp.toPx())
-                            lineTo(center.x, center.y + 4.dp.toPx())
-                            lineTo(center.x - 10.dp.toPx(), center.y + 10.dp.toPx())
-                            close()
-                        }
-                        drawPath(path = navArrow, color = Color(0xFF2563EB))
-                    }
-                }
+                // Vasantra Stylized Live Radar Map isolated to its own composable to prevent full-screen recomposition
+                VasantraRadarCanvas(location = liveLoc)
             }
 
             // Top Status & Locality Bar
@@ -632,7 +553,7 @@ fun VasantraMapSection(
             ) {
                 Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
                     Text(
-                        text = "📍 ${location.address.ifBlank { "Live Location" }}",
+                        text = "📍 ${liveLoc.address.ifBlank { "Live Location" }}",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0F172A),
@@ -640,10 +561,10 @@ fun VasantraMapSection(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "${String.format(java.util.Locale.US, "%.4f°N, %.4f°E", location.latitude, location.longitude)} • ${if (location.isLiveGps) "Live GPS" else "Default"}",
+                        text = "${String.format(java.util.Locale.US, "%.4f°N, %.4f°E", liveLoc.latitude, liveLoc.longitude)} • ${if (liveLoc.isLiveGps) "Live GPS" else "Default"}",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Medium,
-                        color = if (location.isLiveGps) Color(0xFF10B981) else Color(0xFF64748B)
+                        color = if (liveLoc.isLiveGps) Color(0xFF10B981) else Color(0xFF64748B)
                     )
                 }
             }
@@ -673,6 +594,87 @@ fun VasantraMapSection(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun VasantraRadarCanvas(location: DriverLiveLocation) {
+    val infiniteTransition = rememberInfiniteTransition(label = "RadarPulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 0.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "PulseAlpha"
+    )
+    val pulseRadius by infiniteTransition.animateFloat(
+        initialValue = 18f,
+        targetValue = 46f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "PulseRadius"
+    )
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(color = Color(0xFFE5EEF5))
+
+        val roadColor = Color.White
+        val greenAreaColor = Color(0xFFDCFCE7)
+
+        // Map grid streets
+        drawLine(color = roadColor, start = Offset(0f, size.height * 0.25f), end = Offset(size.width, size.height * 0.4f), strokeWidth = 14.dp.toPx())
+        drawLine(color = roadColor, start = Offset(0f, size.height * 0.65f), end = Offset(size.width, size.height * 0.5f), strokeWidth = 12.dp.toPx())
+        drawLine(color = roadColor, start = Offset(size.width * 0.3f, 0f), end = Offset(size.width * 0.45f, size.height), strokeWidth = 14.dp.toPx())
+        drawLine(color = roadColor, start = Offset(size.width * 0.75f, 0f), end = Offset(size.width * 0.85f, size.height), strokeWidth = 10.dp.toPx())
+
+        // Green area (Park)
+        val parkPath = Path().apply {
+            moveTo(size.width * 0.05f, size.height * 0.05f)
+            lineTo(size.width * 0.25f, size.height * 0.08f)
+            lineTo(size.width * 0.2f, size.height * 0.3f)
+            lineTo(size.width * 0.02f, size.height * 0.25f)
+            close()
+        }
+        drawPath(path = parkPath, color = greenAreaColor)
+
+        val parkPath2 = Path().apply {
+            moveTo(size.width * 0.38f, size.height * 0.2f)
+            lineTo(size.width * 0.45f, size.height * 0.35f)
+            lineTo(size.width * 0.35f, size.height * 0.55f)
+            close()
+        }
+        drawPath(path = parkPath2, color = greenAreaColor)
+
+        // Demand Surge / Hotspot Marker Dot
+        drawCircle(color = Color(0xFFF97316), radius = 6.dp.toPx(), center = Offset(size.width * 0.2f, size.height * 0.55f))
+
+        // Real Live Driver Center Location Marker with Animated Radar Pulse
+        val center = Offset(size.width * 0.5f, size.height * 0.52f)
+
+        // Outer animated pulse ring
+        drawCircle(
+            color = Color(0xFF2563EB).copy(alpha = pulseAlpha),
+            radius = pulseRadius.dp.toPx(),
+            center = center
+        )
+        drawCircle(color = Color(0x333B82F6), radius = 24.dp.toPx(), center = center)
+        drawCircle(color = Color(0x553B82F6), radius = 16.dp.toPx(), center = center)
+
+        // Directional Navigation Arrow rotating with device heading
+        rotate(degrees = location.heading.toFloat(), pivot = center) {
+            val navArrow = Path().apply {
+                moveTo(center.x, center.y - 14.dp.toPx())
+                lineTo(center.x + 10.dp.toPx(), center.y + 10.dp.toPx())
+                lineTo(center.x, center.y + 4.dp.toPx())
+                lineTo(center.x - 10.dp.toPx(), center.y + 10.dp.toPx())
+                close()
+            }
+            drawPath(path = navArrow, color = Color(0xFF2563EB))
         }
     }
 }
