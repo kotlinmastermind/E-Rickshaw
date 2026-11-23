@@ -311,9 +311,10 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(2.dp))
+                        val nearbyText = if (nearbyVehicles.isNotEmpty()) "${nearbyVehicles.size} EV Pilots Nearby" else "No EV Pilots Nearby"
                         Text(
-                            text = "Pickup: ${bookingDraft.pickupAddress} • ${nearbyVehicles.size} EV Pilots Nearby",
-                            color = ElectricCyan,
+                            text = "Pickup: ${bookingDraft.pickupAddress} • $nearbyText",
+                            color = if (nearbyVehicles.isNotEmpty()) ElectricCyan else TextMuted,
                             fontSize = 11.sp,
                             maxLines = 1
                         )

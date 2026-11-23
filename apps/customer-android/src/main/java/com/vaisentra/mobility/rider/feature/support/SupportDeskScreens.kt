@@ -94,12 +94,6 @@ fun SupportTicketsScreen(onNavigate: (String) -> Unit) {
         RiderRepository.fetchSupportTickets()
     }
 
-    val defaultTickets = listOf(
-        Triple("#TKT-8219 • Fare Recalculation", "STATUS: RESOLVED (₹35 CREDITED)", "Yesterday"),
-        Triple("#TKT-7104 • Driver Cleanliness Report", "STATUS: INVESTIGATING", "05-Nov"),
-        Triple("#TKT-6920 • UPI Double Debit Check", "STATUS: REFUNDED TO BANK", "28-Oct")
-    )
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -122,14 +116,20 @@ fun SupportTicketsScreen(onNavigate: (String) -> Unit) {
                     }
                 }
             } else {
-                items(defaultTickets) { (title, status, date) ->
-                    NeoCard(cornerRadius = 14.dp) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(text = title, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Text(text = date, color = TextDim, fontSize = 11.sp)
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(text = "🎫", fontSize = 42.sp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(text = "No Support Tickets Found", color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(text = "You don't have any open or past support tickets.", color = TextMuted, fontSize = 13.sp)
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = status, color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -145,8 +145,7 @@ fun LiveSupportChatScreen(onNavigate: (String) -> Unit) {
     var msg by remember { mutableStateOf("") }
     val chats = remember {
         mutableStateListOf(
-            Pair("Vaisentra Concierge", "Hello Bhishma! Welcome to RiderGo 24/7 Operations. How can I assist your commute today?"),
-            Pair("You", "I wanted to check on the refund for my cancelled shared ride.")
+            Pair("Vaisentra Concierge", "Hello! Welcome to RiderGo 24/7 Operations. How can I assist your commute today?")
         )
     }
 

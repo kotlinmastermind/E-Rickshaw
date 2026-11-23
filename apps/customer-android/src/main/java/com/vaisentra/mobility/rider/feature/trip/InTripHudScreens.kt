@@ -28,10 +28,28 @@ import kotlinx.coroutines.launch
 // Screen 23: Dispatch Radar & Pilot Matching
 @Composable
 fun DispatchRadarScreen(onNavigate: (String) -> Unit) {
+    val activeRide by RiderRepository.activeRide.collectAsState()
+    var searchTimer by remember { mutableIntStateOf(30) }
+    var noPilotsAvailable by remember { mutableStateOf(false) }
+
+    LaunchedEffect(activeRide?.status) {
+        val s = activeRide?.status
+        if (s == "ASSIGNED" || s == "ARRIVED" || s == "IN_PROGRESS") {
+            onNavigate("pilot_assigned")
+        }
+    }
+
     LaunchedEffect(Unit) {
-        delay(3000)
-        RiderRepository.updateActiveRideStatus("ASSIGNED")
-        onNavigate("pilot_assigned")
+        while (searchTimer > 0 && activeRide?.status !in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS")) {
+            delay(1000L)
+            searchTimer--
+            if (searchTimer % 3 == 0) {
+                RiderRepository.fetchActiveRide()
+            }
+        }
+        if (activeRide?.status !in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS")) {
+            noPilotsAvailable = true
+        }
     }
 
     Column(
@@ -42,33 +60,95 @@ fun DispatchRadarScreen(onNavigate: (String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        NeoHeader(title = "Dispatching Fleet", subtitle = "Cascading H3 matching within 1.5 km", onBack = { onNavigate("map_home") })
+        NeoHeader(
+            title = if (noPilotsAvailable) "Dispatch Status" else "Dispatching Fleet",
+            subtitle = if (noPilotsAvailable) "Search timed out" else "Cascading H3 matching within 1.5 km",
+            onBack = { onNavigate("map_home") }
+        )
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(160.dp)
-                    .clip(CircleShape)
-                    .background(SapphireGlow)
-                    .border(2.dp, BorderFocus, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "📡", fontSize = 64.sp)
+        if (noPilotsAvailable) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(120.dp)
+                        .clip(CircleShape)
+                        .background(SurfaceDark)
+                        .border(1.5.dp, CrimsonRed, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "🚫", fontSize = 48.sp)
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(text = "No Drivers Available", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "All nearby electric rickshaw pilots are currently busy or offline. Please retry in a moment.",
+                    color = TextMuted,
+                    fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
             }
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(text = "Contacting Nearby Pilots...", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = "Scoring best rating, EV battery level, and shortest ETA.", color = TextMuted, fontSize = 13.sp)
-        }
 
-        NeoCard {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = "Standard E-Rickshaw", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                NeoBadge(text = "₹129.04 LOCKED", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                NeoButton(
+                    text = "Retry Dispatch ↻",
+                    onClick = {
+                        noPilotsAvailable = false
+                        searchTimer = 30
+                        val rideId = activeRide?.id
+                        if (!rideId.isNullOrBlank()) {
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                RiderRepository.fetchActiveRide()
+                            }
+                        }
+                    },
+                    backgroundColor = SapphirePrimary,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                NeoButton(
+                    text = "Cancel Request",
+                    onClick = {
+                        val rideId = activeRide?.id ?: ""
+                        if (rideId.isNotBlank()) {
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                RiderRepository.cancelActiveRide(rideId)
+                            }
+                        }
+                        onNavigate("map_home")
+                    },
+                    backgroundColor = SurfaceDark,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(160.dp)
+                        .clip(CircleShape)
+                        .background(SapphireGlow)
+                        .border(2.dp, BorderFocus, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "📡", fontSize = 64.sp)
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(text = "Contacting Nearby Pilots...", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = "Scoring best rating, EV battery level, and shortest ETA. ($searchTimer s)", color = TextMuted, fontSize = 13.sp)
+            }
+
+            NeoCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = activeRide?.vehicleModel ?: "Electric Rickshaw", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    val fareDisplay = if (activeRide?.totalFareCents != null) "₹${activeRide!!.totalFareCents!! / 100} LOCKED" else "PRICE LOCKED"
+                    NeoBadge(text = fareDisplay, backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+                }
             }
         }
     }
@@ -79,6 +159,70 @@ fun DispatchRadarScreen(onNavigate: (String) -> Unit) {
 fun PilotAssignedScreen(onNavigate: (String) -> Unit) {
     val activeRide by RiderRepository.activeRide.collectAsState()
 
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchActiveRide()
+    }
+
+    // Agar koi active ride nahi hai database me toh Empty State dikhayein
+    if (activeRide == null) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(CanvasBlack)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            NeoHeader(title = "Active Ride", subtitle = "Live Chauffeur Status", onBack = { onNavigate("map_home") })
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(vertical = 40.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(CircleShape)
+                        .background(SurfaceDark)
+                        .border(1.dp, BorderSubtle, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "🛺", fontSize = 48.sp)
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(text = "No Driver Available", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "You do not have any ongoing ride or active pilot assignment right now.",
+                    color = TextMuted,
+                    fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp)
+                )
+            }
+
+            NeoButton(
+                text = "Explore & Book a Ride →",
+                onClick = { onNavigate("map_home") },
+                backgroundColor = SapphirePrimary,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        return
+    }
+
+    val isDriverAssigned = !activeRide?.driverName.isNullOrBlank() || activeRide?.driver != null
+    val driverDisplayName = if (isDriverAssigned) (activeRide?.driverName ?: activeRide?.driver?.name ?: "Verified EV Pilot") else "No Driver Assigned"
+    val driverSubtitle = if (isDriverAssigned) {
+        val rating = activeRide?.driverRating ?: activeRide?.driver?.rating ?: 4.9
+        "$rating ★ • Verified Pilot"
+    } else {
+        "Searching for nearby available pilots..."
+    }
+    val vehicleModel = if (isDriverAssigned) (activeRide?.vehicleModel ?: "Electric Rickshaw") else "Awaiting Pilot Acceptance"
+    val vehiclePlate = if (isDriverAssigned) (activeRide?.vehiclePlate ?: activeRide?.driver?.licenseNumber ?: "Verified EV") else "PENDING"
+    val headerSubtitle = if (isDriverAssigned) "Pilot En-Route • ETA ~3 Mins" else "Dispatch Matching in Progress"
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -86,28 +230,32 @@ fun PilotAssignedScreen(onNavigate: (String) -> Unit) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        NeoHeader(title = "Pilot En-Route", subtitle = "ETA 3 Mins (450m away)", onBack = { onNavigate("map_home") })
+        NeoHeader(title = if (isDriverAssigned) "Pilot En-Route" else "Trip Matching", subtitle = headerSubtitle, onBack = { onNavigate("map_home") })
         Spacer(modifier = Modifier.height(16.dp))
 
         // Chauffeur Identity Card
-        NeoCard(borderColor = BorderFocus) {
+        NeoCard(borderColor = if (isDriverAssigned) BorderFocus else BorderSubtle) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .size(60.dp)
                         .clip(CircleShape)
-                        .background(SapphireGlow),
+                        .background(if (isDriverAssigned) SapphireGlow else SurfaceDark),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = "👨‍✈️", fontSize = 32.sp)
+                    Text(text = if (isDriverAssigned) "👨‍✈️" else "⏳", fontSize = 32.sp)
                 }
                 Spacer(modifier = Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = activeRide?.driverName ?: "Ram Lal (EV Pilot)", color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Text(text = "4.95 ★ • 2,420 Completed Rides", color = AmberGold, fontSize = 12.sp)
-                    Text(text = activeRide?.vehicleModel ?: "Mahindra Treo Electric", color = TextMuted, fontSize = 12.sp)
+                    Text(text = driverDisplayName, color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(text = driverSubtitle, color = if (isDriverAssigned) AmberGold else TextMuted, fontSize = 12.sp)
+                    Text(text = vehicleModel, color = TextMuted, fontSize = 12.sp)
                 }
-                NeoBadge(text = activeRide?.vehiclePlate ?: "DL-1ER-4921", backgroundColor = SurfaceDark, textColor = ElectricCyan)
+                NeoBadge(
+                    text = vehiclePlate,
+                    backgroundColor = SurfaceDark,
+                    textColor = if (isDriverAssigned) ElectricCyan else AmberGold
+                )
             }
         }
 
@@ -129,13 +277,15 @@ fun PilotAssignedScreen(onNavigate: (String) -> Unit) {
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-        NeoCard {
-            Text(text = "Boarding Security OTP", color = TextMuted, fontSize = 12.sp)
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(text = "Share this 6-digit code with your pilot upon boarding:", color = TextWhite, fontSize = 13.sp)
-            Spacer(modifier = Modifier.height(12.dp))
-            OtpDisplayBox(otp = activeRide?.otpCode ?: "729481")
+        if (!activeRide?.otpCode.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            NeoCard {
+                Text(text = "Boarding Security OTP", color = TextMuted, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(text = "Share this 6-digit code with your pilot upon boarding:", color = TextWhite, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+                OtpDisplayBox(otp = activeRide?.otpCode ?: "------")
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -143,9 +293,11 @@ fun PilotAssignedScreen(onNavigate: (String) -> Unit) {
             NeoButton(
                 text = "Cancel Ride",
                 onClick = {
-                    val rideId = activeRide?.id ?: "ride-latest"
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        RiderRepository.cancelActiveRide(rideId)
+                    val rideId = activeRide?.id ?: ""
+                    if (rideId.isNotBlank()) {
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            RiderRepository.cancelActiveRide(rideId)
+                        }
                     }
                     DialogController.showToast("Ride cancelled in Supabase.")
                     onNavigate("map_home")
@@ -153,15 +305,17 @@ fun PilotAssignedScreen(onNavigate: (String) -> Unit) {
                 modifier = Modifier.weight(1f),
                 backgroundColor = CrimsonRed
             )
-            NeoButton(
-                text = "Pilot Arrived →",
-                onClick = {
-                    RiderRepository.updateActiveRideStatus("ARRIVED")
-                    onNavigate("pilot_arrived")
-                },
-                modifier = Modifier.weight(1f),
-                backgroundColor = SapphirePrimary
-            )
+            if (isDriverAssigned) {
+                NeoButton(
+                    text = "Pilot Arrived →",
+                    onClick = {
+                        RiderRepository.updateActiveRideStatus("ARRIVED")
+                        onNavigate("pilot_arrived")
+                    },
+                    modifier = Modifier.weight(1f),
+                    backgroundColor = SapphirePrimary
+                )
+            }
         }
     }
 }
@@ -169,13 +323,16 @@ fun PilotAssignedScreen(onNavigate: (String) -> Unit) {
 // Screen 25: Driver En-Route & Vehicle RC
 @Composable
 fun VehicleRcDocumentScreen(onNavigate: (String) -> Unit) {
+    val activeRide by RiderRepository.activeRide.collectAsState()
     var vehicleData by remember { mutableStateOf<Map<String, Any>?>(null) }
-    val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+    val rideId = activeRide?.id
 
     LaunchedEffect(rideId) {
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            val res = RiderRepository.getVehicleCredentials(rideId)
-            res.getOrNull()?.let { vehicleData = it }
+        if (!rideId.isNullOrBlank()) {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                val res = RiderRepository.getVehicleCredentials(rideId)
+                res.getOrNull()?.let { vehicleData = it }
+            }
         }
     }
 
@@ -186,29 +343,37 @@ fun VehicleRcDocumentScreen(onNavigate: (String) -> Unit) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        NeoHeader(title = "Government RC & Fitness", subtitle = "Transport Dept Delhi Verification", onBack = { onNavigate("pilot_assigned") })
+        NeoHeader(title = "Government RC & Fitness", subtitle = "Transport Dept Verification", onBack = { onNavigate("pilot_assigned") })
         Spacer(modifier = Modifier.height(16.dp))
 
-        NeoCard {
-            Text(text = "Vehicle Registration Certificate", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(10.dp))
-            val specs = listOf(
-                "Plate Number" to (vehicleData?.get("license_plate")?.toString() ?: "DL-1ER-4921"),
-                "Chassis Number" to (vehicleData?.get("chassis_number")?.toString() ?: "MA1TREO2026XX8291"),
-                "Fuel Category" to "100% Battery Electric (Zero Emission)",
-                "PUC Fitness Expiry" to "14-Dec-2027 (Active)",
-                "Commercial Permit" to "All Delhi NCR Micro-Transit",
-                "Insurance Status" to "Comprehensive Insured (Bajaj Allianz)"
-            )
-            specs.forEach { (k, v) ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(text = k, color = TextMuted, fontSize = 12.sp)
-                    Text(text = v, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        if (activeRide == null) {
+            NeoCard {
+                Text(text = "No active vehicle assigned.", color = TextMuted, fontSize = 13.sp)
+            }
+        } else {
+            NeoCard {
+                Text(text = "Vehicle Registration Certificate", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(10.dp))
+                val plate = vehicleData?.get("license_plate")?.toString() ?: activeRide?.vehiclePlate ?: "Not Available"
+                val chassis = vehicleData?.get("chassis_number")?.toString() ?: "Not Available"
+                val specs = listOf(
+                    "Plate Number" to plate,
+                    "Chassis Number" to chassis,
+                    "Fuel Category" to "100% Battery Electric (Zero Emission)",
+                    "PUC Fitness Expiry" to (vehicleData?.get("puc_expiry")?.toString() ?: "Active"),
+                    "Commercial Permit" to "All Delhi NCR Micro-Transit",
+                    "Insurance Status" to "Comprehensive Insured"
+                )
+                specs.forEach { (k, v) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(text = k, color = TextMuted, fontSize = 12.sp)
+                        Text(text = v, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
@@ -218,13 +383,34 @@ fun VehicleRcDocumentScreen(onNavigate: (String) -> Unit) {
 // Screen 26: Pilot Arrived & Meeting Point Buzzer
 @Composable
 fun PilotArrivedScreen(onNavigate: (String) -> Unit) {
+    val activeRide by RiderRepository.activeRide.collectAsState()
+
+    if (activeRide == null) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(CanvasBlack)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(text = "No active ride in progress.", color = TextMuted, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            NeoButton(text = "Back to Home", onClick = { onNavigate("map_home") })
+        }
+        return
+    }
+
+    val plate = activeRide?.vehiclePlate ?: "Verified EV"
+    val pickup = activeRide?.pickupAddress ?: "Pickup Location"
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(CanvasBlack)
             .padding(16.dp)
     ) {
-        NeoHeader(title = "Pilot Arrived", subtitle = "Waiting at Connaught Place Gate 2", onBack = { onNavigate("pilot_assigned") })
+        NeoHeader(title = "Pilot Arrived", subtitle = "Waiting at $pickup", onBack = { onNavigate("pilot_assigned") })
         Spacer(modifier = Modifier.height(16.dp))
 
         NeoCard(borderColor = EmeraldGreen) {
@@ -233,7 +419,7 @@ fun PilotArrivedScreen(onNavigate: (String) -> Unit) {
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(text = "Vehicle Waiting Outside", color = EmeraldGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Text(text = "Plate: DL-1ER-4921 (Green E-Rickshaw)", color = TextWhite, fontSize = 13.sp)
+                    Text(text = "Plate: $plate", color = TextWhite, fontSize = 13.sp)
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
@@ -273,7 +459,7 @@ fun BoardingOtpScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = "Tell this OTP to pilot to verify your identity and start trip meters:", color = TextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(24.dp))
-        OtpDisplayBox(otp = activeRide?.otpCode ?: "729481")
+        OtpDisplayBox(otp = activeRide?.otpCode ?: "------")
         Spacer(modifier = Modifier.height(30.dp))
         NeoButton(text = "Trip Started → View Telemetry", onClick = { onNavigate("telemetry_hud") })
     }
@@ -618,13 +804,13 @@ private fun MidTripDestinationChangeModal(
 // Screen 34: In-Trip Pilot Chat & Auto-Translate
 @Composable
 fun InTripChatScreen(onNavigate: (String) -> Unit) {
+    val activeRide by RiderRepository.activeRide.collectAsState()
     var chatInput by remember { mutableStateOf("") }
     val chatHistory = remember {
-        mutableStateListOf(
-            Pair("Pilot Ram Lal", "नमस्ते Sir, I am waiting near Pillar 42."),
-            Pair("You", "Coming in 1 minute, please wait.")
-        )
+        mutableStateListOf<Pair<String, String>>()
     }
+
+    val driverLabel = activeRide?.driverName ?: "Pilot"
 
     Column(
         modifier = Modifier
@@ -632,27 +818,48 @@ fun InTripChatScreen(onNavigate: (String) -> Unit) {
             .background(CanvasBlack)
             .padding(16.dp)
     ) {
-        NeoHeader(title = "Chat with Pilot", subtitle = "2-Way English ⇌ Hindi Auto-Translate", onBack = { onNavigate("pilot_assigned") })
+        NeoHeader(
+            title = "Chat with $driverLabel",
+            subtitle = "2-Way English ⇌ Hindi Auto-Translate",
+            onBack = { onNavigate("pilot_assigned") }
+        )
         Spacer(modifier = Modifier.height(12.dp))
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(chatHistory) { (sender, text) ->
-                val isMe = sender == "You"
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = if (isMe) Alignment.End else Alignment.Start
-                ) {
-                    NeoCard(
-                        backgroundColor = if (isMe) SapphirePrimary else SurfaceCard,
-                        cornerRadius = 14.dp,
-                        modifier = Modifier.widthIn(max = 280.dp)
+        if (chatHistory.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(text = "💬", fontSize = 36.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "No Messages Yet", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = "Send a message to your pilot (e.g. Landmark, waiting spot).", color = TextMuted, fontSize = 12.sp)
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(chatHistory) { (sender, text) ->
+                    val isMe = sender == "You"
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = if (isMe) Alignment.End else Alignment.Start
                     ) {
-                        Text(text = sender, color = if (isMe) TextWhite else ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(text = text, color = TextWhite, fontSize = 13.sp)
+                        NeoCard(
+                            backgroundColor = if (isMe) SapphirePrimary else SurfaceCard,
+                            cornerRadius = 14.dp,
+                            modifier = Modifier.widthIn(max = 280.dp)
+                        ) {
+                            Text(text = sender, color = if (isMe) TextWhite else ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(text = text, color = TextWhite, fontSize = 13.sp)
+                        }
                     }
                 }
             }

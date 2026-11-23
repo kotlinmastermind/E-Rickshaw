@@ -288,32 +288,34 @@ fun RapidoLiveMapCanvas(
             }
         }
 
-        // Live Nearby Vehicles (Simulated Real-time GPS Positions)
-        val vehicles = listOf(
-            Pair(60.dp, 260.dp),
-            Pair(160.dp, 210.dp),
-            Pair(290.dp, 330.dp),
-            Pair(210.dp, 400.dp),
-            Pair(110.dp, 450.dp)
-        )
-        vehicles.forEachIndexed { index, (x, y) ->
-            Box(
-                modifier = Modifier
-                    .offset(x = x + (vehicleJitter * (index % 2 * 2 - 1)).dp, y = y)
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceElevated)
-                    .border(1.dp, BorderSubtle, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = when (index % 3) {
-                        0 -> "🛺"
-                        1 -> "⚡"
-                        else -> "🛵"
-                    },
-                    fontSize = 16.sp
-                )
+        // Live Nearby Vehicles (Render only when nearby vehicles exist in database)
+        if (nearbyVehiclesCount > 0) {
+            val vehicles = listOf(
+                Pair(60.dp, 260.dp),
+                Pair(160.dp, 210.dp),
+                Pair(290.dp, 330.dp),
+                Pair(210.dp, 400.dp),
+                Pair(110.dp, 450.dp)
+            ).take(nearbyVehiclesCount)
+            vehicles.forEachIndexed { index, (x, y) ->
+                Box(
+                    modifier = Modifier
+                        .offset(x = x + (vehicleJitter * (index % 2 * 2 - 1)).dp, y = y)
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(SurfaceElevated)
+                        .border(1.dp, BorderSubtle, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = when (index % 3) {
+                            0 -> "🛺"
+                            1 -> "⚡"
+                            else -> "🛵"
+                        },
+                        fontSize = 16.sp
+                    )
+                }
             }
         }
     }

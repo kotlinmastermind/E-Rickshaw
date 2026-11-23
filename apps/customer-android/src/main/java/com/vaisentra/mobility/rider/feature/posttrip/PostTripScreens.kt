@@ -102,6 +102,8 @@ fun RideReceiptScreen(onNavigate: (String) -> Unit) {
 // Screen 37: Driver Rating & Factor CSAT
 @Composable
 fun DriverRatingScreen(onNavigate: (String) -> Unit) {
+    val activeRide by RiderRepository.activeRide.collectAsState()
+    val driverName = activeRide?.driverName ?: activeRide?.driver?.name ?: "your Pilot"
     var rating by remember { mutableStateOf(5) }
     val compliments = listOf("⚡ Smooth Driving", "🧼 Spotless EV", "🧭 Expert Route", "🙏 Polite Chauffeur")
     val selectedCompliments = remember { mutableStateListOf<String>() }
@@ -117,7 +119,7 @@ fun DriverRatingScreen(onNavigate: (String) -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
 
         NeoCard {
-            Text(text = "How was your journey with Ram Lal?", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(text = "How was your journey with $driverName?", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 (1..5).forEach { star ->
@@ -202,11 +204,13 @@ fun DriverTipScreen(onNavigate: (String) -> Unit) {
         }
         Spacer(modifier = Modifier.height(20.dp))
         NeoButton(text = "Pay ₹$tipAmt Tip via UPI", onClick = {
-            val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+            val activeRide = RiderRepository.activeRide.value
+            val rideId = activeRide?.id ?: "ride-latest"
+            val driverName = activeRide?.driverName ?: activeRide?.driver?.name ?: "Pilot"
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                 RiderRepository.submitTip(rideId, tipAmt)
             }
-            DialogController.showToast("₹$tipAmt tip credited to Pilot Ram Lal!")
+            DialogController.showToast("₹$tipAmt tip credited to $driverName!")
             onNavigate("past_trips")
         }, icon = "💵")
     }
@@ -221,12 +225,6 @@ fun PastTripsHistoryScreen(onNavigate: (String) -> Unit) {
         RiderRepository.fetchRideHistory()
     }
 
-    val defaultTrips = listOf(
-        Triple("Sector 62, Noida ➔ Connaught Place", "₹129.04 • 14 Mins • Completed", "Today, 08:30 AM"),
-        Triple("Anand Vihar Hub ➔ Rajiv Chowk Metro", "₹95.00 • Eco-Pool • Completed", "Yesterday, 06:15 PM"),
-        Triple("Indira Gandhi Airport T3 ➔ Cyber Hub", "₹450.00 • E-Auto • Completed", "08-Nov, 10:20 PM")
-    )
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -239,7 +237,7 @@ fun PastTripsHistoryScreen(onNavigate: (String) -> Unit) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (liveTrips.isNotEmpty()) {
                 items(liveTrips) { ride ->
-                    val fareStr = if (ride.totalFareCents != null) "₹${ride.totalFareCents / 100}.00" else "₹129.00"
+                    val fareStr = if (ride.totalFareCents != null) "₹${ride.totalFareCents / 100}.00" else "₹0.00"
                     val routeStr = "${ride.pickupAddress} ➔ ${ride.destinationAddress}"
                     val detailStr = "$fareStr • ${ride.vehicleModel ?: "EV Rickshaw"} • ${ride.status}"
                     val timeStr = ride.createdAt?.take(16)?.replace("T", " ") ?: "Recent Trip"
@@ -256,16 +254,20 @@ fun PastTripsHistoryScreen(onNavigate: (String) -> Unit) {
                     }
                 }
             } else {
-                items(defaultTrips) { (route, detail, time) ->
-                    NeoCard(
-                        modifier = Modifier.clickable { onNavigate("ride_receipt") },
-                        cornerRadius = 14.dp
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(text = time, color = TextDim, fontSize = 11.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = route, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = detail, color = ElectricCyan, fontSize = 12.sp)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(text = "📭", fontSize = 48.sp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(text = "No Past Trips Found", color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(text = "No ride records available in database.", color = TextMuted, fontSize = 13.sp)
+                        }
                     }
                 }
             }

@@ -150,12 +150,6 @@ fun NotificationInboxScreen(onNavigate: (String) -> Unit) {
         RiderRepository.fetchNotifications()
     }
 
-    val defaultAlerts = listOf(
-        Triple("⚡ Peak Corridor Cleared", "Demand stabilized near Anand Vihar Metro. Standard tariffs restored.", "10 mins ago"),
-        Triple("🎉 ₹100 Referral Credited", "Priya joined via your link! ₹100 added to your wallet balance.", "2 hours ago"),
-        Triple("🌧️ Delhi Monsoon Advisory", "High rain in South Delhi. 100% enclosed E-Autos dispatched on priority.", "Yesterday")
-    )
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -178,14 +172,20 @@ fun NotificationInboxScreen(onNavigate: (String) -> Unit) {
                     }
                 }
             } else {
-                items(defaultAlerts) { (title, body, time) ->
-                    NeoCard(cornerRadius = 14.dp) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(text = title, color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Text(text = time, color = TextDim, fontSize = 10.sp)
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(text = "🔔", fontSize = 42.sp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(text = "No Notifications", color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(text = "You are all caught up! Trip updates & receipts will appear here.", color = TextMuted, fontSize = 13.sp)
                         }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = body, color = TextMuted, fontSize = 12.sp)
                     }
                 }
             }
@@ -215,22 +215,41 @@ fun SavedPlacesScreen(onNavigate: (String) -> Unit) {
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(places) { p ->
-                NeoCard(cornerRadius = 14.dp) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = when (p.tag) {
-                                "HOME" -> "🏠"
-                                "WORK" -> "💼"
-                                "AIRPORT" -> "✈️"
-                                else -> "🚇"
-                            },
-                            fontSize = 24.sp
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = p.name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text(text = p.address, color = TextMuted, fontSize = 11.sp, maxLines = 1)
+            if (places.isNotEmpty()) {
+                items(places) { p ->
+                    NeoCard(cornerRadius = 14.dp) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = when (p.tag) {
+                                    "HOME" -> "🏠"
+                                    "WORK" -> "💼"
+                                    "AIRPORT" -> "✈️"
+                                    else -> "🚇"
+                                },
+                                fontSize = 24.sp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(text = p.name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text(text = p.address, color = TextMuted, fontSize = 11.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            } else {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(text = "📍", fontSize = 42.sp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(text = "No Saved Places Yet", color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(text = "Save frequent destinations like Home or Work for fast bookings.", color = TextMuted, fontSize = 13.sp)
                         }
                     }
                 }

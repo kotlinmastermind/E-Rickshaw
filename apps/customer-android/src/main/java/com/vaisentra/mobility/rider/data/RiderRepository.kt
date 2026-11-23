@@ -388,10 +388,41 @@ object RiderRepository {
                             driverRating = updated.driver?.rating ?: updated.driverRating,
                             vehiclePlate = updated.driver?.licenseNumber ?: updated.vehiclePlate
                         )
+                    } else if (res.isSuccessful && (updated == null || updated.status in listOf("COMPLETED", "CANCELLED"))) {
+                        _activeRide.value = null
                     }
                 } catch (_: Exception) {
                 }
             }
+        }
+    }
+
+    suspend fun fetchActiveRide(): Result<ActiveRideDto?> {
+        return try {
+            val res = NetworkClient.apiService.getActiveRide()
+            if (res.isSuccessful) {
+                val ride = res.body()?.activeRide
+                if (ride != null && ride.status !in listOf("COMPLETED", "CANCELLED")) {
+                    val resolved = ride.copy(
+                        driverName = ride.driver?.name ?: ride.driverName,
+                        driverPhone = ride.driver?.phone ?: ride.driverPhone,
+                        driverRating = ride.driver?.rating ?: ride.driverRating,
+                        vehiclePlate = ride.driver?.licenseNumber ?: ride.vehiclePlate
+                    )
+                    _activeRide.value = resolved
+                    startActiveRideSyncLoop(ride.id)
+                    Result.success(resolved)
+                } else {
+                    _activeRide.value = null
+                    Result.success(null)
+                }
+            } else {
+                _activeRide.value = null
+                Result.success(null)
+            }
+        } catch (e: Exception) {
+            _activeRide.value = null
+            Result.failure(e)
         }
     }
 

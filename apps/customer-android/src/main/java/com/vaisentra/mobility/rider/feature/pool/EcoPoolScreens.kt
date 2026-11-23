@@ -225,11 +225,7 @@ fun EcoPoolBookingScreen(onNavigate: (String) -> Unit) {
 fun EcoPoolChatScreen(onNavigate: (String) -> Unit) {
     var inputMessage by remember { mutableStateOf("") }
     val messages = remember {
-        mutableStateListOf(
-            Triple("Pilot Ram Lal", "Departing Anand Vihar Metro Pillar 42 in 3 mins.", "08:14 AM"),
-            Triple("Priya (Co-Rider)", "Waiting near ATM gate.", "08:15 AM"),
-            Triple("Amit (Co-Rider)", "I am at Gate 2 with green backpack.", "08:16 AM")
-        )
+        mutableStateListOf<Triple<String, String, String>>()
     }
 
     Column(
@@ -241,24 +237,41 @@ fun EcoPoolChatScreen(onNavigate: (String) -> Unit) {
         NeoHeader(title = "Corridor Group Chat", subtitle = "Encrypted broadcast for verified co-riders", onBack = { onNavigate("eco_pool_booking") })
         Spacer(modifier = Modifier.height(12.dp))
 
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(messages) { (sender, msg, time) ->
-                NeoCard(
-                    backgroundColor = if (sender.startsWith("Pilot")) Color(0xFF1E283D) else SurfaceCard,
-                    cornerRadius = 14.dp
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(text = sender, color = if (sender.startsWith("Pilot")) ElectricCyan else TextWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text(text = time, color = TextDim, fontSize = 10.sp)
-                    }
+        if (messages.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(text = "👥", fontSize = 36.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "No Messages Yet", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = msg, color = TextWhite, fontSize = 13.sp)
+                    Text(text = "You are connected to the pool chat. Send a message to co-riders.", color = TextMuted, fontSize = 12.sp)
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(messages) { (sender, msg, time) ->
+                    NeoCard(
+                        backgroundColor = if (sender.startsWith("Pilot")) Color(0xFF1E283D) else SurfaceCard,
+                        cornerRadius = 14.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(text = sender, color = if (sender.startsWith("Pilot")) ElectricCyan else TextWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(text = time, color = TextDim, fontSize = 10.sp)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = msg, color = TextWhite, fontSize = 13.sp)
+                    }
                 }
             }
         }

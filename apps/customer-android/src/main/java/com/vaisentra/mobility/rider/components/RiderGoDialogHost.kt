@@ -208,10 +208,14 @@ private fun PromoAppliedPopup() {
 // 4. Pilot Arrived Buzzer
 @Composable
 private fun PilotArrivedPopup() {
+    val activeRide = RiderRepository.activeRide.value
+    val driverName = activeRide?.driverName ?: activeRide?.driver?.name ?: "Pilot"
+    val vehiclePlate = activeRide?.vehiclePlate ?: activeRide?.driver?.licenseNumber ?: "Vehicle"
+
     NeoCard(borderColor = ElectricCyan) {
-        Text(text = "🎯 Pilot Arrived at Gate", color = ElectricCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(text = "🎯 Pilot Arrived at Location", color = ElectricCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Your pilot Ram Lal is waiting at Gate 2 with vehicle DL-1ER-4921.", color = TextMuted, fontSize = 13.sp)
+        Text(text = "Your pilot $driverName is waiting with vehicle $vehiclePlate.", color = TextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(20.dp))
         NeoButton(text = "Sound Courtesy Buzzer 🔔", backgroundColor = SapphirePrimary, onClick = {
             val tripId = RiderRepository.activeRide.value?.id ?: "trip-current"
@@ -323,11 +327,13 @@ private fun TierUpgradePopup() {
 // 10. Rating & Tip
 @Composable
 private fun RatingTipPopup() {
+    val activeRide = RiderRepository.activeRide.value
+    val driverName = activeRide?.driverName ?: activeRide?.driver?.name ?: "Pilot"
     var rating by remember { mutableStateOf(5) }
     var tipAmount by remember { mutableStateOf(20) }
 
     NeoCard {
-        Text(text = "⭐ Rate Ram Lal", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(text = "⭐ Rate $driverName", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
             (1..5).forEach { star ->
