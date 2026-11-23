@@ -60,8 +60,9 @@ object NetworkClient {
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(45, TimeUnit.SECONDS)
-            .readTimeout(40, TimeUnit.SECONDS)
+            .readTimeout(45, TimeUnit.SECONDS)
             .writeTimeout(45, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)
             .build()

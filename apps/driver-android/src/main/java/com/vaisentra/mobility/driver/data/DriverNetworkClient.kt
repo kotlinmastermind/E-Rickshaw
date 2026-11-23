@@ -211,8 +211,9 @@ object DriverNetworkClient {
                 .build()
 
             val rawClient = OkHttpClient.Builder()
-                .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(10, TimeUnit.SECONDS)
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
                 .build()
 
             val res = rawClient.newCall(refreshRequest).execute()
