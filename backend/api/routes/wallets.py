@@ -15,7 +15,9 @@ class TopUpRequest(BaseModel):
     idempotency_key: Optional[str] = Field(None, json_schema_extra={"example": "topup-uuid-12345"})
 
 class CompensateRequest(BaseModel):
-    original_tx_id: str
+    original_tx_id: Optional[str] = None
+    user_id: Optional[str] = None
+    amount_cents: Optional[int] = None
     reason: str
 
 @router.get("/me")
@@ -81,12 +83,35 @@ async def create_compensating_transaction(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    comp_tx = await WalletService.create_compensating_entry(
-        session=db,
-        original_tx_id=payload.original_tx_id,
-        reason=payload.reason,
-        admin_user_id=admin.id
-    )
+    if payload.original_tx_id:
+        comp_tx = await WalletService.create_compensating_entry(
+            session=db,
+            original_tx_id=payload.original_tx_id,
+            reason=payload.reason,
+            admin_user_id=admin.id
+        )
+    elif payload.user_id and payload.amount_cents:
+        target_uid = payload.user_id
+        if not target_uid.startswith("usr-") and (target_uid.startswith("+") or target_uid.replace(" ", "").isdigit()):
+            clean_digits = "".join(filter(str.isdigit, target_uid))
+            clean_phone = f"+91{clean_digits[-10:]}"
+            u_stmt = select(User).where(User.phone_number == clean_phone)
+            u_res = await db.execute(u_stmt)
+            target_u = u_res.scalar_one_or_none()
+            if target_u:
+                target_uid = target_u.id
+
+        comp_tx = await WalletService.credit_wallet(
+            session=db,
+            user_id=target_uid,
+            amount_cents=payload.amount_cents,
+            transaction_type="ADMIN_COMPENSATION",
+            source="ADMIN_CONCIERGE",
+            description=payload.reason
+        )
+    else:
+        raise HTTPException(status_code=400, detail="Either original_tx_id or user_id and amount_cents must be provided")
+
     await db.commit()
     return {
         "status": "COMPENSATED",
