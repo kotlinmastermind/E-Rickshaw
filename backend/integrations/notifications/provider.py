@@ -144,16 +144,18 @@ class StandardNotificationProvider(NotificationProvider):
             return False
 
         # Acquire OAuth 2.0 access token
-        try:
-            from google.auth.transport.requests import Request
-            creds.refresh(Request())
-            access_token = creds.token
-        except Exception as auth_exc:
-            self.last_error = f"Failed to authenticate with Google FCM OAuth: {auth_exc}"
-            self.last_error_code = "AUTH_FAILED"
-            self.last_message_id = None
-            logger.error("[FCM_AUTH_FAILED] OAuth token acquisition failed.")
-            return False
+        access_token = getattr(creds, "token", None)
+        if not access_token:
+            try:
+                from google.auth.transport.requests import Request
+                creds.refresh(Request())
+                access_token = creds.token
+            except Exception as auth_exc:
+                self.last_error = f"Failed to authenticate with Google FCM OAuth: {auth_exc}"
+                self.last_error_code = "AUTH_FAILED"
+                self.last_message_id = None
+                logger.error("[FCM_AUTH_FAILED] OAuth token acquisition failed.")
+                return False
 
         # Dispatch HTTP v1 POST request
         url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"

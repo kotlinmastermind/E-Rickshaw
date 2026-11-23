@@ -20,34 +20,13 @@ from backend.application.services.admin_governance_service import AdminGovernanc
 router = APIRouter(prefix="/admin", tags=["Platform Administration"])
 
 async def get_admin_actor(
-    request: Request,
-    db: AsyncSession = Depends(get_db)
+    user: User = Depends(get_current_admin)
 ) -> User:
     """
     Resolves the administrator actor for controls center actions.
-    Supports JWT Bearer authentication and seamless session fallback
-    to the registered Supabase admin for web controls center dashboards.
+    Enforces strict JWT authentication, active session verification, and administrator RBAC.
     """
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header.removeprefix("Bearer ").strip()
-        try:
-            claims = decode_jwt_token(token)
-            user_id = claims.get("sub")
-            if user_id:
-                user = await db.get(User, user_id)
-                if user and (user.role or "").lower() in ["admin", "superadmin", "super administrator"]:
-                    return user
-        except Exception:
-            pass
-
-    # Seamless fallback to primary registered Supabase admin
-    stmt = select(User).where(User.role.in_(["admin", "superadmin", "super administrator"])).order_by(User.created_at.asc())
-    res = await db.execute(stmt)
-    admin_user = res.scalars().first()
-    if admin_user:
-        return admin_user
-    raise HTTPException(status_code=403, detail="Admin authorization required.")
+    return user
 
 @router.get("/session/token")
 async def get_admin_session_token(
@@ -448,11 +427,12 @@ async def review_driver(
 
     if target_status == "APPROVED":
         documents = (await db.execute(select(DriverDocument).where(DriverDocument.driver_id == driver_id))).scalars().all()
-        for doc in documents:
-            if doc.verification_status != "VERIFIED":
-                doc.verification_status = "VERIFIED"
-                doc.rejection_reason = None
-        await db.flush()
+        unverified_docs = [doc for doc in documents if doc.verification_status != "VERIFIED"]
+        if unverified_docs:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot approve chauffeur: {len(unverified_docs)} document(s) have not been verified."
+            )
 
     service = AdminService(db)
     return await service.review_driver_approval(

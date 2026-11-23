@@ -702,6 +702,20 @@ async def get_current_active_ride(
                 "total_trips": drv.total_trips
             }
 
+    passenger_info = None
+    if ride.customer_id:
+        cust_profile_res = await db.execute(select(CustomerProfile).where(CustomerProfile.id == ride.customer_id))
+        cust_profile = cust_profile_res.scalar_one_or_none()
+        if cust_profile:
+            u_cust_res = await db.execute(select(User).where(User.id == cust_profile.user_id))
+            u_cust = u_cust_res.scalar_one_or_none()
+            passenger_info = {
+                "customer_id": cust_profile.id,
+                "name": u_cust.full_name if (u_cust and u_cust.full_name) else "Commuter",
+                "phone": u_cust.phone_number if u_cust else "",
+                "rating": cust_profile.rating_average or 5.0
+            }
+
     return {
         "active_ride": {
             "id": ride.id,
@@ -719,6 +733,10 @@ async def get_current_active_ride(
             "payment_method": ride.payment_method,
             "assigned_driver_id": ride.assigned_driver_id,
             "driver": driver_info,
+            "passenger": passenger_info,
+            "customer": passenger_info,
+            "customer_name": passenger_info["name"] if passenger_info else None,
+            "customer_phone": passenger_info["phone"] if passenger_info else None,
             "created_at": ride.requested_at.isoformat() if ride.requested_at else None
         }
     }
@@ -729,19 +747,29 @@ async def get_ride_history(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    stmt = select(CustomerProfile).where(CustomerProfile.user_id == user.id)
-    res = await db.execute(stmt)
-    customer = res.scalar_one_or_none()
-    
-    if not customer:
-        return []
-
-    stmt_rides = (
-        select(Ride)
-        .where(Ride.customer_id == customer.id)
-        .order_by(Ride.requested_at.desc())
-        .limit(limit)
-    )
+    if user.role == "driver":
+        drv_res = await db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
+        driver = drv_res.scalar_one_or_none()
+        if not driver:
+            return []
+        stmt_rides = (
+            select(Ride)
+            .where(Ride.assigned_driver_id == driver.id)
+            .order_by(Ride.requested_at.desc())
+            .limit(limit)
+        )
+    else:
+        stmt = select(CustomerProfile).where(CustomerProfile.user_id == user.id)
+        res = await db.execute(stmt)
+        customer = res.scalar_one_or_none()
+        if not customer:
+            return []
+        stmt_rides = (
+            select(Ride)
+            .where(Ride.customer_id == customer.id)
+            .order_by(Ride.requested_at.desc())
+            .limit(limit)
+        )
     res_rides = await db.execute(stmt_rides)
     rides = res_rides.scalars().all()
 

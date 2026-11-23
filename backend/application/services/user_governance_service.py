@@ -367,22 +367,11 @@ class UserGovernanceService:
     # backend/application/services/user_governance_service.py
 
     async def register_passkey(self, user_id: str, credential_id: str, public_key: str) -> Dict[str, Any]:
-        stmt = select(User).where(User.id == user_id)
-        res = await self.db.execute(stmt)
-        user = res.scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-
-        user.passkey_credential_id = credential_id.strip()
-        user.passkey_public_key = public_key.strip()
-        user.biometric_enabled = True
-        await self.db.commit()
-
-        return {
-            "biometric_enabled": True,
-            "has_passkey": True,
-            "message": "Biometric Passkey registered successfully."
-        }
+        """Passkey registration fails closed to prevent unverified public key registration."""
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Passkey registration is temporarily disabled pending production cryptographic verification."
+        )
 
     async def verify_passkey_login(
         self, credential_id: str, signature: str,

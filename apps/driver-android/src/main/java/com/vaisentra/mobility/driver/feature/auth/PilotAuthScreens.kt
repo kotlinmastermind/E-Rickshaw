@@ -276,23 +276,8 @@ fun PilotOtpScreen(onNavigate: (String) -> Unit) {
                         onNavigate("duty_dashboard")
                     }
                 } else {
-                    // Authenticate with live real backend database
-                    val loginRes = DriverRepository.driverLogin(targetPhone, "DriverPass123456!")
-                    if (loginRes.isSuccess) {
-                        DriverDialogController.showToast("Logged in! Live backend connected.")
-                        onNavigate("duty_dashboard")
-                    } else {
-                        // Auto-register on real backend if account doesn't exist yet
-                        val regRes = DriverRepository.registerDriver(targetPhone, "Rohit Kumar", "DriverPass123456!")
-                        if (regRes.isSuccess) {
-                            DriverDialogController.showToast("Driver registered & connected to live backend!")
-                            onNavigate("duty_dashboard")
-                        } else {
-                            DriverDialogController.showToast(
-                                res.exceptionOrNull()?.message ?: "Verification failed. Please retry."
-                            )
-                        }
-                    }
+                    val errorMsg = res.exceptionOrNull()?.message ?: "Invalid OTP! Please check and retry."
+                    DriverDialogController.showToast(errorMsg)
                 }
             }
         },

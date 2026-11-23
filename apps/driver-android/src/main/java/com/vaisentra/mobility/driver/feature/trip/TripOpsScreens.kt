@@ -356,7 +356,7 @@ fun PickupNavScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("PICKUP POINT", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                activeRide?.pickupAddress?.ifBlank { "Airport Terminal / MG Road" } ?: "Airport Terminal / MG Road",
+                                activeRide?.pickupAddress?.ifBlank { "Pickup Point Not Available" } ?: "Pickup Point Not Available",
                                 color = CockpitTextPrimary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
