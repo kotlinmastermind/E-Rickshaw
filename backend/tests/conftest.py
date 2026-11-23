@@ -31,11 +31,12 @@ async def _seed_test_data(session):
         session.add_all([standard, shared, e_auto, e_cargo, sedan])
         await session.flush()
         rules = [
-            FareRule(category_id=standard.id, version=1, base_fare_cents=2000, per_km_cents=1000, per_minute_cents=100, minimum_fare_cents=2000, cancellation_fee_cents=1000, surge_multiplier=1.0, is_active=True),
-            FareRule(category_id=shared.id, version=1, base_fare_cents=1000, per_km_cents=600, per_minute_cents=50, minimum_fare_cents=1500, cancellation_fee_cents=500, surge_multiplier=1.0, is_active=True),
-            FareRule(category_id=e_auto.id, version=1, base_fare_cents=3000, per_km_cents=1200, per_minute_cents=150, minimum_fare_cents=3000, cancellation_fee_cents=1500, surge_multiplier=1.0, is_active=True),
-            FareRule(category_id=e_cargo.id, version=1, base_fare_cents=5000, per_km_cents=1500, per_minute_cents=200, minimum_fare_cents=6000, cancellation_fee_cents=2000, surge_multiplier=1.0, is_active=True),
-            FareRule(category_id=sedan.id, version=1, base_fare_cents=4000, per_km_cents=1400, per_minute_cents=150, minimum_fare_cents=4000, cancellation_fee_cents=2000, surge_multiplier=1.0, is_active=True),
+            FareRule(category_id=standard.id, city_code="DELHI_NCR", version=1, base_fare_cents=2000, per_km_cents=1000, per_minute_cents=100, minimum_fare_cents=2000, cancellation_fee_cents=1000, surge_multiplier=1.0, is_active=True),
+            FareRule(category_id=shared.id, city_code="DELHI_NCR", version=1, base_fare_cents=1000, per_km_cents=600, per_minute_cents=50, minimum_fare_cents=1500, cancellation_fee_cents=500, surge_multiplier=1.0, is_active=True),
+            FareRule(category_id=e_auto.id, city_code="DELHI_NCR", version=1, base_fare_cents=3000, per_km_cents=1200, per_minute_cents=150, minimum_fare_cents=3000, cancellation_fee_cents=1500, surge_multiplier=1.0, is_active=True),
+            FareRule(category_id=e_cargo.id, city_code="DELHI_NCR", version=1, base_fare_cents=5000, per_km_cents=1500, per_minute_cents=200, minimum_fare_cents=6000, cancellation_fee_cents=2000, surge_multiplier=1.0, is_active=True),
+            FareRule(category_id=sedan.id, city_code="DELHI_NCR", version=1, base_fare_cents=4000, per_km_cents=1400, per_minute_cents=150, minimum_fare_cents=4000, cancellation_fee_cents=2000, surge_multiplier=1.0, is_active=True),
+            FareRule(category_id=sedan.id, city_code="MUMBAI", version=1, base_fare_cents=4000, per_km_cents=1400, per_minute_cents=150, minimum_fare_cents=4000, cancellation_fee_cents=2000, surge_multiplier=1.0, is_active=True),
         ]
         session.add_all(rules)
         await session.commit()

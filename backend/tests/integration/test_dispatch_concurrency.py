@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    VehicleCategory, FareRule, Ride, RideAssignment
+    VehicleCategory, FareRule, Ride, RideAssignment, Vehicle, DriverVehicleAssignment
 )
 from backend.infrastructure.database.session import async_session_maker
 from backend.application.services.smart_dispatch_service import SmartDispatchService
@@ -52,6 +52,13 @@ async def test_driver_cannot_receive_two_conflicting_offers(db_session):
 
     d_avail = DriverAvailability(driver_id=d_prof.id, is_online=True, is_busy=False)
     db_session.add(d_avail)
+    await db_session.flush()
+
+    veh = Vehicle(id=str(uuid.uuid4()), category_id=cat.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-C-{suffix}", is_active=True)
+    db_session.add(veh)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=d_prof.id, vehicle_id=veh.id, is_active=True))
+    await db_session.flush()
 
     # Ingest telemetry
     live_loc = LiveLocationService(db=db_session)

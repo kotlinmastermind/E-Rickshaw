@@ -35,6 +35,9 @@ interface DriverApiService {
     @POST("api/v1/auth/signup/driver")
     suspend fun registerDriver(@Body request: DriverSignupRequest): Response<DriverLoginResponse>
 
+    @GET("api/v1/vehicles/categories")
+    suspend fun getVehicleCategories(): Response<List<VehicleCategoryDto>>
+
     @POST("api/v1/auth/change-password")
     suspend fun changePassword(@Body request: ChangePasswordRequest): Response<Map<String, Any>>
 

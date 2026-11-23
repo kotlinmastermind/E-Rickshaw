@@ -67,6 +67,16 @@ data class DriverSignupRequest(
     @SerializedName("vehicle_no") val vehicleNo: String = "DL-01-ER-1001"
 )
 
+data class VehicleCategoryDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("code") val code: String,
+    @SerializedName("name") val name: String,
+    @SerializedName("description") val description: String? = null,
+    @SerializedName("capacity") val capacity: Int = 4,
+    @SerializedName("is_active") val isActive: Boolean = true,
+    @SerializedName("sort_order") val sortOrder: Int = 0
+)
+
 data class LoginUserDto(
     @SerializedName("id") val id: String = "",
     @SerializedName("phone_number") val phoneNumber: String? = null,

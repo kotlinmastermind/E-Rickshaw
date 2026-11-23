@@ -45,6 +45,7 @@ import com.vaisentra.mobility.driver.theme.*
 enum class DriverScreen(val title: String, val category: String) {
     // 1. Pilot Auth & KYC (1-6)
     PILOT_LOGIN("1. Pilot Login", "Auth & KYC"),
+    PILOT_SIGNUP("1A. Pilot Registration", "Auth & KYC"),
     PILOT_OTP("2. Road OTP Verify", "Auth & KYC"),
     PILOT_RECOVERY("3. Pilot PIN Recovery", "Auth & KYC"),
     PILOT_PROFILE("4. Transport Pilot Profile", "Auth & KYC"),
@@ -122,6 +123,7 @@ fun resolveRoute(route: String): DriverScreen? {
     return when (route.lowercase()) {
         // Auth & KYC
         "login", "auth_login" -> DriverScreen.PILOT_LOGIN
+        "signup", "register", "auth_signup", "pilot_signup" -> DriverScreen.PILOT_SIGNUP
         "otp", "auth_otp" -> DriverScreen.PILOT_OTP
         "forgot", "recovery", "auth_recovery", "auth_reset" -> DriverScreen.PILOT_RECOVERY
         "pilot_profile", "profile" -> DriverScreen.PILOT_PROFILE
@@ -341,6 +343,7 @@ fun DriverNavigation() {
 
     val hideBottomBarRoutes = setOf(
         DriverScreen.PILOT_LOGIN.name,
+        DriverScreen.PILOT_SIGNUP.name,
         DriverScreen.PILOT_OTP.name,
         DriverScreen.PILOT_RECOVERY.name,
         DriverScreen.DOC_EXPIRY_WATCHDOG.name,
@@ -413,8 +416,21 @@ fun DriverNavigation() {
                     when (route) {
                         "auth_otp", "otp" -> router.navigateTo(DriverScreen.PILOT_OTP)
                         "auth_recovery", "forgot" -> router.navigateTo(DriverScreen.PILOT_RECOVERY)
+                        "auth_signup", "signup", "register" -> router.navigateTo(DriverScreen.PILOT_SIGNUP)
                         "duty_dashboard", "home", "dashboard" -> {
                             router.navigateAndClearTo(DriverScreen.DUTY_DASHBOARD, DriverScreen.PILOT_LOGIN, inclusive = true)
+                        }
+                        else -> router.navigateRoute(route)
+                    }
+                })
+            }
+
+            composable(DriverScreen.PILOT_SIGNUP.name) {
+                PilotSignupScreen(onNavigate = { route ->
+                    when (route) {
+                        "auth_login", "login" -> router.navigateAndClearTo(DriverScreen.PILOT_LOGIN, DriverScreen.PILOT_SIGNUP, inclusive = true)
+                        "duty_dashboard", "home", "dashboard" -> {
+                            router.navigateAndClearTo(DriverScreen.DUTY_DASHBOARD, DriverScreen.PILOT_SIGNUP, inclusive = true)
                         }
                         else -> router.navigateRoute(route)
                     }

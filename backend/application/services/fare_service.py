@@ -12,17 +12,124 @@ class FareService:
         self.db = db
         self.maps_provider = get_maps_provider()
 
-    async def get_active_rule_for_category(self, category_id: str) -> FareRule:
+    @staticmethod
+    def resolve_city_code_from_coords(lat: float, lng: float) -> str:
+        """
+        Authoritative GPS resolution with rigorous boundary checks:
+        1. Validates coordinate existence, numeric types, and coordinate ranges.
+        2. Applies city-specific metropolitan operational radii:
+           - DELHI_NCR: 75 km (Delhi, Gurgaon, Noida, Ghaziabad, Faridabad)
+           - PATNA: 35 km (Patna Municipal Corp, Danapur, Phulwari Sharif, Hajipur)
+           - MUMBAI: 60 km (Mumbai Island, Suburban, Thane, Navi Mumbai, Mira-Bhayandar)
+           - LUCKNOW: 40 km (Lucknow Urban Agglomeration, Gomti Nagar, Alambagh)
+           - BENGALURU: 50 km (BBMP limits, Electronic City, Whitefield, Yelahanka)
+        3. At border/overlap coordinates, resolves strictly to the nearest city center.
+        4. Rejects out-of-bounds coordinates with HTTP 400.
+        """
+        if lat is None or lng is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pickup GPS coordinates (latitude and longitude) are strictly required for city resolution."
+            )
+        try:
+            lat = float(lat)
+            lng = float(lng)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid GPS coordinates: latitude and longitude must be valid floating point numbers."
+            )
+
+        if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lng <= 180.0):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"GPS coordinates out of valid range: lat={lat}, lng={lng}. Must be within [-90, 90] and [-180, 180]."
+            )
+
+        import math
+        city_configs = {
+            "DELHI_NCR": {"center": (28.6139, 77.2090), "max_radius_km": 75.0},
+            "PATNA": {"center": (25.5941, 85.1376), "max_radius_km": 35.0},
+            "MUMBAI": {"center": (19.0760, 72.8777), "max_radius_km": 60.0},
+            "LUCKNOW": {"center": (26.8467, 80.9462), "max_radius_km": 40.0},
+            "BENGALURU": {"center": (12.9716, 77.5946), "max_radius_km": 50.0},
+        }
+        closest_city = None
+        min_dist_km = float("inf")
+        candidate_matches = []
+
+        for city, cfg in city_configs.items():
+            c_lat, c_lng = cfg["center"]
+            d_lat = math.radians(lat - c_lat)
+            d_lng = math.radians(lng - c_lng)
+            a = math.sin(d_lat / 2)**2 + math.cos(math.radians(c_lat)) * math.cos(math.radians(lat)) * math.sin(d_lng / 2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            dist_km = 6371.0 * c
+
+            if dist_km < min_dist_km:
+                min_dist_km = dist_km
+                closest_city = city
+
+            if dist_km <= cfg["max_radius_km"]:
+                candidate_matches.append((dist_km, city))
+
+        # If location falls within one or multiple city radii, pick the closest matching one
+        if candidate_matches:
+            candidate_matches.sort(key=lambda x: x[0])
+            return candidate_matches[0][1]
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Pickup location ({lat:.4f}, {lng:.4f}) is outside our operational service area (nearest active city '{closest_city}' is {min_dist_km:.1f}km away). Operating coverage is currently available in Delhi NCR, Patna, Mumbai, Lucknow, and Bengaluru."
+        )
+
+    async def resolve_operating_city(self, city_code: Optional[str], lat: float, lng: float) -> str:
+        # 1. Authoritative resolution from physical GPS coordinates
+        coords_city = self.resolve_city_code_from_coords(lat, lng)
+
+        # 2. If client supplied a city_code, verify it does not contradict physical coordinates
+        if city_code and city_code.strip():
+            clean_city = city_code.strip().upper()
+            if clean_city != coords_city:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"City mismatch: Specified city '{clean_city}' does not match coordinates-resolved city '{coords_city}'. Cross-city fare spoofing is prohibited."
+                )
+
+        from backend.domain.models import MultiCityOperatingConfig
+        cfg = (await self.db.execute(
+            select(MultiCityOperatingConfig).where(
+                MultiCityOperatingConfig.city_code == coords_city
+            )
+        )).scalars().first()
+        if cfg and cfg.is_active is False:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Operating city '{coords_city}' is currently paused or inactive."
+            )
+        return coords_city
+
+    async def get_active_rule_for_category(self, category_id: str, city_code: Optional[str] = None) -> FareRule:
         now = datetime.now(timezone.utc)
-        stmt = select(FareRule).where(
+        base_filters = [
             FareRule.category_id == category_id,
             FareRule.is_active == True,
             FareRule.workflow_status.in_(["ACTIVE", "APPROVED"]),
             FareRule.effective_from <= now,
             (FareRule.effective_until.is_(None) | (FareRule.effective_until > now)),
-        ).order_by(FareRule.effective_from.desc(), FareRule.version.desc())
-        res = await self.db.execute(stmt)
-        rule = res.scalars().first()
+        ]
+        if city_code:
+            # 1. Exact city-scoped tariff rule has absolute priority
+            stmt_city = select(FareRule).where(*base_filters, FareRule.city_code == city_code).order_by(FareRule.effective_from.desc(), FareRule.version.desc())
+            rule = (await self.db.execute(stmt_city)).scalars().first()
+            if not rule:
+                # 2. Universal unpartitioned fallback rule (city_code IS NULL) if configured
+                stmt_univ = select(FareRule).where(*base_filters, FareRule.city_code.is_(None)).order_by(FareRule.effective_from.desc(), FareRule.version.desc())
+                rule = (await self.db.execute(stmt_univ)).scalars().first()
+        else:
+            stmt = select(FareRule).where(*base_filters).order_by(FareRule.effective_from.desc(), FareRule.version.desc())
+            rule = (await self.db.execute(stmt)).scalars().first()
+
         if not rule:
             # Check if category_id was given by vehicle code or name
             cat_stmt = select(VehicleCategory).where(
@@ -35,38 +142,28 @@ class FareService:
             cat_res = await self.db.execute(cat_stmt)
             cat = cat_res.scalars().first()
             if cat:
-                cat_rule_stmt = select(FareRule).where(
+                cat_base_filters = [
                     FareRule.category_id == cat.id,
-                    FareRule.is_active == True
-                ).order_by(FareRule.effective_from.desc())
-                rule = (await self.db.execute(cat_rule_stmt)).scalars().first()
+                    FareRule.is_active == True,
+                    FareRule.workflow_status.in_(["ACTIVE", "APPROVED"]),
+                    FareRule.effective_from <= now,
+                    (FareRule.effective_until.is_(None) | (FareRule.effective_until > now)),
+                ]
+                if city_code:
+                    stmt_cat_city = select(FareRule).where(*cat_base_filters, FareRule.city_code == city_code).order_by(FareRule.effective_from.desc(), FareRule.version.desc())
+                    rule = (await self.db.execute(stmt_cat_city)).scalars().first()
+                    if not rule:
+                        stmt_cat_univ = select(FareRule).where(*cat_base_filters, FareRule.city_code.is_(None)).order_by(FareRule.effective_from.desc(), FareRule.version.desc())
+                        rule = (await self.db.execute(stmt_cat_univ)).scalars().first()
+                else:
+                    cat_rule_stmt = select(FareRule).where(*cat_base_filters).order_by(FareRule.effective_from.desc(), FareRule.version.desc())
+                    rule = (await self.db.execute(cat_rule_stmt)).scalars().first()
 
         if not rule:
-            # Resilient fallback to any active fare rule in the database
-            fallback_stmt = select(FareRule).where(FareRule.is_active == True).order_by(FareRule.created_at.desc())
-            rule = (await self.db.execute(fallback_stmt)).scalars().first()
-
-        if not rule:
-            # Resilient in-memory fallback rule so client app calculation never breaks with 404
-            rule = FareRule(
-                id=f"fallback-fare-{category_id[:12]}",
-                category_id=category_id,
-                version=1,
-                base_fare_cents=2000,
-                per_km_cents=1000,
-                per_minute_cents=100,
-                minimum_fare_cents=3000,
-                cancellation_fee_cents=1000,
-                surge_multiplier=1.0,
-                grace_waiting_minutes=5,
-                per_minute_waiting_cents=100,
-                shared_discount_percentage=0.0,
-                fare_cap_cents=100000,
-                tax_percentage=5.0,
-                amenities_fee_cents=0,
-                is_active=True,
-                effective_from=datetime.now(timezone.utc) - timedelta(days=365),
-                workflow_status="ACTIVE",
+            city_str = f" in city '{city_code}'" if city_code else ""
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No active fare rule configured in database for vehicle category '{category_id}'{city_str}. Please configure via Admin Controls."
             )
         return rule
 
@@ -97,15 +194,17 @@ class FareService:
         self,
         category_id: str,
         pickup_lat: float, pickup_lng: float,
-        dest_lat: float, dest_lng: float
+        dest_lat: float, dest_lng: float,
+        city_code: Optional[str] = None
     ) -> Dict[str, Any]:
-        rule = await self.get_active_rule_for_category(category_id)
+        resolved_city = await self.resolve_operating_city(city_code, pickup_lat, pickup_lng)
+        rule = await self.get_active_rule_for_category(category_id, city_code=resolved_city)
         route = await self.maps_provider.get_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
 
         # Distance & Time charges in minor currency units (paise/cents)
         distance_charge = round(route.distance_km * rule.per_km_cents)
         time_charge = round(route.duration_minutes * rule.per_minute_cents)
-        amenities_fee = getattr(rule, "amenities_fee_cents", 5000) or 5000
+        amenities_fee = getattr(rule, "amenities_fee_cents", 0) or 0
         subtotal = rule.base_fare_cents + distance_charge + time_charge + amenities_fee
         
         # Minimum fare guard & surge multiplier
@@ -144,8 +243,10 @@ class FareService:
             if cat_obj:
                 real_category_id = cat_obj.id
             else:
-                first_cat = (await self.db.execute(select(VehicleCategory).limit(1))).scalars().first()
-                real_category_id = first_cat.id if first_cat else category_id
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Vehicle category '{category_id}' not found in database."
+                )
 
         # Persist estimate snapshot for auditable validation when booking
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
@@ -185,6 +286,7 @@ class FareService:
             "fare_rule_id": rule.id,
             "fare_rule_version": rule.version,
             "category_id": category_id,
+            "city_code": resolved_city,
             "distance_km": round(route.distance_km, 2),
             "estimated_duration_minutes": round(route.duration_minutes, 1),
             "base_fare_cents": rule.base_fare_cents,
@@ -218,10 +320,12 @@ class FareService:
     async def compare_all_classes(
         self,
         pickup_lat: float, pickup_lng: float,
-        dest_lat: float, dest_lng: float
+        dest_lat: float, dest_lng: float,
+        city_code: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Feature 78: Compare fare estimates across all luxury vehicle classes."""
-        stmt = select(VehicleCategory).order_by(VehicleCategory.sort_order.asc())
+        resolved_city = await self.resolve_operating_city(city_code, pickup_lat, pickup_lng)
+        stmt = select(VehicleCategory).where(VehicleCategory.is_active == True).order_by(VehicleCategory.sort_order.asc())
         res = await self.db.execute(stmt)
         categories = res.scalars().all()
 
@@ -233,7 +337,8 @@ class FareService:
                     pickup_lat=pickup_lat,
                     pickup_lng=pickup_lng,
                     dest_lat=dest_lat,
-                    dest_lng=dest_lng
+                    dest_lng=dest_lng,
+                    city_code=resolved_city
                 )
                 comparisons.append({
                     "category_id": cat.id,

@@ -690,7 +690,7 @@ fun VasantraRideRequestCard(
     val pickupTimeMin = offer?.effectivePickupDurationMinutes ?: 3
     val tripDistKm = offer?.effectiveTripDistanceKm ?: 3.5
     val tripTimeMin = offer?.effectiveTripDurationMinutes ?: 12
-    val fareRupees = offer?.estimatedDriverEarningsRupees ?: 48.0
+    val validEarnings = offer?.estimatedDriverEarningsRupees?.takeIf { it > 0.0 }
 
     Card(
         modifier = modifier,
@@ -740,15 +740,15 @@ fun VasantraRideRequestCard(
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "₹${"%.0f".format(fareRupees)}",
-                        fontSize = 24.sp,
+                        text = if (validEarnings != null) "₹${"%.0f".format(validEarnings)}" else "--",
+                        fontSize = if (validEarnings != null) 24.sp else 18.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF0F172A)
+                        color = if (validEarnings != null) Color(0xFF0F172A) else Color(0xFF9CA3AF)
                     )
                     Text(
-                        text = "Estimated Pay",
+                        text = if (validEarnings != null) "Estimated Pay" else "Pay Pending",
                         fontSize = 11.sp,
-                        color = Color(0xFF10B981),
+                        color = if (validEarnings != null) Color(0xFF10B981) else Color(0xFFF59E0B),
                         fontWeight = FontWeight.Bold
                     )
                 }

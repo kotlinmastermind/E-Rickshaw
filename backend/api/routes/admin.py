@@ -282,6 +282,8 @@ async def get_live_mobility_feed(
         min_f = rule.minimum_fare_cents / 100.0 if rule else 20.0
 
         formatted_tariffs.append({
+            "id": c.id,
+            "ruleId": rule.id if rule else None,
             "code": c.code,
             "name": c.name,
             "desc": c.description or "Clean electric mobility",
@@ -289,6 +291,11 @@ async def get_live_mobility_feed(
             "perKm": f"₹{per_km:.1f}/km",
             "perMin": f"₹{per_min:.1f}/min",
             "minFare": f"₹{min_f:.0f}",
+            "baseFareRupees": base_f,
+            "perKmRupees": per_km,
+            "perMinuteRupees": per_min,
+            "minimumFareRupees": min_f,
+            "surgeMultiplier": rule.surge_multiplier if rule else 1.0,
             "icon": icons_by_code.get(c.code, "🛺"),
             "active": True
         })
@@ -371,6 +378,32 @@ class CreateFareRulePayload(BaseModel):
     minimum_fare_cents: int = Field(..., ge=0)
     surge_multiplier: float = Field(default=1.0, ge=1.0)
     fare_cap_cents: Optional[int] = Field(default=None, ge=0)
+
+class UpdateFareRulePayload(BaseModel):
+    city_code: Optional[str] = "DELHI_NCR"
+    base_fare_rupees: Optional[float] = Field(None, ge=0.0)
+    per_km_rupees: Optional[float] = Field(None, ge=0.0)
+    per_minute_rupees: Optional[float] = Field(None, ge=0.0)
+    minimum_fare_rupees: Optional[float] = Field(None, ge=0.0)
+    surge_multiplier: Optional[float] = Field(None, ge=1.0, le=5.0)
+    cancellation_fee_rupees: Optional[float] = Field(None, ge=0.0)
+    fare_cap_rupees: Optional[float] = Field(None, ge=0.0)
+    base_fare_cents: Optional[int] = Field(None, ge=0)
+    per_km_cents: Optional[int] = Field(None, ge=0)
+    per_minute_cents: Optional[int] = Field(None, ge=0)
+    minimum_fare_cents: Optional[int] = Field(None, ge=0)
+    reason: Optional[str] = "Admin runtime tariff adjustment"
+
+class UpdateSurgePayload(BaseModel):
+    surge_multiplier: float = Field(..., ge=1.0, le=5.0)
+    category_id: Optional[str] = None
+    reason: Optional[str] = "Corridor dynamic surge adjustment"
+
+class ApproveFareDraftPayload(BaseModel):
+    reason: str = Field(..., min_length=10)
+
+class ActivateFareDraftPayload(BaseModel):
+    effective_from: Optional[datetime] = None
 
 @router.get("/dashboard/stats")
 async def get_dashboard_stats(admin: User = Depends(get_admin_actor), db: AsyncSession = Depends(get_db)):
@@ -575,6 +608,64 @@ async def create_fare_rule(
         "minimum_fare_cents": payload.minimum_fare_cents, "surge_multiplier": payload.surge_multiplier,
         "fare_cap_cents": getattr(payload, "fare_cap_cents", None), "effective_from": datetime.now(timezone.utc),
     })
+
+@router.put("/fares/category/{category_id}")
+async def update_runtime_fare_rule(
+    category_id: str,
+    payload: UpdateFareRulePayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Admin Runtime Fare Configuration Endpoint:
+    Allows real-time updates to live base fare, per km, per minute, min fare, and surge rates
+    for any vehicle category directly from backend without creating or releasing a new mobile APK.
+    """
+    service = AdminGovernanceService(db)
+    return await service.update_runtime_fare_rule(
+        admin_id=admin.id,
+        category_identifier=category_id,
+        values=payload.model_dump(exclude_unset=True)
+    )
+
+@router.post("/fares/surge")
+async def update_runtime_corridor_surge(
+    payload: UpdateSurgePayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Admin Dynamic Surge Configuration Endpoint:
+    Instantly updates surge multipliers across vehicle categories in real time.
+    """
+    service = AdminGovernanceService(db)
+    return await service.update_runtime_surge(
+        admin_id=admin.id,
+        surge_multiplier=payload.surge_multiplier,
+        category_id=payload.category_id,
+        reason=payload.reason or "Corridor surge adjustment"
+    )
+
+@router.post("/fares/{rule_id}/approve")
+async def approve_fare_draft(
+    rule_id: str,
+    payload: ApproveFareDraftPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    service = AdminGovernanceService(db)
+    return await service.approve_fare_draft(admin.id, rule_id, payload.reason)
+
+@router.post("/fares/{rule_id}/activate")
+async def activate_fare_draft(
+    rule_id: str,
+    payload: ActivateFareDraftPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    service = AdminGovernanceService(db)
+    effective_from = payload.effective_from or datetime.now(timezone.utc)
+    return await service.activate_fare_draft(admin.id, rule_id, effective_from)
 
 # ==================== PHASE 2 ADMIN FEATURES ====================
 from backend.application.services.admin_advanced_service import AdminAdvancedService

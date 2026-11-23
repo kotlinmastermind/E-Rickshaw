@@ -240,38 +240,76 @@ private fun OverspeedingModal() {
 // 6. Cash Fare Collection Calculator
 @Composable
 private fun CashCollectModal() {
+    val scope = rememberCoroutineScope()
     val offer by DriverRepository.activeOffer.collectAsState()
-    val fare = remember(offer) { (offer?.estimatedFareRupees ?: 145.0).coerceAtLeast(0.0) }
-    var tender by remember { mutableStateOf(fare.toInt().toString()) }
+    val breakdown by DriverRepository.rideBreakdown.collectAsState()
+    val currentRide = DriverRepository.currentRideId.value
+
+    val validFare: Double? = breakdown?.fareBreakdown?.grossFareRupees?.takeIf { it > 0.0 }
+        ?: offer?.estimatedFareRupees?.takeIf { it > 0.0 }
+
+    var tender by remember(validFare) { mutableStateOf(validFare?.let { "%.0f".format(it) } ?: "") }
     val tenderVal = tender.toDoubleOrNull() ?: 0.0
-    val returnChange = if (tenderVal >= fare) tenderVal - fare else 0.0
+    val returnChange = if (validFare != null && tenderVal >= validFare) tenderVal - validFare else 0.0
 
     CockpitCard {
         Text(text = "💵 Cash Fare Collection", color = PilotTextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Net Fare Payable: ₹${"%.2f".format(fare)}", color = PilotElectricCyan, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(modifier = Modifier.height(12.dp))
-        CockpitTextField(value = tender, onValueChange = { tender = it }, placeholder = "Cash received from passenger", label = "Cash Tendered (₹)")
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(text = "Return Change: ₹${"%.2f".format(returnChange)}", color = PilotAmber, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Confirm ₹${"%.2f".format(fare)} Cash Received", onClick = {
-            val cb = DriverDialogController.onConfirmAction
-            val currentRide = DriverRepository.currentRideId.value
-            if (currentRide.isNullOrBlank()) {
-                DriverDialogController.showToast("No active ride found.")
-                return@CockpitButton
-            }
-            DriverRepository.collectCash(currentRide) { ok ->
-                DriverDialogController.dismiss()
-                if (ok) {
-                    DriverDialogController.showToast("Cash payment reconciled!")
-                    cb?.invoke()
-                } else {
-                    DriverDialogController.showToast("Failed to confirm cash collection.")
+
+        if (validFare == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(PilotCrimson.copy(alpha = 0.15f))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Text(text = "⚠️ Fare Unavailable / Calculating", color = PilotCrimson, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = "Server has not finalized the authoritative fare for this ride. Cash collection is blocked until a valid fare snapshot is available.", color = PilotTextMuted, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    CockpitButton(
+                        text = "Refresh Fare Breakdown",
+                        onClick = {
+                            if (!currentRide.isNullOrBlank()) {
+                                scope.launch {
+                                    DriverRepository.fetchRideBreakdown(currentRide)
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
-        })
+        } else {
+            Text(text = "Net Fare Payable: ₹${"%.2f".format(validFare)}", color = PilotElectricCyan, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(modifier = Modifier.height(12.dp))
+            CockpitTextField(value = tender, onValueChange = { tender = it }, placeholder = "Cash received from passenger", label = "Cash Tendered (₹)")
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(text = "Return Change: ₹${"%.2f".format(returnChange)}", color = PilotAmber, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            CockpitButton(
+                text = "Confirm ₹${"%.2f".format(validFare)} Cash Received",
+                enabled = tenderVal >= validFare,
+                onClick = {
+                    val cb = DriverDialogController.onConfirmAction
+                    if (currentRide.isNullOrBlank()) {
+                        DriverDialogController.showToast("No active ride found.")
+                        return@CockpitButton
+                    }
+                    DriverRepository.collectCash(currentRide) { ok ->
+                        DriverDialogController.dismiss()
+                        if (ok) {
+                            DriverDialogController.showToast("Cash payment reconciled!")
+                            cb?.invoke()
+                        } else {
+                            DriverDialogController.showToast("Failed to confirm cash collection.")
+                        }
+                    }
+                }
+            )
+        }
     }
 }
 

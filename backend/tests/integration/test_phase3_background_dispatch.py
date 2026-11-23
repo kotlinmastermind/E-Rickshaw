@@ -12,7 +12,7 @@ from backend.infrastructure.security.crypto import create_jwt_token
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    VehicleCategory, Ride, RideAssignment, Session
+    VehicleCategory, Ride, RideAssignment, Session, Vehicle, DriverVehicleAssignment
 )
 from backend.application.services.cascading_dispatch_service import CascadingDispatchService
 from backend.application.services.ride_service import RideService
@@ -98,6 +98,33 @@ async def setup_dispatch_environment(db_session):
 
     avail2 = DriverAvailability(driver_id=driver2_profile.id, is_online=True, is_busy=False)
     db_session.add(avail2)
+
+    veh1 = Vehicle(
+        id=str(uuid.uuid4()),
+        category_id=cat.id,
+        make="Mercedes-Benz",
+        model="E-Class",
+        year=2024,
+        license_plate=f"DL-01-LUX-{suffix[:4].upper()}",
+        color="Black",
+        is_active=True
+    )
+    veh2 = Vehicle(
+        id=str(uuid.uuid4()),
+        category_id=cat.id,
+        make="BMW",
+        model="5-Series",
+        year=2024,
+        license_plate=f"DL-02-LUX-{suffix[:4].upper()}",
+        color="White",
+        is_active=True
+    )
+    db_session.add_all([veh1, veh2])
+    await db_session.flush()
+
+    assign_v1 = DriverVehicleAssignment(driver_id=driver1_profile.id, vehicle_id=veh1.id, is_active=True)
+    assign_v2 = DriverVehicleAssignment(driver_id=driver2_profile.id, vehicle_id=veh2.id, is_active=True)
+    db_session.add_all([assign_v1, assign_v2])
 
     # Sessions for tokens
     sess_expiry = datetime.now(timezone.utc) + timedelta(days=7)

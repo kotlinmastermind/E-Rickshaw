@@ -6,7 +6,7 @@ from backend.application.services.cascading_dispatch_service import CascadingDis
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
     DriverLocation, VehicleCategory,
-    Ride, RideAssignment, RideStatusEvent
+    Ride, RideAssignment, RideStatusEvent, Vehicle, DriverVehicleAssignment
 )
 from backend.infrastructure.cache.redis_client import redis_client
 
@@ -83,6 +83,16 @@ async def test_driver_timeout_cascades_to_driver_b(db_session):
     avail_a = DriverAvailability(driver_id=driver_a.id, is_online=True, is_busy=False)
     avail_b = DriverAvailability(driver_id=driver_b.id, is_online=True, is_busy=False)
     db_session.add_all([avail_a, avail_b])
+
+    veh_a = Vehicle(id=str(uuid.uuid4()), category_id=cat.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-{suffix}-A", is_active=True)
+    veh_b = Vehicle(id=str(uuid.uuid4()), category_id=cat.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-{suffix}-B", is_active=True)
+    db_session.add_all([veh_a, veh_b])
+    await db_session.flush()
+
+    db_session.add_all([
+        DriverVehicleAssignment(driver_id=driver_a.id, vehicle_id=veh_a.id, is_active=True),
+        DriverVehicleAssignment(driver_id=driver_b.id, vehicle_id=veh_b.id, is_active=True)
+    ])
 
     # Telemetry: Driver A is 10m away, Driver B is 50m away
     # Pickup at (19.0760, 72.8777)
@@ -257,6 +267,16 @@ async def test_all_drivers_rejecting_leads_to_expired_lifecycle(db_session):
     loc = DriverLocation(driver_id=driver.id, latitude=19.0760, longitude=72.8777)
     db_session.add_all([avail, loc])
 
+    veh = Vehicle(id=str(uuid.uuid4()), category_id=cat.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-{suffix}-AFK", is_active=True)
+    db_session.add(veh)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=driver.id, vehicle_id=veh.id, is_active=True))
+
+    veh = Vehicle(id=str(uuid.uuid4()), category_id=cat.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-{suffix}-EXP", is_active=True)
+    db_session.add(veh)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=driver.id, vehicle_id=veh.id, is_active=True))
+
     ride = Ride(
         customer_id=customer_profile.id,
         vehicle_category_id=cat.id,
@@ -349,6 +369,16 @@ async def test_server_authoritative_safety_fallback_execution(db_session):
     avail = DriverAvailability(driver_id=driver.id, is_online=True, is_busy=False)
     loc = DriverLocation(driver_id=driver.id, latitude=19.0760, longitude=72.8777)
     db_session.add_all([avail, loc])
+
+    veh = Vehicle(id=str(uuid.uuid4()), category_id=cat.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-{suffix}-AFK", is_active=True)
+    db_session.add(veh)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=driver.id, vehicle_id=veh.id, is_active=True))
+
+    veh = Vehicle(id=str(uuid.uuid4()), category_id=cat.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-{suffix}-EXP", is_active=True)
+    db_session.add(veh)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=driver.id, vehicle_id=veh.id, is_active=True))
 
     ride = Ride(
         customer_id=customer_profile.id,

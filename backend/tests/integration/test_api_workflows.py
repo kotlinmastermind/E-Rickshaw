@@ -65,6 +65,7 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             "email": "drv1_lifecycle@vaisentra.com",
             "phone_number": drv1_phone,
             "password": "Password123!",
+            "vehicle_type": "SEDAN",
             "vehicle_name": "Sedan Prime",
             "vehicle_no": "DL-01-AA-0001"
         })
@@ -79,6 +80,7 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             "email": "drv2_lifecycle@vaisentra.com",
             "phone_number": drv2_phone,
             "password": "Password123!",
+            "vehicle_type": "SEDAN",
             "vehicle_name": "Sedan Prime",
             "vehicle_no": "DL-01-AA-0002"
         })
@@ -140,14 +142,47 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
                 "destination_latitude": 19.0974,
                 "destination_longitude": 72.8744
             })
-            assert est_resp.status_code == 200
+            assert est_resp.status_code == 200, f"ESTIMATE ERROR: {est_resp.status_code} - {est_resp.text}"
             estimate = est_resp.json()
             assert estimate["estimated_fare_cents"] > 0
             est_id = estimate["estimate_id"]
 
             # 5. Customer creates Ride Request
+            # Negative test: missing category_id strictly returns 400
+            bad_req_no_cat = await client.post("/api/v1/rides/request", json={
+                "estimate_id": est_id,
+                "pickup_address": "The Taj Mahal Palace, Colaba",
+                "destination_address": "Chhatrapati Shivaji Maharaj T2 VIP Terminal",
+                "payment_method": "UPI"
+            }, headers=cust_headers)
+            assert bad_req_no_cat.status_code == 400
+            assert "category_id is required" in bad_req_no_cat.text
+
+            # Negative test: null category_id strictly returns 400
+            bad_req_null_cat = await client.post("/api/v1/rides/request", json={
+                "estimate_id": est_id,
+                "category_id": None,
+                "pickup_address": "The Taj Mahal Palace, Colaba",
+                "destination_address": "Chhatrapati Shivaji Maharaj T2 VIP Terminal",
+                "payment_method": "UPI"
+            }, headers=cust_headers)
+            assert bad_req_null_cat.status_code == 400
+            assert "category_id is required" in bad_req_null_cat.text
+
+            # Negative test: nonexistent category_id strictly returns 404
+            bad_req_inv = await client.post("/api/v1/rides/request", json={
+                "estimate_id": est_id,
+                "category_id": "nonexistent_cat_99999",
+                "pickup_address": "The Taj Mahal Palace, Colaba",
+                "destination_address": "Chhatrapati Shivaji Maharaj T2 VIP Terminal",
+                "payment_method": "UPI"
+            }, headers=cust_headers)
+            assert bad_req_inv.status_code == 404
+
+            # Valid booking with mandatory category_id
             ride_req_resp = await client.post("/api/v1/rides/request", json={
                 "estimate_id": est_id,
+                "category_id": sedan_cat_id,
                 "pickup_address": "The Taj Mahal Palace, Colaba",
                 "destination_address": "Chhatrapati Shivaji Maharaj T2 VIP Terminal",
                 "payment_method": "UPI"

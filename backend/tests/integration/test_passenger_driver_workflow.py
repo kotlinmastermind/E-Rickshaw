@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    VehicleCategory, FareRule, Ride, RideAssignment
+    VehicleCategory, FareRule, Ride, RideAssignment, Vehicle, DriverVehicleAssignment
 )
 from backend.domain.state_machine.ride_state_machine import RideStateMachine, RideStatus, ActorRole
 from backend.application.services.smart_dispatch_service import SmartDispatchService
@@ -59,6 +59,16 @@ async def test_complete_passenger_driver_dispatch_and_reassignment_flow(db_sessi
     d_avail1 = DriverAvailability(driver_id=d_prof1.id, is_online=True, is_busy=False)
     d_avail2 = DriverAvailability(driver_id=d_prof2.id, is_online=True, is_busy=False)
     db_session.add_all([d_avail1, d_avail2])
+
+    veh1 = Vehicle(id=str(uuid.uuid4()), category_id=cat.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-1-{suffix}", is_active=True)
+    veh2 = Vehicle(id=str(uuid.uuid4()), category_id=cat.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-2-{suffix}", is_active=True)
+    db_session.add_all([veh1, veh2])
+    await db_session.flush()
+
+    db_session.add_all([
+        DriverVehicleAssignment(driver_id=d_prof1.id, vehicle_id=veh1.id, is_active=True),
+        DriverVehicleAssignment(driver_id=d_prof2.id, vehicle_id=veh2.id, is_active=True)
+    ])
 
     live_loc = LiveLocationService(db=db_session)
     # Driver 1 at (28.6140, 77.2091)

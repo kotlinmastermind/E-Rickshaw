@@ -320,6 +320,7 @@ class FareRule(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     category_id: Mapped[str] = mapped_column(String(36), ForeignKey("vehicle_categories.id"), nullable=False)
+    city_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default="DELHI_NCR", index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     base_fare_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     per_km_cents: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -376,6 +377,34 @@ class FareEstimate(Base):
     
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class FarePriceLock(Base):
+    __tablename__ = "fare_price_locks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    customer_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("customer_profiles.id"), nullable=True, index=True)
+    category_id: Mapped[str] = mapped_column(String(36), ForeignKey("vehicle_categories.id"), nullable=False)
+    city_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default="DELHI_NCR")
+    fare_rule_id: Mapped[str] = mapped_column(String(36), ForeignKey("fare_rules.id"), nullable=False)
+    fare_rule_version: Mapped[int] = mapped_column(Integer, default=1)
+    pickup_latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    pickup_longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    destination_latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    destination_longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    distance_km: Mapped[float] = mapped_column(Float, default=0.0)
+    duration_minutes: Mapped[float] = mapped_column(Float, default=0.0)
+    locked_fare_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    surge_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    lock_duration_hours: Mapped[int] = mapped_column(Integer, default=24)
+    status: Mapped[str] = mapped_column(String(32), default="ACTIVE", index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    consumed_ride_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("rides.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    category: Mapped["VehicleCategory"] = relationship()
+    fare_rule: Mapped["FareRule"] = relationship()
 
 
 class Ride(Base):
@@ -827,6 +856,7 @@ class GeofenceZone(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
+    city_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default="DELHI_NCR", index=True)
     zone_type: Mapped[str] = mapped_column(String(30), default="SERVICE_AREA")  # SERVICE_AREA, SURGE_ZONE, RESTRICTED
     coordinates_json: Mapped[str] = mapped_column(Text, nullable=False)  # JSON array [[lat, lng], ...]
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

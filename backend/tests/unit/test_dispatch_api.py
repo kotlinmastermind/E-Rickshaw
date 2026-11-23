@@ -10,7 +10,7 @@ from backend.main import app
 from backend.api.deps import get_current_user, get_current_driver
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    VehicleCategory, FareRule, Ride
+    VehicleCategory, FareRule, Ride, Vehicle, DriverVehicleAssignment
 )
 
 
@@ -65,6 +65,28 @@ async def test_dispatch_api_endpoints(db_session):
         is_busy=False
     )
     db_session.add(driver_avail)
+    await db_session.flush()
+
+    vehicle = Vehicle(
+        id=str(uuid.uuid4()),
+        category_id=cat.id,
+        make="Mahindra",
+        model="Treo",
+        year=2024,
+        license_plate=f"DL-01-{suffix.upper()}",
+        color="Green",
+        is_active=True
+    )
+    db_session.add(vehicle)
+    await db_session.flush()
+
+    driver_assignment = DriverVehicleAssignment(
+        id=str(uuid.uuid4()),
+        driver_id=driver_profile.id,
+        vehicle_id=vehicle.id,
+        is_active=True
+    )
+    db_session.add(driver_assignment)
     await db_session.flush()
 
     # Customer User & Profile

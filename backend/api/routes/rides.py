@@ -24,6 +24,7 @@ class IntermediateStopInput(BaseModel):
 
 class RideRequestPayload(BaseModel):
     estimate_id: Optional[str] = None
+    category_id: Optional[str] = None
     pickup_address: str
     destination_address: str
     pickup_latitude: Optional[float] = None
@@ -38,6 +39,7 @@ class RideRequestPayload(BaseModel):
 
 class AdvancedRideRequestPayload(BaseModel):
     estimate_id: str
+    category_id: Optional[str] = None
     pickup_address: str
     destination_address: str
     payment_method: str = "UPI"
@@ -100,6 +102,7 @@ class AdvancedRideRequestPayload(BaseModel):
 
 class ScheduleRidePayload(BaseModel):
     estimate_id: str
+    category_id: Optional[str] = None
     pickup_address: str
     destination_address: str
     scheduled_pickup_time: datetime
@@ -234,9 +237,15 @@ async def create_ride_request(
 
     service = RideService(db)
     stops_data = [s.model_dump() for s in payload.stops] if payload.stops else None
+    if not payload.category_id or not payload.category_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vehicle category_id is required. Please select a valid active vehicle category."
+        )
     result = await service.create_ride_request(
         customer_user_id=user.id,
         estimate_id=payload.estimate_id,
+        category_id=payload.category_id,
         pickup_address=payload.pickup_address,
         destination_address=payload.destination_address,
         pickup_latitude=payload.pickup_latitude,
@@ -268,9 +277,15 @@ async def schedule_ride(
     DispatchAdvancedService.validate_schedule_window(payload.scheduled_pickup_time)
     service = RideService(db)
     stops_data = [s.model_dump() for s in payload.stops] if payload.stops else None
+    if not payload.category_id or not payload.category_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vehicle category_id is required. Please select a valid active vehicle category."
+        )
     return await service.create_ride_request(
         customer_user_id=user.id,
         estimate_id=payload.estimate_id,
+        category_id=payload.category_id,
         pickup_address=payload.pickup_address,
         destination_address=payload.destination_address,
         payment_method=payload.payment_method,
@@ -293,6 +308,7 @@ async def create_advanced_ride_request(
         estimate_id=payload.estimate_id,
         pickup_address=payload.pickup_address,
         destination_address=payload.destination_address,
+        category_id=payload.category_id,
         payment_method=payload.payment_method,
         is_scheduled=payload.is_scheduled,
         scheduled_pickup_time=payload.scheduled_pickup_time,
@@ -727,6 +743,7 @@ async def get_current_active_ride(
         "active_ride": {
             "id": ride.id,
             "status": ride.status,
+            "category_id": ride.vehicle_category_id,
             "pickup_address": ride.pickup_address,
             "pickup_latitude": ride.pickup_latitude,
             "pickup_longitude": ride.pickup_longitude,

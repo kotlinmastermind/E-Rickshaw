@@ -12,7 +12,10 @@ from sqlalchemy import select
 from backend.main import app
 from backend.infrastructure.database.session import async_session_maker
 from datetime import datetime, timezone, timedelta
-from backend.domain.models.models import User, DriverProfile, DriverLocation, DriverAvailability, Ride, Session, CustomerProfile, Wallet
+from backend.domain.models.models import (
+    User, DriverProfile, DriverLocation, DriverAvailability,
+    Ride, Session, CustomerProfile, Wallet, VehicleCategory, FareRule
+)
 from backend.infrastructure.security.crypto import create_jwt_token, hash_secret
 
 
@@ -31,8 +34,6 @@ async def test_driver_batch_location_ingestion():
             is_active=True
         )
         session.add(user)
-        session.add(CustomerProfile(user_id=uid))
-        session.add(Wallet(user_id=uid, balance_cents=50000))
         sess_record = Session(
             id=sid,
             user_id=uid,
@@ -91,6 +92,26 @@ async def test_ride_request_idempotency_key_replay():
         session.add(user)
         session.add(CustomerProfile(user_id=uid))
         session.add(Wallet(user_id=uid, balance_cents=50000))
+
+        cat = VehicleCategory(
+            id=f"cat_{uid[:8]}",
+            code=f"IDEM_{uid[:6].upper()}",
+            name="Idempotency Auto",
+            is_active=True
+        )
+        session.add(cat)
+        rule = FareRule(
+            id=f"rule_{uid[:8]}",
+            category_id=cat.id,
+            city_code="DELHI_NCR",
+            version=1,
+            base_fare_cents=2500,
+            per_km_cents=800,
+            per_minute_cents=100,
+            minimum_fare_cents=2500,
+            is_active=True
+        )
+        session.add(rule)
         sess_record = Session(
             id=sid,
             user_id=uid,
@@ -110,6 +131,7 @@ async def test_ride_request_idempotency_key_replay():
 
     payload = {
         "estimate_id": f"est_{uuid.uuid4()}",
+        "category_id": cat.id,
         "pickup_address": "Connaught Place Inner Circle",
         "destination_address": "India Gate C-Hexagon",
         "pickup_latitude": 28.6328,
@@ -121,6 +143,24 @@ async def test_ride_request_idempotency_key_replay():
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Negative test 1: missing category_id
+        bad_p1 = dict(payload)
+        bad_p1.pop("category_id")
+        r_bad1 = await client.post("/api/v1/rides/request", json=bad_p1, headers=headers)
+        assert r_bad1.status_code == 400
+        assert "category_id is required" in r_bad1.text
+
+        # Negative test 2: null category_id
+        bad_p2 = dict(payload, category_id=None)
+        r_bad2 = await client.post("/api/v1/rides/request", json=bad_p2, headers=headers)
+        assert r_bad2.status_code == 400
+        assert "category_id is required" in r_bad2.text
+
+        # Negative test 3: invalid category_id
+        bad_p3 = dict(payload, category_id="invalid_cat_99999")
+        r_bad3 = await client.post("/api/v1/rides/request", json=bad_p3, headers=headers)
+        assert r_bad3.status_code == 404
+
         # First request: should create ride
         resp1 = await client.post("/api/v1/rides/request", json=payload, headers=headers)
         assert resp1.status_code == 200, resp1.text

@@ -750,8 +750,8 @@
             <div class="glass-card p-6 rounded-2xl border border-border space-y-5">
                 <div class="flex items-center justify-between">
                     <div>
-                        <h3 class="text-sm font-bold text-white">East Delhi Feeder Corridor Dynamic Surge</h3>
-                        <p class="text-xs text-slate-400">Applies automatic multiplier to Anand Vihar & Mayur Vihar high-frequency corridors</p>
+                        <h3 class="text-sm font-bold text-white">Platform Baseline Dynamic Surge Multiplier</h3>
+                        <p class="text-xs text-slate-400">Updates live baseline surge across active vehicle categories. (For geofenced corridor surge, see Geofence Zone Surge Rules)</p>
                     </div>
                     <span id="surge-slider-value" class="text-2xl font-extrabold text-cyan-glow font-mono">1.4x</span>
                 </div>
@@ -1520,6 +1520,73 @@
         </div>
     </div>
 
+    <!-- Modal: Runtime Fare & Tariff Configuration -->
+    <div id="modal-tariff-edit" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden p-4">
+        <div class="glass-panel w-full max-w-lg rounded-2xl border border-cyan-glow/30 p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-border pb-3">
+                <div class="flex items-center gap-3">
+                    <span id="tariff-edit-icon" class="text-3xl">🛺</span>
+                    <div>
+                        <h3 id="tariff-edit-name" class="text-base font-bold text-white">Configure Tariff Rates</h3>
+                        <p id="tariff-edit-code" class="text-[11px] font-mono text-cyan-glow">E_RICKSHAW_STANDARD</p>
+                    </div>
+                </div>
+                <button onclick="closeTariffEditModal()" class="w-8 h-8 rounded-lg bg-surface border border-border flex items-center justify-center text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <p class="text-xs text-slate-400">
+                ⚡ <strong>Instant Runtime Update:</strong> Rates apply live immediately to all customer bookings and driver settlement calculations without building or installing a new APK.
+            </p>
+            <div class="grid grid-cols-2 gap-3 text-xs">
+                <div class="col-span-2">
+                    <label class="block text-[11px] text-cyan-glow font-semibold mb-1">Target Operating City (India-Wide Multi-City)</label>
+                    <select id="tariff-input-city" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-glow font-bold">
+                        <option value="DELHI_NCR">Delhi NCR (DELHI_NCR)</option>
+                        <option value="PATNA">Patna (PATNA)</option>
+                        <option value="MUMBAI">Mumbai (MUMBAI)</option>
+                        <option value="LUCKNOW">Lucknow (LUCKNOW)</option>
+                        <option value="BENGALURU">Bengaluru (BENGALURU)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-300 font-semibold mb-1">Base Fare (₹)</label>
+                    <input type="number" id="tariff-input-base" min="0" step="1" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-glow font-mono font-bold">
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-300 font-semibold mb-1">Per Kilometer Rate (₹/km)</label>
+                    <input type="number" id="tariff-input-per-km" min="0" step="0.5" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-cyan-glow focus:outline-none focus:border-cyan-glow font-mono font-bold">
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-300 font-semibold mb-1">Per Minute Rate (₹/min)</label>
+                    <input type="number" id="tariff-input-per-min" min="0" step="0.1" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-glow font-mono">
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-300 font-semibold mb-1">Minimum Fare (₹)</label>
+                    <input type="number" id="tariff-input-min-fare" min="0" step="1" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-emerald-glow focus:outline-none focus:border-cyan-glow font-mono font-bold">
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-300 font-semibold mb-1">Surge Multiplier (1.0 - 5.0x)</label>
+                    <input type="number" id="tariff-input-surge" min="1.0" max="5.0" step="0.1" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-amber-glow focus:outline-none focus:border-cyan-glow font-mono font-bold">
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-300 font-semibold mb-1">Cancellation Fee (₹)</label>
+                    <input type="number" id="tariff-input-cancellation" min="0" step="5" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-rose-400 focus:outline-none focus:border-cyan-glow font-mono">
+                </div>
+            </div>
+            <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Audit Governance Reason</label>
+                <input type="text" id="tariff-input-reason" placeholder="e.g. Fuel price adjustment / peak festival revision" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-glow">
+            </div>
+            <div class="flex gap-3 pt-2 border-t border-border">
+                <button onclick="submitTariffRatesConfirm()" class="flex-1 py-2.5 rounded-xl bg-cyan-glow text-black font-extrabold text-xs transition-all shadow-lg shadow-cyan-glow/20 hover:opacity-90">
+                    Apply Live to Fleet & Mobile Apps 🚀
+                </button>
+                <button onclick="closeTariffEditModal()" class="px-4 py-2.5 rounded-xl bg-surface border border-border text-slate-400 hover:text-white text-xs">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification Overlay -->
     <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
@@ -2139,7 +2206,7 @@
             ];
 
             grid.innerHTML = '';
-            categories.forEach(cat => {
+            categories.forEach((cat, idx) => {
                 const card = document.createElement('div');
                 card.className = 'glass-card p-4 rounded-2xl border border-border flex flex-col justify-between space-y-3';
                 card.innerHTML = `
@@ -2149,7 +2216,7 @@
                             <span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow text-[10px] font-mono font-bold">ACTIVE TARIFF</span>
                         </div>
                         <h4 class="text-sm font-bold text-white">${cat.name}</h4>
-                        <p class="text-xs text-slate-400">${cat.desc}</p>
+                        <p class="text-xs text-slate-400">${cat.desc || 'Clean electric mobility'}</p>
                     </div>
 
                     <div class="pt-2 border-t border-border space-y-1.5 text-xs font-mono">
@@ -2171,12 +2238,96 @@
                         </div>
                     </div>
 
-                    <button onclick="showToast('Tariff editor opened for ${cat.name}')" class="w-full py-1.5 rounded-lg bg-surface hover:bg-card border border-border text-xs text-slate-300 hover:text-cyan-glow font-semibold transition-all">
-                        Adjust Rates
+                    <button onclick="openTariffEditModal(${idx})" class="w-full py-1.5 rounded-lg bg-surface hover:bg-card border border-border text-xs text-slate-300 hover:text-cyan-glow font-semibold transition-all">
+                        Adjust Rates ⚙️
                     </button>
                 `;
                 grid.appendChild(card);
             });
+        }
+
+        let ACTIVE_EDIT_TARIFF = null;
+
+        function openTariffEditModal(idx) {
+            const cat = STATE.categories[idx];
+            if (!cat) return;
+            ACTIVE_EDIT_TARIFF = cat;
+
+            document.getElementById('tariff-edit-icon').innerText = cat.icon || '🛺';
+            document.getElementById('tariff-edit-name').innerText = `Configure ${cat.name}`;
+            document.getElementById('tariff-edit-code').innerText = cat.code || cat.id;
+
+            // Extract numeric defaults
+            const parseNum = (str, fallback) => {
+                if (typeof str === 'number') return str;
+                if (!str) return fallback;
+                const m = str.match(/[\d.]+/);
+                return m ? parseFloat(m[0]) : fallback;
+            };
+
+            document.getElementById('tariff-input-base').value = cat.baseFareRupees ?? parseNum(cat.base, 20);
+            document.getElementById('tariff-input-per-km').value = cat.perKmRupees ?? parseNum(cat.perKm, 10);
+            document.getElementById('tariff-input-per-min').value = cat.perMinuteRupees ?? parseNum(cat.perMin, 1);
+            document.getElementById('tariff-input-min-fare').value = cat.minimumFareRupees ?? parseNum(cat.minFare, 20);
+            document.getElementById('tariff-input-surge').value = cat.surgeMultiplier ?? 1.0;
+            document.getElementById('tariff-input-cancellation').value = 10;
+            document.getElementById('tariff-input-reason').value = '';
+
+            document.getElementById('modal-tariff-edit').classList.remove('hidden');
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function closeTariffEditModal() {
+            document.getElementById('modal-tariff-edit').classList.add('hidden');
+            ACTIVE_EDIT_TARIFF = null;
+        }
+
+        async function submitTariffRatesConfirm() {
+            if (!ACTIVE_EDIT_TARIFF) return;
+            const cat = ACTIVE_EDIT_TARIFF;
+            const targetId = cat.id || cat.code;
+
+            const baseFare = parseFloat(document.getElementById('tariff-input-base').value) || 0;
+            const perKm = parseFloat(document.getElementById('tariff-input-per-km').value) || 0;
+            const perMin = parseFloat(document.getElementById('tariff-input-per-min').value) || 0;
+            const minFare = parseFloat(document.getElementById('tariff-input-min-fare').value) || 0;
+            const surge = parseFloat(document.getElementById('tariff-input-surge').value) || 1.0;
+            const cancellation = parseFloat(document.getElementById('tariff-input-cancellation').value) || 10;
+            const cityCode = document.getElementById('tariff-input-city')?.value || 'DELHI_NCR';
+            const reason = document.getElementById('tariff-input-reason').value.trim() || 'Admin runtime tariff adjustment via Controls Center';
+
+            showToast(`Applying runtime tariff update for ${cat.name} (${cityCode})...`);
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+
+                const res = await fetch(`/api/v1/admin/fares/category/${targetId}`, {
+                    method: 'PUT',
+                    headers: headers,
+                    body: JSON.stringify({
+                        city_code: cityCode,
+                        base_fare_rupees: baseFare,
+                        per_km_rupees: perKm,
+                        per_minute_rupees: perMin,
+                        minimum_fare_rupees: minFare,
+                        surge_multiplier: surge,
+                        cancellation_fee_rupees: cancellation,
+                        reason: reason
+                    })
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    showToast(`✅ ${cat.name} (${data.city_code || cityCode}) rates updated live! Base: ₹${data.base_fare_rupees}, Per Km: ₹${data.per_km_rupees}. Effective on mobile apps without APK update.`);
+                    closeTariffEditModal();
+                    await loadInitialData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Failed to update tariff rates', 'error');
+                }
+            } catch (e) {
+                showToast('Network error while committing tariff rates', 'error');
+            }
         }
 
         // Surge Slider Action
@@ -2184,10 +2335,32 @@
             document.getElementById('surge-slider-value').innerText = `${parseFloat(val).toFixed(1)}x`;
         }
 
-        function saveCorridorSurge() {
-            const val = document.getElementById('surge-range-slider').value;
-            showToast(`Corridor Surge of ${val}x committed to Supabase active rules!`);
-            document.getElementById('stat-surge').innerText = `${val}x`;
+        async function saveCorridorSurge() {
+            const val = parseFloat(document.getElementById('surge-range-slider').value) || 1.0;
+            showToast(`Committing Corridor Surge of ${val}x live to backend...`);
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+
+                const res = await fetch('/api/v1/admin/fares/surge', {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        surge_multiplier: val,
+                        reason: 'Corridor surge adjusted via Admin slider'
+                    })
+                });
+                if (res.ok) {
+                    showToast(`✅ Corridor Surge of ${val}x committed to Supabase active rules!`);
+                    document.getElementById('stat-surge').innerText = `${val}x`;
+                    await loadInitialData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Surge update failed', 'error');
+                }
+            } catch (e) {
+                showToast('Network error updating corridor surge', 'error');
+            }
         }
 
         // KYC Modal Logic

@@ -266,7 +266,7 @@ class PaymentService:
         if not driver_prof:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is not a registered chauffeur.")
 
-        ride = (await self.db.execute(select(Ride).where(Ride.id == ride_id))).scalar_one_or_none()
+        ride = (await self.db.execute(select(Ride).where(Ride.id == ride_id).with_for_update())).scalar_one_or_none()
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
 
@@ -274,12 +274,17 @@ class PaymentService:
         if ride.assigned_driver_id != driver_prof.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not the designated chauffeur for this journey.")
 
-        stmt = select(Payment).where(Payment.ride_id == ride_id)
+        stmt = select(Payment).where(Payment.ride_id == ride_id).with_for_update()
         res = await self.db.execute(stmt)
         payment = res.scalar_one_or_none()
         if not payment:
             # Initialize payment for cash ride if not yet created
             fare = int(ride.final_fare_cents or ride.estimated_fare_cents or 0)
+            if fare <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot collect cash: Ride does not have a valid final fare or fare snapshot."
+                )
             payment = Payment(
                 ride_id=ride_id,
                 customer_id=ride.customer_id,
@@ -292,6 +297,18 @@ class PaymentService:
             )
             self.db.add(payment)
             await self.db.flush()
+
+        if payment.amount_cents <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot collect cash: Payment amount is invalid or zero."
+            )
+
+        if payment.cash_collected_confirmed or payment.status in ["CAPTURED", "SETTLED"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cash collection for this ride has already been confirmed and processed."
+            )
 
         if payment.payment_method != "CASH":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Journey was not designated for physical cash settlement.")
@@ -309,7 +326,7 @@ class PaymentService:
         fare_cents = payment.amount_cents
         commission_cents = int(round(fare_cents * 0.15))
 
-        wallet_res = await self.db.execute(select(DriverWallet).where(DriverWallet.driver_id == driver_prof.id))
+        wallet_res = await self.db.execute(select(DriverWallet).where(DriverWallet.driver_id == driver_prof.id).with_for_update())
         wallet = wallet_res.scalar_one_or_none()
         if not wallet:
             wallet = DriverWallet(driver_id=driver_prof.id, balance_cents=0, currency="INR")

@@ -267,6 +267,9 @@ object DriverRepository {
     private val _assignedVehicle = MutableStateFlow<DriverVehicleDto?>(null)
     val assignedVehicle: StateFlow<DriverVehicleDto?> = _assignedVehicle.asStateFlow()
 
+    private val _vehicleCategories = MutableStateFlow<List<VehicleCategoryDto>>(emptyList())
+    val vehicleCategories: StateFlow<List<VehicleCategoryDto>> = _vehicleCategories.asStateFlow()
+
     private val _ledger = MutableStateFlow<List<LedgerItemDto>>(emptyList())
     val ledger: StateFlow<List<LedgerItemDto>> = _ledger.asStateFlow()
 
@@ -412,7 +415,8 @@ object DriverRepository {
     suspend fun registerDriver(
         phone: String,
         fullName: String = "Rohit Kumar",
-        password: String = "DriverPass123456!"
+        password: String = "DriverPass123456!",
+        vehicleType: String = "E_RICKSHAW_STANDARD"
     ): Result<Boolean> {
         return try {
             val digits = phone.filter { it.isDigit() }
@@ -423,7 +427,8 @@ object DriverRepository {
                     email = "driver_${digits.takeLast(6)}@vaisentra.com",
                     fullName = fullName,
                     password = password,
-                    username = "driver_${digits.takeLast(6)}"
+                    username = "driver_${digits.takeLast(6)}",
+                    vehicleType = vehicleType
                 )
             )
             val body = res.body()
@@ -448,6 +453,22 @@ object DriverRepository {
             }
         } catch (e: Exception) {
             Log.e(TAG, "registerDriver exception: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchVehicleCategories(): Result<List<VehicleCategoryDto>> {
+        return try {
+            val res = DriverNetworkClient.apiService.getVehicleCategories()
+            if (res.isSuccessful && res.body() != null) {
+                val list = res.body()!!.filter { it.isActive }
+                _vehicleCategories.value = list
+                Result.success(list)
+            } else {
+                Result.failure(Exception("Failed to load vehicle categories: ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchVehicleCategories error: ${e.message}", e)
             Result.failure(e)
         }
     }

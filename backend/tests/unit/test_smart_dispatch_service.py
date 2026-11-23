@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from backend.domain.models import (
     Ride, RideAssignment, DriverProfile, DriverAvailability,
-    User, CustomerProfile, VehicleCategory, FareRule
+    User, CustomerProfile, VehicleCategory, FareRule, Vehicle, DriverVehicleAssignment
 )
 from backend.application.services.smart_dispatch_service import SmartDispatchService
 from backend.application.services.live_location_service import LiveLocationService
@@ -67,6 +67,20 @@ async def test_smart_dispatch_lifecycle(db_session):
         is_busy=False
     )
     db_session.add(driver_avail)
+    await db_session.flush()
+
+    veh = Vehicle(
+        id=str(uuid.uuid4()),
+        category_id=cat.id,
+        make="Mayuri",
+        model="Deluxe",
+        year=2024,
+        license_plate=f"DL-H3-{suffix}",
+        is_active=True
+    )
+    db_session.add(veh)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=driver_profile.id, vehicle_id=veh.id, is_active=True))
     await db_session.flush()
 
     # 2. Ingest driver location in Central Delhi (28.6139, 77.2090)
@@ -199,6 +213,20 @@ async def test_smart_dispatch_rejection_and_exhaustion(db_session):
         is_busy=False
     )
     db_session.add(driver_avail)
+    await db_session.flush()
+
+    veh = Vehicle(
+        id=str(uuid.uuid4()),
+        category_id=cat.id,
+        make="Mayuri",
+        model="Deluxe",
+        year=2024,
+        license_plate=f"DL-H3-{suffix}",
+        is_active=True
+    )
+    db_session.add(veh)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=driver_profile.id, vehicle_id=veh.id, is_active=True))
     await db_session.flush()
 
     live_loc = LiveLocationService(db=db_session)

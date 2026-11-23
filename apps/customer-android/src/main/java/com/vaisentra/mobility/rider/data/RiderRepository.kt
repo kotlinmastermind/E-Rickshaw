@@ -302,16 +302,20 @@ object RiderRepository {
                 _categories.value = list
                 Result.success(list)
             } else {
-                // Fallback to pre-seeded live categories if network fails
-                val fallback = defaultVehicleCategories()
-                _categories.value = fallback
-                Result.success(fallback)
+                val raw = response.errorBody()?.string()
+                val err = parseApiErrorMessage(raw, "Failed to load vehicle categories: HTTP ${response.code()}")
+                Result.failure(Exception(err))
             }
         } catch (e: Exception) {
-            val fallback = defaultVehicleCategories()
-            _categories.value = fallback
-            Result.success(fallback)
+            if (e is CancellationException) throw e
+            Result.failure(e)
         }
+    }
+
+    sealed class FareCompareException(message: String, cause: Throwable? = null) : Exception(message, cause) {
+        class NetworkError(message: String, cause: Throwable? = null) : FareCompareException(message, cause)
+        class MissingFareConfiguration(message: String) : FareCompareException(message)
+        class HttpError(val code: Int, message: String) : FareCompareException(message)
     }
 
     suspend fun compareFares(
@@ -324,10 +328,22 @@ object RiderRepository {
             if (response.isSuccessful && response.body() != null) {
                 Result.success(response.body()!!)
             } else {
-                Result.success(defaultFareComparisons())
+                val code = response.code()
+                val raw = response.errorBody()?.string()
+                val err = parseApiErrorMessage(raw, "Fare calculation unavailable: HTTP $code")
+                if (code == 404) {
+                    Result.failure(FareCompareException.MissingFareConfiguration(err))
+                } else {
+                    Result.failure(FareCompareException.HttpError(code, err))
+                }
             }
         } catch (e: Exception) {
-            Result.success(defaultFareComparisons())
+            if (e is CancellationException) throw e
+            if (e is java.io.IOException) {
+                Result.failure(FareCompareException.NetworkError("Network connection error. Please check your internet connection.", e))
+            } else {
+                Result.failure(e)
+            }
         }
     }
 
@@ -599,45 +615,6 @@ object RiderRepository {
             quietnessDb = 46.0,
             wheelchairAccessible = false,
             petFriendly = false
-        )
-    )
-
-    private fun defaultFareComparisons(): List<VehicleFareComparisonDto> = listOf(
-        VehicleFareComparisonDto(
-            categoryId = "12b8f8bd-2d61-4105-a0d8-5661fe822254",
-            code = "E_RICKSHAW_STANDARD",
-            name = "Standard E-Rickshaw",
-            capacity = 4,
-            description = "Eco-friendly electric 3-wheeler",
-            iconUrl = null,
-            estimate = FareEstimateDetailDto("est-1", 4.2, 14.0, 12900, 129.00, 20.0, 1.0)
-        ),
-        VehicleFareComparisonDto(
-            categoryId = "9b1c4e58-78b3-4a0b-80bb-f625f2d6ea2a",
-            code = "E_RICKSHAW_SHARE",
-            name = "Shared E-Rickshaw (Eco-Pool)",
-            capacity = 4,
-            description = "Per-seat commuter transit",
-            iconUrl = null,
-            estimate = FareEstimateDetailDto("est-2", 4.2, 14.0, 9500, 95.00, 10.0, 1.0)
-        ),
-        VehicleFareComparisonDto(
-            categoryId = "0daec8ce-7e8a-4603-ab3f-6bed9455ccd7",
-            code = "E_AUTO",
-            name = "High-Speed Electric Auto",
-            capacity = 3,
-            description = "Enclosed high-speed cabin",
-            iconUrl = null,
-            estimate = FareEstimateDetailDto("est-3", 4.2, 12.0, 15500, 155.00, 30.0, 1.0)
-        ),
-        VehicleFareComparisonDto(
-            categoryId = "653d62fb-c68e-4799-9d55-411ccc9b5e01",
-            code = "E_CARGO_LOADER",
-            name = "E-Loader Cargo",
-            capacity = 1,
-            description = "Heavy goods and parcels",
-            iconUrl = null,
-            estimate = FareEstimateDetailDto("est-4", 4.2, 16.0, 19500, 195.00, 50.0, 1.0)
         )
     )
 

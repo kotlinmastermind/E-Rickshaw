@@ -47,6 +47,7 @@ class BookingAdvancedService:
         estimate_id: str,
         pickup_address: str,
         destination_address: str,
+        category_id: Optional[str] = None,
         payment_method: str = "UPI",
         is_scheduled: bool = False,
         scheduled_pickup_time: Optional[datetime] = None,
@@ -109,10 +110,21 @@ class BookingAdvancedService:
         if is_scheduled and scheduled_pickup_time:
             DispatchAdvancedService.validate_schedule_window(scheduled_pickup_time)
 
+        if not category_id and estimate_id:
+            from backend.domain.models import FareEstimate, FarePriceLock
+            cand_est = (await self.db.execute(select(FareEstimate).where(FareEstimate.id == estimate_id))).scalar_one_or_none()
+            if cand_est:
+                category_id = cand_est.category_id
+            else:
+                cand_lock = (await self.db.execute(select(FarePriceLock).where(FarePriceLock.id == estimate_id))).scalar_one_or_none()
+                if cand_lock:
+                    category_id = cand_lock.category_id
+
         ride_service = RideService(self.db)
         primary_ride_res = await ride_service.create_ride_request(
             customer_user_id=customer_user_id,
             estimate_id=estimate_id,
+            category_id=category_id,
             pickup_address=pickup_address,
             destination_address=destination_address,
             payment_method=payment_method,

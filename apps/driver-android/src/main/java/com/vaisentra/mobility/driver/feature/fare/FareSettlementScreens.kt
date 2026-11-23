@@ -34,7 +34,6 @@ fun TripCompletedFareScreen(
     val offer by DriverRepository.activeOffer.collectAsState()
     val rideId by DriverRepository.currentRideId.collectAsState()
     val breakdown by DriverRepository.rideBreakdown.collectAsState()
-    val scope = rememberCoroutineScope()
     var isFinishing by remember { mutableStateOf(false) }
 
     LaunchedEffect(rideId) {
@@ -45,12 +44,11 @@ fun TripCompletedFareScreen(
 
     val totalFare = breakdown?.fareBreakdown?.grossFareRupees
         ?.takeIf { it > 0.0 }
-        ?: offer?.estimatedFareRupees
-        ?: 0.0
+        ?: offer?.estimatedFareRupees?.takeIf { it > 0.0 }
     val netPay = breakdown?.netDriverEarningsRupees
         ?.takeIf { it > 0.0 }
-        ?: offer?.estimatedDriverEarningsRupees
-        ?: (totalFare * 0.8)
+        ?: offer?.estimatedDriverEarningsRupees?.takeIf { it > 0.0 }
+        ?: totalFare?.let { it * 0.85 }
 
     Column(
         modifier = Modifier
@@ -76,9 +74,18 @@ fun TripCompletedFareScreen(
                     ) {
                         Text("TOTAL FARE COLLECTIBLE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹${"%.2f".format(totalFare)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+                        Text(
+                            text = if (totalFare != null) "₹${"%.2f".format(totalFare)}" else "Fare Unavailable",
+                            color = if (totalFare != null) EmeraldPrimary else PilotCrimson,
+                            fontSize = if (totalFare != null) 36.sp else 22.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
                         Spacer(Modifier.height(4.dp))
-                        Text("Pilot Net Pay: ₹${"%.2f".format(netPay)}", color = CockpitTextSecondary, fontSize = 12.sp)
+                        Text(
+                            text = if (netPay != null) "Pilot Net Pay: ₹${"%.2f".format(netPay)}" else "Net Pay: Pending Calculation",
+                            color = if (netPay != null) CockpitTextSecondary else PilotAmber,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }
@@ -86,7 +93,8 @@ fun TripCompletedFareScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     CockpitButton(
-                        text = "COLLECT CASH (₹${"%.2f".format(totalFare)})",
+                        text = if (totalFare != null) "COLLECT CASH (₹${"%.2f".format(totalFare)})" else "CANNOT COLLECT CASH (FARE MISSING)",
+                        enabled = totalFare != null,
                         onClick = onCollectCash,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -141,12 +149,11 @@ fun CashCollectionScreen(
 
     val totalBill = breakdown?.fareBreakdown?.grossFareRupees
         ?.takeIf { it > 0.0 }
-        ?: offer?.estimatedFareRupees
-        ?: 0.0
-    var tenderedAmount by remember { mutableStateOf("100") }
+        ?: offer?.estimatedFareRupees?.takeIf { it > 0.0 }
+    var tenderedAmount by remember(totalBill) { mutableStateOf(totalBill?.let { "%.0f".format(it) } ?: "") }
     var isSubmitting by remember { mutableStateOf(false) }
     val tenderedVal = tenderedAmount.toDoubleOrNull() ?: 0.0
-    val changeReturn = maxOf(0.0, tenderedVal - totalBill)
+    val changeReturn = if (totalBill != null && tenderedVal >= totalBill) tenderedVal - totalBill else 0.0
 
     Column(
         modifier = Modifier
@@ -207,8 +214,8 @@ fun CashCollectionScreen(
             }
 
             CockpitButton(
-                text = if (isSubmitting) "CONFIRMING..." else "CONFIRM CASH RECEIVED (₹${"%.2f".format(totalBill)})",
-                enabled = !isSubmitting,
+                text = if (isSubmitting) "CONFIRMING..." else if (totalBill != null) "CONFIRM CASH RECEIVED (₹${"%.2f".format(totalBill)})" else "CANNOT COLLECT CASH (FARE MISSING)",
+                enabled = !isSubmitting && totalBill != null && tenderedVal >= totalBill,
                 onClick = {
                     if (rideId.isBlank()) {
                         onShowToast("No active ride ID.")

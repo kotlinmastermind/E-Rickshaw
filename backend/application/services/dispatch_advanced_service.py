@@ -106,7 +106,26 @@ class DispatchAdvancedService:
                 detail="Schedule conflict: You already have another scheduled ride within 60 minutes of this time"
             )
 
+        # Validate that driver's active vehicle category matches the scheduled ride's category
+        from backend.domain.models import DriverVehicleAssignment, Vehicle
+        stmt_veh = (
+            select(Vehicle)
+            .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+            .where(
+                DriverVehicleAssignment.driver_id == drv_id,
+                DriverVehicleAssignment.is_active.is_(True),
+                Vehicle.is_active.is_(True)
+            )
+        )
+        driver_veh = (await session.execute(stmt_veh)).scalars().first()
+        if not driver_veh or driver_veh.category_id != ride.vehicle_category_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Driver vehicle category mismatch. Expected category '{ride.vehicle_category_id}', but driver vehicle is '{driver_veh.category_id if driver_veh else None}'."
+            )
+
         ride.assigned_driver_id = drv_id
+        ride.vehicle_id = driver_veh.id
         ride.status = "ACCEPTED"
         await session.flush()
         return ride

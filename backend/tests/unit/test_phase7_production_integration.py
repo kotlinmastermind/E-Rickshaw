@@ -5,7 +5,8 @@ from sqlalchemy import select
 from backend.main import app
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    DriverLocation, Ride, RideAssignment, RideLocationHistory
+    DriverLocation, Ride, RideAssignment, RideLocationHistory,
+    VehicleCategory, Vehicle, DriverVehicleAssignment
 )
 from backend.infrastructure.security.crypto import hash_password
 
@@ -41,8 +42,14 @@ async def test_production_ride_booking_with_coordinates(db_session):
         assert login_resp.status_code == 200, login_resp.text
         cust_token = login_resp.json()["access_token"]
 
-        # Request ride with real GPS coordinates
-        payload = {
+        # Fetch active vehicle category
+        cat_resp = await client.get("/api/v1/vehicles/categories")
+        categories = cat_resp.json()
+        assert len(categories) > 0
+        cat_id = categories[0]["id"]
+
+        # Negative test 1: missing category_id strictly rejected with 400
+        payload_no_cat = {
             "pickup_address": "Connaught Place Inner Circle",
             "destination_address": "India Gate C-Hexagon",
             "pickup_latitude": 28.6328,
@@ -52,6 +59,21 @@ async def test_production_ride_booking_with_coordinates(db_session):
             "payment_method": "WALLET"
         }
         headers = {"Authorization": f"Bearer {cust_token}"}
+        resp_bad = await client.post("/api/v1/rides/request", json=payload_no_cat, headers=headers)
+        assert resp_bad.status_code == 400
+        assert "category_id is required" in resp_bad.text
+
+        # Negative test 2: null category_id strictly rejected with 400
+        resp_null = await client.post("/api/v1/rides/request", json=dict(payload_no_cat, category_id=None), headers=headers)
+        assert resp_null.status_code == 400
+        assert "category_id is required" in resp_null.text
+
+        # Negative test 3: invalid category_id strictly rejected with 404
+        resp_inv = await client.post("/api/v1/rides/request", json=dict(payload_no_cat, category_id="invalid_cat_99999"), headers=headers)
+        assert resp_inv.status_code == 404
+
+        # Request ride with real GPS coordinates and valid category_id
+        payload = dict(payload_no_cat, category_id=cat_id)
         resp = await client.post("/api/v1/rides/request", json=payload, headers=headers)
         assert resp.status_code == 200, resp.text
         data = resp.json()
@@ -98,6 +120,29 @@ async def test_end_to_end_ride_lifecycle_and_trip_breadcrumbs(db_session):
 
     driver_avail = DriverAvailability(driver_id=driver_prof.id, is_online=True, is_busy=False)
     db_session.add(driver_avail)
+
+    cat_stmt = select(VehicleCategory).where(VehicleCategory.is_active == True)
+    active_cat = (await db_session.execute(cat_stmt)).scalars().first()
+
+    driver_veh = Vehicle(
+        id=f"veh_p7_{driver_user.id[:8]}",
+        category_id=active_cat.id,
+        make="Mahindra",
+        model="Treo",
+        year=2024,
+        license_plate="DL-04-2024-9988",
+        color="Green",
+        is_active=True
+    )
+    db_session.add(driver_veh)
+    await db_session.flush()
+
+    veh_assign = DriverVehicleAssignment(
+        driver_id=driver_prof.id,
+        vehicle_id=driver_veh.id,
+        is_active=True
+    )
+    db_session.add(veh_assign)
     await db_session.commit()
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -116,10 +161,11 @@ async def test_end_to_end_ride_lifecycle_and_trip_breadcrumbs(db_session):
         assert d_login.status_code == 200, d_login.text
         driver_token = d_login.json()["access_token"]
 
-        # 1. Customer creates ride
+        # 1. Customer creates ride with mandatory category_id
         req_resp = await client.post(
             "/api/v1/rides/request",
             json={
+                "category_id": active_cat.id,
                 "pickup_address": "Janpath Metro Station",
                 "destination_address": "Khan Market",
                 "pickup_latitude": 28.6250,

@@ -641,16 +641,19 @@ class AuthService:
         await self.db.flush()
 
         # Find or create Vehicle Category
-        cat_code = vehicle_type.strip().upper() if vehicle_type else "SEDAN"
-        stmt_cat = select(VehicleCategory).where(VehicleCategory.code == cat_code)
+        v_type_clean = vehicle_type.strip() if vehicle_type else ""
+        cat_code = v_type_clean.upper() if v_type_clean else "E_RICKSHAW_STANDARD"
+        stmt_cat = select(VehicleCategory).where(
+            or_(VehicleCategory.code == cat_code, VehicleCategory.id == v_type_clean)
+        )
         res_cat = await self.db.execute(stmt_cat)
         category = res_cat.scalars().first()
         if not category:
-            stmt_cat_any = select(VehicleCategory)
+            stmt_cat_any = select(VehicleCategory).where(VehicleCategory.is_active == True).order_by(VehicleCategory.sort_order.asc())
             res_cat_any = await self.db.execute(stmt_cat_any)
             category = res_cat_any.scalars().first()
             if not category:
-                category = VehicleCategory(code="SEDAN", name="Executive Sedan", description="Default Sedan Category", capacity=4)
+                category = VehicleCategory(code="E_RICKSHAW_STANDARD", name="Standard E-Rickshaw", description="Default E-Rickshaw Category", capacity=4)
                 self.db.add(category)
                 await self.db.flush()
 

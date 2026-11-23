@@ -1,5 +1,6 @@
 """Audited, permission-scoped administrator workflows."""
 import json
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -332,8 +333,25 @@ class AdminGovernanceService:
         user = await self.db.get(User, driver.user_id)
         if not user or not user.is_active:
             raise HTTPException(409, "The selected driver account is inactive.")
+
+        # Re-validate that driver's active vehicle matches the ride's vehicle_category_id
+        from backend.domain.models import DriverVehicleAssignment, Vehicle
+        stmt_veh = (
+            select(Vehicle)
+            .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+            .where(
+                DriverVehicleAssignment.driver_id == driver.id,
+                DriverVehicleAssignment.is_active.is_(True),
+                Vehicle.is_active.is_(True)
+            )
+        )
+        driver_veh = (await self.db.execute(stmt_veh)).scalars().first()
+        if not driver_veh or driver_veh.category_id != ride.vehicle_category_id:
+            raise HTTPException(409, f"Driver vehicle category mismatch. Expected '{ride.vehicle_category_id}', but driver vehicle is '{driver_veh.category_id if driver_veh else None}'.")
+
         previous = ride.status
         ride.assigned_driver_id = driver.id
+        ride.vehicle_id = driver_veh.id
         ride.status = "ASSIGNED"
         ride.assigned_at = datetime.now(timezone.utc)
         self.db.add(RideAssignment(ride_id=ride.id, driver_id=driver.id, status="ASSIGNED", responded_at=datetime.now(timezone.utc)))
@@ -421,6 +439,183 @@ class AdminGovernanceService:
                    {"effective_from": effective_from.isoformat(), "version": rule.version})
         await self.db.commit()
         return {"id": rule.id, "workflow_status": rule.workflow_status, "is_active": True, "effective_from": effective_from.isoformat(), "scheduled": effective_from > now}
+
+    async def update_runtime_fare_rule(self, admin_id: str, category_identifier: str, values: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Dynamically updates or provisions live fare rules for a vehicle category at runtime.
+        Changes take effect immediately across all customer and driver apps without rebuilding APKs.
+        """
+        # Resolve category by ID or Code
+        cat_stmt = select(VehicleCategory).where(
+            or_(
+                VehicleCategory.id == category_identifier,
+                VehicleCategory.code == category_identifier,
+                VehicleCategory.code == category_identifier.upper()
+            )
+        )
+        category = (await self.db.execute(cat_stmt)).scalars().first()
+        if not category:
+            raise HTTPException(404, f"Vehicle category '{category_identifier}' not found.")
+
+        city_code = (values.get("city_code") or "DELHI_NCR").strip().upper()
+
+        # Find existing active rule for this specific city & category
+        current_stmt = select(FareRule).where(
+            FareRule.category_id == category.id,
+            FareRule.city_code == city_code,
+            FareRule.is_active == True
+        ).order_by(FareRule.effective_from.desc(), FareRule.version.desc())
+        current_rule = (await self.db.execute(current_stmt)).scalars().first()
+
+        # Convert rupee fields to cents if provided in rupees
+        base_fare_cents = values.get("base_fare_cents")
+        if base_fare_cents is None and "base_fare_rupees" in values and values["base_fare_rupees"] is not None:
+            base_fare_cents = int(round(float(values["base_fare_rupees"]) * 100))
+        if base_fare_cents is None and current_rule:
+            base_fare_cents = current_rule.base_fare_cents
+
+        per_km_cents = values.get("per_km_cents")
+        if per_km_cents is None and "per_km_rupees" in values and values["per_km_rupees"] is not None:
+            per_km_cents = int(round(float(values["per_km_rupees"]) * 100))
+        if per_km_cents is None and current_rule:
+            per_km_cents = current_rule.per_km_cents
+
+        per_minute_cents = values.get("per_minute_cents")
+        if per_minute_cents is None and "per_minute_rupees" in values and values["per_minute_rupees"] is not None:
+            per_minute_cents = int(round(float(values["per_minute_rupees"]) * 100))
+        if per_minute_cents is None and current_rule:
+            per_minute_cents = current_rule.per_minute_cents
+
+        minimum_fare_cents = values.get("minimum_fare_cents")
+        if minimum_fare_cents is None and "minimum_fare_rupees" in values and values["minimum_fare_rupees"] is not None:
+            minimum_fare_cents = int(round(float(values["minimum_fare_rupees"]) * 100))
+        if minimum_fare_cents is None and current_rule:
+            minimum_fare_cents = current_rule.minimum_fare_cents
+
+        cancellation_fee_cents = values.get("cancellation_fee_cents")
+        if cancellation_fee_cents is None and "cancellation_fee_rupees" in values and values["cancellation_fee_rupees"] is not None:
+            cancellation_fee_cents = int(round(float(values["cancellation_fee_rupees"]) * 100))
+        if cancellation_fee_cents is None and current_rule:
+            cancellation_fee_cents = current_rule.cancellation_fee_cents
+
+        surge_multiplier = values.get("surge_multiplier")
+        if surge_multiplier is None and current_rule:
+            surge_multiplier = current_rule.surge_multiplier
+        surge_multiplier = float(surge_multiplier or 1.0)
+
+        fare_cap_cents = values.get("fare_cap_cents")
+        if fare_cap_cents is None and "fare_cap_rupees" in values and values["fare_cap_rupees"] is not None:
+            fare_cap_cents = int(round(float(values["fare_cap_rupees"]) * 100))
+        if fare_cap_cents is None and current_rule:
+            fare_cap_cents = current_rule.fare_cap_cents
+
+        now = datetime.now(timezone.utc)
+        reason = values.get("reason", "Admin runtime tariff adjustment")
+
+        # Deactivate previous active rules for this category and city with row-level lock to prevent concurrent races
+        all_active_stmt = (
+            select(FareRule)
+            .where(
+                FareRule.category_id == category.id,
+                FareRule.city_code == city_code,
+                FareRule.is_active == True
+            )
+            .with_for_update()
+        )
+        active_rules = (await self.db.execute(all_active_stmt)).scalars().all()
+        for r in active_rules:
+            r.is_active = False
+            r.effective_until = now
+
+        next_version = (current_rule.version + 1) if current_rule else 1
+        new_rule = FareRule(
+            id=str(uuid.uuid4()),
+            category_id=category.id,
+            city_code=city_code,
+            version=next_version,
+            base_fare_cents=base_fare_cents if base_fare_cents is not None else 2000,
+            per_km_cents=per_km_cents if per_km_cents is not None else 1000,
+            per_minute_cents=per_minute_cents if per_minute_cents is not None else 100,
+            minimum_fare_cents=minimum_fare_cents if minimum_fare_cents is not None else 2000,
+            cancellation_fee_cents=cancellation_fee_cents if cancellation_fee_cents is not None else 1000,
+            surge_multiplier=surge_multiplier,
+            fare_cap_cents=fare_cap_cents,
+            shared_discount_percentage=values.get("shared_discount_percentage", 25.0),
+            tax_percentage=values.get("tax_percentage", 5.0),
+            amenities_fee_cents=values.get("amenities_fee_cents", 5000),
+            grace_waiting_minutes=values.get("grace_waiting_minutes", 5),
+            per_minute_waiting_cents=values.get("per_minute_waiting_cents", 1000),
+            is_active=True,
+            workflow_status="ACTIVE",
+            effective_from=now,
+            effective_until=None,
+            created_by=admin_id,
+            approved_by=admin_id,
+            approved_at=now,
+            approval_reason=reason
+        )
+        self.db.add(new_rule)
+        await self.db.flush()
+
+        self.audit(admin_id, "FARE_RULE_RUNTIME_UPDATED", "fare_rules", new_rule.id, {
+            "category_id": category.id,
+            "category_code": category.code,
+            "city_code": city_code,
+            "version": new_rule.version,
+            "base_fare_cents": new_rule.base_fare_cents,
+            "per_km_cents": new_rule.per_km_cents,
+            "minimum_fare_cents": new_rule.minimum_fare_cents,
+            "surge_multiplier": new_rule.surge_multiplier,
+            "reason": reason
+        })
+        await self.db.commit()
+
+        return {
+            "id": new_rule.id,
+            "category_id": new_rule.category_id,
+            "category_code": category.code,
+            "category_name": category.name,
+            "city_code": new_rule.city_code,
+            "version": new_rule.version,
+            "base_fare_rupees": round(new_rule.base_fare_cents / 100.0, 2),
+            "per_km_rupees": round(new_rule.per_km_cents / 100.0, 2),
+            "per_minute_rupees": round(new_rule.per_minute_cents / 100.0, 2),
+            "minimum_fare_rupees": round(new_rule.minimum_fare_cents / 100.0, 2),
+            "surge_multiplier": new_rule.surge_multiplier,
+            "cancellation_fee_rupees": round(new_rule.cancellation_fee_cents / 100.0, 2),
+            "fare_cap_rupees": round(new_rule.fare_cap_cents / 100.0, 2) if new_rule.fare_cap_cents else None,
+            "is_active": new_rule.is_active,
+            "workflow_status": new_rule.workflow_status,
+            "effective_from": new_rule.effective_from.isoformat()
+        }
+
+    async def update_runtime_surge(self, admin_id: str, surge_multiplier: float, category_id: Optional[str] = None, reason: str = "Corridor surge adjustment") -> Dict[str, Any]:
+        """
+        Updates surge multiplier across active fare rules or for a single vehicle category at runtime.
+        """
+        stmt = select(FareRule).where(FareRule.is_active == True, FareRule.workflow_status == "ACTIVE")
+        if category_id:
+            stmt = stmt.where(FareRule.category_id == category_id)
+
+        rules = (await self.db.execute(stmt)).scalars().all()
+        updated_count = 0
+        for r in rules:
+            r.surge_multiplier = surge_multiplier
+            updated_count += 1
+
+        self.audit(admin_id, "CORRIDOR_SURGE_UPDATED", "fare_rules", category_id or "ALL", {
+            "surge_multiplier": surge_multiplier,
+            "category_id": category_id,
+            "updated_count": updated_count,
+            "reason": reason
+        })
+        await self.db.commit()
+        return {
+            "surge_multiplier": surge_multiplier,
+            "category_id": category_id or "ALL",
+            "updated_count": updated_count,
+            "status": "APPLIED_LIVE"
+        }
 
     async def list_categories(self) -> List[Dict[str, Any]]:
         rows = (await self.db.execute(select(VehicleCategory).order_by(VehicleCategory.sort_order, VehicleCategory.name))).scalars().all()

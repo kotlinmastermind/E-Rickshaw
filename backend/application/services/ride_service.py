@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,7 +8,7 @@ from sqlalchemy import select, update, and_, or_
 from sqlalchemy.orm import joinedload
 from fastapi import HTTPException, status
 from backend.domain.models import (
-    Ride, RideStatusEvent, RideAssignment, FareEstimate, FareRule, VehicleCategory,
+    Ride, RideStatusEvent, RideAssignment, FareEstimate, FarePriceLock, FareRule, VehicleCategory,
     CustomerProfile, DriverProfile, DriverAvailability, DriverLocation,
     Payment, DriverRating, Vehicle, DriverWallet
 )
@@ -26,6 +27,7 @@ class RideService:
         self,
         customer_user_id: str,
         estimate_id: Optional[str] = None,
+        category_id: Optional[str] = None,
         pickup_address: str = "Current Location Pickup",
         destination_address: str = "Destination",
         pickup_latitude: Optional[float] = None,
@@ -45,83 +47,145 @@ class RideService:
         if not customer:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer profile not found.")
 
-        # Fetch fare estimate snapshot if provided
+        # 1. Mandatory Vehicle Category validation
+        clean_cat_id = str(category_id).strip() if category_id and str(category_id).strip() else None
+        if not clean_cat_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Vehicle category_id is mandatory. Please select a valid active vehicle category."
+            )
+
+        stmt_cat = select(VehicleCategory).where(
+            or_(VehicleCategory.id == clean_cat_id, VehicleCategory.code == clean_cat_id)
+        )
+        cat = (await self.db.execute(stmt_cat)).scalars().first()
+        if not cat:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Vehicle category '{clean_cat_id}' not found."
+            )
+        if not cat.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Vehicle category '{cat.name}' is currently inactive."
+            )
+
+        # 2. Fetch fare estimate snapshot or price lock if provided
         estimate = None
+        matched_price_lock = None
         if estimate_id:
             stmt_est = select(FareEstimate).where(FareEstimate.id == estimate_id)
             res_est = await self.db.execute(stmt_est)
-            estimate = res_est.scalar_one_or_none()
+            candidate_est = res_est.scalar_one_or_none()
+            if candidate_est:
+                if candidate_est.category_id != cat.id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Vehicle category mismatch: Estimate belongs to category '{candidate_est.category_id}' but ride requested '{cat.name}'."
+                    )
+                estimate = candidate_est
+            else:
+                # Check persisted 24h price lock with row-level lock to prevent concurrent double-booking
+                stmt_lock = select(FarePriceLock).where(FarePriceLock.id == estimate_id).with_for_update()
+                candidate_lock = (await self.db.execute(stmt_lock)).scalar_one_or_none()
+                if candidate_lock:
+                    if candidate_lock.customer_id and candidate_lock.customer_id != customer.id:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Price lock belongs to another customer account and cannot be used."
+                        )
+                    if candidate_lock.category_id != cat.id:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Vehicle category mismatch: Price lock belongs to category '{candidate_lock.category_id}' but ride requested '{cat.name}'."
+                        )
+                    if candidate_lock.status != "ACTIVE":
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Price lock '{candidate_lock.id}' cannot be used because its status is '{candidate_lock.status}'."
+                        )
+                    lock_exp = candidate_lock.expires_at if candidate_lock.expires_at.tzinfo else candidate_lock.expires_at.replace(tzinfo=timezone.utc)
+                    if datetime.now(timezone.utc) > lock_exp:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Price lock has expired. Please recalculate fare."
+                        )
 
-        # If estimate snapshot does not pre-exist in DB, dynamically provision authoritative snapshot
+                    # Verify route corridor deviation if client passed pickup coordinates
+                    if pickup_latitude is not None and pickup_longitude is not None:
+                        import math
+                        d_lat = math.radians(pickup_latitude - candidate_lock.pickup_latitude)
+                        d_lng = math.radians(pickup_longitude - candidate_lock.pickup_longitude)
+                        a = math.sin(d_lat / 2)**2 + math.cos(math.radians(candidate_lock.pickup_latitude)) * math.cos(math.radians(pickup_latitude)) * math.sin(d_lng / 2)**2
+                        p_dist_km = 6371.0 * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+                        if p_dist_km > 2.0:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Pickup location deviates {p_dist_km:.1f}km from the locked price route corridor (max allowed: 2.0km). Please generate a live fare estimate."
+                            )
+
+                    matched_price_lock = candidate_lock
+                    # Map price lock into estimate snapshot representation
+                    estimate = FareEstimate(
+                        id=candidate_lock.id,
+                        category_id=candidate_lock.category_id,
+                        fare_rule_id=candidate_lock.fare_rule_id,
+                        pickup_latitude=candidate_lock.pickup_latitude,
+                        pickup_longitude=candidate_lock.pickup_longitude,
+                        destination_latitude=candidate_lock.destination_latitude,
+                        destination_longitude=candidate_lock.destination_longitude,
+                        distance_km=candidate_lock.distance_km,
+                        estimated_duration_minutes=candidate_lock.duration_minutes,
+                        estimated_fare_cents=candidate_lock.locked_fare_cents,
+                        surge_multiplier=candidate_lock.surge_multiplier,
+                        expires_at=candidate_lock.expires_at
+                    )
+                elif pickup_latitude is None or pickup_longitude is None or destination_latitude is None or destination_longitude is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Fare estimate or price lock '{estimate_id}' was not found or has expired. Please calculate a live fare."
+                    )
+
         if not estimate:
-            stmt_cat = select(VehicleCategory).order_by(VehicleCategory.sort_order.asc())
-            cat = (await self.db.execute(stmt_cat)).scalars().first()
-            if not cat:
-                cat = VehicleCategory(
-                    id="default_erickshaw_cat",
-                    code="E_RICKSHAW",
-                    name="RideGo E-Rickshaw",
-                    description="Standard Eco-friendly Urban Shuttle",
-                    capacity=4,
-                    sort_order=1,
-                    is_active=True
+            if pickup_latitude is None or pickup_longitude is None or destination_latitude is None or destination_longitude is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Valid pickup and destination coordinates are required to create a ride request when estimate_id is omitted."
                 )
-                self.db.add(cat)
-                await self.db.flush()
-
-            stmt_rule = select(FareRule).where(FareRule.category_id == cat.id, FareRule.is_active.is_(True))
-            rule = (await self.db.execute(stmt_rule)).scalars().first()
-            if not rule:
-                rule = FareRule(
-                    id="default_erickshaw_rule",
-                    category_id=cat.id,
-                    base_fare_cents=2500,
-                    per_km_cents=800,
-                    per_minute_cents=100,
-                    minimum_fare_cents=2500,
-                    cancellation_fee_cents=1000,
-                    is_active=True
-                )
-                self.db.add(rule)
-                await self.db.flush()
-
-            p_lat = pickup_latitude if pickup_latitude is not None else 28.6328
-            p_lng = pickup_longitude if pickup_longitude is not None else 77.2195
-            d_lat = destination_latitude if destination_latitude is not None else 28.6129
-            d_lng = destination_longitude if destination_longitude is not None else 77.2295
-
-            dist_km = max(0.5, round((((d_lat - p_lat)**2 + (d_lng - p_lng)**2)**0.5) * 111.0, 2))
-            dur_mins = round((dist_km / 18.0) * 60.0, 1)
-            fare_cents = int(rule.base_fare_cents + (dist_km * rule.per_km_cents) + (dur_mins * rule.per_minute_cents))
-            fare_cents = max(rule.minimum_fare_cents, fare_cents)
-
-            now_time = datetime.now(timezone.utc)
-            est_key = estimate_id if (estimate_id and len(estimate_id) <= 64) else f"est_{int(now_time.timestamp())}"
-            estimate = FareEstimate(
-                id=est_key,
+            from backend.application.services.fare_service import FareService
+            fare_svc = FareService(self.db)
+            est_data = await fare_svc.calculate_estimate(
                 category_id=cat.id,
-                fare_rule_id=rule.id,
-                pickup_latitude=p_lat,
-                pickup_longitude=p_lng,
-                destination_latitude=d_lat,
-                destination_longitude=d_lng,
-                distance_km=dist_km,
-                estimated_duration_minutes=dur_mins,
-                base_fare_cents=rule.base_fare_cents,
-                distance_charge_cents=int(dist_km * rule.per_km_cents),
-                time_charge_cents=int(dur_mins * rule.per_minute_cents),
-                surge_multiplier=1.0,
-                estimated_fare_cents=fare_cents,
-                expires_at=now_time + timedelta(minutes=60)
+                pickup_lat=pickup_latitude,
+                pickup_lng=pickup_longitude,
+                dest_lat=destination_latitude,
+                dest_lng=destination_longitude
             )
-            self.db.add(estimate)
-            await self.db.flush()
+            stmt_est = select(FareEstimate).where(FareEstimate.id == est_data["estimate_id"])
+            estimate = (await self.db.execute(stmt_est)).scalar_one()
 
         now = datetime.now(timezone.utc)
 
         expires_at = estimate.expires_at if estimate.expires_at.tzinfo else estimate.expires_at.replace(tzinfo=timezone.utc)
         if now > expires_at:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Fare estimate has expired. Please recalculate.")
+
+        # Check active ride to prevent duplicate concurrent bookings
+        active_ride_stmt = select(Ride).where(
+            Ride.customer_id == customer.id,
+            Ride.status.in_([
+                RideStatus.REQUESTED.value,
+                RideStatus.ASSIGNED.value,
+                RideStatus.ARRIVED.value,
+                RideStatus.IN_PROGRESS.value
+            ])
+        )
+        existing_active = (await self.db.execute(active_ride_stmt)).scalars().first()
+        if existing_active:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"You already have an active journey (#{existing_active.id[:8]}) in status '{existing_active.status}'. Please complete or cancel it before requesting a new ride."
+            )
 
         # Generate secure trip OTP
         start_otp = generate_secure_otp(6)
@@ -165,6 +229,12 @@ class RideService:
         )
         self.db.add(ride)
         await self.db.flush()
+
+        # If booking was made using a persisted 24h price lock, mark lock consumed
+        if matched_price_lock:
+            matched_price_lock.status = "CONSUMED"
+            matched_price_lock.consumed_at = datetime.now(timezone.utc)
+            matched_price_lock.consumed_ride_id = ride.id
 
         # Add intermediate stops if provided
         if stops:
@@ -234,6 +304,7 @@ class RideService:
         return {
             "ride_id": ride.id,
             "status": ride.status,
+            "category_id": ride.vehicle_category_id,
             "start_otp": ride.start_otp,
             "estimated_fare_cents": ride.estimated_fare_cents,
             "pickup_address": ride.pickup_address,
@@ -268,6 +339,35 @@ class RideService:
         
         if driver.approval_status != "APPROVED":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chauffeur account is pending verification approval.")
+
+        # Re-validate ride existence and vehicle category match
+        stmt_ride = select(Ride).where(Ride.id == ride_id)
+        ride_res = await self.db.execute(stmt_ride)
+        ride_obj = ride_res.scalar_one_or_none()
+        if not ride_obj:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+        from backend.domain.models import DriverVehicleAssignment, Vehicle
+        stmt_veh = (
+            select(Vehicle)
+            .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+            .where(
+                DriverVehicleAssignment.driver_id == driver.id,
+                DriverVehicleAssignment.is_active.is_(True),
+                Vehicle.is_active.is_(True)
+            )
+        )
+        driver_veh = (await self.db.execute(stmt_veh)).scalars().first()
+        if not driver_veh or not driver_veh.category_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Driver does not have an active assigned vehicle."
+            )
+        if driver_veh.category_id != ride_obj.vehicle_category_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Driver vehicle category mismatch. Expected category '{ride_obj.vehicle_category_id}', but driver vehicle is '{driver_veh.category_id}'."
+            )
 
         now = datetime.now(timezone.utc)
         now_naive = now.replace(tzinfo=None)
@@ -305,6 +405,7 @@ class RideService:
                 .values(
                     status=RideStatus.ASSIGNED.value,
                     assigned_driver_id=driver.id,
+                    vehicle_id=driver_veh.id,
                     assigned_at=now
                 )
             )

@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from backend.main import app
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability, Vehicle, VehicleCategory,
-    FareRule, FareEstimate, Ride, RideAssignment, RideOperationalEvent, Session
+    FareRule, FareEstimate, Ride, RideAssignment, RideOperationalEvent, Session, DriverVehicleAssignment
 )
 from backend.domain.state_machine.ride_state_machine import RideStateMachine, RideStatus, ActorRole, RideTransitionError
 from backend.infrastructure.security.crypto import (
@@ -191,6 +191,16 @@ async def test_driver_ride_acceptance_race_condition_prevention(db_session):
     cat = VehicleCategory(id=f"cat_race_{suffix}", code=f"CAT_{suffix}", name="Eco E-Rickshaw", description="Standard", capacity=4)
     rule = FareRule(id=f"rule_race_{suffix}", category_id=cat.id, base_fare_cents=2000, per_km_cents=500, per_minute_cents=100, minimum_fare_cents=2000, cancellation_fee_cents=1000)
     db_session.add_all([cat, rule])
+    await db_session.flush()
+
+    veh1 = Vehicle(id=f"veh1_{suffix}", category_id=cat.id, make="Mahindra", model="Treo", year=2024, license_plate=f"DL-01-R1-{str(suffix)[:4]}", is_active=True)
+    veh2 = Vehicle(id=f"veh2_{suffix}", category_id=cat.id, make="Mahindra", model="Treo", year=2024, license_plate=f"DL-01-R2-{str(suffix)[:4]}", is_active=True)
+    db_session.add_all([veh1, veh2])
+    await db_session.flush()
+
+    assign1 = DriverVehicleAssignment(driver_id=d1_prof.id, vehicle_id=veh1.id, is_active=True)
+    assign2 = DriverVehicleAssignment(driver_id=d2_prof.id, vehicle_id=veh2.id, is_active=True)
+    db_session.add_all([assign1, assign2])
     await db_session.flush()
 
     # Create Requested Ride

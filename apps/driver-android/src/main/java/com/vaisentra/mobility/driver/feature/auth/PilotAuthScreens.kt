@@ -108,8 +108,325 @@ fun PilotLoginScreen(onNavigate: (String) -> Unit) {
         },
         onForgotPasswordClick = {
             onNavigate("auth_recovery")
+        },
+        onRegisterClick = {
+            onNavigate("auth_signup")
         }
     )
+}
+
+// Screen 1A: Pilot Registration & Dynamic Vehicle Category Selection
+@Composable
+fun PilotSignupScreen(onNavigate: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var fullName by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var selectedCategoryId by remember { mutableStateOf<String?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var isLoadingCategories by remember { mutableStateOf(true) }
+    var categoryLoadError by remember { mutableStateOf<String?>(null) }
+
+    val categories by DriverRepository.vehicleCategories.collectAsState()
+
+    fun loadCategories() {
+        isLoadingCategories = true
+        categoryLoadError = null
+        scope.launch {
+            val res = DriverRepository.fetchVehicleCategories()
+            isLoadingCategories = false
+            if (res.isFailure) {
+                categoryLoadError = res.exceptionOrNull()?.message ?: "Failed to load active vehicle categories"
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadCategories()
+    }
+
+    LaunchedEffect(categories) {
+        if (categories.isNotEmpty() && selectedCategoryId == null) {
+            selectedCategoryId = categories.first().id
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(CockpitBackground)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Back / Top Bar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = { onNavigate("auth_login") }) {
+                Text("← Back to Sign In", color = PilotElectricCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Pilot Registration",
+            color = PilotTextWhite,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.ExtraBold
+        )
+        Text(
+            text = "Register with your verified vehicle category to receive dispatched rides.",
+            color = PilotTextMuted,
+            fontSize = 13.sp
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Personal Details Card
+        CockpitCard {
+            Text("Pilot Credentials", color = PilotElectricCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(12.dp))
+
+            CockpitTextField(
+                value = fullName,
+                onValueChange = { fullName = it },
+                placeholder = "e.g. Rohit Kumar",
+                label = "Full Legal Name"
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            CockpitTextField(
+                value = phone,
+                onValueChange = { phone = it.filter { ch -> ch.isDigit() }.take(10) },
+                placeholder = "10-digit mobile number",
+                label = "Mobile Number (+91)"
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            CockpitTextField(
+                value = password,
+                onValueChange = { password = it },
+                placeholder = "Minimum 6 characters",
+                label = "Account Password"
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Vehicle Category Selection Card
+        CockpitCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Vehicle Category", color = PilotElectricCyan, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                if (isLoadingCategories) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = PilotElectricCyan,
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (isLoadingCategories && categories.isEmpty()) {
+                Text("Connecting to server and loading active categories...", color = PilotTextMuted, fontSize = 13.sp)
+            } else if (categoryLoadError != null && categories.isEmpty()) {
+                // API Failure State
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF2E1A1A))
+                        .padding(14.dp)
+                ) {
+                    Text(
+                        text = "⚠️ Network / API Error",
+                        color = Color(0xFFFF6B6B),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = categoryLoadError ?: "Failed to connect to backend",
+                        color = PilotTextMuted,
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { loadCategories() },
+                        colors = ButtonDefaults.buttonColors(containerColor = PilotElectricCyan)
+                    ) {
+                        Text("Retry Loading Categories", color = Color(0xFF141210), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            } else if (categories.isEmpty()) {
+                // Empty List State
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF2E241A))
+                        .padding(14.dp)
+                ) {
+                    Text(
+                        text = "No Active Categories Available",
+                        color = Color(0xFFFFB84D),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = "No active vehicle categories are currently configured on the platform.",
+                        color = PilotTextMuted,
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { loadCategories() },
+                        colors = ButtonDefaults.buttonColors(containerColor = PilotElectricCyan)
+                    ) {
+                        Text("Refresh", color = Color(0xFF141210), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            } else {
+                // Dynamic Category Options from Backend API
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    categories.forEach { cat ->
+                        val isSelected = selectedCategoryId == cat.id
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (isSelected) Color(0xFF1E2F38) else Color(0xFF1B1B1E))
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) PilotElectricCyan else Color(0xFF333333),
+                                    shape = RoundedCornerShape(14.dp)
+                                )
+                                .clickable { selectedCategoryId = cat.id }
+                                .padding(14.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = { selectedCategoryId = cat.id },
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = PilotElectricCyan,
+                                        unselectedColor = Color.Gray
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = cat.name,
+                                        color = PilotTextWhite,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    if (!cat.description.isNullOrBlank()) {
+                                        Text(
+                                            text = cat.description,
+                                            color = PilotTextMuted,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = "Capacity: ${cat.capacity} Seats • Code: ${cat.code}",
+                                        color = PilotElectricCyan,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Submit Button
+        Button(
+            onClick = {
+                val digits = phone.filter { it.isDigit() }
+                if (fullName.isBlank()) {
+                    DriverDialogController.showToast("Please enter your full legal name")
+                    return@Button
+                }
+                if (digits.length != 10) {
+                    DriverDialogController.showToast("Please enter a valid 10-digit mobile number")
+                    return@Button
+                }
+                if (password.length < 6) {
+                    DriverDialogController.showToast("Password must be at least 6 characters")
+                    return@Button
+                }
+                val catId = selectedCategoryId
+                if (catId.isNullOrBlank()) {
+                    DriverDialogController.showToast("Please select a vehicle category")
+                    return@Button
+                }
+                if (isSubmitting) return@Button
+
+                val fullPhone = "+91$digits"
+                isSubmitting = true
+                scope.launch {
+                    val res = DriverRepository.registerDriver(
+                        phone = fullPhone,
+                        fullName = fullName.trim(),
+                        password = password,
+                        vehicleType = catId
+                    )
+                    isSubmitting = false
+                    if (res.isSuccess) {
+                        DriverDialogController.showToast("Pilot registered successfully with assigned category!")
+                        onNavigate("duty_dashboard")
+                    } else {
+                        val errMsg = res.exceptionOrNull()?.message ?: "Registration failed. Please try again."
+                        DriverDialogController.showToast(errMsg)
+                    }
+                }
+            },
+            enabled = !isSubmitting && !selectedCategoryId.isNullOrBlank(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = PilotElectricCyan,
+                disabledContainerColor = Color(0xFF333333)
+            )
+        ) {
+            if (isSubmitting) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color(0xFF141210), strokeWidth = 2.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Registering Pilot...", color = Color(0xFF141210), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            } else {
+                Text(
+                    "Complete Pilot Registration →",
+                    color = if (!selectedCategoryId.isNullOrBlank()) Color(0xFF141210) else Color.Gray,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+    }
 }
 
 // Screen 3: Pilot Password & PIN Recovery

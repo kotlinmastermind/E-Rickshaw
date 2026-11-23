@@ -223,10 +223,17 @@ class DriverEligibilityService:
 
         if required_category_id:
             query = query.where(
-                or_(
-                    Vehicle.category_id == required_category_id,
-                    Vehicle.category_id.is_(None)
-                )
+                Vehicle.category_id == required_category_id,
+                Vehicle.category_id.is_not(None),
+                Vehicle.is_active.is_(True),
+                DriverVehicleAssignment.is_active.is_(True)
+            )
+        else:
+            # Discovery without category filter (e.g. customer map view): require active assigned vehicle
+            query = query.where(
+                Vehicle.category_id.is_not(None),
+                Vehicle.is_active.is_(True),
+                DriverVehicleAssignment.is_active.is_(True)
             )
 
         res = await self.db.execute(query)

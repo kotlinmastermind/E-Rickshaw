@@ -843,15 +843,39 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
     val bookingDraft by RiderRepository.bookingDraft.collectAsState()
     var selectedCategory by remember { mutableStateOf(bookingDraft.selectedCategoryCode) }
     var fareComparisons by remember { mutableStateOf<List<com.vaisentra.mobility.rider.data.VehicleFareComparisonDto>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isNetworkError by remember { mutableStateOf(false) }
+
+    val loadFares: () -> Unit = {
+        scope.launch {
+            isLoading = true
+            errorMessage = null
+            isNetworkError = false
+            val res = RiderRepository.compareFares(
+                bookingDraft.pickupLat,
+                bookingDraft.pickupLng,
+                bookingDraft.destinationLat,
+                bookingDraft.destinationLng
+            )
+            isLoading = false
+            res.onSuccess { list ->
+                fareComparisons = list
+                errorMessage = null
+                if (list.isNotEmpty() && list.none { it.code == selectedCategory }) {
+                    selectedCategory = list.first().code
+                }
+            }.onFailure { err ->
+                fareComparisons = emptyList()
+                errorMessage = err.message ?: "Failed to calculate live fare"
+                isNetworkError = err is RiderRepository.FareCompareException.NetworkError ||
+                    (err.message?.contains("Network", ignoreCase = true) == true)
+            }
+        }
+    }
 
     LaunchedEffect(bookingDraft) {
-        val res = RiderRepository.compareFares(
-            bookingDraft.pickupLat,
-            bookingDraft.pickupLng,
-            bookingDraft.destinationLat,
-            bookingDraft.destinationLng
-        )
-        res.onSuccess { fareComparisons = it }
+        loadFares()
     }
 
     val firstEstimate = fareComparisons.firstOrNull()?.estimate
@@ -900,16 +924,29 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(text = "Route to $destTitle", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     Text(
-                        text = if (firstEstimate != null) {
-                            "${firstEstimate.distanceKm} km • Estimated ${firstEstimate.estimatedDurationMinutes.toInt()} mins"
-                        } else {
-                            "Calculating live route & fare..."
+                        text = when {
+                            isLoading -> "Calculating live route & fare..."
+                            errorMessage != null -> "Fare unavailable: $errorMessage"
+                            fareComparisons.isEmpty() -> "No active tariffs configured for route"
+                            firstEstimate != null -> "${firstEstimate.distanceKm} km • Estimated ${firstEstimate.estimatedDurationMinutes.toInt()} mins"
+                            else -> "Route ready"
                         },
-                        color = ElectricCyan,
-                        fontSize = 11.sp
+                        color = when {
+                            errorMessage != null -> CrimsonRed
+                            fareComparisons.isEmpty() -> AmberGold
+                            else -> ElectricCyan
+                        },
+                        fontSize = 11.sp,
+                        maxLines = 1
                     )
                 }
-                NeoBadge(text = "LIVE FARE", backgroundColor = SapphireGlow, textColor = ElectricCyan)
+                if (!isLoading && errorMessage == null && fareComparisons.isNotEmpty()) {
+                    NeoBadge(text = "LIVE FARE", backgroundColor = SapphireGlow, textColor = ElectricCyan)
+                } else if (errorMessage != null) {
+                    NeoBadge(text = if (isNetworkError) "OFFLINE" else "ERROR", backgroundColor = CrimsonGlow, textColor = CrimsonRed)
+                } else if (!isLoading && fareComparisons.isEmpty()) {
+                    NeoBadge(text = "UNCONFIGURED", backgroundColor = AmberGold.copy(alpha = 0.2f), textColor = AmberGold)
+                }
             }
         }
 
@@ -935,34 +972,127 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    fareComparisons.forEach { tier ->
-                        val isSelected = selectedCategory == tier.code
-                        val fareRupees = tier.estimate?.estimatedFareRupees ?: 0.0
-                        val detailText = "₹${String.format(Locale.US, "%.2f", fareRupees)} • ${tier.capacity} Seats • ${tier.description ?: ""}"
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(32.dp),
+                                color = ElectricCyan,
+                                strokeWidth = 3.dp
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Calculating live vehicle tariffs...",
+                                color = TextWhite,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Contacting routing engine & active tariff ledger",
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                } else if (errorMessage != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(SurfaceDark)
+                            .border(1.dp, CrimsonRed.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                            .padding(16.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = if (isNetworkError) "📡 Network Connection Error" else "⚠️ Fare Calculation Error",
+                                color = CrimsonRed,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = errorMessage ?: "Unable to fetch live fare rates.",
+                                color = TextMuted,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
+                            NeoButton(
+                                text = "Retry Fare Calculation",
+                                onClick = { loadFares() },
+                                backgroundColor = SapphirePrimary,
+                                modifier = Modifier.height(44.dp)
+                            )
+                        }
+                    }
+                } else if (fareComparisons.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(SurfaceDark)
+                            .border(1.dp, AmberGold.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                            .padding(16.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = "🚫 No Active Tariffs Configured",
+                                color = AmberGold,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "No active fare rules were found in the database for the available vehicle categories on this route. Please contact administration or try another destination.",
+                                color = TextMuted,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
+                            NeoButton(
+                                text = "Refresh Fares",
+                                onClick = { loadFares() },
+                                backgroundColor = SapphirePrimary,
+                                modifier = Modifier.height(44.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        fareComparisons.forEach { tier ->
+                            val isSelected = selectedCategory == tier.code
+                            val fareRupees = tier.estimate?.estimatedFareRupees ?: 0.0
+                            val detailText = "₹${String.format(Locale.US, "%.2f", fareRupees)} • ${tier.capacity} Seats • ${tier.description ?: ""}"
 
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (isSelected) SurfaceCard else SurfaceDark)
-                                .border(
-                                    1.5.dp,
-                                    if (isSelected) BorderFocus else Color.Transparent,
-                                    RoundedCornerShape(16.dp)
-                                )
-                                .clickable { selectedCategory = tier.code }
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = "🛺", fontSize = 26.sp)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = tier.name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                    Text(text = detailText, color = if (isSelected) ElectricCyan else TextMuted, fontSize = 11.sp, maxLines = 1)
-                                }
-                                if (isSelected) {
-                                    NeoBadge(text = "SELECTED", backgroundColor = SapphireGlow, textColor = ElectricCyan)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isSelected) SurfaceCard else SurfaceDark)
+                                    .border(
+                                        1.5.dp,
+                                        if (isSelected) BorderFocus else Color.Transparent,
+                                        RoundedCornerShape(16.dp)
+                                    )
+                                    .clickable { selectedCategory = tier.code }
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(text = "🛺", fontSize = 26.sp)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(text = tier.name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                        Text(text = detailText, color = if (isSelected) ElectricCyan else TextMuted, fontSize = 11.sp, maxLines = 1)
+                                    }
+                                    if (isSelected) {
+                                        NeoBadge(text = "SELECTED", backgroundColor = SapphireGlow, textColor = ElectricCyan)
+                                    }
                                 }
                             }
                         }
@@ -998,11 +1128,23 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
 
                 val selectedTier = fareComparisons.firstOrNull { it.code == selectedCategory }
                 val selectedTierName = selectedTier?.name ?: "Ride"
+                val canBook = !isLoading && errorMessage == null && selectedTier != null && (selectedTier.estimate?.estimatedFareRupees ?: 0.0) > 0.0
+
+                val buttonText = when {
+                    isBooking -> "Requesting Live Pilot..."
+                    isLoading -> "Calculating Live Fare..."
+                    errorMessage != null -> "Fare Unavailable — Retry Above"
+                    fareComparisons.isEmpty() -> "Tariffs Not Configured"
+                    else -> "Book $selectedTierName"
+                }
 
                 NeoButton(
-                    text = if (isBooking) "Requesting Live Pilot..." else "Book $selectedTierName",
+                    text = buttonText,
+                    enabled = canBook && !isBooking,
+                    backgroundColor = if (canBook) SapphirePrimary else SurfaceCard,
+                    textColor = if (canBook) TextWhite else TextDim,
                     onClick = {
-                        if (isBooking) return@NeoButton
+                        if (!canBook || isBooking) return@NeoButton
                         scope.launch {
                             isBooking = true
                             val result = RiderRepository.createRideBooking(
@@ -1023,7 +1165,7 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
                             }
                         }
                     },
-                    icon = "⚡"
+                    icon = if (canBook) "⚡" else null
                 )
             }
         }

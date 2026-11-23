@@ -34,7 +34,8 @@ fun DriverGoLoginScreen(
     onNextClick: (String) -> Unit = {},
     onPasswordLoginClick: ((phone: String, password: String) -> Unit)? = null,
     onTermsClick: () -> Unit = {},
-    onForgotPasswordClick: () -> Unit = {}
+    onForgotPasswordClick: () -> Unit = {},
+    onRegisterClick: () -> Unit = {}
 ) {
     var phoneNumber by remember { mutableStateOf(initialPhoneNumber) }
     var isPasswordMode by remember { mutableStateOf(false) }
@@ -287,6 +288,26 @@ fun DriverGoLoginScreen(
                         color = Color(0xFF141210),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = { onRegisterClick() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFF141210)
+                    )
+                ) {
+                    Text(
+                        text = "New Pilot? Register with Vehicle Category →",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF141210)
                     )
                 }
 
