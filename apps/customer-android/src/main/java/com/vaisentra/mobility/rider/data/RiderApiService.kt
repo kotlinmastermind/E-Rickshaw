@@ -109,6 +109,19 @@ interface RiderApiService {
     @POST("api/v1/payments/split")
     suspend fun splitFare(@Body request: SplitFareRequest): Response<Map<String, Any>>
 
+        // --- Razorpay Verified Wallet Top-up ---
+    @POST("api/v1/wallets/topup/create-order")
+    suspend fun createWalletTopupOrder(@Body request: TopupCreateOrderRequest): Response<TopupOrderResponse>
+
+    @POST("api/v1/wallets/topup/verify")
+    suspend fun verifyWalletTopup(@Body request: TopupVerifyRequest): Response<TopupVerifyResponse>
+
+    // --- Razorpay Verified Ride Payment ---
+    @POST("api/v1/payments/razorpay/create-order")
+    suspend fun createRidePaymentOrder(@Body request: RidePaymentOrderRequest): Response<RidePaymentOrderResponse>
+
+    @POST("api/v1/payments/razorpay/verify")
+    suspend fun verifyRidePayment(@Body request: RidePaymentVerifyRequest): Response<RidePaymentVerifyResponse>
     // --- Safety & Emergency SOS ---
     @POST("api/v1/safety/sos")
     suspend fun triggerSos(@Body request: SosTriggerRequest): Response<Map<String, Any>>

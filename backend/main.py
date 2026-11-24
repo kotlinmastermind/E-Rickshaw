@@ -23,7 +23,64 @@ from backend.api.routes import (
 )
 from sqlalchemy import select
 
+# 1. Imports add karein in backend/main.py:
+from backend.api.routes import fleet, tracking_public
+from backend.application.services.sla_escalation_service import SlaEscalationService
+from backend.application.services.driver_incentive_service import DriverIncentiveService
+from backend.application.services.payment_reconciliation_service import run_payment_reconciliation_loop
+
+# 2. Worker loops add karein:
+async def _run_sla_escalation_worker():
+    """Background worker evaluating SLA breaches every 60 seconds."""
+    while True:
+        try:
+            async with async_session_maker() as session:
+                await SlaEscalationService(session).execute_escalation_cycle()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("SLA Escalation worker cycle failed")
+        await asyncio.sleep(60)
+
+async def _run_driver_incentives_worker():
+    """Background worker running night settlement for Driver daily targets in Asia/Kolkata."""
+    while True:
+        try:
+            async with async_session_maker() as session:
+                await DriverIncentiveService(session).settle_daily_targets()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Driver incentive settlement worker cycle failed")
+        await asyncio.sleep(3600) # Check hourly
+
+# 3. Lifespan me add karein:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _seed_baseline_data()
+    dispatcher = asyncio.create_task(_dispatch_scheduled_broadcasts(), name="scheduled-broadcasts")
+    sla_worker = asyncio.create_task(_run_sla_escalation_worker(), name="sla-escalations")
+    recon_worker = asyncio.create_task(run_payment_reconciliation_loop(), name="payment-reconciliation")
+    incentives_worker = asyncio.create_task(_run_driver_incentives_worker(), name="driver-incentives")
+    try:
+        yield
+    finally:
+        dispatcher.cancel()
+        sla_worker.cancel()
+        incentives_worker.cancel()
+        for t in [dispatcher, sla_worker, incentives_worker]:
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+
+# 4. Routers include karein:
+app.include_router(fleet.router, prefix=settings.API_V1_STR)
+app.include_router(tracking_public.router)
+
 logger = logging.getLogger(__name__)
+
+
 
 async def _dispatch_scheduled_broadcasts():
     """Process due notifications while this API worker is running."""

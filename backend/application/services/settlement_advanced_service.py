@@ -15,7 +15,7 @@ from backend.domain.models import (
     PaymentRefund, FareDispute
 )
 from backend.application.services.wallet_service import WalletService
-
+from backend.integrations.payments.provider import get_payment_provider
 class SettlementAdvancedService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -627,28 +627,46 @@ class SettlementAdvancedService:
         reason: str,
         is_partial: bool = False
     ) -> Dict[str, Any]:
-        stmt = select(Payment).where(Payment.id == payment_id)
+        """Initiate authentic gateway refund via Razorpay API."""
+        stmt = select(Payment).where(Payment.id == payment_id).with_for_update()
         res = await self.db.execute(stmt)
         payment = res.scalar_one_or_none()
         if not payment:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record not found.")
 
-        if amount_cents > payment.amount_cents:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Refund amount exceeds total captured payment.")
+        if payment.status != "CAPTURED":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CAPTURED payments can be refunded.")
 
-        arn = f"ARN-{uuid.uuid4().hex[:12].upper()}"
-        est_settlement = datetime.now(timezone.utc) + timedelta(days=2)
+        remaining = payment.amount_cents - (payment.refunded_amount_cents or 0)
+        if amount_cents > remaining:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Refund amount (₹{amount_cents/100:.2f}) exceeds remaining balance (₹{remaining/100:.2f})."
+            )
+
+        provider = get_payment_provider()
+        # Call live Razorpay Refund API
+        gateway_refund = await provider.create_refund(
+            payment_id=payment.provider_payment_id,
+            amount_cents=amount_cents,
+            notes={"reason": reason, "payment_id": payment.id}
+        )
+
+        real_refund_id = gateway_refund.get("id")
+        real_arn = gateway_refund.get("acquirer_data", {}).get("arn")
+        settlement_status = "PROCESSED" if gateway_refund.get("status") == "processed" else "GATEWAY_PROCESSING"
 
         refund = PaymentRefund(
+            id=real_refund_id or str(uuid.uuid4()),
             payment_id=payment.id,
             ride_id=payment.ride_id,
             customer_id=payment.customer_id,
             amount_cents=amount_cents,
             is_partial=is_partial,
             reason=reason,
-            status="GATEWAY_PROCESSING",
-            arn_reference=arn,
-            estimated_settlement_date=est_settlement
+            status=settlement_status,
+            arn_reference=real_arn,
+            estimated_settlement_date=datetime.now(timezone.utc) + timedelta(days=3)
         )
         self.db.add(refund)
 
@@ -659,21 +677,14 @@ class SettlementAdvancedService:
             payment.status = "PARTIALLY_REFUNDED"
 
         await self.db.commit()
-        await self.db.refresh(refund)
-
         return {
             "refund_id": refund.id,
-            "payment_id": refund.payment_id,
-            "ride_id": refund.ride_id,
-            "amount_cents": refund.amount_cents,
-            "amount_rupees": round(refund.amount_cents / 100, 2),
-            "is_partial": refund.is_partial,
+            "payment_id": payment.id,
+            "amount_rupees": round(amount_cents / 100.0, 2),
             "status": refund.status,
             "arn_reference": refund.arn_reference,
-            "estimated_settlement_date": refund.estimated_settlement_date.isoformat(),
-            "reason": refund.reason
+            "gateway_status": gateway_refund.get("status")
         }
-
     async def get_refund_status(self, refund_id: str) -> Dict[str, Any]:
         stmt = select(PaymentRefund).where(PaymentRefund.id == refund_id)
         res = await self.db.execute(stmt)

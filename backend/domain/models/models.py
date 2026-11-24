@@ -970,37 +970,38 @@ class RideAssignment(Base):
 
     ride: Mapped["Ride"] = relationship(back_populates="assignments")
 
-
 class Payment(Base):
     __tablename__ = "payments"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id"), unique=True, nullable=False)
-    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customer_profiles.id"), nullable=False)
-    driver_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=True)
+    # Relaxed to nullable=True to support WALLET_TOPUP and GIFT_CARD_PURCHASE
+    ride_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("rides.id"), unique=True, nullable=True, index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    customer_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("customer_profiles.id"), nullable=True, index=True)
+    driver_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=True, index=True)
+    
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
-    currency: Mapped[str] = mapped_column(String(10), default="INR")
-    payment_method: Mapped[str] = mapped_column(String(20), default="UPI")  # UPI, CASH, WALLET
-    status: Mapped[str] = mapped_column(String(20), default="PENDING")
-    provider_name: Mapped[str] = mapped_column(String(30), default="RAZORPAY")
-    provider_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    provider_payment_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), default="RIDE_FARE", index=True, nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(20), default="UPI", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True, nullable=False)
+    
+    provider_name: Mapped[str] = mapped_column(String(30), default="RAZORPAY", nullable=False)
+    provider_order_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
+    provider_payment_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
     provider_signature: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    
     cash_collected_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     cash_confirmed_by_driver_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
-    # Part 4 Settlements Additions (Features 85, 87, 89, 95)
     refunded_amount_cents: Mapped[int] = mapped_column(Integer, default=0)
     upi_intent_uri: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    saved_method_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    corporate_account_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    split_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
-    ride: Mapped["Ride"] = relationship(back_populates="payment")
+    ride: Mapped[Optional["Ride"]] = relationship(back_populates="payment")
+
 
 
 class DriverRating(Base):

@@ -3,12 +3,13 @@ from typing import Dict, Any, List, Optional
 import os
 import json
 import secrets
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, or_, and_
 from fastapi import HTTPException, status, UploadFile
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, Session, TrustedDevice, UserSavedPhone,
-    UserPreferences, AccountDeletionRequest, DataExportArchive,
+    UserPreferences, AccountDeletionRequest, DataExportArchive,PrivacyDataSubjectRequest,
     Ride, Payment, AdministrativeAuditLog
 )
 from backend.infrastructure.security.crypto import (
@@ -882,6 +883,7 @@ class UserGovernanceService:
         stmt_sessions = select(Session).where(Session.user_id == user_id)
         sessions = (await self.db.execute(stmt_sessions)).scalars().all()
 
+        
         export_dict = {
             "export_metadata": {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -903,6 +905,7 @@ class UserGovernanceService:
                 "preferred_music": cust_profile.preferred_music if cust_profile else "Classical Symphony",
                 "preferred_water": cust_profile.preferred_water if cust_profile else "Sparkling Mineral"
             },
+            # In backend/application/services/user_governance_service.py (around line 913):
             "journey_history": [
                 {
                     "ride_id": r.id,
@@ -910,7 +913,7 @@ class UserGovernanceService:
                     "pickup": r.pickup_address,
                     "destination": r.destination_address,
                     "fare_cents": r.final_fare_cents or r.estimated_fare_cents,
-                    "requested_at": r.requested_at.isoformat()
+                    "created_at": r.created_at.isoformat() if r.created_at else None  # FIXED: Was r.requested_at
                 }
                 for r in rides
             ],
@@ -936,6 +939,20 @@ class UserGovernanceService:
             payload_json=export_json,
             expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
+                # Record statutory DPDP request
+        req_number = f"DPDP-EXP-{secrets.token_hex(4).upper()}"
+        dpo_req = PrivacyDataSubjectRequest(
+            id=str(uuid.uuid4()),
+            request_number=req_number,
+            user_id=user_id,
+            user_role="CUSTOMER",
+            request_type="DATA_PORTABILITY_EXPORT",
+            details="User initiated full account and trip data export under DPDP Act 2023.",
+            status="FULFILLED",
+            resolution_notes="Immediate archive compiled and download link provisioned.",
+            fulfilled_at=datetime.now(timezone.utc)
+        )
+        self.db.add(dpo_req)
         self.db.add(archive)
         await self.db.commit()
 

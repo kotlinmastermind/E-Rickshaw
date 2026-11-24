@@ -19,6 +19,7 @@ from backend.domain.models import (
     AdministrativeAuditLog
 )
 from backend.application.services.wallet_service import WalletService
+from backend.integrations.payments.provider import get_payment_provider
 
 
 def generate_gift_card_code() -> str:
@@ -141,7 +142,11 @@ class GiftCardService:
         message: Optional[str] = None,
         delivery_method: str = "IN_APP",
         payment_method: str = "UPI",
-        idempotency_key: Optional[str] = None
+        idempotency_key: Optional[str] = None,
+        razorpay_payment_id: Optional[str] = None,
+        razorpay_order_id: Optional[str] = None,
+        razorpay_signature: Optional[str] = None,
+        **kwargs: Any
     ) -> Dict[str, Any]:
         # Enforce limits
         if amount_cents < 10000 or amount_cents > 1000000:
@@ -154,12 +159,10 @@ class GiftCardService:
         if not purchaser:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchaser user account not found.")
 
-        # Payment processing
+        now = datetime.now(timezone.utc)
         clean_payment_method = (payment_method or "UPI").upper()
-        payment_order_id = f"order_gc_{uuid.uuid4().hex[:12]}"
-        payment_id = f"pay_gc_{uuid.uuid4().hex[:12]}"
 
-        # If paying via wallet, debit purchaser wallet
+        # 1. If paying via commuter wallet, execute atomic debit
         if clean_payment_method == "WALLET":
             await WalletService.debit_wallet(
                 session=self.db,
@@ -167,17 +170,56 @@ class GiftCardService:
                 amount_cents=amount_cents,
                 source="GIFT_CARD_PURCHASE",
                 description=f"Purchased Gift Card for {recipient_name or 'Friend'}",
-                idempotency_key=idempotency_key
+                idempotency_key=idempotency_key or f"gc_deb_{uuid.uuid4()}"
+            )
+            initial_status = "ACTIVE"
+            payment_status = "COMPLETED"
+            payment_id = f"pay_wallet_{uuid.uuid4().hex[:12]}"
+            payment_order_id = f"ord_wallet_{uuid.uuid4().hex[:12]}"
+
+        # 2. External Gateway (Razorpay UPI / Cards): Require verified gateway payment ID
+        elif clean_payment_method in ["RAZORPAY", "UPI", "CARD"]:
+            rzp_payment_id = razorpay_payment_id or kwargs.get("razorpay_payment_id")
+            rzp_order_id = razorpay_order_id or kwargs.get("razorpay_order_id")
+            rzp_sig = razorpay_signature or kwargs.get("razorpay_signature", "")
+
+            if not rzp_payment_id or not rzp_order_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot issue Gift Card: Verified Razorpay payment and order identifiers required."
+                )
+
+            provider = get_payment_provider()
+            is_valid = provider.verify_payment_signature(
+                razorpay_order_id=rzp_order_id,
+                razorpay_payment_id=rzp_payment_id,
+                razorpay_signature=rzp_sig
+            )
+            if not is_valid:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Gift card issuance rejected: Invalid Razorpay cryptographic signature."
+                )
+
+            initial_status = "ACTIVE"
+            payment_status = "COMPLETED"
+            payment_id = rzp_payment_id
+            payment_order_id = rzp_order_id
+
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported payment method for Gift Card: {clean_payment_method}"
             )
 
-        # Cryptographic generation
+        # 3. Instantiate and persist GiftCard record
         code = generate_gift_card_code()
         pin = generate_gift_card_pin()
         code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
-        now = datetime.now(timezone.utc)
-        expires = now + timedelta(days=365)
+        expires_at = now + timedelta(days=365)
 
         card = GiftCard(
+            id=str(uuid.uuid4()),
             code=code,
             code_hash=code_hash,
             pin=pin,
@@ -185,26 +227,26 @@ class GiftCardService:
             remaining_value_cents=amount_cents,
             currency="INR",
             purchased_by_user_id=purchaser_user_id,
-            card_design=card_design if card_design in ["ROYAL_GOLD", "SAPPHIRE_ELEGANCE", "EMERALD_GREEN", "DIWALI_FESTIVE", "METRO_COMMUTE"] else "ROYAL_GOLD",
-            recipient_name=recipient_name.strip() if recipient_name else None,
-            recipient_email=recipient_email.strip().lower() if recipient_email else None,
-            recipient_phone=recipient_phone.strip() if recipient_phone else None,
-            sender_name=sender_name.strip() if sender_name else (purchaser.full_name or "A Generous Commuter"),
-            message=message.strip() if message else "Wishing you safe and distinguished journeys with RiderGo.",
+            card_design=card_design,
+            recipient_name=recipient_name,
+            recipient_email=recipient_email,
+            recipient_phone=recipient_phone,
+            sender_name=sender_name,
+            message=message,
             delivery_method=delivery_method,
-            status="ACTIVE",
-            payment_status="COMPLETED",
+            status=initial_status,
+            payment_status=payment_status,
             payment_order_id=payment_order_id,
             payment_id=payment_id,
             is_active=True,
-            expires_at=expires,
+            expires_at=expires_at,
             created_at=now,
             updated_at=now
         )
         self.db.add(card)
         await self.db.flush()
 
-        # Audit ledger transaction
+        # 4. Audit ledger transaction
         tx = GiftCardTransaction(
             gift_card_id=card.id,
             user_id=purchaser_user_id,

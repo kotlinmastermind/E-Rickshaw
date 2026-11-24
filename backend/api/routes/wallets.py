@@ -1,66 +1,207 @@
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status
+"""
+Wallet & Ledger API Routes - Production Financial Security Architecture
+Enforces cryptographic Razorpay order binding, server-side signature verification,
+pessimistic row locking, and strict separation between ride payments and wallet top-ups.
+"""
+from typing import Optional, List, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_user, get_current_admin
-from backend.domain.models import User
+from backend.domain.models import User, Payment
 from backend.application.services.wallet_service import WalletService
+from backend.application.services.payment_service import PaymentService
+from backend.integrations.payments.provider import get_payment_provider
+from backend.core.config import settings
 
 router = APIRouter(prefix="/wallets", tags=["Wallet & Ledger"])
 
-class TopUpRequest(BaseModel):
-    amount_cents: int = Field(..., gt=0, json_schema_extra={"example": 500000})
-    payment_method: str = Field("UPI", json_schema_extra={"example": "UPI"})
-    idempotency_key: Optional[str] = Field(None, json_schema_extra={"example": "topup-uuid-12345"})
+MIN_TOPUP_CENTS = 10000     # ₹100.00
+MAX_TOPUP_CENTS = 1000000   # ₹10,000.00
+
+class TopupCreateOrderRequest(BaseModel):
+    amount_cents: int = Field(..., ge=MIN_TOPUP_CENTS, le=MAX_TOPUP_CENTS, description="Amount in paise (1 INR = 100 paise)")
+    currency: str = Field("INR", pattern="^INR$")
+
+class TopupVerifyRequest(BaseModel):
+    razorpay_order_id: str = Field(..., min_length=10)
+    razorpay_payment_id: str = Field(..., min_length=10)
+    razorpay_signature: str = Field(..., min_length=20)
 
 class CompensateRequest(BaseModel):
     original_tx_id: Optional[str] = None
     user_id: Optional[str] = None
-    amount_cents: Optional[int] = None
-    reason: str
+    amount_cents: Optional[int] = Field(None, gt=0)
+    reason: str = Field(..., min_length=10)
+
 
 @router.get("/me")
 async def get_my_wallet(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    """Retrieve authenticated commuter's authoritative balance from database."""
     return await WalletService.get_balance(db, user.id)
+
+
+@router.post("/topup/create-order")
+async def create_wallet_topup_order(
+    payload: TopupCreateOrderRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Stage 1: Generates a cryptographically bound Razorpay Order for Wallet Top-up.
+    Persists a pending Payment entity with purpose=WALLET_TOPUP before client checkout.
+    """
+    provider = get_payment_provider()
+    receipt_id = f"rcpt_w_{user.id[:8]}_{int(db.bind.dialect.name != '')}"
+    
+    order = await provider.create_razorpay_order(
+        amount_cents=payload.amount_cents,
+        currency=payload.currency,
+        receipt=receipt_id,
+        notes={
+            "user_id": user.id,
+            "purpose": "WALLET_TOPUP",
+            "platform": "E-Rickshaw Mobility"
+        }
+    )
+    
+    # Persist pending Payment intent bound to this user
+    payment = Payment(
+        ride_id=None,
+        user_id=user.id,
+        customer_id=None,
+        amount_cents=payload.amount_cents,
+        currency=payload.currency,
+        status="CREATED",
+        purpose="WALLET_TOPUP",
+        payment_method="RAZORPAY",
+        provider_name="RAZORPAY",
+        provider_order_id=order["id"],
+        idempotency_key=f"topup_order_{order['id']}"
+    )
+    db.add(payment)
+    await db.commit()
+
+    return {
+        "order_id": order["id"],
+        "amount_cents": payload.amount_cents,
+        "amount_rupees": round(payload.amount_cents / 100.0, 2),
+        "currency": payload.currency,
+        "key_id": settings.RAZORPAY_KEY_ID or "",
+        "status": "CREATED"
+    }
+
+
+@router.post("/topup/verify")
+async def verify_wallet_topup(
+    payload: TopupVerifyRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Stage 2: Cryptographically verifies Razorpay payment signature, queries Razorpay API
+    for server-side capture status, and commits atomic credit to Wallet Ledger.
+    """
+    provider = get_payment_provider()
+
+    # 1. Cryptographic HMAC-SHA256 signature verification
+    is_valid = provider.verify_payment_signature(
+        razorpay_order_id=payload.razorpay_order_id,
+        razorpay_payment_id=payload.razorpay_payment_id,
+        razorpay_signature=payload.razorpay_signature
+    )
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cryptographic verification failed: Invalid Razorpay signature."
+        )
+
+    # 2. Locate persisted payment record and verify ownership
+    stmt = select(Payment).where(
+        Payment.provider_order_id == payload.razorpay_order_id,
+        Payment.purpose == "WALLET_TOPUP"
+    ).with_for_update()
+    res = await db.execute(stmt)
+    payment = res.scalar_one_or_none()
+
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No wallet top-up order matches {payload.razorpay_order_id}."
+        )
+
+    if payment.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You do not own this payment order."
+        )
+
+    if payment.status == "CAPTURED":
+        # Idempotent response if already processed by webhook
+        balance_info = await WalletService.get_balance(db, user.id)
+        return {
+            "status": "ALREADY_PROCESSED",
+            "message": "Payment was already verified and credited.",
+            "payment_id": payment.provider_payment_id,
+            "balance_rupees": balance_info["balance_cents"] / 100.0
+        }
+
+    # 3. Server-side gateway verification via Razorpay REST API
+    gateway_data = await provider.fetch_payment(payload.razorpay_payment_id)
+    if gateway_data.get("status") not in ["captured", "authorized"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Payment status is {gateway_data.get('status')}; expected captured."
+        )
+    if gateway_data.get("amount") != payment.amount_cents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Amount tampering detected: Captured gateway amount differs from order."
+        )
+
+    # 4. Atomically commit ledger credit and transition payment status
+    payment_service = PaymentService(db)
+    finalized = await payment_service.finalize_payment_capture(
+        payment=payment,
+        provider_payment_id=payload.razorpay_payment_id,
+        provider_signature=payload.razorpay_signature
+    )
+
+    balance_info = await WalletService.get_balance(db, user.id)
+    return {
+        "status": "SUCCESS",
+        "message": "Payment verified and credited to commuter wallet.",
+        "payment_id": payload.razorpay_payment_id,
+        "amount_rupees": round(payment.amount_cents / 100.0, 2),
+        "balance_cents": balance_info["balance_cents"],
+        "balance_rupees": balance_info["balance_cents"] / 100.0
+    }
+
 
 @router.post("/topup")
 @router.post("/top-up")
-async def top_up_wallet(
-    payload: TopUpRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    tx = await WalletService.credit_wallet(
-        session=db,
-        user_id=user.id,
-        amount_cents=payload.amount_cents,
-        transaction_type="CREDIT",
-        source="TOP_UP",
-        description=f"Wallet top-up via {payload.payment_method}",
-        idempotency_key=payload.idempotency_key
+async def legacy_topup_rejection():
+    """Permanent removal of unverified client-side credit route."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Direct wallet top-up without gateway verification is permanently deprecated. Use /topup/create-order and /topup/verify."
     )
-    await db.commit()
-    return {
-        "status": "SUCCESS",
-        "transaction_id": tx.id,
-        "amount_cents": tx.amount_cents,
-        "transaction_type": tx.transaction_type,
-        "balance_after_cents": tx.balance_after_cents,
-        "running_balance_cents": tx.balance_after_cents,
-        "created_at": tx.created_at.isoformat()
-    }
+
 
 @router.get("/history")
 async def get_wallet_history(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    """Retrieve immutable double-entry ledger history."""
     txs = await WalletService.get_history(db, user.id, limit=limit, offset=offset)
     return [
         {
@@ -68,8 +209,9 @@ async def get_wallet_history(
             "transaction_type": tx.transaction_type,
             "source": tx.source,
             "amount_cents": tx.amount_cents,
+            "amount_rupees": round(tx.amount_cents / 100.0, 2),
             "balance_after_cents": tx.balance_after_cents,
-            "running_balance_cents": tx.balance_after_cents,
+            "balance_after_rupees": round(tx.balance_after_cents / 100.0, 2),
             "reference_id": tx.reference_id,
             "description": tx.description,
             "created_at": tx.created_at.isoformat()
@@ -77,12 +219,20 @@ async def get_wallet_history(
         for tx in txs
     ]
 
+
 @router.post("/admin/compensate")
 async def create_compensating_transaction(
     payload: CompensateRequest,
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
+    """Administrative ledger adjustment with mandatory audit logging and justification."""
+    if not (payload.original_tx_id or (payload.user_id and payload.amount_cents)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either original_tx_id or user_id and amount_cents must be provided."
+        )
+
     if payload.original_tx_id:
         comp_tx = await WalletService.create_compensating_entry(
             session=db,
@@ -90,124 +240,22 @@ async def create_compensating_transaction(
             reason=payload.reason,
             admin_user_id=admin.id
         )
-    elif payload.user_id and payload.amount_cents:
-        target_uid = payload.user_id
-        if not target_uid.startswith("usr-") and (target_uid.startswith("+") or target_uid.replace(" ", "").isdigit()):
-            clean_digits = "".join(filter(str.isdigit, target_uid))
-            clean_phone = f"+91{clean_digits[-10:]}"
-            u_stmt = select(User).where(User.phone_number == clean_phone)
-            u_res = await db.execute(u_stmt)
-            target_u = u_res.scalar_one_or_none()
-            if target_u:
-                target_uid = target_u.id
-
+    else:
         comp_tx = await WalletService.credit_wallet(
             session=db,
-            user_id=target_uid,
+            user_id=payload.user_id,
             amount_cents=payload.amount_cents,
             transaction_type="ADMIN_COMPENSATION",
             source="ADMIN_CONCIERGE",
-            description=payload.reason
+            reference_id=f"adm_{admin.id[:8]}",
+            description=f"Admin compensation: {payload.reason}"
         )
-    else:
-        raise HTTPException(status_code=400, detail="Either original_tx_id or user_id and amount_cents must be provided")
 
     await db.commit()
     return {
         "status": "COMPENSATED",
         "transaction_id": comp_tx.id,
-        "transaction_type": comp_tx.transaction_type,
-        "amount_cents": comp_tx.amount_cents,
-        "balance_after_cents": comp_tx.balance_after_cents,
-        "running_balance_cents": comp_tx.balance_after_cents,
-        "created_at": comp_tx.created_at.isoformat()
+        "amount_rupees": round(comp_tx.amount_cents / 100.0, 2),
+        "balance_after_rupees": round(comp_tx.balance_after_cents / 100.0, 2),
+        "authorized_by": admin.email
     }
-
-# ----------------- Part 4 Auto Top-up, Alerts & Export (Features 91, 92, 93) -----------------
-class AutoTopupConfigRequest(BaseModel):
-    enabled: bool
-    threshold_cents: int = Field(50000, gt=0)
-    amount_cents: int = Field(200000, gt=0)
-    method_id: Optional[str] = None
-
-class GiftCardPurchaseRequest(BaseModel):
-    amount_cents: int = Field(..., gt=0)
-    sender_name: str
-    recipient_email: Optional[str] = None
-    recipient_phone: Optional[str] = None
-    message: Optional[str] = None
-
-class GiftCardRedeemRequest(BaseModel):
-    code: str
-
-@router.post("/auto-topup/config")
-async def configure_auto_topup(
-    payload: AutoTopupConfigRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
-    service = SettlementAdvancedService(db)
-    return await service.configure_auto_topup(
-        user_id=user.id,
-        enabled=payload.enabled,
-        threshold_cents=payload.threshold_cents,
-        amount_cents=payload.amount_cents,
-        method_id=payload.method_id
-    )
-
-@router.get("/alerts/low-balance")
-async def check_wallet_low_balance(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
-    service = SettlementAdvancedService(db)
-    return await service.check_wallet_low_balance(user.id)
-
-@router.get("/export")
-async def export_wallet_csv(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
-    from fastapi.responses import Response
-    service = SettlementAdvancedService(db)
-    csv_content = await service.export_wallet_transactions_csv(user.id)
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=wallet_ledger_{user.id[:8]}.csv"}
-    )
-
-# ----------------- Part 4 Gift Cards (Feature 90) -----------------
-@router.post("/gift-cards/purchase")
-async def purchase_gift_card(
-    payload: GiftCardPurchaseRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
-    service = SettlementAdvancedService(db)
-    return await service.purchase_gift_card(
-        purchaser_user_id=user.id,
-        amount_cents=payload.amount_cents,
-        sender_name=payload.sender_name,
-        recipient_email=payload.recipient_email,
-        recipient_phone=payload.recipient_phone,
-        message=payload.message
-    )
-
-@router.post("/gift-cards/redeem")
-async def redeem_gift_card(
-    payload: GiftCardRedeemRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
-    service = SettlementAdvancedService(db)
-    return await service.redeem_gift_card(
-        user_id=user.id,
-        code=payload.code
-    )
-

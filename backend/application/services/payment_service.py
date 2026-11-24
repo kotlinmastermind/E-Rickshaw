@@ -15,6 +15,68 @@ class PaymentService:
         self.db = db
         self.provider = get_payment_provider()
 
+
+    # Add to backend/application/services/payment_service.py:
+
+    async def finalize_payment_capture(
+        self,
+        payment: Payment,
+        provider_payment_id: str,
+        provider_signature: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Authoritative single-source payment finalization engine.
+        Applies idempotency, transitions status to CAPTURED, credits wallet if top-up,
+        or marks Ride as COMPLETED if fare payment.
+        """
+        if payment.status == "CAPTURED":
+            return {"status": "ALREADY_PROCESSED", "payment_id": payment.id}
+
+        payment.status = "CAPTURED"
+        payment.provider_payment_id = provider_payment_id
+        if provider_signature:
+            payment.provider_signature = provider_signature
+
+        # Domain Action 1: Wallet Top-Up
+        if payment.purpose == "WALLET_TOPUP":
+            target_user_id = payment.user_id
+            if not target_user_id and payment.customer_id:
+                prof = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.id == payment.customer_id))).scalar_one_or_none()
+                if prof:
+                    target_user_id = prof.user_id
+
+            if not target_user_id:
+                raise ValueError(f"Cannot credit wallet: Payment {payment.id} has no associated user_id.")
+
+            from backend.application.services.wallet_service import WalletService
+            await WalletService.credit_wallet(
+                session=self.db,
+                user_id=target_user_id,
+                amount_cents=payment.amount_cents,
+                transaction_type="CREDIT",
+                source="TOP_UP",
+                reference_id=provider_payment_id,
+                description=f"Razorpay Wallet Top-up ({provider_payment_id})",
+                idempotency_key=f"pay_topup_fin_{payment.provider_order_id}"
+            )
+
+        # Domain Action 2: Ride Fare Payment
+        elif payment.purpose == "RIDE_FARE" and payment.ride_id:
+            r_res = await self.db.execute(select(Ride).where(Ride.id == payment.ride_id))
+            ride = r_res.scalar_one_or_none()
+            if ride and ride.status in ["IN_PROGRESS", "ACCEPTED", "ARRIVED", "STARTED"]:
+                ride.status = "COMPLETED"
+                ride.completed_at = ride.completed_at or datetime.now(timezone.utc)
+                if ride.final_fare_cents is None:
+                    ride.final_fare_cents = payment.amount_cents
+
+        await self.db.commit()
+        return {
+            "status": "CAPTURED",
+            "payment_id": payment.id,
+            "purpose": payment.purpose,
+            "amount_cents": payment.amount_cents
+        }
     async def create_payment_intent(self, user_id: str, ride_id: str, idempotency_key: str) -> Dict[str, Any]:
         """
         Creates or retrieves an authentic payment intent for a ride.
@@ -217,26 +279,26 @@ class PaymentService:
                 payment.provider_order_id = order_id
 
         elif webhook_event in ["payment.captured", "order.paid"]:
-            if payment.status == "CAPTURED":
-                if existing_inbox and hasattr(existing_inbox, "event_digest"):
-                    existing_inbox.status = "PROCESSED"
-                try:
-                    await self.db.commit()
-                except Exception:
-                    pass
-                return {"status": "ALREADY_PROCESSED", "payment_id": payment.id, "event": webhook_event}
-
-            payment.status = "CAPTURED"
-            payment.provider_payment_id = payment_id_from_entity
-            if order_id:
+            if order_id and not payment.provider_order_id:
                 payment.provider_order_id = order_id
 
-            target_ride_id = payment.ride_id or ride_id_from_notes
-            if target_ride_id:
-                ride = (await self.db.execute(select(Ride).where(Ride.id == target_ride_id))).scalar_one_or_none()
-                if ride and ride.status in ["IN_PROGRESS", "ACCEPTED", "ARRIVED", "STARTED"]:
-                    ride.status = "COMPLETED"
+            fin_result = await self.finalize_payment_capture(
+                payment=payment,
+                provider_payment_id=payment_id_from_entity,
+                provider_signature=signature_header
+            )
+            if existing_inbox and hasattr(existing_inbox, "event_digest"):
+                existing_inbox.status = "PROCESSED"
+            await self.db.commit()
+            return {
+                "status": "SUCCESS",
+                "event": webhook_event,
+                "payment_id": payment.id,
+                "purpose": getattr(payment, "purpose", "RIDE_FARE"),
+                "detail": fin_result
+            }
 
+            
         elif "refund" in webhook_event:
             payment.status = "REFUNDED"
             payment.refunded_amount_cents = payment_entity.get("amount_refunded") or payment.amount_cents

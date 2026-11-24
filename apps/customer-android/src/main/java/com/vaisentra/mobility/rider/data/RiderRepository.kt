@@ -1656,3 +1656,82 @@ object RiderRepository {
     }
 }
 
+    // Sealed class for UI state management
+    sealed class TopupState {
+        object Idle : TopupState()
+        object CreatingOrder : TopupState()
+        object CheckoutOpen : TopupState()
+        object Verifying : TopupState()
+        data class Success(val balanceRupees: Double) : TopupState()
+        data class Error(val message: String) : TopupState()
+    }
+
+    private val _topupState = MutableStateFlow<TopupState>(TopupState.Idle)
+    val topupState: StateFlow<TopupState> = _topupState.asStateFlow()
+
+    fun launchWalletTopupCheckout(activity: android.app.Activity, amountRupees: Double) {
+        val amountCents = (amountRupees * 100).toInt()
+        _topupState.value = TopupState.CreatingOrder
+
+        scope.launch {
+            try {
+                val res = NetworkClient.apiService.createWalletTopupOrder(
+                    TopupCreateOrderRequest(amountCents = amountCents)
+                )
+                if (res.isSuccessful && res.body() != null) {
+                    val body = res.body()!!
+                    _topupState.value = TopupState.CheckoutOpen
+
+                    withContext(Dispatchers.Main) {
+                        val checkout = com.razorpay.Checkout()
+                        checkout.setKeyID(body.keyId)
+
+                        val options = org.json.JSONObject().apply {
+                            put("name", "Vaisentra Mobility")
+                            put("description", "Wallet Recharge ₹${amountRupees.toInt()}")
+                            put("currency", "INR")
+                            put("amount", amountCents)
+                            put("order_id", body.orderId)
+                            put("theme.color", "#0D9488")
+                            put("prefill.contact", "")
+                            put("prefill.email", "")
+                        }
+                        checkout.open(activity, options)
+                    }
+                } else {
+                    _topupState.value = TopupState.Error("Order creation failed: HTTP ${res.code()}")
+                }
+            } catch (e: Exception) {
+                _topupState.value = TopupState.Error(e.message ?: "Network error creating top-up order")
+            }
+        }
+    }
+
+    fun handleRazorpaySuccess(orderId: String, paymentId: String, signature: String) {
+        _topupState.value = TopupState.Verifying
+        scope.launch {
+            try {
+                val res = NetworkClient.apiService.verifyWalletTopup(
+                    TopupVerifyRequest(
+                        razorpayOrderId = orderId,
+                        razorpayPaymentId = paymentId,
+                        razorpaySignature = signature
+                    )
+                )
+                if (res.isSuccessful && res.body() != null) {
+                    val updated = res.body()!!
+                    _topupState.value = TopupState.Success(updated.balanceRupees)
+                    fetchWalletBalance() // Refresh ledger balance
+                } else {
+                    _topupState.value = TopupState.Error("Backend signature verification rejected.")
+                }
+            } catch (e: Exception) {
+                _topupState.value = TopupState.Error(e.message ?: "Verification failed.")
+            }
+        }
+    }
+
+    fun handleRazorpayFailure(code: Int, description: String) {
+        _topupState.value = TopupState.Error("Payment cancelled: $description")
+    }
+

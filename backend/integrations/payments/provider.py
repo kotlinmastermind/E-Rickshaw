@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional
 import uuid
 import hmac
 import hashlib
+import json
 import logging
 from fastapi import HTTPException
 from backend.core.config import settings
@@ -155,38 +156,62 @@ class RazorpayPaymentProvider(PaymentProvider):
         razorpay_payment_id: str,
         razorpay_signature: str
     ) -> bool:
-        """
-        Cryptographically verify that the payment was captured by Razorpay
-        using HMAC-SHA256(order_id + "|" + payment_id, key_secret).
-        """
         if not (razorpay_order_id and razorpay_payment_id and razorpay_signature and self.key_secret):
             return False
 
-        # Try official razorpay SDK verification if available
-        if self._client:
-            try:
-                self._client.utility.verify_payment_signature({
-                    "razorpay_order_id": razorpay_order_id,
-                    "razorpay_payment_id": razorpay_payment_id,
-                    "razorpay_signature": razorpay_signature
-                })
-                return True
-            except Exception:
-                pass
-
-        # Standard HMAC-SHA256 signature calculation
         try:
             msg = f"{razorpay_order_id}|{razorpay_payment_id}".encode("utf-8")
-            expected_sig = hmac.new(
-                self.key_secret.encode("utf-8"),
-                msg,
-                hashlib.sha256
-            ).hexdigest()
+            expected_sig = hmac.new(self.key_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
             return hmac.compare_digest(expected_sig.lower(), razorpay_signature.lower())
         except Exception as e:
-            logger.error(f"Error verifying payment signature: {e}")
+            logger.error(f"Signature calculation failure: {e}")
             return False
 
+    async def verify_webhook_payload(self, raw_body: bytes, signature_header: str) -> PaymentVerificationResult:
+        if not signature_header or not self.webhook_secret:
+            return PaymentVerificationResult(False, "FAILED", "", "Missing signature header or webhook secret unconfigured.")
+
+        # STRICT ENFORCEMENT: Only verify against RAZORPAY_WEBHOOK_SECRET
+        is_valid = verify_hmac_signature(raw_body, signature_header, self.webhook_secret)
+        if not is_valid:
+            return PaymentVerificationResult(False, "FAILED", "", "Invalid HMAC-SHA256 signature.")
+
+        # Extract payment ID from verified entity
+        payment_id = ""
+        try:
+            data = json.loads(raw_body.decode("utf-8"))
+            payment_id = data.get("payload", {}).get("payment", {}).get("entity", {}).get("id", "")
+        except Exception:
+            pass
+
+        return PaymentVerificationResult(True, "CAPTURED", payment_id, "Webhook verified")
+
+    async def fetch_payment(self, payment_id: str) -> Dict[str, Any]:
+        """Fetch authoritative live payment status directly from Razorpay API."""
+        if self._client:
+            try:
+                return self._client.payment.fetch(payment_id)
+            except Exception as e:
+                logger.warning(f"Razorpay SDK fetch failed, falling back to HTTPX: {e}")
+
+        import httpx
+        url = f"https://api.razorpay.com/v1/payments/{payment_id}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, auth=(self.key_id, self.key_secret), timeout=10.0)
+            if resp.status_code == 200:
+                return resp.json()
+            raise HTTPException(status_code=resp.status_code, detail=f"Razorpay API error: {resp.text}")
+
+    async def create_refund(self, payment_id: str, amount_cents: int, notes: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """Execute real gateway refund via Razorpay Refund API."""
+        import httpx
+        url = f"https://api.razorpay.com/v1/payments/{payment_id}/refund"
+        payload = {"amount": amount_cents, "notes": notes or {}}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, auth=(self.key_id, self.key_secret), timeout=10.0)
+            if resp.status_code in [200, 201]:
+                return resp.json()
+            raise HTTPException(status_code=resp.status_code, detail=f"Razorpay Refund API error: {resp.text}")
     async def verify_webhook_payload(self, raw_body: bytes, signature_header: str) -> PaymentVerificationResult:
         if not signature_header:
             return PaymentVerificationResult(False, "FAILED", "", "Missing webhook signature")
@@ -196,10 +221,7 @@ class RazorpayPaymentProvider(PaymentProvider):
         if self.webhook_secret:
             is_valid = verify_hmac_signature(raw_body, signature_header, self.webhook_secret)
         
-        # 2. Try with key_secret as fallback (in case user pasted key_secret in Razorpay webhook secret field)
-        if not is_valid and self.key_secret:
-            is_valid = verify_hmac_signature(raw_body, signature_header, self.key_secret)
-
+       
         # 3. Try official razorpay SDK if available
         if not is_valid and self._client:
             try:

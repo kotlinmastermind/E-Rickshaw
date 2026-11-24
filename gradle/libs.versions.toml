@@ -17,6 +17,7 @@ mapbox = "11.10.0"
 biometric = "1.1.0"
 fragment = "1.8.5"
 navigationCompose = "2.7.7"
+razorpay = "1.6.40"
 
 [libraries]
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
@@ -57,3 +58,4 @@ mapbox-compose = { group = "com.mapbox.extension", name = "maps-compose-ndk27", 
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+razorpay-checkout = { group = "com.razorpay", name = "checkout", version.ref = "razorpay" }

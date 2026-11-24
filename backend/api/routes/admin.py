@@ -12,7 +12,7 @@ from backend.domain.models import (
     DriverAvailability, DriverLocation, FareRule, Vehicle, DriverDocument,
     AdministrativeAuditLog
 )
-from backend.infrastructure.security.crypto import create_jwt_token, decode_jwt_token
+from backend.infrastructure.security.crypto import create_jwt_token, decode_jwt_token,hash_secret , verify_password
 from backend.application.services.admin_service import AdminService
 from backend.application.services.shared_ride_analytics_service import SharedRideAnalyticsService
 from backend.application.services.admin_governance_service import AdminGovernanceService
@@ -28,55 +28,69 @@ async def get_admin_actor(
     """
     return user
 
-@router.get("/session/token")
-async def get_admin_session_token(
+
+
+# REPLACE lines 31-79 in backend/api/routes/admin.py with the following secure handler:
+
+class AdminLoginRequest(BaseModel):
+    email: str
+    password: str
+
+@router.post("/session/login")
+async def admin_secure_login(
+    payload: AdminLoginRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Issues or refreshes an authenticated JWT session token for the Enterprise Controls Center,
-    anchored directly to the real admin user in Supabase.
+    Secure Administrator Authentication. Requires valid bcrypt password verification.
+    Anonymous token minting is strictly removed.
     """
-    stmt = select(User).where(User.role.in_(["admin", "superadmin", "super administrator"])).order_by(User.created_at.asc())
+    from backend.infrastructure.security.crypto import verify_password
+    
+    stmt = select(User).where(
+        User.email == payload.email.strip().lower(),
+        User.role.in_(["admin", "superadmin", "super administrator"]),
+        User.is_active == True
+    )
     res = await db.execute(stmt)
-    admin_user = res.scalars().first()
-    if not admin_user:
-        raise HTTPException(status_code=404, detail="No admin user registered in database.")
-
-    # Find active unrevoked session or create one in Supabase
-    sess_stmt = select(Session).where(Session.user_id == admin_user.id, Session.is_revoked == False).order_by(Session.created_at.desc())
-    sess_res = await db.execute(sess_stmt)
-    active_sess = sess_res.scalars().first()
-    if not active_sess:
-        active_sess = Session(
-            id=str(uuid.uuid4()),
-            user_id=admin_user.id,
-            is_revoked=False,
-            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
-            created_at=datetime.now(timezone.utc)
+    admin_user = res.scalar_one_or_none()
+    
+    if not admin_user or not verify_password(payload.password, admin_user.hashed_password or ""):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid administrative credentials."
         )
-        db.add(active_sess)
-        await db.commit()
+
+    session_id = str(uuid.uuid4())
+    active_sess = Session(
+        id=session_id,
+        user_id=admin_user.id,
+        token_hash=hash_secret(session_id),
+        is_revoked=False,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=12),
+        created_at=datetime.now(timezone.utc)
+    )
+    db.add(active_sess)
+    await db.commit()
 
     token = create_jwt_token(
         user_id=admin_user.id,
-        role=admin_user.role or "admin",
-        session_id=active_sess.id,
+        role=admin_user.role,
+        session_id=session_id,
         token_type="access",
-        expires_delta=timedelta(days=30)
+        expires_delta=timedelta(hours=12)
     )
 
     return {
         "access_token": token,
         "token_type": "bearer",
+        "expires_in_hours": 12,
         "admin": {
             "id": admin_user.id,
-            "name": admin_user.full_name,
             "email": admin_user.email,
-            "role": admin_user.role,
-            "phone": admin_user.phone_number
+            "role": admin_user.role
         }
     }
-
 DELHI_COMMAND_ANCHORS = [
     (28.6475, 77.3150),  # Anand Vihar ISBT & Terminal Corridor
     (28.6320, 77.2195),  # Connaught Place Central Hub

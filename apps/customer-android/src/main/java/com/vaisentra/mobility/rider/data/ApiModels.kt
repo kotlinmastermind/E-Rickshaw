@@ -236,6 +236,31 @@ data class WalletBalanceDto(
         get() = if (balanceRupees > 0.0) balanceRupees else (balanceCents / 100.0)
 }
 
+data class TopupCreateOrderRequest(
+    @SerializedName("amount_cents") val amountCents: Int,
+    @SerializedName("currency") val currency: String = "INR"
+)
+
+data class TopupOrderResponse(
+    @SerializedName("order_id") val orderId: String,
+    @SerializedName("amount_cents") val amountCents: Int,
+    @SerializedName("amount_rupees") val amountRupees: Double,
+    @SerializedName("currency") val currency: String,
+    @SerializedName("key_id") val keyId: String
+)
+
+data class TopupVerifyRequest(
+    @SerializedName("razorpay_order_id") val razorpayOrderId: String,
+    @SerializedName("razorpay_payment_id") val razorpayPaymentId: String,
+    @SerializedName("razorpay_signature") val razorpaySignature: String
+)
+
+data class TopupVerifyResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("message") val message: String,
+    @SerializedName("balance_rupees") val balanceRupees: Double
+)
+
 data class TopupRequest(
     @SerializedName("amount_cents", alternate = ["amount_rupees"]) val amountCents: Int,
     @SerializedName("payment_method") val paymentMethod: String = "UPI",

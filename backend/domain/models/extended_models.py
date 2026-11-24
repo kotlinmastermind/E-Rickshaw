@@ -492,15 +492,20 @@ class PaymentWebhookInbox(Base):
     __tablename__ = "payment_webhook_inbox"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    provider_name: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    event_digest: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    signature_verified: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    attempts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    provider_name: Mapped[str] = mapped_column(String(32), default="RAZORPAY", nullable=False)
+    event_digest: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    signature_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     last_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    received_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     last_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    __table_args__ = (
+        UniqueConstraint("event_digest", name="uq_payment_webhook_inbox_event_digest"),
+    )
+
 
 
 class RideDestinationChangeRequest(Base):
@@ -1119,3 +1124,16 @@ class AudioRecordingAuditLog(Base):
 
 
 
+class SupportTicketEscalationLog(Base):
+    __tablename__ = "support_ticket_escalation_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    ticket_id: Mapped[str] = mapped_column(String(36), ForeignKey("support_tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    policy_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("support_escalation_policies.id"), nullable=True)
+    from_priority: Mapped[str] = mapped_column(String(20), nullable=False)
+    to_priority: Mapped[str] = mapped_column(String(20), nullable=False)
+    from_squad: Mapped[str] = mapped_column(String(50), nullable=False)
+    to_squad: Mapped[str] = mapped_column(String(50), nullable=False)
+    escalation_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    escalated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

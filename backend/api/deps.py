@@ -76,24 +76,39 @@ def require_role(required_role: str):
 async def get_current_customer(user: User = Depends(require_role("customer"))) -> User:
     return user
 
+# REPLACE lines 79-98 in backend/api/deps.py with:
+
 async def get_current_driver(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> User:
+    """
+    Enforces that the authenticated user is an APPROVED driver.
+    Strictly forbids role mutation or auto-provisioning of driver profiles.
+    """
     user_role = (user.role or "").strip().lower()
     if user_role not in ["driver", "admin", "superadmin", "super administrator"]:
-        user.role = "driver"
-        db.add(user)
-        stmt = select(DriverProfile).where(DriverProfile.user_id == user.id)
-        res = await db.execute(stmt)
-        if not res.scalar_one_or_none():
-            driver = DriverProfile(
-                user_id=user.id,
-                license_number=f"DL-{user.id[:8].upper()}",
-                approval_status="APPROVED"
-            )
-            db.add(driver)
-        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access restricted: User is not registered as a chauffeur."
+        )
+
+    stmt = select(DriverProfile).where(DriverProfile.user_id == user.id)
+    res = await db.execute(stmt)
+    driver_prof = res.scalar_one_or_none()
+
+    if not driver_prof:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No chauffeur profile found for this account."
+        )
+
+    if driver_prof.approval_status != "APPROVED":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Chauffeur account is not operational (Status: {driver_prof.approval_status})."
+        )
+
     return user
 
 _ADMIN_PERMISSION_PATHS = {
