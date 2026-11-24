@@ -55,3 +55,9 @@ uploads/
 *.png
 *.xml
 *~
+
+.env
+backend/.env
+*.env
+*.pem
+firebase-service-account.json
