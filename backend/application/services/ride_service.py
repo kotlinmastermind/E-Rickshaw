@@ -17,6 +17,7 @@ from backend.domain.state_machine.ride_state_machine import (
 )
 from backend.infrastructure.security.crypto import generate_secure_otp, verify_otp_constant_time
 from backend.integrations.notifications.provider import get_notification_provider
+from backend.application.services.promo_pass_service import PromoPassService
 
 class RideService:
     def __init__(self, db: AsyncSession):
@@ -623,40 +624,81 @@ class RideService:
 
         # Update driver stats and driver_wallets table
         driver.total_trips += 1
-        driver_earnings = round(ride.final_fare_cents * 0.8)
-        stmt_w = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
+        fare_cents = int(ride.final_fare_cents or ride.estimated_fare_cents or 0)
+        commission_rate = 0.15
+        commission_cents = int(round(fare_cents * commission_rate))
+        driver_earnings = fare_cents - commission_cents
+
+        stmt_w = select(DriverWallet).where(DriverWallet.driver_id == driver.id).with_for_update()
         d_wallet = (await self.db.execute(stmt_w)).scalar_one_or_none()
         if not d_wallet:
-            d_wallet = DriverWallet(driver_id=driver.id, balance_cents=driver_earnings, currency="INR")
+            d_wallet = DriverWallet(driver_id=driver.id, balance_cents=0, currency="INR")
             self.db.add(d_wallet)
-        else:
-            d_wallet.balance_cents += driver_earnings
-            d_wallet.updated_at = now
-        driver.wallet_balance_cents += driver_earnings
+            await self.db.flush()
 
-        # Sync with WalletService and PromoPassService
-        from backend.application.services.wallet_service import WalletService
-        from backend.application.services.promo_pass_service import PromoPassService
-        await WalletService.credit_wallet(
-            session=self.db,
-            user_id=driver_user_id,
-            amount_cents=driver_earnings,
-            transaction_type="TRIP_EARNING",
-            reference_id=ride.id,
-            description=f"Earnings for luxury chauffeur trip {ride.id[:8]}"
-        )
+        if ride.payment_method == "CASH":
+            # For CASH rides: Driver physically collects 100% of the fare from the commuter.
+            # Driver already holds their earnings + platform commission in cash!
+            # Driver therefore owes the platform the 15% commission.
+            # Check if commission was already debited to prevent duplicate debits
+            existing_comm = (await self.db.execute(select(DriverLedgerEntry).where(
+                DriverLedgerEntry.driver_id == driver.id,
+                DriverLedgerEntry.reference_id == ride.id,
+                DriverLedgerEntry.category == "COMMISSION"
+            ))).scalar_one_or_none()
+            if not existing_comm:
+                d_wallet.balance_cents -= commission_cents
+                d_wallet.updated_at = now
+                comm_entry = DriverLedgerEntry(
+                    id=str(uuid.uuid4()),
+                    driver_id=driver.id,
+                    entry_type="DEBIT",
+                    category="COMMISSION",
+                    amount_cents=-commission_cents,
+                    balance_after_cents=d_wallet.balance_cents,
+                    reference_id=ride.id,
+                    description=f"Platform commission (15%) for cash ride #{ride.id[:8]}",
+                    created_at=now
+                )
+                self.db.add(comm_entry)
+        elif ride.payment_method == "WALLET":
+            # For WALLET rides: Passenger pays through pre-funded digital commuter wallet.
+            # Platform credits driver net earnings (85%) to driver_wallets.
+            existing_earn = (await self.db.execute(select(DriverLedgerEntry).where(
+                DriverLedgerEntry.driver_id == driver.id,
+                DriverLedgerEntry.reference_id == ride.id,
+                DriverLedgerEntry.category == "TRIP_EARNING"
+            ))).scalar_one_or_none()
+            if not existing_earn:
+                d_wallet.balance_cents += driver_earnings
+                d_wallet.updated_at = now
+                earn_entry = DriverLedgerEntry(
+                    id=str(uuid.uuid4()),
+                    driver_id=driver.id,
+                    entry_type="CREDIT",
+                    category="TRIP_EARNING",
+                    amount_cents=driver_earnings,
+                    balance_after_cents=d_wallet.balance_cents,
+                    reference_id=ride.id,
+                    description=f"Net earnings (85%) for wallet-paid ride #{ride.id[:8]}",
+                    created_at=now
+                )
+                self.db.add(earn_entry)
 
+        # Debit commuter wallet if paid via WALLET
         cust_stmt = select(CustomerProfile).where(CustomerProfile.id == ride.customer_id)
         c_res = await self.db.execute(cust_stmt)
         cust_profile = c_res.scalars().first()
         if cust_profile and ride.payment_method == "WALLET":
+            from backend.application.services.wallet_service import WalletService
             await WalletService.debit_wallet(
                 session=self.db,
                 user_id=cust_profile.user_id,
-                amount_cents=ride.final_fare_cents,
+                amount_cents=fare_cents,
                 transaction_type="RIDE_PAYMENT",
                 reference_id=ride.id,
-                description=f"Trip fare payment for ride {ride.id[:8]}"
+                description=f"Trip fare payment for ride #{ride.id[:8]}",
+                idempotency_key=f"ride_wallet_deb_{ride.id}"
             )
 
         if cust_profile:

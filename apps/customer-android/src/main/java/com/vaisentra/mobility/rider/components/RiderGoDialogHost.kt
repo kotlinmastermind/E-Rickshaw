@@ -274,17 +274,17 @@ private fun PilotArrivedPopup() {
 // 5. Low Wallet Top-up
 @Composable
 private fun LowWalletPopup() {
+    val context = LocalContext.current
     NeoCard(borderColor = AmberGold) {
         Text(text = "⚡ Low Wallet Balance", color = AmberGold, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Your balance is ₹48.00. Trip estimated at ₹129.00. Recharge seamlessly with 1-tap UPI:", color = TextMuted, fontSize = 13.sp)
+        Text(text = "Recharge your commuter wallet securely via Razorpay UPI & Cards:", color = TextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(16.dp))
-        NeoButton(text = "Recharge ₹250 via UPI", backgroundColor = AmberGold, textColor = CanvasBlack, onClick = {
-            CoroutineScope(Dispatchers.IO).launch {
-                RiderRepository.topupWalletBalance(250.0)
+        NeoButton(text = "Recharge ₹250 via Razorpay", backgroundColor = AmberGold, textColor = CanvasBlack, onClick = {
+            (context as? android.app.Activity)?.let { activity ->
+                RiderRepository.launchWalletTopupCheckout(activity, 250.0)
             }
             DialogController.dismiss()
-            DialogController.showToast("₹250 added to RiderGo Wallet via FastAPI!")
         })
         Spacer(modifier = Modifier.height(8.dp))
         NeoButton(text = "Pay Cash After Ride", backgroundColor = SurfaceDark, onClick = { DialogController.dismiss() })

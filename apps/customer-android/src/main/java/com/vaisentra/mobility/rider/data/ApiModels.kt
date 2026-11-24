@@ -261,6 +261,39 @@ data class TopupVerifyResponse(
     @SerializedName("balance_rupees") val balanceRupees: Double
 )
 
+data class RidePaymentOrderRequest(
+    @SerializedName("ride_id") val rideId: String,
+    @SerializedName("amount_cents") val amountCents: Int? = null,
+    @SerializedName("amount_rupees") val amountRupees: Double? = null
+)
+
+data class RidePaymentOrderResponse(
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("order_id") val orderId: String? = null,
+    @SerializedName("amount_cents") val amountCents: Int = 0,
+    @SerializedName("currency") val currency: String = "INR",
+    @SerializedName("key_id") val keyId: String? = null
+) {
+    val effectiveOrderId: String
+        get() = orderId ?: id ?: ""
+}
+
+data class RidePaymentVerifyRequest(
+    @SerializedName("razorpay_order_id") val razorpayOrderId: String,
+    @SerializedName("razorpay_payment_id") val razorpayPaymentId: String,
+    @SerializedName("razorpay_signature") val razorpaySignature: String,
+    @SerializedName("ride_id") val rideId: String? = null
+)
+
+data class RidePaymentVerifyResponse(
+    @SerializedName("success") val success: Boolean = true,
+    @SerializedName("status") val status: String = "CAPTURED",
+    @SerializedName("message") val message: String = "",
+    @SerializedName("payment_id") val paymentId: String = "",
+    @SerializedName("order_id") val orderId: String = "",
+    @SerializedName("ride_id") val rideId: String? = null
+)
+
 data class TopupRequest(
     @SerializedName("amount_cents", alternate = ["amount_rupees"]) val amountCents: Int,
     @SerializedName("payment_method") val paymentMethod: String = "UPI",

@@ -20,7 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
-import com.vaisentra.mobility.rider.data.RiderRepository
+import com.vaisentra.mobility.rider.data.*
 import com.vaisentra.mobility.rider.theme.*
 import kotlinx.coroutines.launch
 
@@ -64,7 +64,7 @@ fun EcoPoolBookingScreen(onNavigate: (String) -> Unit) {
     val soloFare = estimate?.soloFareRupees ?: 90.0
     val totalSharedFare = estimate?.sharedFareRupees ?: (soloFare * 0.70 * seats)
     val totalSavings = estimate?.savingsRupees ?: ((soloFare * seats) - totalSharedFare)
-    val detourKm = estimate?.distance_km ?: 2.5
+    val detourKm = estimate?.distanceKm ?: 2.5
     val durationMin = estimate?.estimatedDurationMinutes?.toInt() ?: 12
 
     Column(

@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 object RiderRepository {
 
@@ -611,25 +612,13 @@ object RiderRepository {
     }
 
     fun topupWalletBalance(amount: Double) {
-        val current = _wallet.value
-        val newBal = current.balanceRupees + amount
-        _wallet.value = current.copy(
-            balanceRupees = newBal,
-            balanceCents = (newBal * 100).toInt()
-        )
+        // Direct unverified wallet mutation is deprecated and rejected by backend.
+        // Direct callers should invoke launchWalletTopupCheckout(activity, amount) instead.
+        android.util.Log.w("RiderRepository", "topupWalletBalance is deprecated: Please use launchWalletTopupCheckout to initiate verified Razorpay payment.")
         scope.launch {
             try {
-                val res = NetworkClient.apiService.topupWallet(
-                    TopupRequest.fromRupees(amount)
-                )
-                if (res.isSuccessful && res.body() != null) {
-                    val body = res.body()!!
-                    val finalRupees = if (body.balanceRupees > 0.0) body.balanceRupees else (body.balanceCents / 100.0)
-                    _wallet.value = body.copy(balanceRupees = finalRupees)
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("RiderRepository", "topupWallet failed: ${e.message}")
-            }
+                fetchWalletBalance()
+            } catch (_: Exception) {}
         }
     }
 
@@ -1654,7 +1643,14 @@ object RiderRepository {
             Result.failure(e)
         }
     }
-}
+
+    enum class CheckoutType {
+        WALLET_TOPUP,
+        RIDE_FARE
+    }
+
+    private var activeCheckoutType: CheckoutType = CheckoutType.WALLET_TOPUP
+    private var activeCheckoutRideId: String? = null
 
     // Sealed class for UI state management
     sealed class TopupState {
@@ -1669,8 +1665,22 @@ object RiderRepository {
     private val _topupState = MutableStateFlow<TopupState>(TopupState.Idle)
     val topupState: StateFlow<TopupState> = _topupState.asStateFlow()
 
+    sealed class RidePaymentState {
+        object Idle : RidePaymentState()
+        object CreatingOrder : RidePaymentState()
+        object CheckoutOpen : RidePaymentState()
+        object Verifying : RidePaymentState()
+        data class Success(val message: String, val rideId: String?) : RidePaymentState()
+        data class Error(val message: String) : RidePaymentState()
+    }
+
+    private val _ridePaymentState = MutableStateFlow<RidePaymentState>(RidePaymentState.Idle)
+    val ridePaymentState: StateFlow<RidePaymentState> = _ridePaymentState.asStateFlow()
+
     fun launchWalletTopupCheckout(activity: android.app.Activity, amountRupees: Double) {
         val amountCents = (amountRupees * 100).toInt()
+        activeCheckoutType = CheckoutType.WALLET_TOPUP
+        activeCheckoutRideId = null
         _topupState.value = TopupState.CreatingOrder
 
         scope.launch {
@@ -1707,31 +1717,105 @@ object RiderRepository {
         }
     }
 
-    fun handleRazorpaySuccess(orderId: String, paymentId: String, signature: String) {
-        _topupState.value = TopupState.Verifying
+    fun launchRidePaymentCheckout(activity: android.app.Activity, rideId: String, amountRupees: Double) {
+        val amountCents = (amountRupees * 100).toInt()
+        activeCheckoutType = CheckoutType.RIDE_FARE
+        activeCheckoutRideId = rideId
+        _ridePaymentState.value = RidePaymentState.CreatingOrder
+
         scope.launch {
             try {
-                val res = NetworkClient.apiService.verifyWalletTopup(
-                    TopupVerifyRequest(
-                        razorpayOrderId = orderId,
-                        razorpayPaymentId = paymentId,
-                        razorpaySignature = signature
+                val res = NetworkClient.apiService.createRidePaymentOrder(
+                    RidePaymentOrderRequest(
+                        rideId = rideId,
+                        amountCents = amountCents,
+                        amountRupees = amountRupees
                     )
                 )
                 if (res.isSuccessful && res.body() != null) {
-                    val updated = res.body()!!
-                    _topupState.value = TopupState.Success(updated.balanceRupees)
-                    fetchWalletBalance() // Refresh ledger balance
+                    val body = res.body()!!
+                    val effectiveOrderId = body.effectiveOrderId
+                    val keyId = body.keyId ?: "rzp_test_placeholder"
+                    _ridePaymentState.value = RidePaymentState.CheckoutOpen
+
+                    withContext(Dispatchers.Main) {
+                        val checkout = com.razorpay.Checkout()
+                        checkout.setKeyID(keyId)
+
+                        val options = org.json.JSONObject().apply {
+                            put("name", "Vaisentra Mobility")
+                            put("description", "Ride Payment #${rideId.take(8)}")
+                            put("currency", "INR")
+                            put("amount", if (body.amountCents > 0) body.amountCents else amountCents)
+                            put("order_id", effectiveOrderId)
+                            put("theme.color", "#0D9488")
+                        }
+                        checkout.open(activity, options)
+                    }
                 } else {
-                    _topupState.value = TopupState.Error("Backend signature verification rejected.")
+                    _ridePaymentState.value = RidePaymentState.Error("Ride order creation failed: HTTP ${res.code()}")
                 }
             } catch (e: Exception) {
-                _topupState.value = TopupState.Error(e.message ?: "Verification failed.")
+                _ridePaymentState.value = RidePaymentState.Error(e.message ?: "Network error creating ride payment order")
+            }
+        }
+    }
+
+    fun handleRazorpaySuccess(orderId: String, paymentId: String, signature: String) {
+        if (activeCheckoutType == CheckoutType.RIDE_FARE) {
+            val targetRideId = activeCheckoutRideId
+            _ridePaymentState.value = RidePaymentState.Verifying
+            scope.launch {
+                try {
+                    val res = NetworkClient.apiService.verifyRidePayment(
+                        RidePaymentVerifyRequest(
+                            razorpayOrderId = orderId,
+                            razorpayPaymentId = paymentId,
+                            razorpaySignature = signature,
+                            rideId = targetRideId
+                        )
+                    )
+                    if (res.isSuccessful && res.body() != null) {
+                        _ridePaymentState.value = RidePaymentState.Success("Ride payment verified successfully!", targetRideId)
+                        fetchActiveRide()
+                    } else {
+                        _ridePaymentState.value = RidePaymentState.Error("Backend signature verification rejected.")
+                    }
+                } catch (e: Exception) {
+                    _ridePaymentState.value = RidePaymentState.Error(e.message ?: "Verification failed.")
+                }
+            }
+        } else {
+            _topupState.value = TopupState.Verifying
+            scope.launch {
+                try {
+                    val res = NetworkClient.apiService.verifyWalletTopup(
+                        TopupVerifyRequest(
+                            razorpayOrderId = orderId,
+                            razorpayPaymentId = paymentId,
+                            razorpaySignature = signature
+                        )
+                    )
+                    if (res.isSuccessful && res.body() != null) {
+                        val updated = res.body()!!
+                        _topupState.value = TopupState.Success(updated.balanceRupees)
+                        fetchWalletBalance() // Refresh ledger balance
+                    } else {
+                        _topupState.value = TopupState.Error("Backend signature verification rejected.")
+                    }
+                } catch (e: Exception) {
+                    _topupState.value = TopupState.Error(e.message ?: "Verification failed.")
+                }
             }
         }
     }
 
     fun handleRazorpayFailure(code: Int, description: String) {
-        _topupState.value = TopupState.Error("Payment cancelled: $description")
+        if (activeCheckoutType == CheckoutType.RIDE_FARE) {
+            _ridePaymentState.value = RidePaymentState.Error("Payment cancelled: $description")
+        } else {
+            _topupState.value = TopupState.Error("Payment cancelled: $description")
+        }
     }
+}
 

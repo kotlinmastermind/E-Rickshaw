@@ -644,6 +644,27 @@ class SettlementAdvancedService:
                 detail=f"Refund amount (₹{amount_cents/100:.2f}) exceeds remaining balance (₹{remaining/100:.2f})."
             )
 
+        # Double-dip protection: If this payment was for a commuter wallet topup,
+        # debit the commuter wallet balance atomically BEFORE issuing gateway refund.
+        if getattr(payment, "purpose", None) == "WALLET_TOPUP":
+            topup_user_id = payment.user_id
+            if not topup_user_id and payment.customer_id:
+                cust_prof = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.id == payment.customer_id))).scalar_one_or_none()
+                if cust_prof:
+                    topup_user_id = cust_prof.user_id
+                else:
+                    topup_user_id = payment.customer_id
+            if topup_user_id:
+                await WalletService.debit_wallet(
+                    session=self.db,
+                    user_id=topup_user_id,
+                    amount_cents=amount_cents,
+                    source="TOPUP_REFUND",
+                    reference_id=payment.id,
+                    description=f"Gateway refund reversal for top-up {payment.id}",
+                    allow_negative=False
+                )
+
         provider = get_payment_provider()
         # Call live Razorpay Refund API
         gateway_refund = await provider.create_refund(

@@ -36,6 +36,7 @@ class CompensateRequest(BaseModel):
     user_id: Optional[str] = None
     amount_cents: Optional[int] = Field(None, gt=0)
     reason: str = Field(..., min_length=10)
+    idempotency_key: Optional[str] = None
 
 
 @router.get("/me")
@@ -153,7 +154,7 @@ async def verify_wallet_topup(
         }
 
     # 3. Server-side gateway verification via Razorpay REST API
-    gateway_data = await provider.fetch_payment(payload.razorpay_payment_id)
+    gateway_data = await provider.fetch_payment(payload.razorpay_payment_id, expected_amount_cents=payment.amount_cents)
     if gateway_data.get("status") not in ["captured", "authorized"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -241,6 +242,11 @@ async def create_compensating_transaction(
             admin_user_id=admin.id
         )
     else:
+        if payload.amount_cents > 500000:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Administrative single compensation limit exceeded (maximum ₹5,000.00 / 500,000 paise)."
+            )
         comp_tx = await WalletService.credit_wallet(
             session=db,
             user_id=payload.user_id,
@@ -248,7 +254,8 @@ async def create_compensating_transaction(
             transaction_type="ADMIN_COMPENSATION",
             source="ADMIN_CONCIERGE",
             reference_id=f"adm_{admin.id[:8]}",
-            description=f"Admin compensation: {payload.reason}"
+            description=f"Admin compensation: {payload.reason}",
+            idempotency_key=payload.idempotency_key or f"adm_comp_{payload.user_id}_{payload.amount_cents}_{payload.reason[:16]}"
         )
 
     await db.commit()

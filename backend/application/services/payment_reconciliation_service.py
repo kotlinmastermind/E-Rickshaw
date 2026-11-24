@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 from backend.infrastructure.database.session import async_session_maker
-from backend.domain.models import Payment
+from backend.domain.models import Payment, RefundLiability
 from backend.application.services.payment_service import PaymentService
 from backend.integrations.payments.provider import get_payment_provider
 
@@ -56,6 +56,24 @@ class PaymentReconciliationService:
                             await session.commit()
                 except Exception as e:
                     logger.error(f"Reconciliation error on order {pay.provider_order_id}: {e}")
+
+    @staticmethod
+    async def reconcile_refund_liabilities():
+        """Scans active refund liabilities and audits total unrecovered platform debt."""
+        async with async_session_maker() as session:
+            stmt = select(RefundLiability).where(RefundLiability.status == "ACTIVE")
+            res = await session.execute(stmt)
+            liabs = res.scalars().all()
+            total_unrecovered = sum(l.outstanding_recovery_cents for l in liabs)
+            if total_unrecovered > 0:
+                logger.warning(
+                    f"Reconciliation: Found {len(liabs)} active refund liabilities totaling ₹{total_unrecovered / 100:.2f}."
+                )
+            return {
+                "active_count": len(liabs),
+                "total_unrecovered_cents": total_unrecovered,
+                "total_unrecovered_rupees": round(total_unrecovered / 100.0, 2)
+            }
 
 async def run_payment_reconciliation_loop():
     """Background loop executing reconciliation every 300 seconds."""

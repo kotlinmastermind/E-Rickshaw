@@ -79,12 +79,14 @@ async def get_current_customer(user: User = Depends(require_role("customer"))) -
 # REPLACE lines 79-98 in backend/api/deps.py with:
 
 async def get_current_driver(
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> User:
     """
     Enforces that the authenticated user is an APPROVED driver.
     Strictly forbids role mutation or auto-provisioning of driver profiles.
+    Allows inspection of availability, profile, and onboarding status for PENDING drivers.
     """
     user_role = (user.role or "").strip().lower()
     if user_role not in ["driver", "admin", "superadmin", "super administrator"]:
@@ -103,7 +105,9 @@ async def get_current_driver(
             detail="No chauffeur profile found for this account."
         )
 
-    if driver_prof.approval_status != "APPROVED":
+    path = getattr(request.url, "path", "") if request else ""
+    allow_pending = any(p in path for p in ["/documents", "/onboarding", "/preferences", "/availability"])
+    if not allow_pending and driver_prof.approval_status != "APPROVED":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Chauffeur account is not operational (Status: {driver_prof.approval_status})."

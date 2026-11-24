@@ -111,6 +111,12 @@ class Settings(BaseSettings):
                 "default"
             ):
                 raise ValueError("CRITICAL CONFIGURATION ERROR: A secure SECRET_KEY must be provided via environment variables in production.")
+            if not self.RAZORPAY_KEY_ID or not self.RAZORPAY_KEY_ID.startswith(("rzp_live_", "rzp_test_")):
+                raise ValueError("CRITICAL CONFIGURATION ERROR: A valid RAZORPAY_KEY_ID must be configured in production.")
+            if not self.RAZORPAY_KEY_SECRET or len(self.RAZORPAY_KEY_SECRET.strip()) < 16:
+                raise ValueError("CRITICAL CONFIGURATION ERROR: A valid RAZORPAY_KEY_SECRET must be configured in production.")
+            if not self.RAZORPAY_WEBHOOK_SECRET or len(self.RAZORPAY_WEBHOOK_SECRET.strip()) < 16:
+                raise ValueError("CRITICAL CONFIGURATION ERROR: A valid RAZORPAY_WEBHOOK_SECRET must be configured in production.")
         else:
             # Safe development defaults when .env is absent
             if not self.DATABASE_URL:

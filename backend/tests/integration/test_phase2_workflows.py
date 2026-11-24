@@ -37,13 +37,44 @@ async def test_phase2_customer_and_admin_workflows(db_session):
         del_fav = await client.delete(f"/api/v1/favorites/{fav_id}", headers=cust_headers)
         assert del_fav.status_code == 200
 
-        # 3. Customer Wallet Topup & History
-        topup_resp = await client.post("/api/v1/wallets/top-up", json={
+        # 3. Customer Wallet Topup & History via Authoritative Verified Flow
+        import hmac
+        import hashlib
+        from backend.core.config import settings
+        from backend.integrations.payments.provider import get_payment_provider
+
+        # A: Deprecated direct topup must return 410 Gone
+        dep_resp = await client.post("/api/v1/wallets/top-up", json={
             "amount_cents": 500000,
             "payment_method": "UPI"
         }, headers=cust_headers)
-        assert topup_resp.status_code == 200
-        assert topup_resp.json()["balance_after_cents"] >= 500000
+        assert dep_resp.status_code == 410
+
+        # B: Verified top-up via create-order and verify
+        topup_order = await client.post("/api/v1/wallets/topup/create-order", json={
+            "amount_cents": 500000,
+            "currency": "INR"
+        }, headers=cust_headers)
+        assert topup_order.status_code == 200
+        order_data = topup_order.json()
+
+        secret = "test_phase2_secret_key_123"
+        provider = get_payment_provider()
+        orig_secret = provider.key_secret
+        provider.key_secret = secret
+
+        try:
+            msg = f"{order_data['order_id']}|pay_test_topup_123"
+            sig = hmac.new(secret.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest()
+            verify_resp = await client.post("/api/v1/wallets/topup/verify", json={
+                "razorpay_order_id": order_data["order_id"],
+                "razorpay_payment_id": "pay_test_topup_123",
+                "razorpay_signature": sig
+            }, headers=cust_headers)
+            assert verify_resp.status_code == 200, verify_resp.text
+            assert verify_resp.json()["balance_cents"] >= 500000
+        finally:
+            provider.key_secret = orig_secret
 
         bal_resp = await client.get("/api/v1/wallets/me", headers=cust_headers)
         assert bal_resp.status_code == 200

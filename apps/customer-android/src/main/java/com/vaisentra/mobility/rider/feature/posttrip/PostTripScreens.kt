@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.rider.components.*
@@ -28,6 +29,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun RideReceiptScreen(onNavigate: (String) -> Unit) {
     val receipt by RiderRepository.rideReceipt.collectAsState()
+    val context = LocalContext.current
+    val activeRide = RiderRepository.activeRide.value
 
     LaunchedEffect(Unit) {
         val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
@@ -88,6 +91,22 @@ fun RideReceiptScreen(onNavigate: (String) -> Unit) {
                     Text(text = v, color = TextWhite, fontSize = 12.sp)
                 }
             }
+        }
+
+        if (method != "WALLET" && total > 0) {
+            Spacer(modifier = Modifier.height(14.dp))
+            NeoButton(
+                text = "Pay ₹${"%.2f".format(total)} via Razorpay",
+                onClick = {
+                    (context as? android.app.Activity)?.let { activity ->
+                        val targetRideId = receipt?.rideId ?: activeRide?.id ?: "ride-latest"
+                        RiderRepository.launchRidePaymentCheckout(activity, targetRideId, total)
+                    }
+                },
+                backgroundColor = AmberGold,
+                textColor = CanvasBlack,
+                icon = "💳"
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))

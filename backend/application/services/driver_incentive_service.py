@@ -11,7 +11,11 @@ from backend.domain.models import (
 )
 
 logger = logging.getLogger(__name__)
-INDIA_TZ = ZoneInfo("Asia/Kolkata")
+try:
+    from zoneinfo import ZoneInfo
+    INDIA_TZ = ZoneInfo("Asia/Kolkata")
+except Exception:
+    INDIA_TZ = timezone(timedelta(hours=5, minutes=30), name="Asia/Kolkata")
 
 class DriverIncentiveService:
     def __init__(self, db: AsyncSession):

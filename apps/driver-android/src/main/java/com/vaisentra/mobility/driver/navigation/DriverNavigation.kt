@@ -373,7 +373,7 @@ fun DriverNavigation() {
         DriverScreen.PILOT_PROFILE.name, DriverScreen.DOCUMENT_VAULT.name, DriverScreen.DRIVER_PREFERENCES.name,
         DriverScreen.PERFORMANCE_SCORECARD.name, DriverScreen.ACADEMY_TRAINING.name, DriverScreen.DRIVER_INCIDENT.name,
         DriverScreen.FOUND_ITEM.name, DriverScreen.DRIVER_HELPDESK.name, DriverScreen.EMERGENCY_CONTACTS.name,
-        DriverScreen.ROUTE_DEVIATION.name, DriverScreen.SPEEDOMETER.name, DriverScreen.AUDIO_SHIELD.name,
+        DriverScreen.ROUTE_DEVIATION.name, DriverScreen.AUDIO_SHIELD.name,
         DriverScreen.EMERGENCY_SOS.name -> 4
 
         else -> 0

@@ -2,10 +2,11 @@ from typing import Optional, List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Header, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_user, get_current_customer, get_current_driver
-from backend.domain.models import User
+from backend.domain.models import User, Payment, CustomerProfile, Ride
 from backend.application.services.payment_service import PaymentService
 from backend.application.services.settlement_advanced_service import SettlementAdvancedService
 
@@ -284,11 +285,24 @@ async def verify_razorpay_payment(
             detail="You do not have permission to verify payment for this journey."
         )
 
-    # Update Payment state to CAPTURED
-    payment.status = "CAPTURED"
-    payment.provider_payment_id = payload.razorpay_payment_id
-    payment.provider_signature = payload.razorpay_signature
-    payment.provider_order_id = payload.razorpay_order_id
+    # Idempotency check: if payment already captured with this provider_payment_id, return immediately
+    if payment.status == "CAPTURED":
+        return {
+            "success": True,
+            "message": "Payment was already verified and captured.",
+            "payment_id": payment.provider_payment_id or payload.razorpay_payment_id,
+            "order_id": payment.provider_order_id or payload.razorpay_order_id,
+            "ride_id": payment.ride_id or payload.ride_id,
+            "status": "CAPTURED"
+        }
+
+    # Finalize payment capture (credits driver wallet or commuter wallet according to purpose)
+    payment_service = PaymentService(db)
+    finalized = await payment_service.finalize_payment_capture(
+        payment=payment,
+        provider_payment_id=payload.razorpay_payment_id,
+        provider_signature=payload.razorpay_signature
+    )
 
     target_ride_id = payment.ride_id or payload.ride_id
     if target_ride_id:
@@ -329,15 +343,10 @@ async def tokenize_card(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    service = SettlementAdvancedService(db)
-    return await service.tokenize_and_save_card(
-        user_id=user.id,
-        card_number=payload.card_number,
-        exp_month=payload.exp_month,
-        exp_year=payload.exp_year,
-        cardholder_name=payload.cardholder_name,
-        issuer_bank=payload.issuer_bank,
-        is_default=payload.is_default
+    # Under PCI DSS Req 3/4 & RBI Card-on-File regulations, raw card PAN must never traverse the backend application server.
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Direct ingestion of raw card PAN on application servers is prohibited under PCI DSS. Tokenization must be performed client-side using Razorpay Checkout SDK."
     )
 
 @router.post("/save-vpa")
@@ -410,6 +419,22 @@ async def process_partial_refund(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    stmt = select(Payment).where(Payment.id == payload.payment_id)
+    payment = (await db.execute(stmt)).scalar_one_or_none()
+    if not payment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record not found.")
+
+    is_admin = getattr(user, "role", None) == "admin"
+    is_owner = (payment.user_id == user.id)
+    if not is_owner and not is_admin:
+        prof_stmt = select(CustomerProfile).where(CustomerProfile.user_id == user.id)
+        prof = (await db.execute(prof_stmt)).scalar_one_or_none()
+        if prof and payment.customer_id == prof.id:
+            is_owner = True
+
+    if not is_admin and not is_owner:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized: Only an administrator or the transaction owner can initiate refunds.")
+
     service = SettlementAdvancedService(db)
     return await service.create_refund(
         payment_id=payload.payment_id,

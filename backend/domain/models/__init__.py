@@ -21,6 +21,7 @@ from backend.domain.models.models import (
     Wallet,
     WalletTransaction,
     DriverWallet,
+    RefundLiability,
     SupportTicket,
     SupportMessage,
     RideChat,
@@ -226,4 +227,5 @@ __all__ = [
     "AudioRecordingSession",
     "AudioRecordingSegment",
     "AudioRecordingAuditLog",
+    "RefundLiability",
 ]

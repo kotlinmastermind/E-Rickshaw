@@ -4,6 +4,7 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=
 os.environ["REDIS_URL"] = ""
 
 from backend.core.config import settings
+settings.TESTING = True
 settings.DATABASE_URL = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=shared&uri=true"
 settings.DATABASE_URL_SYNC = "sqlite:///file:testdb?mode=memory&cache=shared&uri=true"
 settings.REDIS_URL = None
@@ -71,4 +72,72 @@ async def flush_cache_isolation():
     await redis_client.flushdb()
     yield
     await redis_client.flushdb()
+
+@pytest_asyncio.fixture(scope="function", loop_scope="function")
+async def client():
+    from httpx import AsyncClient, ASGITransport
+    from backend.main import app
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+@pytest_asyncio.fixture(scope="function", loop_scope="function")
+async def customer_user(db_session):
+    import uuid
+    from datetime import datetime, timezone, timedelta
+    from backend.domain.models import User, CustomerProfile, Session
+    user_id = str(uuid.uuid4())
+    user = User(
+        id=user_id,
+        phone_number=f"+9198{uuid.uuid4().int % 100000000:08d}",
+        email=f"customer_{user_id[:8]}@example.com",
+        full_name="Test Customer",
+        role="customer",
+        is_active=True,
+        is_verified=True
+    )
+    prof = CustomerProfile(user_id=user_id, rating_average=5.0)
+    sess = Session(id=str(uuid.uuid4()), user_id=user_id, token_hash=f"dummy_{user_id}", expires_at=datetime.now(timezone.utc) + timedelta(days=1))
+    db_session.add_all([user, prof, sess])
+    await db_session.commit()
+    return user
+
+@pytest_asyncio.fixture(scope="function", loop_scope="function")
+async def customer_token(customer_user, db_session):
+    from sqlalchemy import select
+    from backend.domain.models import Session
+    from backend.infrastructure.security.crypto import create_jwt_token
+    stmt = select(Session).where(Session.user_id == customer_user.id)
+    sess = (await db_session.execute(stmt)).scalars().first()
+    return create_jwt_token(user_id=customer_user.id, role="customer", session_id=sess.id)
+
+@pytest_asyncio.fixture(scope="function", loop_scope="function")
+async def second_customer_user(db_session):
+    import uuid
+    from datetime import datetime, timezone, timedelta
+    from backend.domain.models import User, CustomerProfile, Session
+    user_id = str(uuid.uuid4())
+    user = User(
+        id=user_id,
+        phone_number=f"+9198{uuid.uuid4().int % 100000000:08d}",
+        email=f"customer2_{user_id[:8]}@example.com",
+        full_name="Second Test Customer",
+        role="customer",
+        is_active=True,
+        is_verified=True
+    )
+    prof = CustomerProfile(user_id=user_id, rating_average=5.0)
+    sess = Session(id=str(uuid.uuid4()), user_id=user_id, token_hash=f"dummy_{user_id}", expires_at=datetime.now(timezone.utc) + timedelta(days=1))
+    db_session.add_all([user, prof, sess])
+    await db_session.commit()
+    return user
+
+@pytest_asyncio.fixture(scope="function", loop_scope="function")
+async def second_customer_token(second_customer_user, db_session):
+    from sqlalchemy import select
+    from backend.domain.models import Session
+    from backend.infrastructure.security.crypto import create_jwt_token
+    stmt = select(Session).where(Session.user_id == second_customer_user.id)
+    sess = (await db_session.execute(stmt)).scalars().first()
+    return create_jwt_token(user_id=second_customer_user.id, role="customer", session_id=sess.id)
 

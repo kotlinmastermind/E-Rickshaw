@@ -54,30 +54,6 @@ async def _run_driver_incentives_worker():
             logger.exception("Driver incentive settlement worker cycle failed")
         await asyncio.sleep(3600) # Check hourly
 
-# 3. Lifespan me add karein:
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await _seed_baseline_data()
-    dispatcher = asyncio.create_task(_dispatch_scheduled_broadcasts(), name="scheduled-broadcasts")
-    sla_worker = asyncio.create_task(_run_sla_escalation_worker(), name="sla-escalations")
-    recon_worker = asyncio.create_task(run_payment_reconciliation_loop(), name="payment-reconciliation")
-    incentives_worker = asyncio.create_task(_run_driver_incentives_worker(), name="driver-incentives")
-    try:
-        yield
-    finally:
-        dispatcher.cancel()
-        sla_worker.cancel()
-        incentives_worker.cancel()
-        for t in [dispatcher, sla_worker, incentives_worker]:
-            try:
-                await t
-            except asyncio.CancelledError:
-                pass
-
-# 4. Routers include karein:
-app.include_router(fleet.router, prefix=settings.API_V1_STR)
-app.include_router(tracking_public.router)
-
 logger = logging.getLogger(__name__)
 
 
@@ -205,14 +181,21 @@ async def lifespan(app: FastAPI):
     # Initialize database tables with retry protection
     await _seed_baseline_data()
     dispatcher = asyncio.create_task(_dispatch_scheduled_broadcasts(), name="scheduled-in-app-broadcasts")
+    sla_worker = asyncio.create_task(_run_sla_escalation_worker(), name="sla-escalations")
+    recon_worker = asyncio.create_task(run_payment_reconciliation_loop(), name="payment-reconciliation")
+    incentives_worker = asyncio.create_task(_run_driver_incentives_worker(), name="driver-incentives")
     try:
         yield
     finally:
         dispatcher.cancel()
-        try:
-            await dispatcher
-        except asyncio.CancelledError:
-            pass
+        sla_worker.cancel()
+        recon_worker.cancel()
+        incentives_worker.cancel()
+        for t in [dispatcher, sla_worker, recon_worker, incentives_worker]:
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -308,6 +291,8 @@ app.include_router(dispatch.router, prefix=settings.API_V1_STR)
 app.include_router(corporate.router, prefix=settings.API_V1_STR)
 app.include_router(audio_recording.router, prefix=settings.API_V1_STR)
 app.include_router(gift_cards.router, prefix=settings.API_V1_STR)
+app.include_router(fleet.router, prefix=settings.API_V1_STR)
+app.include_router(tracking_public.router)
 
 # --- Dynamic Admin Web Panel Hosting on Render ---
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")

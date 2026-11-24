@@ -672,6 +672,7 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
                     }
                 }
             }
+        }
     }
 }
 

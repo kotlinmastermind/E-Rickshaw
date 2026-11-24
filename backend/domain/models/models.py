@@ -682,6 +682,7 @@ class Wallet(Base):
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), unique=True, index=True, nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="INR")
     balance_cents: Mapped[int] = mapped_column(Integer, default=0)
+    debt_cents: Mapped[int] = mapped_column(Integer, default=0)
     
     # Part 4 Wallet Auto Top-up & Alerts (Features 91, 92)
     auto_topup_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -1334,8 +1335,8 @@ class PaymentRefund(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     payment_id: Mapped[str] = mapped_column(String(36), ForeignKey("payments.id"), nullable=False, index=True)
-    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id"), nullable=False, index=True)
-    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customer_profiles.id"), nullable=False)
+    ride_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("rides.id"), nullable=True, index=True)
+    customer_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("customer_profiles.id"), nullable=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     is_partial: Mapped[bool] = mapped_column(Boolean, default=False)
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -1349,6 +1350,25 @@ class PaymentRefund(Base):
     review_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class RefundLiability(Base):
+    """
+    Explicit platform receivable / debt record for refunds where customer's
+    spendable wallet balance was insufficient at the time of gateway clawback.
+    """
+    __tablename__ = "refund_liabilities"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    payment_id: Mapped[str] = mapped_column(String(36), ForeignKey("payments.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    gateway_refund_id: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    refund_amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    debited_from_wallet_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    outstanding_recovery_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="ACTIVE", nullable=False)  # ACTIVE, RECOVERED, WRITTEN_OFF
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
 
 class FareDispute(Base):

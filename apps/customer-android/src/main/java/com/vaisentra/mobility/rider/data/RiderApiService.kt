@@ -148,9 +148,6 @@ interface RiderApiService {
     @GET("api/v1/notifications")
     suspend fun getNotifications(): Response<List<NotificationItemDto>>
 
-    @GET("api/v1/favorites")
-    suspend fun getSavedPlaces(): Response<List<SavedPlaceDto>>
-
     // --- Mapbox Location & Routes Integration ---
     @GET("api/v1/location/config")
     suspend fun getMapboxConfig(): Response<Map<String, Any>>

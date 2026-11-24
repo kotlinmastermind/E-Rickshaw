@@ -832,7 +832,7 @@ fun InTripNavScreen(
                         val maneuverIcon = when {
                             currentManeuver.contains("LEFT") -> Icons.Default.TurnLeft
                             currentManeuver.contains("RIGHT") -> Icons.Default.TurnRight
-                            currentManeuver.contains("UTURN") -> Icons.Default.UturnLeft
+                            currentManeuver.contains("UTURN") -> Icons.Default.TurnLeft
                             currentManeuver.contains("ARRIVE") -> Icons.Default.Flag
                             else -> Icons.Default.Navigation
                         }
