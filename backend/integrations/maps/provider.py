@@ -322,7 +322,7 @@ class WorldwideLiveMapsProvider(MapsProvider):
         except Exception:
             pass
 
-        # 2. Geometric Haversine with Smooth Road Curve Interpolation
+        # 2. Geodesic Direct Distance Calculation (Fallback when OSRM offline)
         R = 6371.0
         dlat = math.radians(dest_lat - origin_lat)
         dlng = math.radians(dest_lng - origin_lng)
@@ -332,33 +332,25 @@ class WorldwideLiveMapsProvider(MapsProvider):
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         straight_km = R * c
         dist_km = round(max(straight_km * 1.25, 0.4), 2)
-        dur_min = round(max((dist_km / 25.0) * 60.0 + 2.0, 4.0), 1)
+        dur_min = round(max((dist_km / 22.0) * 60.0 + 2.0, 3.0), 1)
 
-        # Generate realistic road-like waypoint curve
-        points = []
-        steps_count = 14
-        for i in range(steps_count + 1):
-            t = i / float(steps_count)
-            # Cubic easing with gentle sinusoidal bend simulating street turns
-            bend = math.sin(t * math.pi) * 0.0022 * (1 if (dest_lat >= origin_lat) else -1)
-            p_lat = origin_lat + t * (dest_lat - origin_lat) + bend
-            p_lng = origin_lng + t * (dest_lng - origin_lng) + (bend * 0.8)
-            points.append({"latitude": round(p_lat, 6), "longitude": round(p_lng, 6)})
-
-        poly_str = ";".join([f"{p['latitude']},{p['longitude']}" for p in points])
+        points = [
+            {"latitude": round(origin_lat, 6), "longitude": round(origin_lng, 6)},
+            {"latitude": round(dest_lat, 6), "longitude": round(dest_lng, 6)}
+        ]
+        poly_str = f"{origin_lat:.6f},{origin_lng:.6f};{dest_lat:.6f},{dest_lng:.6f}"
         steps = [
-            {"instruction": "Head towards the main transit corridor", "maneuver": "DEPART", "distance_meters": 150},
-            {"instruction": f"Continue along main arterial road for {max(0.5, dist_km - 0.3):.1f} km", "maneuver": "STRAIGHT", "distance_meters": int(dist_km * 700)},
-            {"instruction": "Arrive at destination pickup point", "maneuver": "ARRIVE", "distance_meters": 50}
+            {"instruction": "Proceed from pickup location along direct transit corridor", "maneuver": "DEPART", "distance_meters": int(dist_km * 500)},
+            {"instruction": "Arrive at destination pickup point", "maneuver": "ARRIVE", "distance_meters": int(dist_km * 500)}
         ]
 
         return RouteDetails(
             distance_km=dist_km,
             duration_minutes=dur_min,
             polyline=poly_str,
-            provider="GEOMETRIC_ROAD_APPROX",
+            provider="GEODESIC_DIRECT_ESTIMATE",
             traffic_aware=False,
-            route_label="Fastest Direct Route",
+            route_label="Direct Distance Estimate",
             points=points,
             steps=steps
         )

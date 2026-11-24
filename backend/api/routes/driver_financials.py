@@ -79,6 +79,13 @@ class ReviewFinancialSupportPayload(BaseModel):
     status: str = Field(..., pattern="^(APPROVED|DISBURSED|REJECTED)$")
     admin_notes: Optional[str] = None
 
+class RecordTollPayload(BaseModel):
+    toll_amount_rupees: float = Field(..., gt=0, le=5000.0)
+    toll_name: str = Field(default="Highway / Municipal Border Toll", max_length=128)
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    receipt_url: Optional[str] = None
+
 
 # -----------------------------------------------------------------------------
 # Endpoints
@@ -488,4 +495,37 @@ async def admin_financial_summary(
         "active_disbursement_batch": "Automated NEFT/IMPS Daily 23:00 UTC",
         "tax_withholding_compliance": "Section 194C (1% TDS Active)"
     }
+
+
+# Feature: Driver Toll Entry & Expense Attachment
+@router.post("/rides/{ride_id}/tolls")
+async def record_ride_toll(
+    ride_id: str,
+    payload: RecordTollPayload,
+    driver_user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    service = DriverFinancialService(db)
+    return await service.record_ride_toll(
+        user_id_or_driver_id=driver_user.id,
+        ride_id=ride_id,
+        toll_amount_rupees=payload.toll_amount_rupees,
+        toll_name=payload.toll_name,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        receipt_url=payload.receipt_url
+    )
+
+
+@router.get("/rides/{ride_id}/tolls")
+async def get_ride_tolls(
+    ride_id: str,
+    driver_user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db)
+):
+    service = DriverFinancialService(db)
+    return await service.get_ride_tolls(
+        user_id_or_driver_id=driver_user.id,
+        ride_id=ride_id
+    )
 

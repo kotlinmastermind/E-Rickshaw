@@ -498,8 +498,12 @@ class Ride(Base):
     locked_fare_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     price_lock_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     invoice_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    corporate_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    corporate_employee_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    corporate_approval_status: Mapped[Optional[str]] = mapped_column(String(32), default="NOT_REQUIRED", nullable=True)
     corporate_billing_ref: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     split_fare_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    toll_cents: Mapped[int] = mapped_column(Integer, default=0)
     
     # Part 5 Tracking, Route & Chauffeur Attributes (Features 108, 111, 115, 116, 118, 119, 125)
     route_preference: Mapped[str] = mapped_column(String(32), default="FASTEST")  # FASTEST, SCENIC, SMOOTHEST
@@ -1443,7 +1447,7 @@ class EmergencyAlert(Base):
     __tablename__ = "emergency_alerts"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id"), nullable=False, index=True)
+    ride_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("rides.id"), nullable=True, index=True)
     triggered_by_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     alert_type: Mapped[str] = mapped_column(String(32), default="SOS_BUTTON")  # SOS_BUTTON, MISSED_CHECKIN, ROUTE_ANOMALY
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
@@ -1472,14 +1476,6 @@ class DriverOnboardingTicket(Base):
     driver: Mapped["DriverProfile"] = relationship()
 
 
-class DriverFatigueCheck(Base):
-    __tablename__ = "driver_fatigue_checks"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=False, index=True)
-    ride_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("rides.id"), nullable=True, index=True)
-    result: Mapped[str] = mapped_column(String(24), nullable=False)  # FIT, NEEDS_REST, UNFIT
-    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
 class IncidentEvidence(Base):
@@ -1667,8 +1663,39 @@ class RouteDeviationEvent(Base):
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
     longitude: Mapped[float] = mapped_column(Float, nullable=False)
     severity: Mapped[str] = mapped_column(String(20), default="WARNING")  # INFO, WARNING, CRITICAL
+    reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    driver_comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class RideToll(Base):
+    __tablename__ = "ride_tolls"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, index=True)
+    driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=False, index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    toll_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="APPROVED")  # APPROVED, PENDING_REVIEW, REJECTED
+    receipt_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class RideRescheduleLog(Base):
+    __tablename__ = "ride_reschedule_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, index=True)
+    requested_by_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    previous_scheduled_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    new_scheduled_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    delay_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    flight_number: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class MapApiUsageLog(Base):

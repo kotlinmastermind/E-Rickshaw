@@ -19,7 +19,7 @@ from backend.api.routes import (
     fares, rides, payments, admin, ws, health,
     wallets, promos, support, chat, favorites, pools, user_governance,
     safety, loyalty_feedback, driver_onboarding, driver_safety, driver_financials,
-    notifications, analytics_bi, dispatch
+    notifications, analytics_bi, dispatch, corporate, audio_recording, gift_cards
 )
 from sqlalchemy import select
 
@@ -248,6 +248,9 @@ app.include_router(driver_safety.router, prefix=settings.API_V1_STR)
 app.include_router(driver_financials.router, prefix=settings.API_V1_STR)
 app.include_router(analytics_bi.router, prefix=settings.API_V1_STR)
 app.include_router(dispatch.router, prefix=settings.API_V1_STR)
+app.include_router(corporate.router, prefix=settings.API_V1_STR)
+app.include_router(audio_recording.router, prefix=settings.API_V1_STR)
+app.include_router(gift_cards.router, prefix=settings.API_V1_STR)
 
 # --- Dynamic Admin Web Panel Hosting on Render ---
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")

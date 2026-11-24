@@ -1,9 +1,11 @@
+import os
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 import uuid
 import hmac
 import hashlib
 import logging
+from fastapi import HTTPException
 from backend.core.config import settings
 from backend.infrastructure.security.crypto import verify_hmac_signature
 
@@ -109,21 +111,27 @@ class RazorpayPaymentProvider(PaymentProvider):
         except Exception as e:
             logger.error(f"Razorpay HTTP request exception: {e}")
 
-        # 3. Fallback mock order if credentials unavailable or offline
-        fallback_order_id = f"order_{uuid.uuid4().hex[:14]}"
-        return {
-            "id": fallback_order_id,
-            "entity": "order",
-            "amount": amount_cents,
-            "amount_paid": 0,
-            "amount_due": amount_cents,
-            "currency": currency or "INR",
-            "receipt": receipt_str,
-            "status": "created",
-            "attempts": 0,
-            "notes": notes or {},
-            "created_at": 1730440000
-        }
+        # 3. Handle failure: do not fake production orders
+        if os.getenv("TESTING") == "1":
+            fallback_order_id = f"order_test_{uuid.uuid4().hex[:14]}"
+            return {
+                "id": fallback_order_id,
+                "entity": "order",
+                "amount": amount_cents,
+                "amount_paid": 0,
+                "amount_due": amount_cents,
+                "currency": currency or "INR",
+                "receipt": receipt_str,
+                "status": "created",
+                "attempts": 0,
+                "notes": notes or {},
+                "created_at": 1730440000
+            }
+
+        raise HTTPException(
+            status_code=502,
+            detail="Razorpay payment gateway order creation failed. Verify credentials and connectivity."
+        )
 
     async def create_payment_intent(self, amount_cents: int, currency: str, idempotency_key: str) -> PaymentIntentResult:
         order = await self.create_razorpay_order(

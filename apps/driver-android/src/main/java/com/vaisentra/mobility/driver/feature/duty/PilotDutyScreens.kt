@@ -1,5 +1,21 @@
 package com.vaisentra.mobility.driver.feature.duty
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,8 +37,11 @@ import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.data.DriverNetworkClient
 import com.vaisentra.mobility.driver.data.DriverRepository
+import com.vaisentra.mobility.driver.data.InspectionDraftDto
 import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+import java.io.File
 
 // Screen 10: Duty Dashboard -> Uses VasantraDriverHomeScreen
 @Composable
@@ -34,34 +53,188 @@ fun DutyDashboardScreen(onNavigate: (String) -> Unit) {
     VasantraDriverHomeScreen(onNavigate = onNavigate)
 }
 
-// Screen 7: Assigned Vehicle & Daily Inspection
+// Screen 7: Assigned Vehicle & Real Camera Daily Inspection
 @Composable
 fun VehicleInspectionScreen(onNavigate: (String) -> Unit) {
-    var tyrePressureOk by remember { mutableStateOf(true) }
-    var lightsOk by remember { mutableStateOf(true) }
-    var brakeBuzzerOk by remember { mutableStateOf(true) }
-    var isSubmitting by remember { mutableStateOf(false) }
-    var lastInspectionInfo by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val profile by DriverRepository.profile.collectAsState()
     val assignedVehicle by DriverRepository.assignedVehicle.collectAsState()
-    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        DriverRepository.fetchDriverVehicles()
-        scope.launch {
-            val inspRes = DriverRepository.fetchLatestPreShiftInspection()
-            inspRes.getOrNull()?.let { insp ->
-                (insp["tyre_pressure_ok"] as? Boolean)?.let { tyrePressureOk = it }
-                (insp["lights_ok"] as? Boolean)?.let { lightsOk = it }
-                (insp["brake_buzzer_ok"] as? Boolean)?.let { brakeBuzzerOk = it }
-                val inspectedAt = insp["inspected_at"]?.toString() ?: insp["created_at"]?.toString() ?: ""
-                val status = insp["status"]?.toString() ?: "PASSED"
-                if (inspectedAt.isNotBlank()) {
-                    lastInspectionInfo = "Last Sign-off: $status • ${inspectedAt.take(19).replace("T", " ")}"
+    var activeInspection by remember { mutableStateOf<InspectionDraftDto?>(null) }
+    var isLoadingInspection by remember { mutableStateOf(true) }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var submissionError by remember { mutableStateOf<String?>(null) }
+
+    // Odometer state
+    var odometerKmInput by remember { mutableStateOf("") }
+    var previousOdometerKm by remember { mutableStateOf(0.0) }
+
+    // Checklist states: PASS, FAIL, NOT_APPLICABLE
+    val checklistState = remember {
+        mutableStateMapOf(
+            "brakes" to "PASS",
+            "steering" to "PASS",
+            "tyres" to "PASS",
+            "headlights_taillights" to "PASS",
+            "battery_electrical" to "PASS",
+            "indicators_horn" to "PASS",
+            "mirrors_windshield" to "PASS",
+            "cabin_cleanliness" to "PASS",
+            "emergency_safety" to "PASS"
+        )
+    }
+
+    var driverRemarks by remember { mutableStateOf("") }
+
+    // Photographs state
+    val capturedBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
+    val photoBytesMap = remember { mutableStateMapOf<String, ByteArray>() }
+    val uploadStatuses = remember { mutableStateMapOf<String, String>() } // PENDING, UPLOADING, UPLOADED, FAILED
+
+    var activeCategoryForCamera by remember { mutableStateOf<String?>(null) }
+    var currentTempFile by remember { mutableStateOf<File?>(null) }
+    var currentTempUri by remember { mutableStateOf<Uri?>(null) }
+
+    // Camera permission
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            DriverDialogController.showToast("Camera permission required to capture inspection photos.")
+        } else {
+            activeCategoryForCamera?.let { cat ->
+                // Retry launch with permission granted
+                val tempDir = File(context.cacheDir, "inspection_photos").apply { mkdirs() }
+                val file = File(tempDir, "${cat.lowercase()}_${System.currentTimeMillis()}.jpg")
+                currentTempFile = file
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                currentTempUri = uri
+            }
+        }
+    }
+
+    // Real Camera Full Image Capture Launcher
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val cat = activeCategoryForCamera
+        val file = currentTempFile
+        if (success && cat != null && file != null && file.exists() && file.length() > 0) {
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath)
+            if (bitmap != null) {
+                capturedBitmaps[cat] = bitmap
+                val stream = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                val bytes = stream.toByteArray()
+                photoBytesMap[cat] = bytes
+                uploadStatuses[cat] = "PENDING"
+
+                // Auto-upload if inspection record is ready
+                val inspId = activeInspection?.activeInspectionId
+                if (!inspId.isNullOrBlank()) {
+                    scope.launch {
+                        uploadStatuses[cat] = "UPLOADING"
+                        val res = DriverRepository.uploadInspectionPhoto(inspId, cat, bytes, "${cat.lowercase()}.jpg")
+                        if (res.isSuccess) {
+                            uploadStatuses[cat] = "UPLOADED"
+                        } else {
+                            uploadStatuses[cat] = "FAILED"
+                        }
+                    }
                 }
             }
         }
     }
+
+    // Direct Bitmap Fallback Launcher
+    val takePicturePreviewLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        val cat = activeCategoryForCamera
+        if (bitmap != null && cat != null) {
+            capturedBitmaps[cat] = bitmap
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+            val bytes = stream.toByteArray()
+            photoBytesMap[cat] = bytes
+            uploadStatuses[cat] = "PENDING"
+
+            val inspId = activeInspection?.activeInspectionId
+            if (!inspId.isNullOrBlank()) {
+                scope.launch {
+                    uploadStatuses[cat] = "UPLOADING"
+                    val res = DriverRepository.uploadInspectionPhoto(inspId, cat, bytes, "${cat.lowercase()}.jpg")
+                    if (res.isSuccess) {
+                        uploadStatuses[cat] = "UPLOADED"
+                    } else {
+                        uploadStatuses[cat] = "FAILED"
+                    }
+                }
+            }
+        }
+    }
+
+    fun launchCameraForCategory(category: String) {
+        activeCategoryForCamera = category
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            return
+        }
+        try {
+            val tempDir = File(context.cacheDir, "inspection_photos").apply { mkdirs() }
+            val file = File(tempDir, "${category.lowercase()}_${System.currentTimeMillis()}.jpg")
+            currentTempFile = file
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            currentTempUri = uri
+            takePictureLauncher.launch(uri)
+        } catch (e: Exception) {
+            takePicturePreviewLauncher.launch(null)
+        }
+    }
+
+    // Load active inspection from backend
+    LaunchedEffect(Unit) {
+        isLoadingInspection = true
+        DriverRepository.fetchDriverVehicles()
+        val draftRes = DriverRepository.startOrGetDraftInspection()
+        isLoadingInspection = false
+        draftRes.getOrNull()?.let { draft ->
+            activeInspection = draft
+            draft.previousOdometerReading?.let { previousOdometerKm = it }
+            draft.odometerReading?.let { if (it > 0) odometerKmInput = "%.0f".format(it) }
+            draft.checklist?.forEach { (k, v) ->
+                checklistState[k] = v
+            }
+            draft.photos.forEach { p ->
+                uploadStatuses[p.category.uppercase()] = "UPLOADED"
+            }
+        }
+    }
+
+    val displayPlate = assignedVehicle?.licensePlate?.ifBlank { profile.assignedVehiclePlate }?.ifBlank { "DL-01-ER-2026" } ?: "DL-01-ER-2026"
+    val displayModel = assignedVehicle?.model?.ifBlank { profile.assignedVehicleModel }?.ifBlank { "Mahindra Treo EV" } ?: "Mahindra Treo EV"
+
+    val mandatoryCategories = listOf(
+        Triple("ODOMETER", "Odometer Cluster", "Clear photo of odometer mileage counter"),
+        Triple("FRONT", "Vehicle Front", "Front bumper, headlights & number plate"),
+        Triple("REAR", "Vehicle Rear", "Rear bumper, tail lights & registration"),
+        Triple("LEFT_SIDE", "Left Profile", "Left side body panels & wheels"),
+        Triple("RIGHT_SIDE", "Right Profile", "Right side panels & battery cabin")
+    )
+
+    val enteredOdo = odometerKmInput.toDoubleOrNull() ?: 0.0
+    val hasOdoDiscrepancy = previousOdometerKm > 0 && enteredOdo > 0 && enteredOdo < previousOdometerKm
+    val hasCriticalFailures = checklistState["brakes"] == "FAIL" ||
+            checklistState["steering"] == "FAIL" ||
+            checklistState["tyres"] == "FAIL" ||
+            checklistState["headlights_taillights"] == "FAIL" ||
+            checklistState["battery_electrical"] == "FAIL"
+
+    val uploadedCount = mandatoryCategories.count { (cat, _, _) ->
+        uploadStatuses[cat] == "UPLOADED" || capturedBitmaps.containsKey(cat)
+    }
+    val allMandatoryPhotosCaptured = uploadedCount == mandatoryCategories.size
 
     Column(
         modifier = Modifier
@@ -70,67 +243,356 @@ fun VehicleInspectionScreen(onNavigate: (String) -> Unit) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        val displayPlate = assignedVehicle?.licensePlate?.ifBlank { profile.assignedVehiclePlate }?.ifBlank { "DL-01-ER-2026" } ?: "DL-01-ER-2026"
         CockpitHeader(
-            title = "Vehicle Inspection Check",
+            title = "Daily Vehicle Inspection",
             subtitle = "$displayPlate • Pre-Shift Walkaround",
             onBack = { onNavigate("duty_dashboard") }
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        if (lastInspectionInfo != null) {
-            CockpitCard(borderColor = PilotOnlineGreen) {
+        // Status Banner
+        CockpitCard(borderColor = if (hasCriticalFailures) PilotCrimson else PilotOnlineGreen) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(text = displayModel, color = PilotTextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "Registration: $displayPlate", color = PilotTextMuted, fontSize = 12.sp)
+                }
+                CockpitBadge(
+                    text = activeInspection?.inspectionStatus ?: "DRAFT",
+                    backgroundColor = if (hasCriticalFailures) Color(0x33FF334B) else OnlineGlow,
+                    textColor = if (hasCriticalFailures) PilotCrimson else PilotOnlineGreen
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Supabase Private Bucket: driver-vehicle-inspections • Real-time roadworthiness audit",
+                color = PilotTextDim,
+                fontSize = 11.sp
+            )
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Section 1: Odometer Verification
+        CockpitCard(borderColor = if (hasOdoDiscrepancy) PilotAmber else PilotBorder) {
+            Text(text = "1. Odometer Reading & Verification", color = PilotTextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(6.dp))
+            if (previousOdometerKm > 0) {
+                Text(
+                    text = "Previous Verified Reading: ${"%.1f".format(previousOdometerKm)} KM",
+                    color = PilotTextMuted,
+                    fontSize = 12.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+
+            CockpitTextField(
+                value = odometerKmInput,
+                onValueChange = { odometerKmInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
+                placeholder = "Enter Current Odometer (KM)",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+
+            if (hasOdoDiscrepancy) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = "⚠️", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Discrepancy: Reading is lower than previous record. Verification flag will be attached.",
+                        color = PilotAmber,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Section 2: Real Camera Photographs (Mandatory 5 Angles)
+        CockpitCard {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = "2. Vehicle Photographs (Real Camera)", color = PilotTextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(text = "$uploadedCount/5 Required", color = if (allMandatoryPhotosCaptured) PilotOnlineGreen else PilotAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Capture clear photographs showing the odometer and exterior profile. Stored securely in private Supabase Storage.",
+                color = PilotTextMuted,
+                fontSize = 12.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            mandatoryCategories.forEach { (catKey, catTitle, catDesc) ->
+                val bitmap = capturedBitmaps[catKey]
+                val status = uploadStatuses[catKey] ?: "PENDING"
+
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF141A24))
+                        .padding(12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "✓ Synced with Supabase", color = PilotOnlineGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    CockpitBadge(text = "LIVE", backgroundColor = OnlineGlow, textColor = PilotOnlineGreen)
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = lastInspectionInfo ?: "", color = PilotTextMuted, fontSize = 11.sp)
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-        }
+                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = catTitle,
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(1.dp, PilotOnlineGreen, RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF1F2937))
+                                    .border(1.dp, PilotBorder, RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(text = "📸", fontSize = 20.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(text = catTitle, color = PilotTextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(text = catDesc, color = PilotTextDim, fontSize = 11.sp, maxLines = 1)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            val (statusText, statusColor) = when (status) {
+                                "UPLOADED" -> Pair("✓ Uploaded to Supabase", PilotOnlineGreen)
+                                "UPLOADING" -> Pair("Uploading photo...", PilotAmber)
+                                "FAILED" -> Pair("Upload Failed - Tap Retry", PilotCrimson)
+                                else -> if (bitmap != null) Pair("Ready to upload", PilotAmber) else Pair("Photo Required", PilotTextDim)
+                            }
+                            Text(text = statusText, color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
 
+                    Row {
+                        Button(
+                            onClick = { launchCameraForCategory(catKey) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (bitmap != null) Color(0xFF243044) else PilotOnlineGreen
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = if (bitmap != null) "Retake" else "Capture",
+                                fontSize = 11.sp,
+                                color = if (bitmap != null) PilotTextWhite else PilotCanvas,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (bitmap != null) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            IconButton(onClick = {
+                                capturedBitmaps.remove(catKey)
+                                photoBytesMap.remove(catKey)
+                                uploadStatuses.remove(catKey)
+                            }) {
+                                Text(text = "✕", color = PilotCrimson, fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Section 3: Vehicle Safety Checklist
         CockpitCard {
-            Text(text = "EV Readiness Checklist", color = PilotTextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(text = "3. Safety & Mechanical Checklist", color = PilotTextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = "Independent pilot audit. Critical defects strictly bar vehicle from duty.", color = PilotTextMuted, fontSize = 12.sp)
             Spacer(modifier = Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "Tyre Pressure (32 PSI Front, 36 PSI Rear)", color = PilotTextMuted, fontSize = 12.sp)
-                Switch(checked = tyrePressureOk, onCheckedChange = { tyrePressureOk = it })
+
+            val checklistItems = listOf(
+                Pair("brakes", "Brakes & Parking/Handbrake (Critical)"),
+                Pair("steering", "Steering Smoothness & Alignment (Critical)"),
+                Pair("tyres", "Tyre Tread & Pressure (32/36 PSI) (Critical)"),
+                Pair("headlights_taillights", "Headlights, Tail Lights & Hazard (Critical)"),
+                Pair("battery_electrical", "EV Battery SOC & High-Voltage Isolator (Critical)"),
+                Pair("indicators_horn", "Turn Indicators, Horn & Reverse Buzzer"),
+                Pair("mirrors_windshield", "Side Mirrors & Windshield Clarity"),
+                Pair("cabin_cleanliness", "Passenger Cabin Cleanliness & Seat Sanitization"),
+                Pair("emergency_safety", "First Aid Kit & Emergency Stop Switch")
+            )
+
+            checklistItems.forEach { (key, label) ->
+                val currentVal = checklistState[key] ?: "PASS"
+                val isCritical = key in listOf("brakes", "steering", "tyres", "headlights_taillights", "battery_electrical")
+
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = (if (isCritical) "🛡️ " else "• ") + label,
+                            color = if (isCritical && currentVal == "FAIL") PilotCrimson else PilotTextWhite,
+                            fontSize = 12.sp,
+                            fontWeight = if (isCritical) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Row {
+                            listOf("PASS", "FAIL", "N/A").forEach { option ->
+                                val selected = currentVal == option
+                                val optColor = when (option) {
+                                    "PASS" -> PilotOnlineGreen
+                                    "FAIL" -> PilotCrimson
+                                    else -> PilotTextMuted
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .padding(horizontal = 2.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (selected) optColor.copy(alpha = 0.25f) else Color(0xFF1B2330))
+                                        .border(if (selected) 1.dp else 0.5.dp, if (selected) optColor else PilotBorder, RoundedCornerShape(6.dp))
+                                        .clickable { checklistState[key] = option }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = option,
+                                        color = if (selected) optColor else PilotTextDim,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
+
+            if (hasCriticalFailures) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0x33FF334B))
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "🚫", fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Critical safety item marked as FAIL. You will be blocked from going online until repairs are certified.",
+                        color = PilotCrimson,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Section 4: Remarks
+        CockpitCard {
+            Text(text = "4. Driver Remarks / Notes (Optional)", color = PilotTextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "Headlights & Hazard Indicators", color = PilotTextMuted, fontSize = 12.sp)
-                Switch(checked = lightsOk, onCheckedChange = { lightsOk = it })
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "Reverse Warning Buzzer & Horn", color = PilotTextMuted, fontSize = 12.sp)
-                Switch(checked = brakeBuzzerOk, onCheckedChange = { brakeBuzzerOk = it })
-            }
+            CockpitTextField(
+                value = driverRemarks,
+                onValueChange = { driverRemarks = it },
+                placeholder = "Note any observations, recent maintenance or cosmetic flaws..."
+            )
         }
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (submissionError != null) {
+            Text(
+                text = "⚠️ $submissionError",
+                color = PilotCrimson,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 10.dp)
+            )
+        }
+
+        // Submit Button
+        val canSubmit = !isSubmitting && enteredOdo > 0 && allMandatoryPhotosCaptured
         CockpitButton(
-            text = if (isSubmitting) "Submitting to Supabase..." else "Sign-Off Inspection & Log Odometer →",
-            enabled = !isSubmitting,
+            text = when {
+                isSubmitting -> "Submitting Inspection to Supabase..."
+                !allMandatoryPhotosCaptured -> "Capture All 5 Photos (${uploadedCount}/5) →"
+                enteredOdo <= 0 -> "Enter Odometer Reading →"
+                hasCriticalFailures -> "Sign-Off Inspection (Vehicle Barred) ⚠️"
+                else -> "Sign-Off Inspection & Verify Roadworthiness →"
+            },
+            enabled = canSubmit,
+            backgroundColor = if (hasCriticalFailures) PilotCrimson else PilotOnlineGreen,
             onClick = {
                 isSubmitting = true
+                submissionError = null
                 scope.launch {
-                    val vehicleId = assignedVehicle?.vehicleId?.ifBlank { profile.assignedVehiclePlate } ?: profile.assignedVehiclePlate
-                    val res = DriverRepository.submitVehicleInspectionCheck(vehicleId, tyrePressureOk, lightsOk, brakeBuzzerOk)
-                    isSubmitting = false
-                    if (res.isSuccess) {
-                        DriverDialogController.showToast("Vehicle inspection recorded in database!")
-                        onNavigate("shift_start")
-                    } else {
-                        DriverDialogController.showToast("Inspection failed: ${res.exceptionOrNull()?.message}")
+                    try {
+                        val draft = activeInspection ?: run {
+                            val dRes = DriverRepository.startOrGetDraftInspection()
+                            dRes.getOrNull()
+                        }
+                        val inspId = draft?.activeInspectionId ?: ""
+                        if (inspId.isBlank()) {
+                            isSubmitting = false
+                            submissionError = "Failed to establish inspection session. Check connection."
+                            return@launch
+                        }
+
+                        // Upload any pending captured photos first
+                        for ((cat, bytes) in photoBytesMap) {
+                            if (uploadStatuses[cat] != "UPLOADED") {
+                                val upRes = DriverRepository.uploadInspectionPhoto(inspId, cat, bytes, "${cat.lowercase()}.jpg")
+                                if (upRes.isSuccess) {
+                                    uploadStatuses[cat] = "UPLOADED"
+                                }
+                            }
+                        }
+
+                        // Submit authoritative inspection
+                        val submitRes = DriverRepository.submitFullVehicleInspection(
+                            inspectionId = inspId,
+                            odometerKm = enteredOdo,
+                            checklist = checklistState.toMap(),
+                            remarks = driverRemarks.ifBlank { null }
+                        )
+                        isSubmitting = false
+
+                        if (submitRes.isSuccess) {
+                            val data = submitRes.getOrNull()
+                            val status = data?.get("status")?.toString() ?: "APPROVED"
+                            if (status == "APPROVED" || status == "PENDING_VERIFICATION") {
+                                DriverDialogController.showToast("✓ Vehicle inspection APPROVED! Roadworthy for duty.")
+                                onNavigate("shift_start")
+                            } else {
+                                DriverDialogController.showToast("⚠️ Inspection FAILED on critical items. Vehicle grounded.")
+                                onNavigate("duty_dashboard")
+                            }
+                        } else {
+                            submissionError = submitRes.exceptionOrNull()?.message ?: "Submission failed."
+                        }
+                    } catch (e: Exception) {
+                        isSubmitting = false
+                        submissionError = e.message ?: "Submission error."
                     }
                 }
             }
         )
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 

@@ -464,34 +464,81 @@ class TrackingAdvancedService:
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found")
 
-        fare = ride.final_fare_cents or ride.estimated_fare_cents
+        fare = ride.final_fare_cents or ride.estimated_fare_cents or 0
         fare_rupees = round(fare / 100, 2)
-        base_rupees = 500.0
-        distance_rupees = round(max(0.0, fare_rupees - 650.0), 2)
-        duration_rupees = 100.0
+        dist_km = round(ride.actual_distance_km or ride.estimated_distance_km or 0.0, 2)
+        dur_min = round(ride.actual_duration_minutes or ride.estimated_duration_minutes or 0.0, 1)
+
+        # Dynamic breakdown from FareRule if available
+        base_rupees = 25.0
+        distance_rupees = 0.0
+        duration_rupees = 0.0
         tax_rupees = round(fare_rupees * 0.05, 2)
-        total_paid_rupees = fare_rupees
+        discount_rupees = round((ride.discount_cents or 0) / 100.0, 2)
+
+        if ride.fare_rule_id:
+            from backend.domain.models import FareRule
+            rule = await self.db.get(FareRule, ride.fare_rule_id)
+            if rule:
+                base_rupees = round(rule.base_fare_cents / 100.0, 2)
+                distance_rupees = round((dist_km * rule.per_km_cents) / 100.0, 2)
+                duration_rupees = round((dur_min * rule.per_minute_cents) / 100.0, 2)
+                tax_pct = getattr(rule, "tax_percentage", 5.0) or 5.0
+                tax_rupees = round(((base_rupees + distance_rupees + duration_rupees) * (tax_pct / 100.0)), 2)
+
+        if distance_rupees == 0.0 and fare_rupees > 0:
+            tax_rupees = round(fare_rupees * 0.05, 2)
+            subtotal = max(0.0, round(fare_rupees - tax_rupees, 2))
+            base_rupees = min(subtotal, 25.0)
+            distance_rupees = round(max(0.0, subtotal - base_rupees), 2)
+
+        driver_name = "Assigned Pilot"
+        vehicle_model = "Electric Auto / E-Rickshaw"
+        license_plate = "DL-EV-PILOT"
+
+        if ride.assigned_driver_id:
+            driver_prof = await self.db.get(DriverProfile, ride.assigned_driver_id)
+            if driver_prof:
+                driver_user = await self.db.get(User, driver_prof.user_id) if driver_prof.user_id else None
+                driver_name = (driver_user.full_name or driver_user.phone_number) if driver_user else "Assigned Pilot"
+        if ride.vehicle_id:
+            veh = await self.db.get(Vehicle, ride.vehicle_id)
+            if veh:
+                vehicle_model = f"{veh.make} {veh.model}".strip() if (veh.make or veh.model) else "Electric Vehicle"
+                license_plate = veh.license_plate or license_plate
+
+        invoice_num = ride.invoice_number or f"INV-VR-2026-{ride.id[:6].upper()}"
 
         return {
             "receipt_id": f"RCP-{ride.id[:8].upper()}-{datetime.now(timezone.utc).strftime('%y%m')}",
             "ride_id": ride.id,
+            "invoice_number": invoice_num,
             "status": ride.status,
             "date": (ride.completed_at or ride.requested_at).strftime("%d %b %Y, %I:%M %p"),
-            "passenger_name": ride.passenger_name or "Distinguished Guest",
-            "chauffeur_name": "Master Chauffeur",
-            "vehicle_model": ride.vehicle_model_override or "Mercedes-Benz E-Class",
-            "license_plate": ride.vehicle_plate_override or "MH 01 DX 4921",
+            "completed_at": (ride.completed_at or ride.requested_at).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "passenger_name": ride.passenger_name or "Commuter",
+            "chauffeur_name": driver_name,
+            "driver_name": driver_name,
+            "vehicle_model": vehicle_model,
+            "license_plate": license_plate,
             "pickup_address": ride.pickup_address,
             "destination_address": ride.destination_address,
-            "distance_km": round(ride.actual_distance_km or ride.estimated_distance_km, 2),
-            "duration_minutes": round(ride.actual_duration_minutes or ride.estimated_duration_minutes, 1),
+            "distance_km": dist_km,
+            "duration_minutes": dur_min,
             "payment_method": ride.payment_method,
+            "total_amount_rupees": fare_rupees,
+            "base_fare": base_rupees,
+            "distance_charge": distance_rupees,
+            "time_charge": duration_rupees,
+            "tax_amount": tax_rupees,
+            "discount_amount": discount_rupees,
             "fare_breakdown": {
                 "base_fare_rupees": base_rupees,
                 "distance_fare_rupees": distance_rupees,
                 "duration_fare_rupees": duration_rupees,
                 "gst_tax_rupees": tax_rupees,
-                "total_charged_rupees": total_paid_rupees
+                "discount_rupees": discount_rupees,
+                "total_charged_rupees": fare_rupees
             },
             "sac_code": "9964 (Passenger Transport)",
             "download_url": f"/api/v1/rides/{ride.id}/tax-invoice"

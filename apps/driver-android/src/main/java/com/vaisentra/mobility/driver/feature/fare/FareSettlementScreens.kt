@@ -1,5 +1,7 @@
 package com.vaisentra.mobility.driver.feature.fare
 
+import android.graphics.Bitmap
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,13 +14,35 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.data.DriverRepository
 import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.launch
+
+fun generateQrBitmap(content: String, size: Int = 512): Bitmap? {
+    return try {
+        val writer = QRCodeWriter()
+        val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, size, size)
+        val width = bitMatrix.width
+        val height = bitMatrix.height
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                bmp.setPixel(x, y, if (bitMatrix.get(x, y)) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        bmp
+    } catch (e: Exception) {
+        null
+    }
+}
 
 /**
  * Screen 31: Trip Completed & Fare Calculation (GET /api/v1/drivers/financials/rides/{ride_id}/breakdown)
@@ -298,21 +322,33 @@ fun UpiSettlementScreen(
                     Text("₹${"%.2f".format(totalBill)}", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(14.dp))
 
+                    val displayPayload = upiIntentUrl ?: "upi://pay?pa=billing@vaisentra&pn=VaisentraMobility&am=${"%.2f".format(totalBill)}&tr=${rideId}&cu=INR"
+                    val qrBitmap = remember(displayPayload) { generateQrBitmap(displayPayload) }
+
                     Box(
                         modifier = Modifier
                             .size(200.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White),
+                            .background(Color.White)
+                            .padding(8.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.QrCode2, contentDescription = null, tint = Color.Black, modifier = Modifier.size(150.dp))
-                            Text(
-                                if (upiIntentUrl != null) "UPI READY" else "GENERATING QR...",
-                                color = Color.DarkGray,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
+                        if (qrBitmap != null) {
+                            Image(
+                                bitmap = qrBitmap.asImageBitmap(),
+                                contentDescription = "Scannable Dynamic UPI QR Code",
+                                modifier = Modifier.size(184.dp)
                             )
+                        } else {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.QrCode2, contentDescription = null, tint = Color.Black, modifier = Modifier.size(150.dp))
+                                Text(
+                                    if (upiIntentUrl != null) "UPI READY" else "GENERATING QR...",
+                                    color = Color.DarkGray,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
 
@@ -353,5 +389,29 @@ fun UpiSettlementScreen(
                 )
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun UpiSettlementScreenPreview() {
+    DriverGoTheme {
+        UpiSettlementScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun CashCollectionScreenPreview() {
+    DriverGoTheme {
+        CashCollectionScreen()
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun TripCompletedFareScreenPreview() {
+    DriverGoTheme {
+        TripCompletedFareScreen()
     }
 }

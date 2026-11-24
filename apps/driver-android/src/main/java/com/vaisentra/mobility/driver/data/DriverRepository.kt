@@ -327,6 +327,16 @@ object DriverRepository {
     private val _ratingAppeals = MutableStateFlow<List<Map<String, Any>>>(emptyList())
     val ratingAppeals: StateFlow<List<Map<String, Any>>> = _ratingAppeals.asStateFlow()
 
+    private val _audioRecordingStatus = MutableStateFlow<AudioRecordingStatusResponse?>(null)
+    val audioRecordingStatus: StateFlow<AudioRecordingStatusResponse?> = _audioRecordingStatus.asStateFlow()
+
+    private val _isAudioRecordingActive = MutableStateFlow(false)
+    val isAudioRecordingActive: StateFlow<Boolean> = _isAudioRecordingActive.asStateFlow()
+
+    fun setAudioRecordingActive(active: Boolean) {
+        _isAudioRecordingActive.value = active
+    }
+
     @Volatile
     var pendingAuthPhone: String = ""
 
@@ -1281,14 +1291,53 @@ object DriverRepository {
         }
     }
 
-    suspend fun reportRouteDeviation(rideId: String, lat: Double, lng: Double): Result<Boolean> {
+    suspend fun reportRouteDeviation(
+        rideId: String,
+        lat: Double,
+        lng: Double,
+        reason: String? = null,
+        comments: String? = null
+    ): Result<Boolean> {
         if (rideId.isBlank()) return Result.failure(IllegalStateException("No active ride"))
         return try {
             val res = DriverNetworkClient.apiService.reportRouteAnomaly(
-                RouteAnomalyRequest(rideId = rideId, currentLat = lat, currentLng = lng)
+                RouteAnomalyRequest(
+                    rideId = rideId,
+                    currentLat = lat,
+                    currentLng = lng,
+                    deviationReason = reason,
+                    comments = comments
+                )
             )
             if (res.isSuccessful) Result.success(true)
             else Result.failure(IllegalStateException("reportRouteAnomaly failed: HTTP ${res.code()}"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitRideToll(
+        rideId: String,
+        amountRupees: Double,
+        tollName: String,
+        lat: Double? = null,
+        lng: Double? = null
+    ): Result<Map<String, Any>> {
+        if (rideId.isBlank()) return Result.failure(IllegalStateException("No active ride"))
+        if (amountRupees <= 0.0) return Result.failure(IllegalArgumentException("Toll amount must be greater than zero"))
+        return try {
+            val req = SubmitTollRequest(
+                tollAmountRupees = amountRupees,
+                tollName = tollName,
+                latitude = lat,
+                longitude = lng
+            )
+            val res = DriverNetworkClient.apiService.submitRideToll(rideId, req)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(IllegalStateException("Submit toll failed: HTTP ${res.code()} ${res.message()}"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1325,6 +1374,93 @@ object DriverRepository {
             } else {
                 val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
                 Log.w(TAG, "reportFoundItem failed: HTTP ${res.code()} - $err")
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun startOrGetDraftInspection(vehicleId: String? = null): Result<InspectionDraftDto> {
+        return try {
+            val targetVehicleId = vehicleId?.ifBlank { null } ?: _assignedVehicle.value?.vehicleId?.ifBlank { null }
+            val res = DriverNetworkClient.apiService.startVehicleInspection(StartInspectionRequest(vehicleId = targetVehicleId))
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchCurrentInspection(): Result<InspectionDraftDto> {
+        return try {
+            val res = DriverNetworkClient.apiService.getCurrentVehicleInspection()
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun uploadInspectionPhoto(
+        inspectionId: String,
+        category: String,
+        imageBytes: ByteArray,
+        filename: String = "inspection_photo.jpg"
+    ): Result<InspectionPhotoUploadResponseDto> {
+        return try {
+            val mediaType = "image/jpeg".toMediaTypeOrNull()
+            val requestFile = imageBytes.toRequestBody(mediaType)
+            val filePart = MultipartBody.Part.createFormData("file", filename, requestFile)
+            val catBody = category.toRequestBody("text/plain".toMediaTypeOrNull())
+
+            val res = DriverNetworkClient.apiService.uploadVehicleInspectionPhoto(
+                inspectionId = inspectionId,
+                category = catBody,
+                file = filePart
+            )
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitFullVehicleInspection(
+        inspectionId: String,
+        odometerKm: Double,
+        checklist: Map<String, Any>,
+        remarks: String? = null
+    ): Result<Map<String, Any>> {
+        return try {
+            val res = DriverNetworkClient.apiService.submitFullVehicleInspection(
+                inspectionId = inspectionId,
+                body = SubmitInspectionRequest(
+                    odometerReading = odometerKm,
+                    checklistResults = checklist,
+                    driverRemarks = remarks
+                )
+            )
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
                 Result.failure(IllegalStateException(err))
             }
         } catch (e: Exception) {
@@ -1911,6 +2047,93 @@ object DriverRepository {
             } else {
                 val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
                 Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun recordAudioConsent(
+        rideId: String,
+        granted: Boolean,
+        consentText: String = "Driver voluntarily provides in-cabin safety audio recording consent under DPDP Act 2023."
+    ): Result<AudioConsentResponse> {
+        return try {
+            val req = AudioConsentRequest(
+                consented = granted,
+                role = "DRIVER"
+            )
+            val res = DriverNetworkClient.apiService.recordAudioConsent(rideId, req)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                fetchAudioConsentStatus(rideId)
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun withdrawAudioConsent(rideId: String, reason: String = "Revoked by pilot"): Result<Boolean> {
+        return try {
+            val req = AudioConsentWithdrawRequest(reason = reason)
+            val res = DriverNetworkClient.apiService.withdrawAudioConsent(rideId, req)
+            if (res.isSuccessful) {
+                fetchAudioConsentStatus(rideId)
+                Result.success(true)
+            } else {
+                Result.failure(IllegalStateException("HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchAudioConsentStatus(rideId: String): Result<AudioRecordingStatusResponse> {
+        return try {
+            val res = DriverNetworkClient.apiService.getAudioConsentStatus(rideId)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                _audioRecordingStatus.value = body
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun authorizeAudioRecording(rideId: String): Result<Map<String, Any>> {
+        return try {
+            val res = DriverNetworkClient.apiService.authorizeAudioRecording(rideId)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                fetchAudioConsentStatus(rideId)
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun checkGiftCardBalance(code: String, pin: String? = null): Result<DriverGiftCardBalanceResponse> {
+        return try {
+            val res = DriverNetworkClient.apiService.checkGiftCardBalance(
+                DriverGiftCardBalanceRequest(code = code.trim().uppercase(), pin = pin?.trim()?.takeIf { it.isNotBlank() })
+            )
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(parseApiErrorMessage(err, "Invalid or expired gift card code")))
             }
         } catch (e: Exception) {
             Result.failure(e)

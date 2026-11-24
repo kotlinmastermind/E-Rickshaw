@@ -54,8 +54,10 @@ fun RouteDeviationScreen(onNavigate: (String) -> Unit) {
                 text = "Yes, Driver Took Traffic Detour (I am Safe)",
                 onClick = {
                     val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+                    val curLat = RiderRepository.activeRide.value?.driverLat ?: RiderRepository.bookingDraft.value.pickupLat
+                    val curLng = RiderRepository.activeRide.value?.driverLng ?: RiderRepository.bookingDraft.value.pickupLng
                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        RiderRepository.reportRouteAnomaly(rideId, 28.7041, 77.1025)
+                        RiderRepository.reportRouteAnomaly(rideId, curLat, curLng)
                     }
                     DialogController.showToast("Safety acknowledgment logged. Detour cleared.")
                     onNavigate("telemetry_hud")
@@ -188,8 +190,10 @@ fun EmergencySosScreen(onNavigate: (String) -> Unit) {
                     .background(CrimsonGlow)
                     .border(2.dp, CrimsonRed, CircleShape)
                     .clickable {
+                        val sosLat = RiderRepository.activeRide.value?.driverLat ?: RiderRepository.bookingDraft.value.pickupLat
+                        val sosLng = RiderRepository.activeRide.value?.driverLng ?: RiderRepository.bookingDraft.value.pickupLng
                         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            RiderRepository.triggerSos(28.6289, 77.3710)
+                            RiderRepository.triggerSos(sosLat, sosLng)
                         }
                         DialogController.show(RiderPopupType.SOS_112)
                     },

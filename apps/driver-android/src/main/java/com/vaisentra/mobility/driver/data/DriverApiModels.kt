@@ -329,7 +329,79 @@ data class DailyIncentiveDto(
 data class RouteAnomalyRequest(
     @SerializedName("ride_id") val rideId: String,
     @SerializedName("current_lat") val currentLat: Double,
-    @SerializedName("current_lng") val currentLng: Double
+    @SerializedName("current_lng") val currentLng: Double,
+    @SerializedName("deviation_reason") val deviationReason: String? = null,
+    @SerializedName("comments") val comments: String? = null
+)
+
+data class SubmitTollRequest(
+    @SerializedName("toll_amount_rupees") val tollAmountRupees: Double,
+    @SerializedName("toll_name") val tollName: String,
+    @SerializedName("latitude") val latitude: Double? = null,
+    @SerializedName("longitude") val longitude: Double? = null,
+    @SerializedName("receipt_url") val receiptUrl: String? = null
+)
+
+data class StartInspectionRequest(
+    @SerializedName("vehicle_id") val vehicleId: String? = null
+)
+
+data class SubmitInspectionRequest(
+    @SerializedName("odometer_reading") val odometerReading: Double,
+    @SerializedName("checklist_results") val checklistResults: Map<String, Any>,
+    @SerializedName("driver_remarks") val driverRemarks: String? = null
+)
+
+data class InspectionPhotoItemDto(
+    @SerializedName("photo_id") val photoId: String = "",
+    @SerializedName("category") val category: String = "",
+    @SerializedName("storage_path") val storagePath: String = "",
+    @SerializedName("signed_url") val signedUrl: String? = null,
+    @SerializedName("mime_type") val mimeType: String? = null,
+    @SerializedName("file_size_bytes") val fileSizeBytes: Long = 0L,
+    @SerializedName("uploaded_at") val uploadedAt: String? = null,
+    @SerializedName("upload_status") val uploadStatus: String = "COMPLETED"
+)
+
+data class InspectionDraftDto(
+    @SerializedName("has_inspection") val hasInspection: Boolean = false,
+    @SerializedName("id") val id: String? = null,
+    @SerializedName("inspection_id") val inspectionId: String? = null,
+    @SerializedName("driver_id") val driverId: String? = null,
+    @SerializedName("vehicle_id") val vehicleId: String? = null,
+    @SerializedName("vehicle_plate") val vehiclePlate: String? = null,
+    @SerializedName("vehicle_model") val vehicleModel: String? = null,
+    @SerializedName("inspection_date") val inspectionDate: String? = null,
+    @SerializedName("inspection_status") val inspectionStatus: String = "DRAFT",
+    @SerializedName("overall_result") val overallResult: String? = null,
+    @SerializedName("verification_status") val verificationStatus: String? = null,
+    @SerializedName("can_go_online") val canGoOnline: Boolean = false,
+    @SerializedName("odometer_reading") val odometerReading: Double? = null,
+    @SerializedName("previous_odometer_reading") val previousOdometerReading: Double? = null,
+    @SerializedName("odometer_unit") val odometerUnit: String = "KM",
+    @SerializedName("checklist") val checklist: Map<String, String>? = null,
+    @SerializedName("failed_items") val failedItems: List<String>? = null,
+    @SerializedName("driver_remarks") val driverRemarks: String? = null,
+    @SerializedName("rejection_reason") val rejectionReason: String? = null,
+    @SerializedName("photos") val photos: List<InspectionPhotoItemDto> = emptyList(),
+    @SerializedName("photos_count") val photosCount: Int = 0,
+    @SerializedName("submitted_at") val submittedAt: String? = null,
+    @SerializedName("message") val message: String? = null
+) {
+    val activeInspectionId: String get() = inspectionId ?: id ?: ""
+}
+
+data class InspectionPhotoUploadResponseDto(
+    @SerializedName("photo_id") val photoId: String = "",
+    @SerializedName("inspection_id") val inspectionId: String = "",
+    @SerializedName("category") val category: String = "",
+    @SerializedName("storage_path") val storagePath: String = "",
+    @SerializedName("signed_url") val signedUrl: String? = null,
+    @SerializedName("mime_type") val mimeType: String = "",
+    @SerializedName("file_size_bytes") val fileSizeBytes: Long = 0L,
+    @SerializedName("file_hash_sha256") val fileHashSha256: String = "",
+    @SerializedName("uploaded_at") val uploadedAt: String = "",
+    @SerializedName("message") val message: String = ""
 )
 
 data class VehicleInspectionRequest(
@@ -661,4 +733,103 @@ data class RatingAppealRequest(
     @SerializedName("reason") val reason: String
 )
 
+// --- Audio Safety Recording System DTOs ---
 
+data class AudioConsentRequest(
+    @SerializedName("consented") val consented: Boolean = true,
+    @SerializedName("role") val role: String = "DRIVER",
+    @SerializedName("consent_purpose") val consentPurpose: String = "IN_CABIN_SAFETY_DPDP_COMPLIANT",
+    @SerializedName("consent_version") val consentVersion: String = "v1.0"
+)
+
+data class AudioConsentWithdrawRequest(
+    @SerializedName("reason") val reason: String? = null
+)
+
+data class AudioConsentResponse(
+    @SerializedName("ride_id") val rideId: String,
+    @SerializedName("session_id") val sessionId: String? = null,
+    @SerializedName("consent_status") val consentStatus: String,
+    @SerializedName("passenger_consent") val passengerConsent: Boolean = false,
+    @SerializedName("driver_consent") val driverConsent: Boolean = false,
+    @SerializedName("dual_consent_achieved") val dualConsentAchieved: Boolean = false,
+    @SerializedName("is_recording_active") val isRecordingActive: Boolean = false,
+    @SerializedName("legal_notice") val legalNotice: String? = null
+)
+
+data class AudioRecordingSessionDto(
+    @SerializedName("session_id") val sessionId: String,
+    @SerializedName("recording_status") val recordingStatus: String,
+    @SerializedName("authorization_status") val authorizationStatus: String,
+    @SerializedName("started_at") val startedAt: String? = null,
+    @SerializedName("stopped_at") val stoppedAt: String? = null,
+    @SerializedName("total_segments") val totalSegments: Int = 0,
+    @SerializedName("total_duration_seconds") val totalDurationSeconds: Double = 0.0
+)
+
+data class AudioRecordingStatusResponse(
+    @SerializedName("ride_id") val rideId: String,
+    @SerializedName("passenger_consent") val passengerConsent: Boolean = false,
+    @SerializedName("driver_consent") val driverConsent: Boolean = false,
+    @SerializedName("passenger_consent_status") val passengerConsentStatus: String = "NOT_REQUESTED",
+    @SerializedName("driver_consent_status") val driverConsentStatus: String = "NOT_REQUESTED",
+    @SerializedName("dual_consent_achieved") val dualConsentAchieved: Boolean = false,
+    @SerializedName("is_recording_active") val isRecordingActive: Boolean = false,
+    @SerializedName("session") val session: AudioRecordingSessionDto? = null
+)
+
+data class AudioSegmentUploadResponse(
+    @SerializedName("segment_id") val segmentId: String,
+    @SerializedName("session_id") val sessionId: String,
+    @SerializedName("sequence") val sequence: Int,
+    @SerializedName("size_bytes") val sizeBytes: Int,
+    @SerializedName("sha256_hash") val sha256Hash: String,
+    @SerializedName("retention_expiry") val retentionExpiry: String,
+    @SerializedName("status") val status: String
+)
+
+// --- Gift Card & Commuter Credit Models ---
+data class DriverGiftCardBalanceRequest(
+    @SerializedName("code") val code: String,
+    @SerializedName("pin") val pin: String? = null
+)
+
+data class DriverGiftCardBalanceResponse(
+    @SerializedName("gift_card_id") val giftCardId: String,
+    @SerializedName("masked_code") val maskedCode: String,
+    @SerializedName("initial_amount_cents") val initialAmountCents: Int,
+    @SerializedName("initial_amount_rupees") val initialAmountRupees: Double,
+    @SerializedName("remaining_balance_cents") val remainingBalanceCents: Int,
+    @SerializedName("remaining_balance_rupees") val remainingBalanceRupees: Double,
+    @SerializedName("currency") val currency: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("is_redeemable") val isRedeemable: Boolean,
+    @SerializedName("card_design") val cardDesign: String? = null,
+    @SerializedName("expires_at") val expiresAt: String? = null,
+    @SerializedName("requires_pin") val requiresPin: Boolean = false
+)
+
+
+
+
+// In DriverApiModels.kt
+
+data class NavigationStepDto(
+    @SerializedName("instruction") val instruction: String,
+    @SerializedName("maneuver") val maneuver: String = "STRAIGHT", // STRAIGHT, RIGHT, LEFT, UTURN, ARRIVE
+    @SerializedName("distance_meters") val distanceMeters: Double = 100.0,
+    @SerializedName("duration_seconds") val durationSeconds: Double = 20.0
+)
+
+data class RoutePointDto(
+    @SerializedName("latitude", alternate = ["lat"]) val latitude: Double,
+    @SerializedName("longitude", alternate = ["lng"]) val longitude: Double
+)
+
+data class NavigationGuidanceResponseDto(
+    @SerializedName("distance_km") val distanceKm: Double = 0.0,
+    @SerializedName("duration_minutes") val durationMinutes: Double = 0.0,
+    @SerializedName("polyline") val polyline: String? = null,
+    @SerializedName("points") val points: List<RoutePointDto> = emptyList(),
+    @SerializedName("steps") val steps: List<NavigationStepDto> = emptyList()
+)

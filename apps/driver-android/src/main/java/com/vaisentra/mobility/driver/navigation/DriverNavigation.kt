@@ -82,10 +82,8 @@ enum class DriverScreen(val title: String, val category: String) {
 
     // 6. Safety Sentinel & Depots (23, 27-30, 45, 48)
     ROUTE_DEVIATION("23. Route Deviation Watchdog", "Safety Sentinel"),
-    SPEEDOMETER("27. Speedometer & Speed Alert", "Safety Sentinel"),
     AUDIO_SHIELD("28. Cabin Audio Safety Shield", "Safety Sentinel"),
     EMERGENCY_SOS("29. Pilot SOS 112 Trigger", "Safety Sentinel"),
-    BATTERY_SWAP_DEPOT("30. Low Battery Swap Depot", "Safety Sentinel"),
     DRIVER_INCIDENT("45. Incident Reporting", "Safety Sentinel"),
     EMERGENCY_CONTACTS("48. Emergency Contacts", "Safety Sentinel"),
 
@@ -160,10 +158,8 @@ fun resolveRoute(route: String): DriverScreen? {
 
         // Safety Sentinel
         "route_deviation" -> DriverScreen.ROUTE_DEVIATION
-        "speedometer" -> DriverScreen.SPEEDOMETER
         "audio_shield" -> DriverScreen.AUDIO_SHIELD
         "sos", "emergency_sos" -> DriverScreen.EMERGENCY_SOS
-        "battery_swap", "swap_depot" -> DriverScreen.BATTERY_SWAP_DEPOT
         "incident", "driver_incident" -> DriverScreen.DRIVER_INCIDENT
         "emergency_contacts", "contacts" -> DriverScreen.EMERGENCY_CONTACTS
 
@@ -378,7 +374,7 @@ fun DriverNavigation() {
         DriverScreen.PERFORMANCE_SCORECARD.name, DriverScreen.ACADEMY_TRAINING.name, DriverScreen.DRIVER_INCIDENT.name,
         DriverScreen.FOUND_ITEM.name, DriverScreen.DRIVER_HELPDESK.name, DriverScreen.EMERGENCY_CONTACTS.name,
         DriverScreen.ROUTE_DEVIATION.name, DriverScreen.SPEEDOMETER.name, DriverScreen.AUDIO_SHIELD.name,
-        DriverScreen.EMERGENCY_SOS.name, DriverScreen.BATTERY_SWAP_DEPOT.name -> 4
+        DriverScreen.EMERGENCY_SOS.name -> 4
 
         else -> 0
     }
@@ -692,12 +688,6 @@ fun DriverNavigation() {
                 )
             }
 
-            composable(DriverScreen.SPEEDOMETER.name) {
-                SpeedometerScreen(
-                    onNavigateBack = { router.popBack() },
-                    onShowToast = { showToast(it) }
-                )
-            }
 
             composable(DriverScreen.AUDIO_SHIELD.name) {
                 AudioShieldScreen(
@@ -708,13 +698,6 @@ fun DriverNavigation() {
 
             composable(DriverScreen.EMERGENCY_SOS.name) {
                 EmergencySosScreen(
-                    onNavigateBack = { router.popBack() },
-                    onShowToast = { showToast(it) }
-                )
-            }
-
-            composable(DriverScreen.BATTERY_SWAP_DEPOT.name) {
-                BatterySwapDepotScreen(
                     onNavigateBack = { router.popBack() },
                     onShowToast = { showToast(it) }
                 )

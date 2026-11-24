@@ -27,6 +27,7 @@ import com.vaisentra.mobility.rider.feature.safety.*
 import com.vaisentra.mobility.rider.feature.support.*
 import com.vaisentra.mobility.rider.feature.trip.*
 import com.vaisentra.mobility.rider.feature.wallet.*
+import com.vaisentra.mobility.rider.feature.giftcard.*
 import com.vaisentra.mobility.rider.theme.*
 import com.vaisentra.mobility.rider.data.NetworkClient
 import com.vaisentra.mobility.rider.data.RiderRepository
@@ -142,6 +143,9 @@ fun RiderAppNavigation() {
             "wallet_hub" -> CashlessWalletHubScreen { navigateTo(it) }
             "wallet_auto_topup" -> WalletAutoTopupScreen { navigateTo(it) }
             "split_fare" -> SplitFareScreen { navigateTo(it) }
+            "gift_cards_hub" -> GiftCardsHomeScreen { navigateTo(it) }
+            "gift_cards_buy" -> BuyGiftCardScreen { navigateTo(it) }
+            "gift_cards_redeem" -> RedeemGiftCardScreen { navigateTo(it) }
 
             // Category 6: In-Trip HUD & Realtime
             "dispatch_matching" -> DispatchRadarScreen { navigateTo(it) }
@@ -180,7 +184,14 @@ fun RiderAppNavigation() {
             "saved_places" -> SavedPlacesScreen { navigateTo(it) }
             "account_hub" -> AccountSettingsHubScreen { navigateTo(it) }
 
-            else -> MapHomeScreen { navigateTo(it) }
+            else -> {
+                if (currentRoute.startsWith("gift_cards_detail/")) {
+                    val cardId = currentRoute.removePrefix("gift_cards_detail/")
+                    GiftCardDetailsScreen(giftCardId = cardId, onNavigate = { navigateTo(it) })
+                } else {
+                    MapHomeScreen { navigateTo(it) }
+                }
+            }
         }
 
         // Persistent Rapido-Style Bottom Navigation Bar (Shown on all pages except auth/onboarding)

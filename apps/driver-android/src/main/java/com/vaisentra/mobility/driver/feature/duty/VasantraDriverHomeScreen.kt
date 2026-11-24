@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.drawscope.rotate
 import com.vaisentra.mobility.driver.components.DriverAvatar
 import com.vaisentra.mobility.driver.components.DriverMapboxLiveView
+import com.vaisentra.mobility.driver.components.*
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -205,10 +206,16 @@ fun VasantraDriverHomeScreen(
                         isOnline = isOnline,
                         onToggleDuty = { next ->
                             DriverRepository.setDutyStatus(next) { ok, err ->
-                                DriverDialogController.showToast(
-                                    if (ok) (if (next) "You are ONLINE" else "You are OFFLINE")
-                                    else "Duty update failed: ${err ?: "Approval required"}"
-                                )
+                                if (!ok && next && (err?.contains("INSPECTION", ignoreCase = true) == true || err?.contains("inspection", ignoreCase = true) == true)) {
+                                    DriverDialogController.show(DriverPopupType.ODOMETER_CHECK) {
+                                        onNavigate("inspection")
+                                    }
+                                } else {
+                                    DriverDialogController.showToast(
+                                        if (ok) (if (next) "You are ONLINE" else "You are OFFLINE")
+                                        else "Duty update failed: ${err ?: "Approval required"}"
+                                    )
+                                }
                             }
                         },
                         onProfileClick = {

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from backend.domain.models import (
-    User, DriverProfile, Ride, Vehicle,
+    User, DriverProfile, Ride, Vehicle, RideToll,
     DriverShift, DriverWeeklyGoal, DriverPayoutAccount, DriverPayoutSchedule,
     DriverLedgerEntry, DriverIncentiveProgress, DriverOperatingExpense,
     DriverFinancialSupportRequest, DriverPayoutReconciliation,
@@ -265,7 +265,8 @@ class DriverFinancialService:
         amenities_cents = fare_cents - (base_fare_cents + dist_fare_cents + time_fare_cents)
         commission_cents = round(fare_cents * 0.20)
         tip_cents = getattr(ride, "tip_cents", 0) or 0
-        toll_cents = 15000 if "Airport" in (ride.destination_address or "") or "Airport" in (ride.pickup_address or "") else 0
+        recorded_toll_cents = getattr(ride, "toll_cents", 0) or 0
+        toll_cents = recorded_toll_cents if recorded_toll_cents > 0 else (15000 if "Airport" in (ride.destination_address or "") or "Airport" in (ride.pickup_address or "") else 0)
         net_cents = (fare_cents - commission_cents) + tip_cents + toll_cents
 
         return {
@@ -296,6 +297,121 @@ class DriverFinancialService:
             "net_driver_earnings_rupees": round(net_cents / 100, 2),
             "settlement_status": "CREDITED_TO_WALLET"
         }
+
+    # -------------------------------------------------------------------------
+    # Toll Entry & Expense Integration
+    # -------------------------------------------------------------------------
+    async def record_ride_toll(
+        self,
+        user_id_or_driver_id: str,
+        ride_id: str,
+        toll_amount_rupees: float,
+        toll_name: str,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        receipt_url: Optional[str] = None
+    ) -> Dict[str, Any]:
+        driver = await self._get_driver_profile(user_id_or_driver_id)
+        ride = await self.db.get(Ride, ride_id)
+        if not ride:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+        if ride.assigned_driver_id != driver.id and getattr(ride, "driver_id", None) != driver.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not the assigned chauffeur for this ride.")
+
+        valid_statuses = ("ACCEPTED", "ARRIVED", "IN_PROGRESS", "COMPLETED")
+        if ride.status not in valid_statuses:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Toll cannot be added to ride with status {ride.status}.")
+
+        if toll_amount_rupees <= 0 or toll_amount_rupees > 5000:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Toll amount must be between ₹1.00 and ₹5,000.00.")
+
+        clean_toll_name = (toll_name or "Highway / Municipal Toll").strip()
+        amount_cents = int(round(toll_amount_rupees * 100))
+
+        # Check duplicate submission within 5 minutes
+        five_mins_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
+        dup_stmt = select(RideToll).where(
+            RideToll.ride_id == ride.id,
+            RideToll.amount_cents == amount_cents,
+            RideToll.toll_name == clean_toll_name,
+            RideToll.created_at >= five_mins_ago
+        )
+        existing_dup = (await self.db.execute(dup_stmt)).scalars().first()
+        if existing_dup:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A toll with this identical amount and plaza name was recently submitted.")
+
+        # Insert RideToll record
+        toll = RideToll(
+            ride_id=ride.id,
+            driver_id=driver.id,
+            amount_cents=amount_cents,
+            toll_name=clean_toll_name,
+            latitude=latitude,
+            longitude=longitude,
+            status="APPROVED",
+            receipt_url=receipt_url
+        )
+        self.db.add(toll)
+
+        # Update Ride total tolls and final fare
+        ride.toll_cents = (getattr(ride, "toll_cents", 0) or 0) + amount_cents
+        current_fare = ride.final_fare_cents or ride.estimated_fare_cents or 0
+        ride.final_fare_cents = current_fare + amount_cents
+        ride.fare_difference_cents = (ride.fare_difference_cents or 0) + amount_cents
+        ride.fare_change_reason = f"Toll surcharge added: {clean_toll_name} (₹{toll_amount_rupees:.2f})"
+
+        # Add Ledger entry for driver reimbursement
+        ledger_entry = DriverLedgerEntry(
+            driver_id=driver.id,
+            entry_type="CREDIT",
+            category="TOLL_REIMBURSEMENT",
+            amount_cents=amount_cents,
+            reference_id=ride.id,
+            description=f"Toll reimbursement: {clean_toll_name} for Ride #{ride.id[:8]}",
+            balance_after_cents=amount_cents
+        )
+        self.db.add(ledger_entry)
+
+        await self.db.commit()
+        await self.db.refresh(toll)
+
+        return {
+            "toll_id": toll.id,
+            "ride_id": ride.id,
+            "toll_name": toll.toll_name,
+            "amount_cents": toll.amount_cents,
+            "amount_rupees": round(toll.amount_cents / 100, 2),
+            "status": toll.status,
+            "total_ride_toll_cents": ride.toll_cents,
+            "total_ride_fare_cents": ride.final_fare_cents,
+            "total_ride_fare_rupees": round(ride.final_fare_cents / 100, 2),
+            "created_at": toll.created_at.isoformat()
+        }
+
+    async def get_ride_tolls(self, user_id_or_driver_id: str, ride_id: str) -> List[Dict[str, Any]]:
+        driver = await self._get_driver_profile(user_id_or_driver_id)
+        ride = await self.db.get(Ride, ride_id)
+        if not ride:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+        tolls_stmt = select(RideToll).where(RideToll.ride_id == ride.id).order_by(RideToll.created_at.asc())
+        tolls = (await self.db.execute(tolls_stmt)).scalars().all()
+
+        return [
+            {
+                "toll_id": t.id,
+                "ride_id": t.ride_id,
+                "toll_name": t.toll_name,
+                "amount_cents": t.amount_cents,
+                "amount_rupees": round(t.amount_cents / 100, 2),
+                "status": t.status,
+                "latitude": t.latitude,
+                "longitude": t.longitude,
+                "created_at": t.created_at.isoformat()
+            }
+            for t in tolls
+        ]
 
     # -------------------------------------------------------------------------
     # Feature 256: Driver shift start and end tracking

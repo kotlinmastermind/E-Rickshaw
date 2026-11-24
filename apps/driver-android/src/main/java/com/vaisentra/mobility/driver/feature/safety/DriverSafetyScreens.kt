@@ -104,7 +104,10 @@ fun RouteDeviationScreen(
                         }
                         isSubmitting = true
                         scope.launch {
-                            val res = DriverRepository.reportRouteDeviation(rideId, 28.6289, 77.3710)
+                            val liveLoc = DriverRepository.driverLocation.value
+                            val currentLat = if (liveLoc.latitude != 0.0) liveLoc.latitude else 28.6139
+                            val currentLng = if (liveLoc.longitude != 0.0) liveLoc.longitude else 77.2090
+                            val res = DriverRepository.reportRouteDeviation(rideId, currentLat, currentLng, reason = selectedReason)
                             isSubmitting = false
                             if (res.isSuccess) {
                                 onShowToast("Detour reason logged: $selectedReason")
@@ -121,82 +124,6 @@ fun RouteDeviationScreen(
     }
 }
 
-/**
- * Screen 27: Speedometer & Urban Limits
- */
-@Composable
-fun SpeedometerScreen(
-    onNavigateBack: () -> Unit = {},
-    onShowToast: (String) -> Unit = {}
-) {
-    var speed by remember { mutableIntStateOf(28) }
-    val maxLimit = 35
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CockpitBackground)
-            .statusBarsPadding()
-    ) {
-        CockpitHeader(
-            title = "Speedometer & Safety HUD",
-            subtitle = "Delhi Transport Department e-rickshaw limit compliance",
-            onBack = onNavigateBack
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            CockpitCard(glow = speed > maxLimit) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("CURRENT SPEED", color = CockpitTextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "$speed",
-                        color = if (speed > maxLimit) CrimsonAlert else EmeraldPrimary,
-                        fontSize = 80.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text("KILOMETERS PER HOUR", color = CockpitTextSecondary, fontSize = 12.sp)
-                    Spacer(Modifier.height(16.dp))
-                    CockpitBadge(
-                        if (speed > maxLimit) "OVERSPEEDING (>35 KM/H)" else "SAFE URBAN SPEED COMPLIANT",
-                        if (speed > maxLimit) CrimsonAlert else EmeraldPrimary
-                    )
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CockpitButton(
-                    text = "Test 25 km/h",
-                    onClick = {
-                        speed = 25
-                        DriverRepository.pingLocation(28.6139, 77.2090, 0.0, 25.0 / 3.6)
-                    },
-                    modifier = Modifier.weight(1f),
-                    isOutlined = true
-                )
-                CockpitButton(
-                    text = "Test 38 km/h Alert",
-                    onClick = {
-                        speed = 38
-                        DriverRepository.pingLocation(28.6139, 77.2090, 0.0, 38.0 / 3.6)
-                        onShowToast("Auditory alert triggered: Speed > 35 km/h")
-                    },
-                    modifier = Modifier.weight(1f),
-                    isOutlined = true
-                )
-            }
-        }
-    }
-}
 
 /**
  * Screen 28: Cabin Audio Safety Shield
@@ -351,52 +278,6 @@ fun EmergencySosScreen(
                 modifier = Modifier.fillMaxWidth(),
                 isOutlined = true
             )
-        }
-    }
-}
-
-/**
- * Screen 30: Low Battery Swap Depot
- */
-@Composable
-fun BatterySwapDepotScreen(
-    onNavigateBack: () -> Unit = {},
-    onShowToast: (String) -> Unit = {}
-) {
-    val depots = listOf(
-        SwapDepotItem("Sun Mobility Hub - Anand Vihar ISBT", "0.8 km", "12 Charged Packs Ready", EmeraldPrimary),
-        SwapDepotItem("Battery Smart Depot - Preet Vihar Gate 1", "2.1 km", "7 Charged Packs Ready", EmeraldPrimary)
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CockpitBackground)
-            .statusBarsPadding()
-    ) {
-        CockpitHeader(
-            title = "Battery Swap Depots",
-            subtitle = "Smart swap stations for 2-minute battery replacement",
-            onBack = onNavigateBack
-        )
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(depots) { depot ->
-                CockpitCard {
-                    Text(depot.name, color = CockpitTextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Spacer(Modifier.height(2.dp))
-                    Text("${depot.distance} • ${depot.status}", color = depot.tint, fontSize = 12.sp)
-                    Spacer(Modifier.height(10.dp))
-                    CockpitButton(
-                        text = "Reserve Pack & Navigate (${depot.distance})",
-                        onClick = { onShowToast("Battery pack reserved at ${depot.name}") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
         }
     }
 }
@@ -692,8 +573,6 @@ fun EmergencyContactsScreen(
     }
 }
 
-private data class SwapDepotItem(val name: String, val distance: String, val status: String, val tint: Color)
-
 @Preview(showBackground = true)
 @Composable
 fun RouteDeviationScreenPreview() {
@@ -702,13 +581,6 @@ fun RouteDeviationScreenPreview() {
     }
 }
 
-@Preview(showBackground = true)
-@Composable
-fun SpeedometerScreenPreview() {
-    DriverGoTheme {
-        SpeedometerScreen()
-    }
-}
 
 @Preview(showBackground = true)
 @Composable
@@ -723,14 +595,6 @@ fun AudioShieldScreenPreview() {
 fun EmergencySosScreenPreview() {
     DriverGoTheme {
         EmergencySosScreen()
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun BatterySwapDepotScreenPreview() {
-    DriverGoTheme {
-        BatterySwapDepotScreen()
     }
 }
 

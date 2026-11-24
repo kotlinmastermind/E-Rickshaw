@@ -15,7 +15,7 @@ from fastapi import HTTPException, status
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, Vehicle, Ride,
     EmergencyContact, IncidentReport, DriverBlock, EmergencyAlert,
-    TripShareLink, AdministrativeAuditLog, Notification
+    TripShareLink, AdministrativeAuditLog, Notification, RouteDeviationEvent
 )
 
 # Curated Safe Luxury Pickup Zones in National Capital Region & Metro Corridors (Feature 147)
@@ -234,37 +234,44 @@ class SafetyAdvancedService:
     # -------------------------------------------------------------------------
     async def trigger_emergency_sos(
         self,
-        ride_id: str,
+        ride_id: Optional[str],
         current_user: User,
         latitude: float,
         longitude: float,
         alert_type: str = "SOS_BUTTON",
         notes: Optional[str] = None
     ) -> Dict[str, Any]:
-        ride = await self.db.get(Ride, ride_id)
-        if not ride:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found")
-        if current_user.role.lower() == "driver":
-            driver_result = await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == current_user.id))
-            driver = driver_result.scalar_one_or_none()
-            if not ((driver and ride.assigned_driver_id == driver.id) or ride.assigned_driver_id == current_user.id):
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
-        elif current_user.role.lower() == "customer":
-            customer_result = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == current_user.id))
-            customer = customer_result.scalar_one_or_none()
-            if not ((customer and ride.customer_id == customer.id) or ride.customer_id == current_user.id):
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
-        elif current_user.role.lower() != "admin":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
+        if abs(latitude) > 90.0 or abs(longitude) > 180.0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid GPS coordinates.")
 
-        # Mark ride SOS
+        location_available = not (latitude == 0.0 and longitude == 0.0)
+        if not location_available:
+            notes = (notes or "") + " [Location unavailable at trigger time]"
+
         now = datetime.now(timezone.utc)
-        ride.sos_triggered = True
-        ride.sos_triggered_at = now
+        ride = None
+        if ride_id:
+            ride = await self.db.get(Ride, ride_id)
+            if ride:
+                if current_user.role.lower() == "driver":
+                    driver_result = await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == current_user.id))
+                    driver = driver_result.scalar_one_or_none()
+                    if not ((driver and ride.assigned_driver_id == driver.id) or ride.assigned_driver_id == current_user.id):
+                        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
+                elif current_user.role.lower() == "customer":
+                    customer_result = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == current_user.id))
+                    customer = customer_result.scalar_one_or_none()
+                    if not ((customer and ride.customer_id == customer.id) or ride.customer_id == current_user.id):
+                        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
+                elif current_user.role.lower() != "admin":
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
+
+                ride.sos_triggered = True
+                ride.sos_triggered_at = now
 
         # Create EmergencyAlert
         alert = EmergencyAlert(
-            ride_id=ride.id,
+            ride_id=ride.id if ride else None,
             triggered_by_user_id=current_user.id,
             alert_type=alert_type,
             latitude=latitude,
@@ -286,21 +293,23 @@ class SafetyAdvancedService:
         alert.contacts_notified_count = len(contacts)
 
         share_token = f"gc-sos-{secrets.token_urlsafe(12)}"
-        link = TripShareLink(
-            ride_id=ride.id,
-            share_token=share_token,
-            created_by_user_id=current_user.id,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
-            recipient_name="Emergency Broadcast"
-        )
-        self.db.add(link)
+        emergency_share_url = f"https://grandchauffeur.luxury/track/{share_token}"
+        if ride:
+            link = TripShareLink(
+                ride_id=ride.id,
+                share_token=share_token,
+                created_by_user_id=current_user.id,
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+                recipient_name="Emergency Broadcast"
+            )
+            self.db.add(link)
 
         # Log audit entry
         audit = AdministrativeAuditLog(
             admin_user_id=current_user.id,
             action="EMERGENCY_SOS_TRIGGERED",
-            target_resource="RIDE",
-            target_id=ride.id,
+            target_resource="RIDE" if ride else "USER",
+            target_id=ride.id if ride else current_user.id,
             changes_json=json.dumps({
                 "alert_id": alert.id,
                 "alert_type": alert_type,
@@ -316,7 +325,7 @@ class SafetyAdvancedService:
         return {
             "success": True,
             "alert_id": alert.id,
-            "ride_id": ride.id,
+            "ride_id": ride.id if ride else None,
             "status": "SOS_ACTIVE",
             "alert_type": alert_type,
             "triggered_at": now.isoformat(),
@@ -675,12 +684,23 @@ class SafetyAdvancedService:
         }
 
     # -------------------------------------------------------------------------
-    # Feature 134: Route Anomaly Detection
+    # Feature 134: Route Anomaly Detection & Deviation Reporting
     # -------------------------------------------------------------------------
-    async def check_route_anomaly(self, ride_id: str, current_lat: float, current_lng: float) -> Dict[str, Any]:
+    async def check_route_anomaly(
+        self,
+        ride_id: str,
+        current_lat: float,
+        current_lng: float,
+        deviation_reason: Optional[str] = None,
+        comments: Optional[str] = None,
+        user: Optional[User] = None
+    ) -> Dict[str, Any]:
         ride = await self.db.get(Ride, ride_id)
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+        if abs(current_lat) > 90.0 or abs(current_lng) > 180.0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid GPS coordinates.")
 
         # Calculate deviation from the direct corridor connecting pickup and destination
         dist_pickup = calculate_haversine_distance_km(current_lat, current_lng, ride.pickup_latitude, ride.pickup_longitude)
@@ -688,19 +708,45 @@ class SafetyAdvancedService:
         direct_span = calculate_haversine_distance_km(ride.pickup_latitude, ride.pickup_longitude, ride.destination_latitude, ride.destination_longitude)
 
         # Triangle inequality corridor check: if (dist_pickup + dist_dest) > direct_span * 1.8 and dist_pickup > 1.0 km
-        is_deviated = (dist_pickup + dist_dest) > (direct_span * 1.8 + 2.5) and dist_pickup > 1.0
+        # Or explicitly reported by driver with deviation_reason
+        is_deviated = ((dist_pickup + dist_dest) > (direct_span * 1.8 + 2.5) and dist_pickup > 1.0) or bool(deviation_reason)
+        effective_reason = deviation_reason or "UNEXPECTED_DETOUR"
 
         if is_deviated:
             ride.route_anomaly_detected = True
-            ride.route_anomaly_type = "UNEXPECTED_DETOUR"
+            ride.route_anomaly_type = effective_reason
+            ride.route_deviation_detected = True
+            ride.route_deviation_reason = effective_reason
+
+            driver_id = ride.assigned_driver_id
+            if not driver_id and user:
+                driver_prof = (await self.db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))).scalar_one_or_none()
+                if driver_prof:
+                    driver_id = driver_prof.id
+
+            if driver_id:
+                dev_event = RouteDeviationEvent(
+                    ride_id=ride.id,
+                    driver_id=driver_id,
+                    deviation_meters=round(max(0.0, ((dist_pickup + dist_dest) - direct_span) * 1000), 1),
+                    latitude=current_lat,
+                    longitude=current_lng,
+                    severity="WARNING",
+                    reason=effective_reason,
+                    driver_comments=comments,
+                    resolved=False
+                )
+                self.db.add(dev_event)
+
             await self.db.commit()
 
         return {
             "ride_id": ride.id,
             "anomaly_detected": is_deviated,
-            "anomaly_type": "UNEXPECTED_DETOUR" if is_deviated else "NONE",
+            "anomaly_type": effective_reason if is_deviated else "NONE",
             "current_coordinates": {"latitude": current_lat, "longitude": current_lng},
             "status": "ALERT_TRIGGERED" if is_deviated else "NORMAL_CORRIDOR",
+            "deviation_reason": effective_reason if is_deviated else None,
             "recommended_action": "Prompt guest for safety check-in" if is_deviated else "Continue routine monitoring"
         }
 

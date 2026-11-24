@@ -169,6 +169,13 @@ fun PilotEarningsScreen(
     var supportReason by remember { mutableStateOf("") }
     var isSubmittingSupport by remember { mutableStateOf(false) }
 
+    var showGiftCardDialog by remember { mutableStateOf(false) }
+    var giftCardCodeInput by remember { mutableStateOf("") }
+    var giftCardPinInput by remember { mutableStateOf("") }
+    var isCheckingGiftCard by remember { mutableStateOf(false) }
+    var giftCardCheckResult by remember { mutableStateOf<DriverGiftCardBalanceResponse?>(null) }
+    var giftCardCheckError by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(Unit) {
         DriverRepository.fetchEarningsSummary()
         DriverRepository.fetchFinancialSupportRequests()
@@ -342,6 +349,36 @@ fun PilotEarningsScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            item {
+                CockpitCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                giftCardCodeInput = ""
+                                giftCardPinInput = ""
+                                giftCardCheckResult = null
+                                giftCardCheckError = null
+                                showGiftCardDialog = true
+                            },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text("🎁", fontSize = 22.sp)
+                            Column {
+                                Text("Gift Cards & Commuter Credits", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Check voucher balance & commuter guidelines", color = CockpitTextSecondary, fontSize = 11.sp)
+                            }
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, tint = AmberWarning)
                     }
                 }
             }
@@ -572,6 +609,154 @@ fun PilotEarningsScreen(
                 dismissButton = {
                     TextButton(onClick = { showWelfareDialog = false }, enabled = !isSubmittingSupport) {
                         Text("Cancel", color = CockpitTextMuted)
+                    }
+                }
+            )
+        }
+
+        if (showGiftCardDialog) {
+            AlertDialog(
+                onDismissRequest = { if (!isCheckingGiftCard) showGiftCardDialog = false },
+                containerColor = CockpitCardBackground,
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("🎁", fontSize = 20.sp)
+                        Column {
+                            Text("Gift Cards & Commuter Credits", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text("Closed-loop passenger credits (RBI PPI Compliance)", color = CockpitTextMuted, fontSize = 11.sp)
+                        }
+                    }
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            color = AmberWarning.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AmberWarning.copy(alpha = 0.3f))
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    "REGULATORY NOTICE",
+                                    color = AmberWarning,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "Gift cards are non-cashable commuter credits redeemable for passenger rides or gifting to family/friends. Per RBI Prepaid Instrument guidelines, gift cards cannot be converted into driver earnings or withdrawn to bank accounts.",
+                                    color = CockpitTextSecondary,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                        }
+
+                        Text("VERIFY GIFT CARD / VOUCHER", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+
+                        CockpitTextField(
+                            value = giftCardCodeInput,
+                            onValueChange = { giftCardCodeInput = it.uppercase() },
+                            placeholder = "GC-XXXX-YYYY-ZZZZ",
+                            label = "Gift Card Code"
+                        )
+
+                        CockpitTextField(
+                            value = giftCardPinInput,
+                            onValueChange = { if (it.length <= 4) giftCardPinInput = it.filter { c -> c.isDigit() } },
+                            placeholder = "4-digit security PIN (if required)",
+                            label = "Security PIN"
+                        )
+
+                        if (giftCardCheckError != null) {
+                            Surface(
+                                color = CrimsonAlert.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    giftCardCheckError ?: "",
+                                    color = CrimsonAlert,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                        }
+
+                        val result = giftCardCheckResult
+                        if (result != null) {
+                            Surface(
+                                color = EmeraldPrimary.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldPrimary.copy(alpha = 0.4f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Balance Available:", color = CockpitTextSecondary, fontSize = 11.sp)
+                                        Text("₹${"%.2f".format(result.remainingBalanceRupees)}", color = EmeraldPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Card Code:", color = CockpitTextMuted, fontSize = 10.sp)
+                                        Text(result.maskedCode, color = CockpitTextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                    Spacer(Modifier.height(2.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Status:", color = CockpitTextMuted, fontSize = 10.sp)
+                                        Text(result.status, color = if (result.isRedeemable) EmeraldPrimary else AmberWarning, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (giftCardCodeInput.trim().isBlank()) {
+                                giftCardCheckError = "Please enter a valid gift card code"
+                                return@Button
+                            }
+                            isCheckingGiftCard = true
+                            giftCardCheckError = null
+                            giftCardCheckResult = null
+                            scope.launch {
+                                val res = DriverRepository.checkGiftCardBalance(
+                                    code = giftCardCodeInput,
+                                    pin = giftCardPinInput
+                                )
+                                isCheckingGiftCard = false
+                                if (res.isSuccess) {
+                                    giftCardCheckResult = res.getOrNull()
+                                } else {
+                                    giftCardCheckError = res.exceptionOrNull()?.message ?: "Verification failed"
+                                }
+                            }
+                        },
+                        enabled = !isCheckingGiftCard && giftCardCodeInput.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
+                    ) {
+                        Text(if (isCheckingGiftCard) "Verifying..." else "Check Balance", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showGiftCardDialog = false }, enabled = !isCheckingGiftCard) {
+                        Text("Close", color = CockpitTextMuted)
                     }
                 }
             )
@@ -1031,6 +1216,19 @@ fun SummaryRowPreview() {
         SummaryRow(
             label = "Today Earnings",
             value = "₹450.00"
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun SummaryRowPreview2() {
+    DriverGoTheme {
+        SummaryRow(
+            label = "Wallet Balance",
+            value = "₹1,250.00",
+            color = EmeraldPrimary,
+            isBold = true
         )
     }
 }

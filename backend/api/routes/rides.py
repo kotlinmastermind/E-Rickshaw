@@ -379,6 +379,11 @@ async def get_flight_status(
     service = BookingAdvancedService(db)
     return await service.get_flight_status_data(flight_number)
 
+class RescheduleRideRequest(BaseModel):
+    new_pickup_time: datetime
+    reason: Optional[str] = None
+    flight_number: Optional[str] = None
+
 @router.post("/{ride_id}/sync-flight")
 async def sync_flight_to_ride(
     ride_id: str,
@@ -387,7 +392,23 @@ async def sync_flight_to_ride(
     db: AsyncSession = Depends(get_db)
 ):
     service = BookingAdvancedService(db)
-    return await service.sync_flight_delay_to_ride(ride_id, flight_number)
+    return await service.sync_flight_delay_to_ride(ride_id, flight_number, user_id=user.id)
+
+@router.post("/{ride_id}/reschedule")
+async def reschedule_ride(
+    ride_id: str,
+    payload: RescheduleRideRequest,
+    user: User = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db)
+):
+    service = BookingAdvancedService(db)
+    return await service.reschedule_ride(
+        ride_id=ride_id,
+        user_id=user.id,
+        new_pickup_time=payload.new_pickup_time,
+        reason=payload.reason,
+        flight_number=payload.flight_number
+    )
 
 @router.get("/{ride_id}/calendar-invite")
 async def download_calendar_invite(
@@ -1090,7 +1111,8 @@ async def track_ride_location(
 
 # ----------------- Part 4 Fares, Splits, Invoices & Disputes (Features 76, 80, 83, 96, 97, 100) -----------------
 class SplitFareInitiateRequest(BaseModel):
-    splits: List[Dict[str, Any]]
+    splits: Optional[List[Dict[str, Any]]] = None
+    co_passenger_phones: Optional[List[str]] = None
 
 class SplitFareRespondRequest(BaseModel):
     action: str  # ACCEPT or DECLINE
@@ -1157,11 +1179,22 @@ async def initiate_split_fare(
 ):
     from backend.application.services.settlement_advanced_service import SettlementAdvancedService
     service = SettlementAdvancedService(db)
+    splits_data = payload.splits if payload.splits is not None else (payload.co_passenger_phones or [])
     return await service.initiate_split_fare(
         ride_id=ride_id,
         inviter_user_id=user.id,
-        splits=payload.splits
+        splits=splits_data
     )
+
+@router.get("/{ride_id}/split-fare")
+async def get_split_fare_status(
+    ride_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
+    service = SettlementAdvancedService(db)
+    return await service.get_ride_split_status(ride_id, user.id)
 
 @router.post("/split-fare/{split_id}/respond")
 async def respond_to_split(

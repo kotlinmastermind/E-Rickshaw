@@ -65,14 +65,7 @@ object RiderRepository {
     // 1. Dummy list hata kar emptyList() rakhein taaki asli Supabase data hi dikhe
     private val _emergencyContacts = MutableStateFlow<List<EmergencyContactDto>>(emptyList())
     val emergencyContacts: StateFlow<List<EmergencyContactDto>> = _emergencyContacts.asStateFlow()
-    private val _savedPlaces = MutableStateFlow<List<SavedPlaceDto>>(
-        listOf(
-            SavedPlaceDto("p1", "Home", "Flat 402, Cyber Heights, Sector 62, Noida", 28.6289, 77.3710, "HOME"),
-            SavedPlaceDto("p2", "Office", "Building 9A, DLF Cyber City, Gurugram", 28.4900, 77.0880, "WORK"),
-            SavedPlaceDto("p3", "IGI Airport T3", "Indira Gandhi International Airport, New Delhi", 28.5562, 77.1000, "AIRPORT"),
-            SavedPlaceDto("p4", "Rajiv Chowk Metro", "Connaught Place Gate 4, New Delhi", 28.6328, 77.2197, "METRO")
-        )
-    )
+    private val _savedPlaces = MutableStateFlow<List<SavedPlaceDto>>(emptyList())
     val savedPlaces: StateFlow<List<SavedPlaceDto>> = _savedPlaces.asStateFlow()
 
     private val _notifications = MutableStateFlow<List<NotificationItemDto>>(emptyList())
@@ -95,6 +88,21 @@ object RiderRepository {
 
     private val _customerPreferences = MutableStateFlow<Map<String, Any>>(emptyMap())
     val customerPreferences: StateFlow<Map<String, Any>> = _customerPreferences.asStateFlow()
+
+    private val _corporateAccount = MutableStateFlow<CorporateAccountDto?>(null)
+    val corporateAccount: StateFlow<CorporateAccountDto?> = _corporateAccount.asStateFlow()
+
+    private val _audioRecordingStatus = MutableStateFlow<AudioRecordingStatusResponse?>(null)
+    val audioRecordingStatus: StateFlow<AudioRecordingStatusResponse?> = _audioRecordingStatus.asStateFlow()
+
+    private val _isAudioRecordingActive = MutableStateFlow(false)
+    val isAudioRecordingActive: StateFlow<Boolean> = _isAudioRecordingActive.asStateFlow()
+
+    private val _giftCardConfig = MutableStateFlow<GiftCardConfigDto?>(null)
+    val giftCardConfig: StateFlow<GiftCardConfigDto?> = _giftCardConfig.asStateFlow()
+
+    private val _myGiftCards = MutableStateFlow<List<GiftCardSummaryDto>>(emptyList())
+    val myGiftCards: StateFlow<List<GiftCardSummaryDto>> = _myGiftCards.asStateFlow()
 
     suspend fun fetchFareRules() {
         try {
@@ -227,11 +235,28 @@ object RiderRepository {
         }
     }
 
-    suspend fun triggerSos(lat: Double, lng: Double): Result<Boolean> {
+    suspend fun triggerSos(lat: Double, lng: Double, rideId: String? = null): Result<Boolean> {
         return try {
-            val currentRide = _activeRide.value?.id ?: "ride-live"
-            val res = NetworkClient.apiService.triggerSos(SosTriggerRequest(currentRide, lat, lng))
+            val targetRide = rideId ?: _activeRide.value?.id
+            val res = NetworkClient.apiService.triggerSos(SosTriggerRequest(targetRide, lat, lng))
             Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun initiateSplitFare(rideId: String, coPassengerPhones: List<String>): Result<Map<String, Any>> {
+        return try {
+            val req = SplitFareRequest(
+                rideId = rideId,
+                coPassengerPhones = coPassengerPhones
+            )
+            val res = NetworkClient.apiService.splitFare(req)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(IllegalStateException("Split fare failed: ${res.code()} ${res.message()}"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -273,17 +298,124 @@ object RiderRepository {
         }
     }
 
+
     suspend fun fetchSavedPlaces(): Result<List<SavedPlaceDto>> {
         return try {
             val res = NetworkClient.apiService.getSavedPlaces()
             if (res.isSuccessful && res.body() != null) {
                 _savedPlaces.value = res.body()!!
                 Result.success(res.body()!!)
-            } else Result.success(_savedPlaces.value)
+            } else {
+                _savedPlaces.value = emptyList()
+                Result.success(emptyList())
+            }
         } catch (e: Exception) {
-            Result.success(_savedPlaces.value)
+            _savedPlaces.value = emptyList()
+            Result.failure(e)
         }
     }
+
+    suspend fun addSavedPlace(name: String, address: String, lat: Double, lng: Double, tag: String = "FAVORITE"): Result<SavedPlaceDto> {
+        return try {
+            val payload = mapOf(
+                "label" to name.trim(),
+                "address" to address.trim(),
+                "latitude" to lat,
+                "longitude" to lng
+            )
+            val res = NetworkClient.apiService.addSavedPlace(payload)
+            if (res.isSuccessful && res.body() != null) {
+                fetchSavedPlaces()
+                val created = SavedPlaceDto(
+                    id = res.body()?.get("id")?.toString() ?: "",
+                    name = name,
+                    address = address,
+                    latitude = lat,
+                    longitude = lng,
+                    tag = tag
+                )
+                Result.success(created)
+            } else {
+                val err = parseApiErrorMessage(res.errorBody()?.string(), "Failed to save place")
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteSavedPlace(placeId: String): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.deleteSavedPlace(placeId)
+            if (res.isSuccessful) {
+                _savedPlaces.value = _savedPlaces.value.filterNot { it.id == placeId }
+                Result.success(true)
+            } else {
+                Result.failure(Exception("Failed to delete place: HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun resolveDestinationCoordinates(query: String, fallbackLat: Double, fallbackLng: Double): MapSearchResult {
+        val cleanQuery = query.trim()
+        val directResults = searchMapboxPlaces(cleanQuery)
+        if (directResults.isNotEmpty()) {
+            return directResults.first()
+        }
+
+        // Secondary Geocoding Provider (OpenStreetMap Nominatim for Indian Landmarks)
+        return try {
+            val encoded = java.net.URLEncoder.encode(cleanQuery, "UTF-8")
+            val urlStr = "https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=1&countrycodes=in"
+            val conn = java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection
+            conn.setRequestProperty("User-Agent", "RiderGo-App/1.0")
+            conn.connectTimeout = 6000
+            conn.readTimeout = 6000
+            val text = conn.inputStream.bufferedReader().use { it.readText() }
+            val arr = org.json.JSONArray(text)
+            if (arr.length() > 0) {
+                val first = arr.getJSONObject(0)
+                MapSearchResult(
+                    name = cleanQuery,
+                    full_address = first.optString("display_name", cleanQuery),
+                    latitude = first.getDouble("lat"),
+                    longitude = first.getDouble("lon")
+                )
+            } else {
+                MapSearchResult(cleanQuery, cleanQuery, fallbackLat, fallbackLng)
+            }
+        } catch (_: Exception) {
+            MapSearchResult(cleanQuery, cleanQuery, fallbackLat, fallbackLng)
+        }
+    }
+
+    suspend fun fetchSharedPoolEstimate(categoryId: String, seats: Int = 1): Result<SharedEstimateResponseDto> {
+        return try {
+            val draft = _bookingDraft.value
+            val req = SharedEstimateRequestDto(
+                categoryId = categoryId,
+                pickupLatitude = draft.pickupLat,
+                pickupLongitude = draft.pickupLng,
+                destinationLatitude = draft.destinationLat,
+                destinationLongitude = draft.destinationLng,
+                seatsRequested = seats
+            )
+            val res = NetworkClient.apiService.getSharedPoolEstimate(req)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception("Pool estimation failed: HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+
+
+
 
     suspend fun bookSharedPool(req: PoolBookingRequest): Result<PoolTripDto?> {
         return try {
@@ -353,6 +485,8 @@ object RiderRepository {
         categoryId: String,
         estimateId: String? = null,
         paymentMethod: String = "UPI",
+        bookingMode: String = "STANDARD",
+        businessCostCenter: String? = null,
         pickupLat: Double,
         pickupLng: Double,
         destLat: Double,
@@ -368,7 +502,9 @@ object RiderRepository {
                 pickupLongitude = pickupLng,
                 destinationLatitude = destLat,
                 destinationLongitude = destLng,
-                paymentMethod = paymentMethod
+                paymentMethod = paymentMethod,
+                bookingMode = bookingMode,
+                businessCostCenter = businessCostCenter
             )
             val response = NetworkClient.apiService.requestRide(request)
             if (response.isSuccessful && response.body() != null) {
@@ -745,20 +881,70 @@ object RiderRepository {
         }
     }
 
-    suspend fun scheduleRideBooking(pickup: String, dest: String, pickupTimeIso: String): Result<Boolean> {
+    suspend fun scheduleRideBooking(
+        pickup: String,
+        dest: String,
+        pickupTimeIso: String,
+        pickupLat: Double? = null,
+        pickupLng: Double? = null,
+        destLat: Double? = null,
+        destLng: Double? = null
+    ): Result<Boolean> {
         return try {
+            val draft = _bookingDraft.value
+            val pLat = pickupLat ?: draft.pickupLat.takeIf { it != 0.0 } ?: 28.6139
+            val pLng = pickupLng ?: draft.pickupLng.takeIf { it != 0.0 } ?: 77.2090
+            val dLat = destLat ?: draft.destinationLat.takeIf { it != 0.0 } ?: 28.5562
+            val dLng = destLng ?: draft.destinationLng.takeIf { it != 0.0 } ?: 77.1000
+
             val res = NetworkClient.apiService.scheduleRide(
                 mapOf(
                     "pickup_address" to pickup,
                     "destination_address" to dest,
-                    "pickup_latitude" to 28.6289,
-                    "pickup_longitude" to 77.3710,
-                    "destination_latitude" to 28.6328,
-                    "destination_longitude" to 77.2197,
+                    "pickup_latitude" to pLat,
+                    "pickup_longitude" to pLng,
+                    "destination_latitude" to dLat,
+                    "destination_longitude" to dLng,
                     "scheduled_pickup_time" to pickupTimeIso
                 )
             )
             Result.success(res.isSuccessful)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun rescheduleRide(
+        rideId: String,
+        newPickupTimeIso: String,
+        reason: String? = null,
+        flightNumber: String? = null
+    ): Result<Map<String, Any>> {
+        return try {
+            val req = RescheduleRideRequest(
+                newPickupTime = newPickupTimeIso,
+                reason = reason,
+                flightNumber = flightNumber
+            )
+            val res = NetworkClient.apiService.rescheduleRide(rideId, req)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(IllegalStateException("Reschedule ride failed: ${res.code()} ${res.message()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun syncFlightDelay(rideId: String, flightNumber: String): Result<Map<String, Any>> {
+        return try {
+            val res = NetworkClient.apiService.syncFlightDelay(rideId, flightNumber)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(IllegalStateException("Flight delay sync failed: ${res.code()} ${res.message()}"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -779,6 +965,10 @@ object RiderRepository {
         }
     }
 
+    fun setPaymentMethod(method: String) {
+        _bookingDraft.value = _bookingDraft.value.copy(paymentMethod = method)
+    }
+
     suspend fun saveCustomerPreferences(
         tempCelsius: Float? = null,
         quietRide: Boolean? = null,
@@ -786,7 +976,8 @@ object RiderRepository {
         wheelchair: Boolean? = null,
         petFriendly: Boolean? = null,
         extraLegroom: Boolean? = null,
-        corporateNotes: String? = null
+        accessibilityNotes: String? = null,
+        preferredPaymentMethod: String? = null
     ): Result<Boolean> {
         return try {
             val payload = mutableMapOf<String, Any>()
@@ -796,12 +987,79 @@ object RiderRepository {
             wheelchair?.let { payload["wheelchair_access_required"] = it }
             petFriendly?.let { payload["pet_friendly_preferred"] = it }
             extraLegroom?.let { payload["extra_legroom_required"] = it }
-            corporateNotes?.let { payload["accessibility_notes"] = it }
+            accessibilityNotes?.let { payload["accessibility_notes"] = it }
+            preferredPaymentMethod?.let { payload["preferred_payment_method"] = it }
 
             val res = NetworkClient.apiService.updatePreferences(payload)
             if (res.isSuccessful) {
                 fetchCustomerPreferences()
                 Result.success(true)
+            } else {
+                Result.failure(IllegalStateException("HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchCorporateAccount(): Result<CorporateAccountDto?> {
+        return try {
+            val res = NetworkClient.apiService.getMyCorporateAccount()
+            if (res.isSuccessful) {
+                val data = res.body()
+                _corporateAccount.value = data
+                Result.success(data)
+            } else if (res.code() == 404) {
+                _corporateAccount.value = null
+                Result.success(null)
+            } else {
+                Result.failure(IllegalStateException("HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun registerCorporateAccount(
+        companyName: String,
+        taxId: String,
+        billingEmail: String,
+        billingContactName: String? = null,
+        billingContactPhone: String? = null,
+        registeredAddress: String? = null,
+        defaultCostCenter: String? = "OPS-CORP",
+        department: String? = "Executive"
+    ): Result<CorporateAccountDto> {
+        return try {
+            val req = CorporateRegistrationRequest(
+                companyName = companyName,
+                taxId = taxId,
+                billingEmail = billingEmail,
+                billingContactName = billingContactName,
+                billingContactPhone = billingContactPhone,
+                registeredAddress = registeredAddress,
+                defaultCostCenter = defaultCostCenter,
+                department = department
+            )
+            val res = NetworkClient.apiService.registerCorporateAccount(req)
+            if (res.isSuccessful && res.body() != null) {
+                _corporateAccount.value = res.body()
+                Result.success(res.body()!!)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitCorporateAccountForApproval(): Result<String> {
+        return try {
+            val res = NetworkClient.apiService.submitCorporateAccountForApproval()
+            if (res.isSuccessful) {
+                fetchCorporateAccount()
+                Result.success("Submitted for approval")
             } else {
                 Result.failure(IllegalStateException("HTTP ${res.code()}"))
             }
@@ -854,6 +1112,23 @@ object RiderRepository {
             if (res.isSuccessful) res.body() else null
         } catch (e: Exception) {
             null
+        }
+    }
+
+    suspend fun sendInvoiceEmail(rideId: String, recipientEmail: String): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.sendInvoiceEmail(
+                rideId = rideId,
+                body = mapOf("recipient_email" to recipientEmail.trim())
+            )
+            if (res.isSuccessful) {
+                Result.success(true)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(Exception(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
@@ -1116,15 +1391,78 @@ object RiderRepository {
         }
     }
 
-    suspend fun setAudioRecordingConsent(enabled: Boolean, rideId: String? = null): Result<Boolean> {
+    suspend fun recordAudioConsent(rideId: String, consented: Boolean): Result<AudioConsentResponse> {
         return try {
-            val res = NetworkClient.apiService.setAudioRecordingConsent(
-                mapOf("audio_consent" to enabled, "ride_id" to (rideId ?: activeRide.value?.id ?: "ride-latest"))
+            val res = NetworkClient.apiService.recordAudioConsent(
+                rideId = rideId,
+                body = AudioConsentRequest(consented = consented, role = "CUSTOMER")
             )
-            Result.success(res.isSuccessful)
+            if (res.isSuccessful && res.body() != null) {
+                val data = res.body()!!
+                _isAudioRecordingActive.value = data.isRecordingActive
+                Result.success(data)
+            } else {
+                Result.failure(Exception(res.errorBody()?.string() ?: "Failed to record audio consent"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun withdrawAudioConsent(rideId: String, reason: String? = null): Result<Boolean> {
+        return try {
+            val res = NetworkClient.apiService.withdrawAudioConsent(
+                rideId = rideId,
+                body = AudioConsentWithdrawRequest(reason = reason)
+            )
+            if (res.isSuccessful) {
+                _isAudioRecordingActive.value = false
+                Result.success(true)
+            } else {
+                Result.failure(Exception(res.errorBody()?.string() ?: "Failed to withdraw consent"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchAudioConsentStatus(rideId: String): Result<AudioRecordingStatusResponse?> {
+        return try {
+            val res = NetworkClient.apiService.getAudioConsentStatus(rideId)
+            if (res.isSuccessful && res.body() != null) {
+                val data = res.body()!!
+                _audioRecordingStatus.value = data
+                _isAudioRecordingActive.value = data.isRecordingActive
+                Result.success(data)
+            } else {
+                Result.success(_audioRecordingStatus.value)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun authorizeAudioRecording(rideId: String): Result<Map<String, Any>> {
+        return try {
+            val res = NetworkClient.apiService.authorizeAudioRecording(rideId)
+            if (res.isSuccessful && res.body() != null) {
+                Result.success(res.body()!!)
+            } else {
+                Result.failure(Exception(res.errorBody()?.string() ?: "Failed to authorize audio recording"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun setAudioRecordingActive(active: Boolean) {
+        _isAudioRecordingActive.value = active
+    }
+
+    suspend fun setAudioRecordingConsent(enabled: Boolean, rideId: String? = null): Result<Boolean> {
+        val targetRideId = rideId ?: activeRide.value?.id ?: "ride-latest"
+        val consentRes = recordAudioConsent(targetRideId, enabled)
+        return if (consentRes.isSuccess) Result.success(true) else Result.failure(consentRes.exceptionOrNull() ?: Exception("Consent update failed"))
     }
 
     suspend fun reportRouteAnomaly(rideId: String, currentLat: Double, currentLng: Double): Result<Boolean> {
@@ -1218,6 +1556,101 @@ object RiderRepository {
             }
         } catch (e: Exception) {
             updateDestination(newAddress, latitude, longitude)
+            Result.failure(e)
+        }
+    }
+
+    // --- Gift Cards Suite Methods ---
+
+    suspend fun fetchGiftCardConfig(): Result<GiftCardConfigDto> {
+        return try {
+            val res = NetworkClient.apiService.getGiftCardConfig()
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                _giftCardConfig.value = body
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("Failed to load gift card configuration: HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun purchaseGiftCard(req: GiftCardPurchaseRequest): Result<GiftCardPurchaseResponse> {
+        return try {
+            val res = NetworkClient.apiService.purchaseGiftCard(req)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                fetchMyGiftCards()
+                fetchWalletBalance()
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun checkGiftCardBalance(code: String, pin: String? = null): Result<GiftCardBalanceResponse> {
+        return try {
+            val res = NetworkClient.apiService.checkGiftCardBalance(GiftCardBalanceRequest(code = code, pin = pin))
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "Invalid gift card code or expired"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun redeemGiftCard(code: String, pin: String? = null): Result<GiftCardRedeemResponse> {
+        return try {
+            val res = NetworkClient.apiService.redeemGiftCard(GiftCardRedeemRequest(code = code, pin = pin))
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                fetchWalletBalance()
+                fetchMyGiftCards()
+                Result.success(body)
+            } else {
+                val err = res.errorBody()?.string() ?: "Redemption failed: HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchMyGiftCards(filterType: String = "ALL"): Result<List<GiftCardSummaryDto>> {
+        return try {
+            val res = NetworkClient.apiService.getMyGiftCards(filterType)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                _myGiftCards.value = body
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("Failed to fetch gift cards: HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchGiftCardDetails(giftCardId: String): Result<GiftCardDetailDto> {
+        return try {
+            val res = NetworkClient.apiService.getGiftCardDetails(giftCardId)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("Failed to load gift card details: HTTP ${res.code()}"))
+            }
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }

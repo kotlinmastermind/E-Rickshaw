@@ -21,11 +21,12 @@ def hash_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 def create_jwt_token(
-    user_id: str,
-    role: str,
-    session_id: str,
+    user_id: Optional[str] = None,
+    role: Optional[str] = None,
+    session_id: Optional[str] = None,
     token_type: str = "access",
-    expires_delta: Optional[timedelta] = None
+    expires_delta: Optional[timedelta] = None,
+    payload: Optional[Dict[str, Any]] = None
 ) -> str:
     now = datetime.now(timezone.utc)
     if expires_delta:
@@ -35,8 +36,18 @@ def create_jwt_token(
             expire = now + timedelta(days=7)
         else:
             expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    if payload:
+        user_id = payload.get("sub", user_id or str(uuid.uuid4()))
+        role = payload.get("role", role or "customer")
+        session_id = payload.get("session_id", session_id or str(uuid.uuid4()))
+        token_type = payload.get("token_type", token_type)
+    else:
+        user_id = user_id or str(uuid.uuid4())
+        role = role or "customer"
+        session_id = session_id or str(uuid.uuid4())
     
-    payload: Dict[str, Any] = {
+    token_payload: Dict[str, Any] = {
         "sub": user_id,
         "role": role,
         "session_id": session_id,
@@ -47,7 +58,7 @@ def create_jwt_token(
         "iss": "vaisentra-mobility",
         "aud": "vaisentra-mobility-clients"
     }
-    encoded_jwt = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded_jwt = jwt.encode(token_payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
 def decode_jwt_token(token: str) -> Dict[str, Any]:

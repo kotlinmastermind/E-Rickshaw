@@ -94,6 +94,7 @@ class CustomerPreferencesUpdate(BaseModel):
     extra_legroom_required: Optional[bool] = None
     pet_friendly_preferred: Optional[bool] = None
     accessibility_notes: Optional[str] = None
+    preferred_payment_method: Optional[str] = None
 
 @router.get("/preferences")
 async def get_customer_preferences(
@@ -111,6 +112,7 @@ async def get_customer_preferences(
 
     return {
         "user_id": user.id,
+        "preferred_payment_method": getattr(profile, "preferred_payment_method", "UPI") or "UPI",
         "quiet_ride": profile.quiet_ride,
         "temperature_celsius": profile.temperature_celsius,
         "preferred_music": profile.preferred_music,
@@ -143,7 +145,16 @@ async def update_customer_preferences(
         profile = CustomerProfile(user_id=user.id)
         db.add(profile)
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "preferred_payment_method" in data and data["preferred_payment_method"] is not None:
+        val = str(data["preferred_payment_method"]).upper().strip()
+        if val in ("UPI", "CASH", "WALLET", "CARD"):
+            profile.preferred_payment_method = val
+        else:
+            raise HTTPException(status_code=400, detail="Invalid payment method. Supported: UPI, CASH, WALLET, CARD")
+        data.pop("preferred_payment_method")
+
+    for field, value in data.items():
         if hasattr(profile, field):
             setattr(profile, field, value)
 
@@ -153,6 +164,7 @@ async def update_customer_preferences(
         "status": "PREFERENCES_SAVED",
         "message": "Bespoke ride preferences and accessibility settings saved to profile.",
         "preferences": {
+            "preferred_payment_method": getattr(profile, "preferred_payment_method", "UPI"),
             "quiet_ride": profile.quiet_ride,
             "temperature_celsius": profile.temperature_celsius,
             "preferred_music": profile.preferred_music,

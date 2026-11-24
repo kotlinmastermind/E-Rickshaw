@@ -719,8 +719,10 @@ fun BoardingOtpScreen(
     }
 }
 
+
+
 /**
- * Screen 21: In-Trip Turn Navigation
+ * Screen 21: In-Trip Turn Navigation with Live Voice Guidance
  */
 @Composable
 fun InTripNavScreen(
@@ -728,21 +730,51 @@ fun InTripNavScreen(
     onEndTrip: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val rideId by DriverRepository.currentRideId.collectAsState()
     val activeRide by DriverRepository.activeRide.collectAsState()
     val liveLocation by DriverRepository.driverLocation.collectAsState()
+    val isAudioRecordingActive by DriverRepository.isAudioRecordingActive.collectAsState()
     var isFinishing by remember { mutableStateOf(false) }
-    val speedLimit = 35
 
-    LaunchedEffect(Unit) {
-        DriverRepository.fetchActiveRide()
-    }
+    // Live Voice Navigation Engine States
+    val routePoints by DriverVoiceNavigationEngine.routePoints.collectAsState()
+    val currentInstruction by DriverVoiceNavigationEngine.currentInstruction.collectAsState()
+    val currentManeuver by DriverVoiceNavigationEngine.currentManeuver.collectAsState()
+    val distanceToManeuver by DriverVoiceNavigationEngine.distanceToNextManeuverMeters.collectAsState()
+    val isVoiceMuted by DriverVoiceNavigationEngine.isVoiceMuted.collectAsState()
 
     val driverLat = if (liveLocation.latitude != 0.0) liveLocation.latitude else 28.6139
     val driverLng = if (liveLocation.longitude != 0.0) liveLocation.longitude else 77.2090
     val targetLat = activeRide?.destinationLatitude ?: 28.5355
     val targetLng = activeRide?.destinationLongitude ?: 77.3910
     val currentSpeed = liveLocation.speedKmh.toInt().coerceAtLeast(0)
+    val speedLimit = 35
+
+    // Start Live Turn-by-Turn Voice Engine on Screen Launch
+    LaunchedEffect(activeRide?.id, targetLat, targetLng) {
+        DriverRepository.fetchActiveRide()
+        DriverVoiceNavigationEngine.startNavigation(
+            context = context,
+            originLat = driverLat,
+            originLng = driverLng,
+            destLat = targetLat,
+            destLng = targetLng,
+            destinationTitle = activeRide?.destinationAddress ?: "Passenger Destination"
+        )
+    }
+
+    // Pass every live GPS ping to Voice Engine
+    LaunchedEffect(liveLocation.latitude, liveLocation.longitude) {
+        DriverVoiceNavigationEngine.onLocationUpdate(driverLat, driverLng)
+    }
+
+    // Stop Voice Engine when leaving screen
+    DisposableEffect(Unit) {
+        onDispose {
+            DriverVoiceNavigationEngine.stopNavigation()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -751,7 +783,7 @@ fun InTripNavScreen(
             .statusBarsPadding()
     ) {
         CockpitHeader(
-            title = "Trip In Progress (Live Nav)",
+            title = "Trip In Progress (Live Voice Nav)",
             subtitle = "Ride: ${rideId.ifBlank { "Active Trip" }}",
             onBack = onNavigateBack
         )
@@ -761,64 +793,87 @@ fun InTripNavScreen(
                 .fillMaxSize()
                 .weight(1f)
         ) {
-            // 1. Fullscreen Mapbox Live Map
+            // 1. Live Mapbox Map with Real Curved Street Polyline
             DriverMapboxLiveView(
                 modifier = Modifier.fillMaxSize(),
                 driverLat = driverLat,
                 driverLng = driverLng,
                 targetLat = targetLat,
                 targetLng = targetLng,
-                targetLabel = activeRide?.destinationAddress?.ifBlank { "Passenger Destination" } ?: "Passenger Destination",
+                targetLabel = activeRide?.destinationAddress?.ifBlank { "Destination" } ?: "Destination",
                 isNavigating = true,
-                headingDegrees = liveLocation.heading
+                headingDegrees = liveLocation.heading,
+                routePoints = routePoints
             )
 
-            // 2. Floating Top Turn-by-Turn Instruction HUD
+            // 2. Real-Time Dynamic Turn-by-Turn HUD Banner
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(14.dp)
                     .align(Alignment.TopCenter),
-                color = CockpitCardBackground.copy(alpha = 0.95f),
-                shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, CockpitBorder)
+                color = CockpitCardBackground.copy(alpha = 0.96f),
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.5f))
             ) {
                 Row(
                     modifier = Modifier.padding(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Dynamic Turn Maneuver Icon
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(46.dp)
                             .clip(CircleShape)
                             .background(ElectricCyan.copy(alpha = 0.2f)),
                         contentAlignment = Alignment.Center
                     ) {
+                        val maneuverIcon = when {
+                            currentManeuver.contains("LEFT") -> Icons.Default.TurnLeft
+                            currentManeuver.contains("RIGHT") -> Icons.Default.TurnRight
+                            currentManeuver.contains("UTURN") -> Icons.Default.UturnLeft
+                            currentManeuver.contains("ARRIVE") -> Icons.Default.Flag
+                            else -> Icons.Default.Navigation
+                        }
                         Icon(
-                            imageVector = Icons.Default.TurnRight,
-                            contentDescription = "Turn",
+                            imageVector = maneuverIcon,
+                            contentDescription = "Turn Maneuver",
                             tint = ElectricCyan,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(26.dp)
                         )
                     }
+
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("In 250m turn right", color = CockpitTextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Text(
-                            activeRide?.destinationAddress?.ifBlank { "Towards Destination" } ?: "Towards Destination",
-                            color = CockpitTextSecondary,
-                            fontSize = 11.sp,
-                            maxLines = 1
+                            text = if (distanceToManeuver > 0) "In ${distanceToManeuver}m" else "Turn Now",
+                            color = EmeraldPrimary,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = currentInstruction,
+                            color = CockpitTextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            maxLines = 2
                         )
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            "$currentSpeed",
-                            color = if (currentSpeed > speedLimit) CrimsonAlert else EmeraldPrimary,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 20.sp
+
+                    // Voice Mute / Unmute Button
+                    IconButton(
+                        onClick = { DriverVoiceNavigationEngine.toggleVoiceMute() },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(CockpitSurfaceHighlight)
+                    ) {
+                        Icon(
+                            imageVector = if (isVoiceMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                            contentDescription = "Mute Voice",
+                            tint = if (isVoiceMuted) CrimsonAlert else EmeraldPrimary,
+                            modifier = Modifier.size(20.dp)
                         )
-                        Text("km/h (Max $speedLimit)", color = CockpitTextMuted, fontSize = 9.sp)
                     }
                 }
             }
@@ -842,7 +897,7 @@ fun InTripNavScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text("DROP-OFF DESTINATION", color = CockpitTextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Text(
-                                activeRide?.destinationAddress?.ifBlank { "City Center Destination" } ?: "City Center Destination",
+                                activeRide?.destinationAddress?.ifBlank { "Passenger Destination" } ?: "Passenger Destination",
                                 color = CockpitTextPrimary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
@@ -863,22 +918,74 @@ fun InTripNavScreen(
                         }
                     }
 
+                    if (isAudioRecordingActive) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = CrimsonAlert.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonAlert.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = "🔴", fontSize = 12.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "IN-CABIN AUDIO SAFETY ACTIVE (DPDP Encrypted)",
+                                    color = CrimsonAlert,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                DriverDialogController.show(DriverPopupType.AUDIO_RECORDING_CONSENT)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = if (isAudioRecordingActive) "🎙️ Audio: Active" else "🎙️ Safety Audio",
+                                color = if (isAudioRecordingActive) EmeraldPrimary else CockpitTextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                DriverDialogController.show(DriverPopupType.TOLL_ENTRY)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(text = "🛂 Add Toll", color = CockpitTextSecondary, fontSize = 12.sp)
+                        }
+                    }
+
                     CockpitButton(
                         text = if (isFinishing) "COMPLETING TRIP..." else "ARRIVED & COLLECT FARE",
                         enabled = !isFinishing,
                         onClick = {
                             if (rideId.isBlank()) {
-                                onShowToast("No active ride ID.")
+                                onShowToast("No active ride found.")
                                 return@CockpitButton
                             }
                             isFinishing = true
-                            DriverRepository.finishTrip(rideId) { ok ->
+                            DriverVoiceNavigationEngine.stopNavigation()
+                            DriverRepository.finishTrip(rideId, targetLat, targetLng) { ok ->
                                 isFinishing = false
                                 if (ok) {
-                                    onShowToast("Trip completed! Calculating final fare...")
+                                    onShowToast("Trip finished! Generating fare settlement.")
                                     onEndTrip()
                                 } else {
-                                    onShowToast("Could not finish trip.")
+                                    onShowToast("Failed to complete trip.")
                                 }
                             }
                         },

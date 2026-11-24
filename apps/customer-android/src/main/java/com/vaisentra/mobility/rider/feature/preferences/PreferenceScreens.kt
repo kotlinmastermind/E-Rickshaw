@@ -1,6 +1,7 @@
 package com.vaisentra.mobility.rider.feature.preferences
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -347,32 +348,36 @@ fun PromoVouchersScreen(onNavigate: (String) -> Unit) {
 // Screen 20: Corporate & Business Profile
 @Composable
 fun CorporateProfileScreen(onNavigate: (String) -> Unit) {
-    val prefs by RiderRepository.customerPreferences.collectAsState()
+    val corpAccount by RiderRepository.corporateAccount.collectAsState()
     val scope = rememberCoroutineScope()
-    var isSaving by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
 
-    var companyGstin by remember { mutableStateOf("07AABCV1234F1Z8") }
+    // Registration / Edit Form State
+    var companyName by remember { mutableStateOf("") }
+    var companyGstin by remember { mutableStateOf("") }
+    var billingEmail by remember { mutableStateOf("") }
+    var billingContactName by remember { mutableStateOf("") }
+    var billingContactPhone by remember { mutableStateOf("") }
+    var department by remember { mutableStateOf("Executive") }
     var costCenter by remember { mutableStateOf("OPS-NORTH-DELHI") }
-    var expCode by remember { mutableStateOf("PROJECT-CLEAN-ENERGY") }
+    var registeredAddress by remember { mutableStateOf("Connaught Place, New Delhi") }
 
     LaunchedEffect(Unit) {
-        RiderRepository.fetchCustomerPreferences()
+        isLoading = true
+        RiderRepository.fetchCorporateAccount()
+        isLoading = false
     }
 
-    LaunchedEffect(prefs) {
-        val notes = prefs["accessibility_notes"] as? String
-        if (!notes.isNullOrBlank()) {
-            val parts = notes.split(";")
-            for (p in parts) {
-                val kv = p.split(":")
-                if (kv.size == 2) {
-                    when (kv[0].trim()) {
-                        "GSTIN" -> companyGstin = kv[1].trim()
-                        "CC" -> costCenter = kv[1].trim()
-                        "EXP" -> expCode = kv[1].trim()
-                    }
-                }
-            }
+    LaunchedEffect(corpAccount) {
+        corpAccount?.let { acc ->
+            companyName = acc.companyName
+            companyGstin = acc.taxId
+            billingEmail = acc.billingEmail
+            billingContactName = acc.billingContactName ?: ""
+            billingContactPhone = acc.billingContactPhone ?: ""
+            department = acc.membership?.department ?: "Executive"
+            costCenter = acc.membership?.costCenter ?: acc.defaultCostCenter ?: "OPS-NORTH-DELHI"
+            registeredAddress = acc.registeredAddress ?: "Connaught Place, New Delhi"
         }
     }
 
@@ -383,34 +388,193 @@ fun CorporateProfileScreen(onNavigate: (String) -> Unit) {
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        NeoHeader(title = "Corporate Billing Profile", subtitle = "Automated GST & B2B Invoicing", onBack = { onNavigate("fare_matrix") })
+        NeoHeader(
+            title = "Corporate Billing Profile",
+            subtitle = "Automated GST & B2B Enterprise Invoicing",
+            onBack = { onNavigate("fare_matrix") }
+        )
         Spacer(modifier = Modifier.height(16.dp))
 
-        NeoCard {
-            NeoTextField(value = companyGstin, onValueChange = { companyGstin = it }, placeholder = "15-Digit GSTIN", label = "Company GSTIN", trailingText = "TAX COMPLIANT")
-            Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(value = costCenter, onValueChange = { costCenter = it }, placeholder = "Cost Center Name", label = "Internal Cost Center")
-            Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(value = expCode, onValueChange = { expCode = it }, placeholder = "Project Code", label = "Expense Project Code")
-            Spacer(modifier = Modifier.height(20.dp))
-            NeoButton(
-                text = if (isSaving) "Linking Account..." else "Link Corporate Account",
-                enabled = !isSaving && companyGstin.trim().isNotEmpty(),
-                onClick = {
-                    isSaving = true
-                    val formattedNotes = "GSTIN:${companyGstin.trim()};CC:${costCenter.trim()};EXP:${expCode.trim()}"
-                    scope.launch {
-                        val res = RiderRepository.saveCustomerPreferences(corporateNotes = formattedNotes)
-                        isSaving = false
-                        if (res.isSuccess) {
-                            DialogController.showToast("Corporate GSTIN & profile linked in Supabase!")
-                            onNavigate("map_home")
-                        } else {
-                            DialogController.showToast("Failed to link profile: ${res.exceptionOrNull()?.message}")
-                        }
+        if (corpAccount != null) {
+            val acc = corpAccount!!
+            // Account Status Banner
+            val (statusColor, statusBg, statusText) = when (acc.status) {
+                "APPROVED", "ACTIVE" -> Triple(EmeraldGreen, EmeraldGreen.copy(alpha = 0.15f), "ACTIVE & APPROVED")
+                "PENDING_APPROVAL" -> Triple(AmberGold, AmberGold.copy(alpha = 0.15f), "PENDING VERIFICATION")
+                "REJECTED" -> Triple(CrimsonRed, CrimsonRed.copy(alpha = 0.15f), "VERIFICATION REJECTED")
+                "SUSPENDED" -> Triple(TextMuted, SurfaceCard, "ACCOUNT SUSPENDED")
+                else -> Triple(ElectricCyan, SurfaceCard, acc.status)
+            }
+
+            NeoCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(text = acc.companyName, color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(text = "GSTIN: ${acc.taxId}", color = ElectricCyan, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .background(statusBg, RoundedCornerShape(8.dp))
+                            .border(1.dp, statusColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(text = statusText, color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
                     }
                 }
-            )
+
+                if (acc.status == "REJECTED" && !acc.rejectionReason.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(CrimsonRed.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                            .border(1.dp, CrimsonRed.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text(
+                            text = "Rejection Reason: ${acc.rejectionReason}",
+                            color = CrimsonRed,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = BorderSubtle)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Financial & Credit Telemetry
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text("Credit Limit", color = TextMuted, fontSize = 11.sp)
+                        Text("₹${"%,.2f".format(acc.creditLimitRupees)}", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Column {
+                        Text("Balance Due", color = TextMuted, fontSize = 11.sp)
+                        Text("₹${"%,.2f".format(acc.balanceDueRupees)}", color = if (acc.balanceDueRupees > 0) AmberGold else EmeraldGreen, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Column {
+                        Text("Monthly Limit", color = TextMuted, fontSize = 11.sp)
+                        Text("₹${"%,.2f".format(acc.monthlySpendingLimitRupees)}", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                acc.membership?.let { mem ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = BorderSubtle)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("EMPLOYEE MEMBERSHIP", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Employee ID: ${mem.employeeId ?: "N/A"} • ${mem.designation ?: "Staff"}", color = TextWhite, fontSize = 13.sp)
+                    Text("Department: ${mem.department ?: "General"} • Cost Center: ${mem.costCenter ?: "N/A"}", color = ElectricCyan, fontSize = 12.sp)
+                    Text("Per-Ride Limit: ₹${"%,.2f".format(mem.perRideLimitRupees)}", color = TextMuted, fontSize = 12.sp)
+                }
+
+                if (acc.status == "PENDING_APPROVAL") {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "ℹ️ Your profile is pending verification by the mobility platform administration. Once approved, corporate rides will be enabled automatically during booking.",
+                        color = AmberGold,
+                        fontSize = 11.sp
+                    )
+                } else if (acc.status == "REJECTED") {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    NeoButton(
+                        text = if (isLoading) "Submitting..." else "Resubmit for Approval",
+                        enabled = !isLoading,
+                        onClick = {
+                            isLoading = true
+                            scope.launch {
+                                val res = RiderRepository.submitCorporateAccountForApproval()
+                                isLoading = false
+                                if (res.isSuccess) {
+                                    DialogController.showToast("Resubmitted for administrative verification.")
+                                } else {
+                                    DialogController.showToast("Failed to resubmit: ${res.exceptionOrNull()?.message}")
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+        } else {
+            // New Registration Card
+            NeoCard {
+                Text(text = "Link Corporate Account", color = TextWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(text = "Direct billing to your employer with statutory GST input tax credit", color = TextMuted, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                NeoTextField(
+                    value = companyName,
+                    onValueChange = { companyName = it },
+                    placeholder = "Company Legal Name (e.g. Vaisentra Corp Pvt Ltd)",
+                    label = "Company Legal Name"
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                NeoTextField(
+                    value = companyGstin,
+                    onValueChange = { companyGstin = it.uppercase() },
+                    placeholder = "15-Digit GSTIN (e.g. 07AABCV1234F1Z8)",
+                    label = "Statutory GSTIN",
+                    trailingText = "GST COMPLIANT"
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                NeoTextField(
+                    value = billingEmail,
+                    onValueChange = { billingEmail = it },
+                    placeholder = "corporate-billing@company.com",
+                    label = "Official Billing Email"
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                NeoTextField(
+                    value = costCenter,
+                    onValueChange = { costCenter = it },
+                    placeholder = "Cost Center (e.g. OPS-NORTH-DELHI)",
+                    label = "Internal Cost Center"
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                NeoTextField(
+                    value = department,
+                    onValueChange = { department = it },
+                    placeholder = "Department (e.g. Engineering)",
+                    label = "Department"
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                NeoButton(
+                    text = if (isLoading) "Registering Account..." else "Submit Corporate Profile",
+                    enabled = !isLoading && companyName.isNotBlank() && companyGstin.length == 15 && billingEmail.isNotBlank(),
+                    onClick = {
+                        isLoading = true
+                        scope.launch {
+                            val res = RiderRepository.registerCorporateAccount(
+                                companyName = companyName.trim(),
+                                taxId = companyGstin.trim(),
+                                billingEmail = billingEmail.trim(),
+                                defaultCostCenter = costCenter.trim(),
+                                department = department.trim(),
+                                registeredAddress = registeredAddress.trim()
+                            )
+                            isLoading = false
+                            if (res.isSuccess) {
+                                DialogController.showToast("Corporate profile registered successfully in Supabase!")
+                                onNavigate("map_home")
+                            } else {
+                                DialogController.showToast("Registration failed: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
+                    }
+                )
+            }
         }
     }
 }

@@ -81,6 +81,7 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.mapbox.maps)
     implementation(libs.mapbox.compose)
+    implementation("com.google.zxing:core:3.5.3")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

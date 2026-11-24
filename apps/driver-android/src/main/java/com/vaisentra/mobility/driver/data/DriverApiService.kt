@@ -12,6 +12,15 @@ import retrofit2.http.*
 @JvmSuppressWildcards
 interface DriverApiService {
 
+    // --- Live Turn-by-Turn Navigation & Guidance ---
+    @GET("api/v1/location/navigation-guidance")
+    suspend fun getNavigationGuidance(
+        @Query("origin_lat") originLat: Double,
+        @Query("origin_lng") originLng: Double,
+        @Query("dest_lat") destLat: Double,
+        @Query("dest_lng") destLng: Double
+    ): Response<NavigationGuidanceResponseDto>
+
     // --- Backend Health & Status ---
     @GET("health")
     suspend fun healthCheck(): Response<BackendHealthDto>
@@ -98,6 +107,29 @@ interface DriverApiService {
     @GET("api/v1/drivers/duty/vehicle-inspection/latest")
     suspend fun getLatestPreShiftInspection(): Response<Map<String, Any>>
 
+    @POST("api/v1/drivers/vehicle-inspections/start")
+    suspend fun startVehicleInspection(@Body body: StartInspectionRequest = StartInspectionRequest()): Response<InspectionDraftDto>
+
+    @GET("api/v1/drivers/vehicle-inspections/current")
+    suspend fun getCurrentVehicleInspection(): Response<InspectionDraftDto>
+
+    @GET("api/v1/drivers/vehicle-inspections/{inspection_id}")
+    suspend fun getVehicleInspectionDetails(@Path("inspection_id") inspectionId: String): Response<InspectionDraftDto>
+
+    @Multipart
+    @POST("api/v1/drivers/vehicle-inspections/{inspection_id}/photos")
+    suspend fun uploadVehicleInspectionPhoto(
+        @Path("inspection_id") inspectionId: String,
+        @Part("category") category: RequestBody,
+        @Part file: MultipartBody.Part
+    ): Response<InspectionPhotoUploadResponseDto>
+
+    @POST("api/v1/drivers/vehicle-inspections/{inspection_id}/submit")
+    suspend fun submitFullVehicleInspection(
+        @Path("inspection_id") inspectionId: String,
+        @Body body: SubmitInspectionRequest
+    ): Response<Map<String, Any>>
+
     // --- Dispatch Offers, Active Ride & Notifications ---
     @GET("api/v1/drivers/dispatch/offers")
     suspend fun getActiveOffers(): Response<List<DispatchOfferDto>>
@@ -163,6 +195,17 @@ interface DriverApiService {
 
     @GET("api/v1/drivers/financials/payout-accounts")
     suspend fun getPayoutAccounts(): Response<List<PayoutAccountDto>>
+
+    @POST("api/v1/drivers/financials/rides/{ride_id}/tolls")
+    suspend fun submitRideToll(
+        @Path("ride_id") rideId: String,
+        @Body body: SubmitTollRequest
+    ): Response<Map<String, Any>>
+
+    @GET("api/v1/drivers/financials/rides/{ride_id}/tolls")
+    suspend fun getRideTolls(
+        @Path("ride_id") rideId: String
+    ): Response<List<Map<String, Any>>>
 
     @POST("api/v1/safety/anomaly/route")
     suspend fun reportRouteAnomaly(@Body body: RouteAnomalyRequest): Response<Map<String, Any>>
@@ -291,4 +334,60 @@ interface DriverApiService {
         @Path("rating_id") ratingId: String,
         @Body body: RatingAppealRequest
     ): Response<Map<String, Any>>
+
+    // --- Audio Safety Recording Endpoints ---
+    @POST("api/v1/rides/{ride_id}/audio-consent")
+    suspend fun recordAudioConsent(
+        @Path("ride_id") rideId: String,
+        @Body body: AudioConsentRequest
+    ): Response<AudioConsentResponse>
+
+    @GET("api/v1/rides/{ride_id}/audio-consent")
+    suspend fun getAudioConsentStatus(
+        @Path("ride_id") rideId: String
+    ): Response<AudioRecordingStatusResponse>
+
+    @POST("api/v1/rides/{ride_id}/audio-consent/withdraw")
+    suspend fun withdrawAudioConsent(
+        @Path("ride_id") rideId: String,
+        @Body body: AudioConsentWithdrawRequest
+    ): Response<Map<String, Any>>
+
+    @POST("api/v1/rides/{ride_id}/audio-recording/authorize")
+    suspend fun authorizeAudioRecording(
+        @Path("ride_id") rideId: String
+    ): Response<Map<String, Any>>
+
+    @POST("api/v1/audio-recordings/{session_id}/start")
+    suspend fun startAudioRecording(
+        @Path("session_id") sessionId: String
+    ): Response<Map<String, Any>>
+
+    @POST("api/v1/audio-recordings/{session_id}/heartbeat")
+    suspend fun sendAudioRecordingHeartbeat(
+        @Path("session_id") sessionId: String
+    ): Response<Map<String, Any>>
+
+    @POST("api/v1/audio-recordings/{session_id}/stop")
+    suspend fun stopAudioRecording(
+        @Path("session_id") sessionId: String,
+        @Body body: Map<String, String>
+    ): Response<Map<String, Any>>
+
+    @Multipart
+    @POST("api/v1/audio-recordings/{session_id}/segments")
+    suspend fun uploadAudioSegment(
+        @Path("session_id") sessionId: String,
+        @Part("sequence") sequence: RequestBody,
+        @Part("duration_seconds") durationSeconds: RequestBody,
+        @Part("encryption_nonce") encryptionNonce: RequestBody,
+        @Part("encryption_tag") encryptionTag: RequestBody,
+        @Part file: MultipartBody.Part
+    ): Response<AudioSegmentUploadResponse>
+
+    // --- Gift Cards & Commuter Credits ---
+    @POST("api/v1/gift-cards/check-balance")
+    suspend fun checkGiftCardBalance(
+        @Body request: DriverGiftCardBalanceRequest
+    ): Response<DriverGiftCardBalanceResponse>
 }

@@ -23,8 +23,6 @@ enum class DriverPopupType {
     NONE,
     INCOMING_OFFER,
     RIDER_CANCELLED,
-    LOW_BATTERY_SWAP,
-    OVERSPEEDING_ALERT,
     CASH_COLLECT,
     NO_SHOW_EXPIRY,
     ROUTE_DEVIATION,
@@ -34,7 +32,8 @@ enum class DriverPopupType {
     PEAK_BONUS,
     CSAT_ADVISORY,
     PAYOUT_SUCCESS,
-    TOLL_ENTRY
+    TOLL_ENTRY,
+    AUDIO_RECORDING_CONSENT
 }
 
 object DriverDialogController {
@@ -93,8 +92,6 @@ fun DriverGoDialogHost() {
             when (active) {
                 DriverPopupType.INCOMING_OFFER -> IncomingOfferModal()
                 DriverPopupType.RIDER_CANCELLED -> RiderCancelledModal()
-                DriverPopupType.LOW_BATTERY_SWAP -> LowBatterySwapModal()
-                DriverPopupType.OVERSPEEDING_ALERT -> OverspeedingModal()
                 DriverPopupType.CASH_COLLECT -> CashCollectModal()
                 DriverPopupType.NO_SHOW_EXPIRY -> NoShowExpiryModal()
                 DriverPopupType.ROUTE_DEVIATION -> RouteDeviationModal()
@@ -105,6 +102,7 @@ fun DriverGoDialogHost() {
                 DriverPopupType.CSAT_ADVISORY -> CsatAdvisoryModal()
                 DriverPopupType.PAYOUT_SUCCESS -> PayoutSuccessModal()
                 DriverPopupType.TOLL_ENTRY -> TollEntryModal()
+                DriverPopupType.AUDIO_RECORDING_CONSENT -> DriverAudioRecordingConsentModal()
                 DriverPopupType.NONE -> Unit
             }
         }
@@ -200,42 +198,6 @@ private fun RiderCancelledModal() {
     }
 }
 
-// 3. Low Battery Swap Reroute
-@Composable
-private fun LowBatterySwapModal() {
-    val cb = DriverDialogController.onConfirmAction
-    CockpitCard(borderColor = PilotAmber) {
-        Text(text = "🪫 Low Battery SoC (< 18%)", color = PilotAmber, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Battery SoC is low. Auto-dispatch paused. Navigate to nearest Battery Swap Station.", color = PilotTextMuted, fontSize = 13.sp)
-        Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(
-            text = "Open Battery Swap Depot",
-            onClick = {
-                DriverDialogController.dismiss()
-                cb?.invoke()
-                DriverDialogController.showToast("Opening Battery Swap Depot locator.")
-            },
-            backgroundColor = PilotAmber,
-            textColor = PilotCanvas
-        )
-    }
-}
-
-// 5. Overspeeding Alert
-@Composable
-private fun OverspeedingModal() {
-    CockpitCard(borderColor = PilotCrimson, backgroundColor = Color(0xFF1E1014)) {
-        Text(text = "⚠️ URBAN SPEED WARNING", color = PilotCrimson, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Vehicle speed exceeded urban electric 3-wheeler corridor limit (35 km/h). Please decelerate immediately.", color = PilotTextWhite, fontSize = 13.sp)
-        Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Decelerate Vehicle (Conforming)", onClick = {
-            DriverDialogController.dismiss()
-            DriverDialogController.showToast("Speed warning acknowledged.")
-        }, backgroundColor = PilotCrimson)
-    }
-}
 
 // 6. Cash Fare Collection Calculator
 @Composable
@@ -344,27 +306,47 @@ private fun NoShowExpiryModal() {
 @Composable
 private fun RouteDeviationModal() {
     val scope = rememberCoroutineScope()
+    var selectedReason by remember { mutableStateOf("MUNICIPAL_ROAD_WORK") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
     CockpitCard(borderColor = PilotAmber) {
         Text(text = "🧭 Route Detour Detected", color = PilotAmber, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Vehicle departed trajectory by >300m. Confirm if detour was required by municipal road works.", color = PilotTextMuted, fontSize = 13.sp)
+        Text(text = "Vehicle departed corridor trajectory. Confirm detour cause to inform rider and Security Operations Center.", color = PilotTextMuted, fontSize = 13.sp)
+        Spacer(modifier = Modifier.height(14.dp))
+        CockpitTextField(
+            value = selectedReason,
+            onValueChange = { selectedReason = it },
+            placeholder = "e.g. Municipal Road Works / Traffic Diversion",
+            label = "Detour / Deviation Reason"
+        )
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Confirm Detour due to Road Hazard", onClick = {
-            val currentRide = DriverRepository.currentRideId.value
-            if (currentRide.isNullOrBlank()) {
-                DriverDialogController.dismiss()
-                return@CockpitButton
-            }
-            scope.launch {
-                val res = DriverRepository.reportRouteDeviation(currentRide, 28.6289, 77.3710)
-                DriverDialogController.dismiss()
-                if (res.isSuccess) {
-                    DriverDialogController.showToast("Road hazard & detour recorded.")
-                } else {
-                    DriverDialogController.showToast("Failed to log route detour.")
+        CockpitButton(
+            text = if (isSubmitting) "Logging Detour..." else "Confirm Detour & Notify Rider",
+            enabled = !isSubmitting,
+            onClick = {
+                val currentRide = DriverRepository.currentRideId.value
+                if (currentRide.isNullOrBlank()) {
+                    DriverDialogController.dismiss()
+                    DriverDialogController.showToast("No active ride found.")
+                    return@CockpitButton
+                }
+                isSubmitting = true
+                scope.launch {
+                    val liveLoc = DriverRepository.driverLocation.value
+                    val lat = if (liveLoc.latitude != 0.0) liveLoc.latitude else 28.6139
+                    val lng = if (liveLoc.longitude != 0.0) liveLoc.longitude else 77.2090
+                    val res = DriverRepository.reportRouteDeviation(currentRide, lat, lng, reason = selectedReason)
+                    isSubmitting = false
+                    DriverDialogController.dismiss()
+                    if (res.isSuccess) {
+                        DriverDialogController.showToast("Road hazard & detour recorded in fleet telemetry.")
+                    } else {
+                        DriverDialogController.showToast("Failed to log route detour: ${res.exceptionOrNull()?.message}")
+                    }
                 }
             }
-        })
+        )
     }
 }
 
@@ -403,28 +385,26 @@ private fun PilotSosModal() {
     }
 }
 
-// 11. Odometer Discrepancy
+// 11. Daily Vehicle & Odometer Verification
 @Composable
 private fun OdometerCheckModal() {
-    val scope = rememberCoroutineScope()
-    val profile by DriverRepository.profile.collectAsState()
+    val cb = DriverDialogController.onConfirmAction
     CockpitCard(borderColor = PilotAmber) {
-        Text(text = "📸 Vehicle & Odometer Verification", color = PilotAmber, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(text = "📸 Daily Vehicle Inspection Required", color = PilotAmber, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Reported odometer reading deviates from GPS calculation. Submit quick vehicle verification check.", color = PilotTextMuted, fontSize = 13.sp)
+        Text(
+            text = "To ensure passenger safety and road compliance, capture vehicle photographs and verify current odometer reading before going on duty.",
+            color = PilotTextMuted,
+            fontSize = 13.sp
+        )
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Submit Verification Check", onClick = {
-            scope.launch {
-                val vehicleId = profile.assignedVehiclePlate.ifBlank { "default-vehicle" }
-                val res = DriverRepository.submitVehicleInspectionCheck(vehicleId, true, true, true)
+        CockpitButton(
+            text = "Start Vehicle Inspection & Camera Capture →",
+            onClick = {
                 DriverDialogController.dismiss()
-                if (res.isSuccess) {
-                    DriverDialogController.showToast("Vehicle verification submitted!")
-                } else {
-                    DriverDialogController.showToast("Verification failed. Check connection.")
-                }
+                cb?.invoke()
             }
-        })
+        )
     }
 }
 
@@ -498,17 +478,185 @@ private fun PayoutSuccessModal() {
 // 15. Toll & Surcharge Entry
 @Composable
 private fun TollEntryModal() {
+    val scope = rememberCoroutineScope()
     var tollAmount by remember { mutableStateOf("100") }
+    var tollName by remember { mutableStateOf("MCD Delhi Border Toll") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
     CockpitCard {
         Text(text = "🛂 Add Border Toll / Surcharge", color = PilotTextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Add official state / MCD municipal border entry tax to commuter's final invoice.", color = PilotTextMuted, fontSize = 13.sp)
+        Text(text = "Add verified municipal entry or expressway toll tax directly to commuter's final invoice with driver reimbursement credit.", color = PilotTextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(12.dp))
-        CockpitTextField(value = tollAmount, onValueChange = { tollAmount = it }, placeholder = "₹100", label = "Toll Amount (₹)")
+        CockpitTextField(
+            value = tollAmount,
+            onValueChange = { tollAmount = it },
+            placeholder = "100",
+            label = "Toll Amount (₹)"
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        CockpitTextField(
+            value = tollName,
+            onValueChange = { tollName = it },
+            placeholder = "e.g. MCD Border Toll Plaza / DND Flyway",
+            label = "Toll Plaza / Border Gate Name"
+        )
         Spacer(modifier = Modifier.height(16.dp))
-        CockpitButton(text = "Add ₹$tollAmount to Commuter Bill", onClick = {
-            DriverDialogController.dismiss()
-            DriverDialogController.showToast("₹$tollAmount toll noted for trip invoice.")
-        })
+        CockpitButton(
+            text = if (isSubmitting) "Submitting Toll..." else "Add ₹$tollAmount to Commuter Bill",
+            enabled = !isSubmitting && (tollAmount.toDoubleOrNull() ?: 0.0) > 0.0,
+            onClick = {
+                val currentRide = DriverRepository.currentRideId.value
+                if (currentRide.isNullOrBlank()) {
+                    DriverDialogController.dismiss()
+                    DriverDialogController.showToast("No active ride found.")
+                    return@CockpitButton
+                }
+                val amountVal = tollAmount.toDoubleOrNull() ?: 0.0
+                if (amountVal <= 0.0) {
+                    DriverDialogController.showToast("Please enter a valid toll amount.")
+                    return@CockpitButton
+                }
+
+                isSubmitting = true
+                scope.launch {
+                    val liveLoc = DriverRepository.driverLocation.value
+                    val lat = if (liveLoc.latitude != 0.0) liveLoc.latitude else null
+                    val lng = if (liveLoc.longitude != 0.0) liveLoc.longitude else null
+
+                    val res = DriverRepository.submitRideToll(
+                        rideId = currentRide,
+                        amountRupees = amountVal,
+                        tollName = tollName.ifBlank { "Municipal Border Entry Tax" },
+                        lat = lat,
+                        lng = lng
+                    )
+                    isSubmitting = false
+                    DriverDialogController.dismiss()
+                    if (res.isSuccess) {
+                        DriverDialogController.showToast("₹${"%.2f".format(amountVal)} toll added to invoice & driver wallet!")
+                        DriverRepository.fetchRideBreakdown(currentRide)
+                    } else {
+                        DriverDialogController.showToast("Failed to add toll: ${res.exceptionOrNull()?.message ?: "Check connection"}")
+                    }
+                }
+            }
+        )
+    }
+}
+
+// 14. Pilot Audio Recording Safety Consent Modal (DPDP Act 2023 Compliant)
+@Composable
+private fun DriverAudioRecordingConsentModal() {
+    val scope = rememberCoroutineScope()
+    var isSubmitting by remember { mutableStateOf(false) }
+    val currentRide = DriverRepository.currentRideId.collectAsState().value
+    val status by DriverRepository.audioRecordingStatus.collectAsState()
+
+    CockpitCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text = "🎙️", fontSize = 24.sp, modifier = Modifier.padding(end = 8.dp))
+            Column {
+                Text(
+                    text = "Pilot In-Cabin Safety Recording",
+                    color = PilotTextWhite,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Statutory DPDP Act 2023 Mutual Consent",
+                    color = EmeraldPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = "To protect both Pilot and Rider against dispute or harassment, in-cabin audio can be recorded under mutual dual-party opt-in.\n\n" +
+                    "• Recording ONLY activates when both Pilot and Passenger grant explicit opt-in.\n" +
+                    "• Encrypted with AES-256-GCM before upload to private sovereign cloud storage.\n" +
+                    "• Auto-purged after 7 days unless locked by law enforcement / dispute incident.\n" +
+                    "• You may withdraw consent at any time during the ride to stop recording immediately.",
+            color = PilotTextMuted,
+            fontSize = 13.sp,
+            lineHeight = 18.sp
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        val sessionStatus = status?.session?.recordingStatus ?: status?.driverConsentStatus ?: "NOT_REQUESTED"
+        if (status?.isRecordingActive == true || status?.dualConsentAchieved == true) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF1B3B2B))
+                    .padding(10.dp)
+            ) {
+                Text(
+                    text = "STATUS: $sessionStatus (Consent Granted by Both Parties)",
+                    color = EmeraldPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = {
+                    if (currentRide.isNotBlank()) {
+                        scope.launch {
+                            DriverRepository.withdrawAudioConsent(currentRide, "Pilot declined in-cabin recording")
+                            DriverDialogController.dismiss()
+                            DriverDialogController.showToast("In-cabin recording declined")
+                        }
+                    } else {
+                        DriverDialogController.dismiss()
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Decline", color = Color(0xFFFF5252))
+            }
+
+            CockpitButton(
+                text = if (isSubmitting) "Saving..." else "Opt-In & Agree",
+                enabled = !isSubmitting,
+                modifier = Modifier.weight(1.5f),
+                onClick = {
+                    if (currentRide.isBlank()) {
+                        DriverDialogController.dismiss()
+                        DriverDialogController.showToast("No active ride found")
+                        return@CockpitButton
+                    }
+                    isSubmitting = true
+                    scope.launch {
+                        val res = DriverRepository.recordAudioConsent(
+                            rideId = currentRide,
+                            granted = true,
+                            consentText = "Pilot voluntarily consents to encrypted in-cabin audio safety recording under DPDP Act 2023."
+                        )
+                        isSubmitting = false
+                        DriverDialogController.dismiss()
+                        if (res.isSuccess) {
+                            DriverDialogController.showToast("Safety Audio Consent Recorded")
+                            // Check if both parties granted; if so, attempt authorization
+                            DriverRepository.authorizeAudioRecording(currentRide)
+                        } else {
+                            DriverDialogController.showToast("Consent registration failed: ${res.exceptionOrNull()?.message}")
+                        }
+                    }
+                }
+            )
+        }
     }
 }

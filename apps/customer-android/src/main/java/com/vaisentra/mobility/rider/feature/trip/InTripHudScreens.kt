@@ -432,17 +432,16 @@ fun PilotArrivedScreen(onNavigate: (String) -> Unit) {
 
         Spacer(modifier = Modifier.height(20.dp))
         NeoButton(
-            text = "Boarded Vehicle & Start Trip →",
+            text = "Share OTP with Pilot to Start Trip →",
             onClick = {
-                RiderRepository.updateActiveRideStatus("IN_PROGRESS")
-                onNavigate("telemetry_hud")
+                onNavigate("boarding_otp")
             },
             backgroundColor = EmeraldGreen
         )
     }
 }
 
-// Screen 27: Boarding & 4-Digit Security OTP
+// Screen 27: Boarding & 6-Digit Security OTP
 @Composable
 fun BoardingOtpScreen(onNavigate: (String) -> Unit) {
     val activeRide by RiderRepository.activeRide.collectAsState()
@@ -455,13 +454,13 @@ fun BoardingOtpScreen(onNavigate: (String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(text = "🔒 Start Trip Security PIN", color = TextWhite, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(text = "🔒 Start Trip Security PIN (6-Digit OTP)", color = TextWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
         Text(text = "Tell this OTP to pilot to verify your identity and start trip meters:", color = TextMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(24.dp))
         OtpDisplayBox(otp = activeRide?.otpCode ?: "------")
         Spacer(modifier = Modifier.height(30.dp))
-        NeoButton(text = "Trip Started → View Telemetry", onClick = { onNavigate("telemetry_hud") })
+        NeoButton(text = "Track Active Ride HUD →", onClick = { onNavigate("telemetry_hud") })
     }
 }
 
@@ -470,6 +469,7 @@ fun BoardingOtpScreen(onNavigate: (String) -> Unit) {
 fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
     val activeRide by RiderRepository.activeRide.collectAsState()
     val bookingDraft by RiderRepository.bookingDraft.collectAsState()
+    val isAudioRecordingActive by RiderRepository.isAudioRecordingActive.collectAsState()
     var showChangeDestSheet by remember { mutableStateOf(false) }
     var isRouteDeviated by remember { mutableStateOf(false) }
     var deviationMeters by remember { mutableStateOf(0) }
@@ -488,6 +488,40 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
             onAction = { DialogController.show(RiderPopupType.SOS_112) }
         )
         Spacer(modifier = Modifier.height(14.dp))
+
+        if (isAudioRecordingActive) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(CrimsonRed.copy(alpha = 0.15f))
+                    .border(1.dp, CrimsonRed.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = "🔴", fontSize = 12.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "AUDIO SAFETY RECORDING ACTIVE",
+                            color = CrimsonRed,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        text = "DPDP Encrypted",
+                        color = TextMuted,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+        }
 
         // Live Route Deviation / Anomaly Alert Banner (Domain I)
         if (isRouteDeviated) {
@@ -649,13 +683,24 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+        val isTripDone = activeRide?.status == "COMPLETED"
         NeoButton(
-            text = "Complete Trip & View Receipt →",
+            text = if (isTripDone) "Trip Completed — View Receipt →" else "Refresh Live Trip Status 🔄",
             onClick = {
-                RiderRepository.updateActiveRideStatus("COMPLETED")
-                onNavigate("ride_receipt")
+                if (isTripDone) {
+                    onNavigate("ride_receipt")
+                } else {
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        RiderRepository.fetchActiveRide()
+                    }
+                    if (activeRide?.status == "COMPLETED") {
+                        onNavigate("ride_receipt")
+                    } else {
+                        DialogController.showToast("Ride is currently in progress.")
+                    }
+                }
             },
-            backgroundColor = EmeraldGreen
+            backgroundColor = if (isTripDone) EmeraldGreen else SurfaceCard
         )
     }
 

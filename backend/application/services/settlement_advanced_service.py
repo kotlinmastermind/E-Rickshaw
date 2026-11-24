@@ -3,7 +3,7 @@ import io
 import json
 import uuid
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, desc
 from fastapi import HTTPException, status
@@ -127,7 +127,7 @@ class SettlementAdvancedService:
         self,
         ride_id: str,
         inviter_user_id: str,
-        splits: List[Dict[str, Any]]
+        splits: Union[List[Dict[str, Any]], List[str]]
     ) -> List[Dict[str, Any]]:
         stmt = select(Ride).where(Ride.id == ride_id)
         res = await self.db.execute(stmt)
@@ -135,15 +135,44 @@ class SettlementAdvancedService:
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
 
+        if inviter_user_id and ride.customer_id != inviter_user_id:
+            customer_prof = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == inviter_user_id))).scalar_one_or_none()
+            if not customer_prof or ride.customer_id != customer_prof.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the primary commuter can initiate split fare for this ride.")
+
+        if not splits:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one co-passenger is required to split fare.")
+
+        # Normalize splits if list of phone strings was provided
+        normalized_splits: List[Dict[str, Any]] = []
+        for s in splits:
+            if isinstance(s, str):
+                clean_phone = s.strip()
+                if clean_phone:
+                    normalized_splits.append({"phone": clean_phone, "name": "Co-Passenger"})
+            elif isinstance(s, dict):
+                normalized_splits.append(s)
+
+        if not normalized_splits:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid co-passenger contact details required.")
+
+        total_fare_cents = ride.final_fare_cents or ride.estimated_fare_cents or 12900
+        total_participants = len(normalized_splits) + 1  # Including inviter
+        equal_share_cents = max(100, round(total_fare_cents / total_participants))
+
         ride.split_fare_enabled = True
         created_records = []
-        for s in splits:
+        for s in normalized_splits:
+            share = s.get("amount_cents")
+            if share is None or share <= 0:
+                share = equal_share_cents
+
             record = RideFareSplit(
                 ride_id=ride.id,
                 inviter_user_id=inviter_user_id,
                 payer_phone=s.get("phone", ""),
-                payer_name=s.get("name", "Guest"),
-                share_amount_cents=s.get("amount_cents", round(ride.estimated_fare_cents / (len(splits) + 1))),
+                payer_name=s.get("name", "Co-Passenger"),
+                share_amount_cents=share,
                 status="PENDING"
             )
             self.db.add(record)
@@ -162,6 +191,36 @@ class SettlementAdvancedService:
             }
             for r in created_records
         ]
+
+    async def get_ride_split_status(self, ride_id: str, user_id: str) -> Dict[str, Any]:
+        stmt = select(Ride).where(Ride.id == ride_id)
+        res = await self.db.execute(stmt)
+        ride = res.scalar_one_or_none()
+        if not ride:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+        split_stmt = select(RideFareSplit).where(RideFareSplit.ride_id == ride.id)
+        split_res = await self.db.execute(split_stmt)
+        splits = split_res.scalars().all()
+
+        total_fare = ride.final_fare_cents or ride.estimated_fare_cents or 12900
+        return {
+            "ride_id": ride.id,
+            "split_fare_enabled": ride.split_fare_enabled,
+            "total_fare_cents": total_fare,
+            "total_fare_rupees": round(total_fare / 100, 2),
+            "splits": [
+                {
+                    "split_id": s.id,
+                    "payer_name": s.payer_name,
+                    "payer_phone": s.payer_phone,
+                    "share_amount_cents": s.share_amount_cents,
+                    "share_amount_rupees": round(s.share_amount_cents / 100, 2),
+                    "status": s.status
+                }
+                for s in splits
+            ]
+        }
 
     async def respond_to_split_fare(
         self,
@@ -452,73 +511,22 @@ class SettlementAdvancedService:
         recipient_phone: Optional[str] = None,
         message: Optional[str] = None
     ) -> Dict[str, Any]:
-        code = f"ROYAL-{uuid.uuid4().hex[:4].upper()}-{uuid.uuid4().hex[:4].upper()}"
-        expires = datetime.now(timezone.utc) + timedelta(days=365)
-
-        card = GiftCard(
-            code=code,
-            initial_value_cents=amount_cents,
-            remaining_value_cents=amount_cents,
+        from backend.application.services.gift_card_service import GiftCardService
+        return await GiftCardService(self.db).purchase_gift_card(
+            purchaser_user_id=purchaser_user_id,
+            amount_cents=amount_cents,
             sender_name=sender_name,
             recipient_email=recipient_email,
             recipient_phone=recipient_phone,
-            message=message or "A distinguished journey from Grand Chauffeur.",
-            purchased_by_user_id=purchaser_user_id,
-            expires_at=expires
+            message=message
         )
-        self.db.add(card)
-        await self.db.commit()
-        await self.db.refresh(card)
-
-        return {
-            "gift_card_id": card.id,
-            "code": card.code,
-            "amount_cents": card.initial_value_cents,
-            "amount_rupees": round(card.initial_value_cents / 100, 2),
-            "sender_name": card.sender_name,
-            "recipient_email": card.recipient_email,
-            "expires_at": card.expires_at.isoformat(),
-            "status": "ACTIVE"
-        }
 
     async def redeem_gift_card(self, user_id: str, code: str) -> Dict[str, Any]:
-        stmt = select(GiftCard).where(GiftCard.code == code.strip().upper(), GiftCard.is_active == True)
-        res = await self.db.execute(stmt)
-        card = res.scalar_one_or_none()
-        if not card:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid or non-existent Gift Card code.")
-
-        if card.remaining_value_cents <= 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Gift card balance has already been fully redeemed.")
-
-        now = datetime.now(timezone.utc)
-        if card.expires_at.replace(tzinfo=timezone.utc) < now:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This gift card has expired.")
-
-        credit_amt = card.remaining_value_cents
-        card.remaining_value_cents = 0
-        card.redeemed_by_user_id = user_id
-        card.is_active = False
-
-        # Credit to user wallet
-        tx = await WalletService.credit_wallet(
-            session=self.db,
+        from backend.application.services.gift_card_service import GiftCardService
+        return await GiftCardService(self.db).redeem_gift_card(
             user_id=user_id,
-            amount_cents=credit_amt,
-            transaction_type="CREDIT",
-            source="GIFT_CARD_REDEMPTION",
-            description=f"Redeemed Gift Card {card.code} from {card.sender_name}"
+            code=code
         )
-        await self.db.commit()
-
-        return {
-            "status": "SUCCESS",
-            "redeemed_amount_cents": credit_amt,
-            "redeemed_amount_rupees": round(credit_amt / 100, 2),
-            "new_wallet_balance_rupees": round(tx.balance_after_cents / 100, 2),
-            "sender_name": card.sender_name,
-            "message": card.message
-        }
 
     # -------------------------------------------------------------------------
     # Feature 91 & 92: Customer wallet auto top-up & Low balance alerts
@@ -732,11 +740,11 @@ class SettlementAdvancedService:
             "invoice_number": invoice_num,
             "invoice_date": (ride.completed_at or ride.requested_at).strftime("%Y-%m-%d"),
             "ride_id": ride.id,
-            "platform_name": "Grand Chauffeur Mobility Private Limited",
-            "platform_gstin": "27AAACG1234F1Z8",
+            "platform_name": "Vaisentra Mobility Technologies Private Limited",
+            "platform_gstin": "07AABCV1234F1Z8",
             "sac_code": "9964",
-            "sac_description": "Passenger Transportation in Luxury Motor Vehicles",
-            "customer_name": ride.passenger_name or "Distinguished Member",
+            "sac_description": "Passenger Transportation Service (Electric Auto & E-Rickshaw)",
+            "customer_name": ride.passenger_name or "Commuter",
             "customer_gstin": ride.business_tax_id or "Unregistered B2C",
             "cost_center": ride.business_cost_center or "N/A",
             "pickup_address": ride.pickup_address,

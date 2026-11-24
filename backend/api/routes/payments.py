@@ -446,13 +446,17 @@ async def split_payment(
     user: User = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db)
 ):
-    from backend.application.services.ride_service import RideService
-    from backend.api.routes.rides import SplitFareInitiatePayload
-    service = RideService(db)
-    return await service.initiate_split_fare(
+    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
+    service = SettlementAdvancedService(db)
+    splits = await service.initiate_split_fare(
         ride_id=payload.ride_id,
-        initiator_user_id=user.id,
-        participant_phones=payload.co_passenger_phones
+        inviter_user_id=user.id,
+        splits=payload.co_passenger_phones
     )
+    return {
+        "status": "SUCCESS",
+        "message": f"Split fare initiated with {len(splits)} co-passengers.",
+        "splits": splits
+    }
 
 

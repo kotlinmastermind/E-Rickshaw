@@ -13,7 +13,7 @@ router = APIRouter(prefix="/safety", tags=["Safety, Emergency & Regulatory Assur
 
 # --- Pydantic Request Models ---
 class SosTriggerPayload(BaseModel):
-    ride_id: str
+    ride_id: Optional[str] = None
     latitude: float
     longitude: float
     alert_type: str = "SOS_BUTTON"
@@ -73,6 +73,8 @@ class RouteAnomalyCheckPayload(BaseModel):
     ride_id: str
     current_lat: float
     current_lng: float
+    deviation_reason: Optional[str] = None
+    comments: Optional[str] = None
 
 class UnexpectedStopCheckPayload(BaseModel):
     ride_id: str
@@ -207,7 +209,14 @@ async def check_route_anomaly(
     db: AsyncSession = Depends(get_db)
 ):
     service = SafetyAdvancedService(db)
-    return await service.check_route_anomaly(payload.ride_id, payload.current_lat, payload.current_lng)
+    return await service.check_route_anomaly(
+        ride_id=payload.ride_id,
+        current_lat=payload.current_lat,
+        current_lng=payload.current_lng,
+        deviation_reason=payload.deviation_reason,
+        comments=payload.comments,
+        user=current_user
+    )
 
 
 # Feature 135: Unexpected Stop Detection Check
@@ -226,19 +235,20 @@ async def check_unexpected_stop(
     )
 
 
-# Feature 136 & 137: Audio Recording Consent & Status
+# Feature 136 & 137: Audio Recording Consent & Status (Integrated with AudioRecordingService)
 @router.post("/recording/consent")
 async def update_recording_consent(
     payload: RecordingConsentPayload,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    service = SafetyAdvancedService(db)
-    return await service.update_recording_consent(
-        payload.ride_id,
-        current_user,
-        payload.role,
-        payload.consented
+    from backend.application.services.audio_recording_service import AudioRecordingService
+    service = AudioRecordingService(db)
+    return await service.record_consent(
+        ride_id=payload.ride_id,
+        user=current_user,
+        consented=payload.consented,
+        role=payload.role
     )
 
 
@@ -248,8 +258,9 @@ async def get_recording_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    service = SafetyAdvancedService(db)
-    return await service.get_recording_status(ride_id)
+    from backend.application.services.audio_recording_service import AudioRecordingService
+    service = AudioRecordingService(db)
+    return await service.get_consent_status(ride_id=ride_id, user=current_user)
 
 
 # Feature 138 & 139: Incident Reporting (Customer & Driver)

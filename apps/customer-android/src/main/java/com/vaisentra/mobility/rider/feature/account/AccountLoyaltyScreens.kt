@@ -18,6 +18,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
@@ -698,6 +700,60 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
                         }
                     )
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 3.5 GIFT CARDS & VOUCHERS CARD
+        NeoCard(
+            borderColor = AmberGold.copy(alpha = 0.5f),
+            backgroundColor = SurfaceElevated
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigate("gift_cards_hub") },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(Color(0xFFFFD54F), Color(0xFFFF8F00))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "🎁", fontSize = 20.sp)
+                    }
+                    Column {
+                        Text(
+                            text = "Gift Cards & Commuter Vouchers",
+                            color = TextWhite,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Buy instant gifts or redeem voucher balance",
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+                Text(
+                    text = "Manage →",
+                    color = AmberGold,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 

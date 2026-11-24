@@ -1255,6 +1255,143 @@ async def list_corporate_billings(
         for r in rides
     ]
 
+class AdminCorporateDecisionPayload(BaseModel):
+    reason: Optional[str] = None
+
+class AdminCorporateInvoicePayload(BaseModel):
+    corporate_id: str
+    billing_period: str
+
+@router.get("/corporate/accounts")
+async def admin_list_corporate_accounts(
+    status_filter: Optional[str] = None,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import CorporateAccount
+    stmt = select(CorporateAccount)
+    if status_filter:
+        stmt = stmt.where(CorporateAccount.status == status_filter.upper())
+    stmt = stmt.order_by(desc(CorporateAccount.created_at))
+    res = await db.execute(stmt)
+    accounts = res.scalars().all()
+    return [
+        {
+            "id": a.id,
+            "company_name": a.company_name,
+            "trade_name": a.trade_name,
+            "tax_id": a.tax_id,
+            "pan": a.pan,
+            "billing_email": a.billing_email,
+            "billing_contact_name": a.billing_contact_name,
+            "billing_contact_phone": a.billing_contact_phone,
+            "status": a.status,
+            "credit_limit_rupees": round((a.credit_limit_cents or 0) / 100, 2),
+            "balance_due_rupees": round((a.balance_due_cents or 0) / 100, 2),
+            "created_at": a.created_at.isoformat() if a.created_at else None
+        }
+        for a in accounts
+    ]
+
+@router.get("/corporate/accounts/{account_id}")
+async def admin_get_corporate_account(
+    account_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.corporate_billing_service import CorporateBillingService
+    service = CorporateBillingService(db)
+    return await service.get_account_details(account_id, admin.id)
+
+@router.post("/corporate/accounts/{account_id}/approve")
+async def admin_approve_corporate_account(
+    account_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import CorporateAccount
+    stmt = select(CorporateAccount).where(CorporateAccount.id == account_id)
+    corp = (await db.execute(stmt)).scalar_one_or_none()
+    if not corp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Corporate account not found.")
+
+    corp.status = "APPROVED"
+    corp.rejection_reason = None
+    corp.approved_by = admin.id
+    corp.approved_at = datetime.now(timezone.utc)
+    corp.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"message": f"Corporate account '{corp.company_name}' approved successfully.", "status": "APPROVED"}
+
+@router.post("/corporate/accounts/{account_id}/reject")
+async def admin_reject_corporate_account(
+    account_id: str,
+    payload: AdminCorporateDecisionPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import CorporateAccount
+    stmt = select(CorporateAccount).where(CorporateAccount.id == account_id)
+    corp = (await db.execute(stmt)).scalar_one_or_none()
+    if not corp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Corporate account not found.")
+
+    corp.status = "REJECTED"
+    corp.rejection_reason = payload.reason or "Statutory verification failed or incomplete documentation."
+    corp.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"message": f"Corporate account '{corp.company_name}' rejected.", "status": "REJECTED", "reason": corp.rejection_reason}
+
+@router.post("/corporate/accounts/{account_id}/suspend")
+async def admin_suspend_corporate_account(
+    account_id: str,
+    payload: AdminCorporateDecisionPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import CorporateAccount
+    stmt = select(CorporateAccount).where(CorporateAccount.id == account_id)
+    corp = (await db.execute(stmt)).scalar_one_or_none()
+    if not corp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Corporate account not found.")
+
+    corp.status = "SUSPENDED"
+    corp.suspension_reason = payload.reason or "Account suspended by platform administration."
+    corp.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"message": f"Corporate account '{corp.company_name}' suspended.", "status": "SUSPENDED"}
+
+@router.post("/corporate/accounts/{account_id}/reactivate")
+async def admin_reactivate_corporate_account(
+    account_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.domain.models import CorporateAccount
+    stmt = select(CorporateAccount).where(CorporateAccount.id == account_id)
+    corp = (await db.execute(stmt)).scalar_one_or_none()
+    if not corp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Corporate account not found.")
+
+    corp.status = "APPROVED"
+    corp.suspension_reason = None
+    corp.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"message": f"Corporate account '{corp.company_name}' reactivated.", "status": "APPROVED"}
+
+@router.post("/corporate/invoices/generate")
+async def admin_generate_corporate_invoice(
+    payload: AdminCorporateInvoicePayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.corporate_billing_service import CorporateBillingService
+    service = CorporateBillingService(db)
+    return await service.generate_consolidated_invoice(
+        corporate_id=payload.corporate_id,
+        billing_period=payload.billing_period
+    )
+
 @router.get("/roles")
 async def list_admin_roles(
     admin: User = Depends(get_current_admin),
@@ -1293,5 +1430,64 @@ async def list_admin_permissions(
         }
         for p in perms
     ]
+
+
+# --- In-Cabin Audio Safety Recording Admin Governance ---
+
+class AdminAudioPlaybackRequest(BaseModel):
+    segment_id: str
+    justification_reason: str = Field(..., min_length=10)
+
+
+@router.get("/audio-recordings")
+async def admin_list_audio_recordings(
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.audio_recording_service import AudioRecordingService
+    service = AudioRecordingService(db)
+    return await service.admin_list_sessions(status_filter=status, limit=limit, offset=offset)
+
+
+@router.get("/audio-recordings/{session_id}")
+async def admin_get_audio_recording_details(
+    session_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.audio_recording_service import AudioRecordingService
+    service = AudioRecordingService(db)
+    return await service.admin_get_session_details(session_id=session_id, admin_user=admin)
+
+
+@router.post("/audio-recordings/{session_id}/playback")
+async def admin_authorize_audio_playback(
+    session_id: str,
+    payload: AdminAudioPlaybackRequest,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.audio_recording_service import AudioRecordingService
+    service = AudioRecordingService(db)
+    return await service.admin_authorize_segment_playback(
+        session_id=session_id,
+        segment_id=payload.segment_id,
+        admin_user=admin,
+        justification_reason=payload.justification_reason
+    )
+
+
+@router.post("/audio-recordings/purge")
+async def admin_purge_expired_audio(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.audio_recording_service import AudioRecordingService
+    service = AudioRecordingService(db)
+    return await service.purge_expired_recordings()
+
 
 

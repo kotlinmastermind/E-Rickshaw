@@ -50,6 +50,7 @@ fun DriverMapboxLiveView(
     targetLabel: String = "Passenger Pickup",
     isNavigating: Boolean = false,
     headingDegrees: Double = 0.0,
+    routePoints: List<Point> = emptyList(), // <-- CONNECTED REAL ROAD POLYLINE
     onRecenterClicked: (() -> Unit)? = null
 ) {
     if (LocalInspectionMode.current) {
@@ -148,15 +149,19 @@ fun DriverMapboxLiveView(
                 }
 
                 // Glowing Navigation Polyline Corridors
-                val routePoints = remember(driverPoint, targetPoint) {
-                    listOf(driverPoint, targetPoint)
+                 // Render real road polyline points from navigation engine
+                val displayPoints = remember(driverPoint, targetPoint, routePoints) {
+                    if (routePoints.size >= 2) {
+                        routePoints
+                    }  else {
+                        listOf(driverPoint, targetPoint)
+                    }
                 }
-
                 PolylineAnnotation(
-                    points = routePoints
+                    points = displayPoints
                 ) {
-                    lineColor = Color(0xFF10B981) // Emerald Green dispatch line
-                    lineWidth = 6.0
+                    lineColor = Color(0xFF10B981) // Emerald Green glowing route line
+                    lineWidth = 7.0
                     lineOpacity = 0.95
                 }
             }

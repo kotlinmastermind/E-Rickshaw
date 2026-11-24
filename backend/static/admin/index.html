@@ -199,6 +199,9 @@
             <button onclick="switchTab('customers')" id="tab-btn-customers" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 text-slate-400 hover:text-white transition-all whitespace-nowrap">
                 <i data-lucide="users" class="w-3.5 h-3.5"></i> Customers
             </button>
+            <button onclick="switchTab('giftcards')" id="tab-btn-giftcards" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 text-slate-400 hover:text-white transition-all whitespace-nowrap">
+                <i data-lucide="gift" class="w-3.5 h-3.5 text-amber-glow"></i> Gift Cards
+            </button>
             <button onclick="switchTab('payouts')" id="tab-btn-payouts" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 text-slate-400 hover:text-white transition-all whitespace-nowrap">
                 <i data-lucide="wallet" class="w-3.5 h-3.5 text-emerald-glow"></i> Payouts & Welfare
                 <span id="badge-pending-payouts" class="px-1.5 py-0.2 rounded-full bg-emerald-dim text-emerald-glow text-[10px] font-mono hidden">0</span>
@@ -1324,6 +1327,85 @@
             </div>
         </section>
 
+        <!-- Section: Gift Cards & Commuter Vouchers -->
+        <section id="section-giftcards" class="tab-section hidden p-6 space-y-6 flex-1 overflow-y-auto">
+            <!-- Header & Metrics -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <i data-lucide="gift" class="w-6 h-6 text-amber-glow"></i> Gift Cards & Commuter Credits
+                    </h2>
+                    <p class="text-xs text-slate-400">Prepaid Instrument (RBI PPI) governance, digital issuance ledger & liability monitoring</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="loadGiftCards()" class="px-3.5 py-2 rounded-xl bg-card border border-border text-xs text-cyan-glow hover:border-cyan-glow/50 flex items-center gap-1.5 transition-all">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh Vouchers
+                    </button>
+                </div>
+            </div>
+
+            <!-- Metric Summary Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="glass-card rounded-2xl border border-border p-4 space-y-1">
+                    <p class="text-xs text-slate-400">Total Issued Capital</p>
+                    <p id="gc-stat-issued" class="text-xl font-bold font-mono text-white">₹0.00</p>
+                    <p class="text-[10px] text-slate-500 font-mono">Gross gift card issuance</p>
+                </div>
+                <div class="glass-card rounded-2xl border border-border p-4 space-y-1 border-amber-dim">
+                    <p class="text-xs text-amber-glow">Active Float Liability</p>
+                    <p id="gc-stat-liability" class="text-xl font-bold font-mono text-amber-glow">₹0.00</p>
+                    <p class="text-[10px] text-slate-500 font-mono">Unredeemed in escrow</p>
+                </div>
+                <div class="glass-card rounded-2xl border border-border p-4 space-y-1">
+                    <p class="text-xs text-emerald-glow">Redeemed Into Wallets</p>
+                    <p id="gc-stat-redeemed" class="text-xl font-bold font-mono text-emerald-glow">₹0.00</p>
+                    <p class="text-[10px] text-slate-500 font-mono">Credited for passenger trips</p>
+                </div>
+                <div class="glass-card rounded-2xl border border-border p-4 space-y-1">
+                    <p class="text-xs text-cyan-glow">Total Gift Cards</p>
+                    <p id="gc-stat-count" class="text-xl font-bold font-mono text-cyan-glow">0</p>
+                    <p class="text-[10px] text-slate-500 font-mono">Cards in registry</p>
+                </div>
+            </div>
+
+            <!-- Gift Cards Table -->
+            <div class="glass-card rounded-2xl border border-border p-5 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div class="flex items-center gap-3">
+                        <select id="gc-filter-status" onchange="loadGiftCards()" class="bg-surface border border-border rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-glow">
+                            <option value="">All Statuses</option>
+                            <option value="ACTIVE">Active (Unredeemed)</option>
+                            <option value="REDEEMED">Redeemed</option>
+                            <option value="CANCELLED">Cancelled</option>
+                            <option value="EXPIRED">Expired</option>
+                        </select>
+                        <input id="gc-search-query" onkeydown="if(event.key==='Enter') loadGiftCards()" placeholder="Search code, phone or email..." class="bg-surface border border-border rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-glow w-64" />
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead class="bg-surface/90 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-border">
+                            <tr>
+                                <th class="py-3 px-4">Card Code</th>
+                                <th class="py-3 px-4">Design Theme</th>
+                                <th class="py-3 px-4">Initial Value</th>
+                                <th class="py-3 px-4">Remaining Balance</th>
+                                <th class="py-3 px-4">Recipient</th>
+                                <th class="py-3 px-4">Status</th>
+                                <th class="py-3 px-4">Expires</th>
+                                <th class="py-3 px-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="giftcards-table-body" class="divide-y divide-border text-slate-300 font-mono">
+                            <tr>
+                                <td colspan="8" class="py-6 text-center text-slate-500">Loading gift cards...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
     </main>
 
     <!-- Global Modal: Driver Approval / KYC Review -->
@@ -1670,6 +1752,8 @@
             } else if (tabId === 'audit') {
                 loadAuditLogsData();
                 loadSystemHealth();
+            } else if (tabId === 'giftcards') {
+                loadGiftCards();
             }
             lucide.createIcons();
         }
@@ -3480,6 +3564,102 @@
                 }
             } catch (err) {
                 showToast('Cloud backup triggered');
+            }
+        }
+        async function loadGiftCards() {
+            try {
+                const statusFilter = document.getElementById('gc-filter-status')?.value || '';
+                const searchQuery = document.getElementById('gc-search-query')?.value || '';
+                let url = '/api/v1/gift-cards/admin/overview?limit=50';
+                if (statusFilter) url += `&status_filter=${encodeURIComponent(statusFilter)}`;
+                if (searchQuery) url += `&search_query=${encodeURIComponent(searchQuery)}`;
+
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+
+                const res = await fetch(url, { headers });
+                if (!res.ok) return;
+                const data = await res.json();
+
+                // Stats
+                if (data.summary) {
+                    const elIssued = document.getElementById('gc-stat-issued');
+                    const elLiab = document.getElementById('gc-stat-liability');
+                    const elRed = document.getElementById('gc-stat-redeemed');
+                    const elCount = document.getElementById('gc-stat-count');
+                    if (elIssued) elIssued.innerText = `₹${(data.summary.total_issued_rupees || 0).toFixed(2)}`;
+                    if (elLiab) elLiab.innerText = `₹${(data.summary.active_liability_rupees || 0).toFixed(2)}`;
+                    if (elRed) elRed.innerText = `₹${(data.summary.total_redeemed_rupees || 0).toFixed(2)}`;
+                    if (elCount) elCount.innerText = data.summary.total_records || 0;
+                }
+
+                // Table
+                const tbody = document.getElementById('giftcards-table-body');
+                if (!tbody) return;
+                tbody.innerHTML = '';
+
+                const list = data.gift_cards || [];
+                if (list.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="8" class="py-6 text-center text-slate-500 font-mono">No gift cards matching query.</td></tr>`;
+                    return;
+                }
+
+                list.forEach(c => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-surface/50 transition-colors';
+
+                    let statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">ACTIVE</span>';
+                    if (c.status === 'REDEEMED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">REDEEMED</span>';
+                    if (c.status === 'CANCELLED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-crimson-dim text-crimson-glow font-mono text-[10px] font-bold">CANCELLED</span>';
+                    if (c.status === 'EXPIRED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 font-mono text-[10px] font-bold">EXPIRED</span>';
+
+                    tr.innerHTML = `
+                        <td class="py-3 px-4 font-mono font-bold text-white">${c.masked_code}</td>
+                        <td class="py-3 px-4"><span class="px-2 py-0.5 rounded bg-surface border border-border text-[10px] text-slate-300 font-bold">${c.card_design || 'ROYAL_GOLD'}</span></td>
+                        <td class="py-3 px-4 font-mono text-white">₹${c.initial_value_rupees.toFixed(2)}</td>
+                        <td class="py-3 px-4 font-mono font-bold text-cyan-glow">₹${c.remaining_value_rupees.toFixed(2)}</td>
+                        <td class="py-3 px-4 text-slate-300">${c.recipient_name || c.recipient_phone || 'General Commuter'}</td>
+                        <td class="py-3 px-4">${statusBadge}</td>
+                        <td class="py-3 px-4 text-slate-400 text-[10px]">${(c.expires_at || '').slice(0, 10)}</td>
+                        <td class="py-3 px-4 text-right">
+                            ${c.status === 'ACTIVE' ? `
+                                <button onclick="adminCancelGiftCard('${c.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim hover:bg-crimson-glow/20 border border-crimson-glow/30 text-crimson-glow text-[11px] font-bold transition-all">
+                                    Void / Cancel
+                                </button>
+                            ` : `<span class="text-[10px] text-slate-600 font-mono">—</span>`}
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+                lucide.createIcons();
+            } catch (err) {
+                console.error('Error loading gift cards:', err);
+            }
+        }
+
+        async function adminCancelGiftCard(giftCardId) {
+            const reason = prompt('Enter statutory reason for administrative cancellation / chargeback:');
+            if (!reason || reason.trim().length < 5) {
+                if (reason) alert('Reason must be at least 5 characters.');
+                return;
+            }
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+
+                const res = await fetch(`/api/v1/gift-cards/admin/${giftCardId}/cancel?reason=${encodeURIComponent(reason.trim())}`, {
+                    method: 'POST',
+                    headers
+                });
+                if (res.ok) {
+                    showToast('Gift card cancelled and logged to audit ledger.');
+                    loadGiftCards();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showToast(err.detail || 'Cancellation failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error during cancellation', 'error');
             }
         }
     </script>

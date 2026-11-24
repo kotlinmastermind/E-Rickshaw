@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import json
 import os
+import uuid
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, desc, or_
@@ -187,7 +188,7 @@ class DriverService:
             select(Vehicle, DriverVehicleAssignment)
             .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
             .where(DriverVehicleAssignment.driver_id == driver.id)
-            .order_by(DriverVehicleAssignment.is_active.desc(), DriverVehicleAssignment.created_at.desc())
+            .order_by(DriverVehicleAssignment.is_active.desc(), DriverVehicleAssignment.assigned_at.desc())
         )
         res = await self.db.execute(stmt)
         row = res.first()
@@ -211,15 +212,16 @@ class DriverService:
         cat = cat_res.scalar_one_or_none()
         cat_id = cat.id if cat else "e-rickshaw-std"
 
+        v_uid = uuid.uuid4().hex[:6].upper()
         v = Vehicle(
             category_id=cat_id,
             make="Mahindra",
             model="Treo EV",
-            license_plate="DL-01-ER-2026",
+            license_plate=f"DL-01-ER-{v_uid}",
             color="Electric Green",
             year=2025,
-            rc_number="DL-01-2025-RC88341",
-            permit_number="AITP-DEL-2026-99124",
+            rc_number=f"DL-01-2025-RC{v_uid}",
+            permit_number=f"AITP-DEL-2026-{v_uid}",
             is_active=True
         )
         self.db.add(v)
@@ -252,7 +254,7 @@ class DriverService:
             select(Vehicle, DriverVehicleAssignment)
             .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
             .where(DriverVehicleAssignment.driver_id == driver.id)
-            .order_by(DriverVehicleAssignment.is_active.desc(), DriverVehicleAssignment.created_at.desc())
+            .order_by(DriverVehicleAssignment.is_active.desc(), DriverVehicleAssignment.assigned_at.desc())
         )
         res = await self.db.execute(stmt)
         row = res.first()
@@ -341,20 +343,44 @@ class DriverService:
             target_veh_id = active_veh.get("vehicle_id")
 
         all_passed = tyre_pressure_ok and lights_ok and brake_buzzer_ok
-        status_val = "PASSED" if all_passed else "FLAGGED"
+        status_val = "APPROVED" if all_passed else "FAILED"
+        overall_res = "PASS" if all_passed else "FAIL"
+        failed_items = []
+        if not tyre_pressure_ok:
+            failed_items.append("tyres")
+        if not lights_ok:
+            failed_items.append("headlights_taillights")
+        if not brake_buzzer_ok:
+            failed_items.append("brakes")
+
+        from backend.application.services.driver_inspection_service import get_ist_today
+        today = get_ist_today()
+
         checklist = {
-            "tyre_pressure": "PASS" if tyre_pressure_ok else "FAIL",
-            "lights_indicators": "PASS" if lights_ok else "FAIL",
-            "reverse_buzzer_horn": "PASS" if brake_buzzer_ok else "FAIL"
+            "brakes": "PASS" if brake_buzzer_ok else "FAIL",
+            "steering": "PASS",
+            "tyres": "PASS" if tyre_pressure_ok else "FAIL",
+            "headlights_taillights": "PASS" if lights_ok else "FAIL",
+            "indicators_horn": "PASS" if brake_buzzer_ok else "FAIL",
+            "mirrors_windshield": "PASS",
+            "battery_electrical": "PASS",
+            "cabin_cleanliness": "PASS",
+            "emergency_safety": "PASS"
         }
 
         inspection = DriverVehicleInspection(
             driver_id=driver.id,
             vehicle_id=target_veh_id,
+            inspection_date=today,
             inspection_status=status_val,
+            overall_result=overall_res,
+            verification_status="AUTO_APPROVED" if all_passed else "REJECTED",
+            rejection_reason=f"Failed critical checks: {', '.join(failed_items)}" if failed_items else None,
+            failed_items_json=json.dumps(failed_items) if failed_items else None,
             checklist_json=json.dumps(checklist),
             inspector_notes=notes or "Pre-shift vehicle inspection completed by pilot.",
-            inspected_at=datetime.now(timezone.utc)
+            inspected_at=datetime.now(timezone.utc),
+            submitted_at=datetime.now(timezone.utc)
         )
         self.db.add(inspection)
         await self.db.commit()
@@ -437,16 +463,46 @@ class DriverService:
 
     async def toggle_availability(self, user_id: str, is_online: bool) -> Dict[str, Any]:
         driver = await self.get_or_create_profile(user_id)
-        if is_online and driver.approval_status not in ["APPROVED", "ACTIVE"]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Driver must be approved before going online. Mandatory document verification and admin approval required.",
-                headers={
-                    "X-Error-Code": "DRIVER_NOT_APPROVED",
-                    "X-Approval-Status": str(driver.approval_status),
-                    "X-Can-Go-Online": "false"
-                }
+        if is_online:
+            if driver.approval_status not in ["APPROVED", "ACTIVE"]:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Driver must be approved before going online. Mandatory document verification and admin approval required.",
+                    headers={
+                        "X-Error-Code": "DRIVER_NOT_APPROVED",
+                        "X-Approval-Status": str(driver.approval_status),
+                        "X-Can-Go-Online": "false"
+                    }
+                )
+
+            # Check if driver has an active assigned vehicle
+            stmt_assign = (
+                select(DriverVehicleAssignment)
+                .where(
+                    DriverVehicleAssignment.driver_id == driver.id,
+                    DriverVehicleAssignment.is_active == True
+                )
+                .limit(1)
             )
+            assign_res = await self.db.execute(stmt_assign)
+            assigned = assign_res.scalar_one_or_none()
+
+            if assigned:
+                # Gate availability on daily vehicle inspection & odometer verification (Asia/Kolkata timezone)
+                from backend.application.services.driver_inspection_service import DriverInspectionService
+                can_online, err_code, err_msg = await DriverInspectionService(self.db).verify_inspection_eligibility_for_online(
+                    driver.id, assigned.vehicle_id
+                )
+                if not can_online:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=err_msg,
+                        headers={
+                            "X-Error-Code": err_code,
+                            "X-Vehicle-Id": assigned.vehicle_id,
+                            "X-Can-Go-Online": "false"
+                        }
+                    )
 
         # Section 9: Validate Ride Safety - Prevent going offline during active rides
         if not is_online:

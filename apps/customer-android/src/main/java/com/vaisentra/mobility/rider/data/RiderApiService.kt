@@ -80,6 +80,18 @@ interface RiderApiService {
     @GET("api/v1/rides/{ride_id}/receipt")
     suspend fun getRideReceipt(@Path("ride_id") rideId: String): Response<RideReceiptDto>
 
+    @POST("api/v1/rides/{ride_id}/reschedule")
+    suspend fun rescheduleRide(
+        @Path("ride_id") rideId: String,
+        @Body request: RescheduleRideRequest
+    ): Response<Map<String, Any>>
+
+    @POST("api/v1/rides/{ride_id}/sync-flight")
+    suspend fun syncFlightDelay(
+        @Path("ride_id") rideId: String,
+        @Query("flight_number") flightNumber: String
+    ): Response<Map<String, Any>>
+
     // --- Eco-Pool Shared Transit ---
     @POST("api/v1/pools/book")
     suspend fun bookPool(@Body request: PoolBookingRequest): Response<PoolTripDto>
@@ -185,6 +197,12 @@ interface RiderApiService {
         @Path("ride_id") rideId: String
     ): Response<Map<String, Any>>
 
+    @POST("api/v1/rides/{ride_id}/send-invoice-email")
+    suspend fun sendInvoiceEmail(
+        @Path("ride_id") rideId: String,
+        @Body body: Map<String, String>
+    ): Response<Map<String, Any>>
+
     // --- User Governance, Password Reset & Security ---
     @POST("api/v1/auth/recovery/reset-password")
     suspend fun resetForgotPassword(@Body body: Map<String, String>): Response<Map<String, Any>>
@@ -259,6 +277,123 @@ interface RiderApiService {
         @Path("ride_id") rideId: String,
         @Body body: Map<String, @JvmSuppressWildcards Any>
     ): Response<Map<String, Any>>
+
+    // --- Corporate B2B Billing & Enterprise Accounts ---
+    @POST("api/v1/corporate/accounts")
+    suspend fun registerCorporateAccount(@Body req: CorporateRegistrationRequest): Response<CorporateAccountDto>
+
+    @GET("api/v1/corporate/accounts/me")
+    suspend fun getMyCorporateAccount(): Response<CorporateAccountDto>
+
+    @PUT("api/v1/corporate/accounts/me")
+    suspend fun updateMyCorporateAccount(@Body body: Map<String, String>): Response<CorporateAccountDto>
+
+    @POST("api/v1/corporate/accounts/me/submit")
+    suspend fun submitCorporateAccountForApproval(): Response<Map<String, Any>>
+
+    @GET("api/v1/corporate/accounts/me/employees")
+    suspend fun listCorporateEmployees(): Response<List<CorporateEmployeeDto>>
+
+    @GET("api/v1/corporate/accounts/me/invoices")
+    suspend fun listCorporateInvoices(): Response<List<CorporateInvoiceDto>>
+
+    @GET("api/v1/corporate/accounts/me/invoices/{invoice_id}")
+    suspend fun getCorporateInvoiceDetail(@Path("invoice_id") invoiceId: String): Response<CorporateInvoiceDetailDto>
+
+    // --- Audio Safety Recording Endpoints ---
+    @POST("api/v1/rides/{ride_id}/audio-consent")
+    suspend fun recordAudioConsent(
+        @Path("ride_id") rideId: String,
+        @Body body: AudioConsentRequest
+    ): Response<AudioConsentResponse>
+
+    @GET("api/v1/rides/{ride_id}/audio-consent")
+    suspend fun getAudioConsentStatus(
+        @Path("ride_id") rideId: String
+    ): Response<AudioRecordingStatusResponse>
+
+    @POST("api/v1/rides/{ride_id}/audio-consent/withdraw")
+    suspend fun withdrawAudioConsent(
+        @Path("ride_id") rideId: String,
+        @Body body: AudioConsentWithdrawRequest
+    ): Response<Map<String, Any>>
+
+    @POST("api/v1/rides/{ride_id}/audio-recording/authorize")
+    suspend fun authorizeAudioRecording(
+        @Path("ride_id") rideId: String
+    ): Response<Map<String, Any>>
+
+    @POST("api/v1/audio-recordings/{session_id}/start")
+    suspend fun startAudioRecording(
+        @Path("session_id") sessionId: String
+    ): Response<Map<String, Any>>
+
+    @POST("api/v1/audio-recordings/{session_id}/heartbeat")
+    suspend fun sendAudioRecordingHeartbeat(
+        @Path("session_id") sessionId: String
+    ): Response<Map<String, Any>>
+
+    @POST("api/v1/audio-recordings/{session_id}/stop")
+    suspend fun stopAudioRecording(
+        @Path("session_id") sessionId: String,
+        @Body body: Map<String, String>
+    ): Response<Map<String, Any>>
+
+    @retrofit2.http.Multipart
+    @POST("api/v1/audio-recordings/{session_id}/segments")
+    suspend fun uploadAudioSegment(
+        @Path("session_id") sessionId: String,
+        @retrofit2.http.Part("sequence") sequence: okhttp3.RequestBody,
+        @retrofit2.http.Part("duration_seconds") durationSeconds: okhttp3.RequestBody,
+        @retrofit2.http.Part("encryption_nonce") encryptionNonce: okhttp3.RequestBody,
+        @retrofit2.http.Part("encryption_tag") encryptionTag: okhttp3.RequestBody,
+        @retrofit2.http.Part file: okhttp3.MultipartBody.Part
+    ): Response<AudioSegmentUploadResponse>
+
+    // --- Gift Cards Suite ---
+    @GET("api/v1/gift-cards/config")
+    suspend fun getGiftCardConfig(): Response<GiftCardConfigDto>
+
+    @POST("api/v1/gift-cards/purchase")
+    suspend fun purchaseGiftCard(@Body req: GiftCardPurchaseRequest): Response<GiftCardPurchaseResponse>
+
+    @POST("api/v1/gift-cards/check-balance")
+    suspend fun checkGiftCardBalance(@Body req: GiftCardBalanceRequest): Response<GiftCardBalanceResponse>
+
+    @POST("api/v1/gift-cards/redeem")
+    suspend fun redeemGiftCard(@Body req: GiftCardRedeemRequest): Response<GiftCardRedeemResponse>
+
+    @GET("api/v1/gift-cards/my")
+    suspend fun getMyGiftCards(@Query("filter_type") filterType: String = "ALL"): Response<List<GiftCardSummaryDto>>
+
+    @GET("api/v1/gift-cards/{id}")
+    suspend fun getGiftCardDetails(@Path("id") id: String): Response<GiftCardDetailDto>
+
+        // --- Saved Places (Favorites) Full CRUD ---
+    @GET("api/v1/favorites")
+    suspend fun getSavedPlaces(): Response<List<SavedPlaceDto>>
+
+    @POST("api/v1/favorites")
+    suspend fun addSavedPlace(
+        @Body body: Map<String, @JvmSuppressWildcards Any>
+    ): Response<Map<String, Any>>
+
+    @PUT("api/v1/favorites/{fav_id}")
+    suspend fun updateSavedPlace(
+        @Path("fav_id") favId: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any>
+    ): Response<Map<String, Any>>
+
+    @DELETE("api/v1/favorites/{fav_id}")
+    suspend fun deleteSavedPlace(
+        @Path("fav_id") favId: String
+    ): Response<Map<String, Any>>
+
+    // --- Live Shared Pool Estimate ---
+    @POST("api/v1/pools/estimate")
+    suspend fun getSharedPoolEstimate(
+        @Body request: SharedEstimateRequestDto
+    ): Response<SharedEstimateResponseDto>
 }
 
 data class MapSearchRequest(

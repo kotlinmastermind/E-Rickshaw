@@ -62,7 +62,7 @@ class TwilioVerifyProvider(SMSProvider):
     def _ensure_configured(self):
         if not self.account_sid or not self.auth_token or not self.verify_service_sid:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Twilio Verify Service credentials are not fully configured."
             )
 

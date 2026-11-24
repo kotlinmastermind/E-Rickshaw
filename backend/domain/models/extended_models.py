@@ -1,9 +1,9 @@
 import uuid
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Optional, List
 from sqlalchemy import (
-    String, Integer, Float, Boolean, DateTime, ForeignKey, Text, Index, UniqueConstraint
+    String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, Index, UniqueConstraint
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.infrastructure.database.session import Base
@@ -13,17 +13,6 @@ from backend.domain.models.models import generate_uuid, utc_now
 # ENTERPRISE PERSISTENT MODELS (REPLACED PLACEHOLDER STUBS)
 # All models are genuine SQLAlchemy Declarative entities.
 # =====================================================================
-
-class ABTestExperiment(Base):
-    __tablename__ = "ab_test_experiments"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    experiment_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    variants_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    rollout_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-
 
 class AddressQualityFeedback(Base):
     __tablename__ = "address_quality_feedback"
@@ -102,104 +91,6 @@ class AdministrativeAuditLog(Base):
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
 
 
-class AirportTransferPackage(Base):
-    __tablename__ = "airport_transfer_packages"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    airport_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
-    package_title: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    category_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    flat_fare_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    meets_and_greets_included: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-
-
-class ApiErrorCatalogEntry(Base):
-    __tablename__ = "api_error_catalog"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    http_status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    title: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    resolution_guidance: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    category: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class ApiVersionRecord(Base):
-    __tablename__ = "api_version_records"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    version_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    app_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    min_supported_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    latest_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    deprecation_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class BackgroundJob(Base):
-    __tablename__ = "background_jobs"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    job_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    queue_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    attempt_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    max_retries: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    next_retry_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
-class BackupPolicy(Base):
-    __tablename__ = "backup_policies"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    policy_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    backup_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    retention_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    encryption_algorithm: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    key_rotation_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    kms_key_arn: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    last_backup_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    next_backup_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
-class BusinessApprovalRequest(Base):
-    __tablename__ = "business_approval_requests"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    ride_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    employee_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    approver_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    cost_center: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    project_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    justification: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
-class ChauffeurServiceAddon(Base):
-    __tablename__ = "chauffeur_service_addons"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    addon_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    title: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    price_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    category_compatibility: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-
-
 class CommissionRule(Base):
     __tablename__ = "commission_rules"
 
@@ -222,26 +113,86 @@ class CorporateAccount(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     company_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    tax_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    trade_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    tax_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # GSTIN
+    pan: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    registered_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    billing_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    billing_contact_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    billing_contact_email: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     billing_email: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    credit_limit_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    balance_due_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    billing_contact_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    admin_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    credit_limit_cents: Mapped[Optional[int]] = mapped_column(Integer, default=50000000, nullable=True)
+    balance_due_cents: Mapped[Optional[int]] = mapped_column(Integer, default=0, nullable=True)
+    monthly_spending_limit_cents: Mapped[Optional[int]] = mapped_column(Integer, default=10000000, nullable=True)
+    currency: Mapped[Optional[str]] = mapped_column(String(8), default="INR", nullable=True)
+    payment_terms: Mapped[Optional[str]] = mapped_column(String(32), default="NET_30", nullable=True)
+    default_cost_center: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(32), default="DRAFT", nullable=True)  # DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, SUSPENDED, ACTIVE
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    suspension_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    approved_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=True)
+
+
+class CorporateEmployee(Base):
+    __tablename__ = "corporate_employees"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    corporate_id: Mapped[str] = mapped_column(String(36), ForeignKey("corporate_accounts.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), index=True, nullable=True)
+    employee_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    employee_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    employee_email: Mapped[str] = mapped_column(String(128), nullable=False)
+    employee_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    department: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    cost_center: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    designation: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="ACTIVE", nullable=False)  # ACTIVE, INACTIVE, SUSPENDED
+    monthly_ride_limit: Mapped[Optional[int]] = mapped_column(Integer, default=50, nullable=True)
+    monthly_spending_limit_cents: Mapped[Optional[int]] = mapped_column(Integer, default=5000000, nullable=True)
+    per_ride_limit_cents: Mapped[Optional[int]] = mapped_column(Integer, default=200000, nullable=True)
+    allowed_vehicle_types_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=True)
 
 
 class CorporateInvoice(Base):
     __tablename__ = "corporate_invoices"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    invoice_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    corporate_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    billing_period: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    invoice_number: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    corporate_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("corporate_accounts.id", ondelete="CASCADE"), index=True, nullable=True)
+    billing_period: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # e.g. "2026-11"
+    subtotal_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tax_amount_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    discount_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    platform_fee_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_amount_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    amount_paid_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[Optional[str]] = mapped_column(String(32), default="ISSUED", nullable=True)  # DRAFT, GENERATED, ISSUED, PARTIALLY_PAID, PAID, OVERDUE, CANCELLED
     pdf_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     due_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=True)
+
+
+class CorporateInvoiceItem(Base):
+    __tablename__ = "corporate_invoice_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    invoice_id: Mapped[str] = mapped_column(String(36), ForeignKey("corporate_invoices.id", ondelete="CASCADE"), index=True, nullable=False)
+    ride_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("rides.id", ondelete="SET NULL"), nullable=True)
+    employee_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    passenger_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    cost_center: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    fare_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    tax_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
 
 
@@ -249,14 +200,19 @@ class CorporateTravelPolicy(Base):
     __tablename__ = "corporate_travel_policies"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    corporate_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    corporate_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("corporate_accounts.id", ondelete="CASCADE"), index=True, nullable=True)
     policy_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     allowed_categories_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     max_fare_per_ride_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     curfew_start_time: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     curfew_end_time: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    monthly_ride_limit: Mapped[Optional[int]] = mapped_column(Integer, default=60, nullable=True)
+    monthly_spending_limit_cents: Mapped[Optional[int]] = mapped_column(Integer, default=10000000, nullable=True)
+    daily_ride_limit: Mapped[Optional[int]] = mapped_column(Integer, default=4, nullable=True)
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, default=True, nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=True)
 
 
 class CustomerRidePass(Base):
@@ -270,76 +226,6 @@ class CustomerRidePass(Base):
     valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
-class CustomerSubscription(Base):
-    __tablename__ = "customer_subscriptions"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    customer_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    plan_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    rides_remaining: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    starts_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-
-
-class DatabaseMigrationVerification(Base):
-    __tablename__ = "db_migration_verifications"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    revision_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    down_revision_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    rollback_verified: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    verification_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    verified_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class DependencyVulnerabilityReport(Base):
-    __tablename__ = "dependency_vulnerability_reports"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    package_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    installed_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    fixed_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    cve_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    severity: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    advisory_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    detected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class DisasterRecoveryPlan(Base):
-    __tablename__ = "disaster_recovery_plans"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    plan_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    primary_region: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    dr_region: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    replication_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    failover_readiness: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    last_failover_test_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class DistributedTraceSpan(Base):
-    __tablename__ = "distributed_trace_spans"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    trace_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    span_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    parent_span_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    operation_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    service_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    duration_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    http_method: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
-    http_status: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    route_path: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    correlation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    timestamp: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class DriverDispatchPreferences(Base):
@@ -428,58 +314,61 @@ class DriverVehicleInspectionPhoto(Base):
     __tablename__ = "driver_vehicle_inspection_photos"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    driver_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    vehicle_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    inspection_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("driver_vehicle_inspections.id", ondelete="CASCADE"), nullable=True, index=True)
+    driver_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    vehicle_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    photo_category: Mapped[str] = mapped_column(String(32), default="OTHER", nullable=False)
     photo_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    storage_bucket: Mapped[str] = mapped_column(String(64), default="driver-vehicle-inspections", nullable=False)
     storage_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    mime_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    mime_type: Mapped[Optional[str]] = mapped_column(String(100), default="image/jpeg", nullable=True)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, default=0, nullable=True)
     file_hash_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    width: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    height: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    captured_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    uploaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+    upload_status: Mapped[str] = mapped_column(String(32), default="COMPLETED", nullable=False)
+    verification_status: Mapped[str] = mapped_column(String(32), default="PENDING", nullable=False)
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+
+    inspection: Mapped[Optional["DriverVehicleInspection"]] = relationship("DriverVehicleInspection", back_populates="photos", lazy="selectin")
 
 
 class DriverVehicleInspection(Base):
     __tablename__ = "driver_vehicle_inspections"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    driver_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    vehicle_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    inspection_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    vehicle_id: Mapped[str] = mapped_column(String(36), ForeignKey("vehicles.id", ondelete="CASCADE"), nullable=False, index=True)
+    inspection_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
+    inspection_status: Mapped[str] = mapped_column(String(32), default="DRAFT", nullable=False, index=True)
+    odometer_reading: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    odometer_unit: Mapped[str] = mapped_column(String(16), default="KM", nullable=False)
+    previous_odometer_reading: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     checklist_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    overall_result: Mapped[Optional[str]] = mapped_column(String(32), default="PENDING", nullable=True)
+    failed_items_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    driver_remarks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    inspector_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    odometer_photo_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     photo_front_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     photo_rear_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     photo_left_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     photo_right_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     photo_interior_front_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     photo_interior_rear_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    inspector_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     inspected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_status: Mapped[str] = mapped_column(String(32), default="PENDING", nullable=False)
+    verified_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
-
-class EmployeeProfile(Base):
-    __tablename__ = "employee_profiles"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    corporate_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    cost_center: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    max_ride_fare_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    requires_approval: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
-class EventTransportWorkspace(Base):
-    __tablename__ = "event_transport_workspaces"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    event_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    venue_address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    event_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    allocated_vehicles_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    total_guests: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+    photos: Mapped[List["DriverVehicleInspectionPhoto"]] = relationship("DriverVehicleInspectionPhoto", back_populates="inspection", cascade="all, delete-orphan", lazy="selectin")
 
 
 class FeatureFlag(Base):
@@ -496,31 +385,6 @@ class FeatureFlag(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class FeatureRequestVote(Base):
-    __tablename__ = "feature_request_votes"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    feature_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    title: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    category: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    upvote_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-
-
-class FleetSubscriptionPlan(Base):
-    __tablename__ = "fleet_subscription_plans"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    plan_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    monthly_price_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    included_rides_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    category_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
 class GeofenceZoneAudit(Base):
     __tablename__ = "geofence_zone_audits"
 
@@ -530,18 +394,6 @@ class GeofenceZoneAudit(Base):
     action: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
     previous_state_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     new_state_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
-class HourlyChauffeurBooking(Base):
-    __tablename__ = "hourly_chauffeur_bookings"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    customer_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    ride_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    requested_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    hourly_rate_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    kilometers_included: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
 
 
@@ -558,18 +410,6 @@ class IdempotencyRecord(Base):
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class IntercityProduct(Base):
-    __tablename__ = "intercity_products"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    route_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    origin_city: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    destination_city: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    distance_km: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    fixed_fare_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    toll_included: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-
-
 class InvoiceCorrectionRequest(Base):
     __tablename__ = "invoice_correction_requests"
 
@@ -583,44 +423,6 @@ class InvoiceCorrectionRequest(Base):
     reviewed_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     review_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
-class LocalizationCatalog(Base):
-    __tablename__ = "localization_catalog"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    string_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    locale: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
-    category: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    translated_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class LoyaltyPartnerCatalog(Base):
-    __tablename__ = "loyalty_partner_catalog"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    partner_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    offer_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    required_points: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    promo_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    logo_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-
-
-class MobileCrashReport(Base):
-    __tablename__ = "mobile_crash_reports"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    app_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    app_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    device_model: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    os_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    report_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    stack_trace: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
 
 
@@ -662,31 +464,6 @@ class NotificationDeliveryAttempt(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class PartnerAccount(Base):
-    __tablename__ = "partner_accounts"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    partner_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    partner_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    api_key_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    commission_rate_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    referral_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
-class PartnerBooking(Base):
-    __tablename__ = "partner_bookings"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    partner_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    ride_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    guest_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    guest_phone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    commission_earned_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    attribution_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
 class PassengerOccupancyEvent(Base):
     __tablename__ = "passenger_occupancy_events"
 
@@ -724,72 +501,6 @@ class PaymentWebhookInbox(Base):
     last_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     received_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
     last_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class PrepaidRideBundle(Base):
-    __tablename__ = "prepaid_ride_bundles"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    bundle_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    title: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    ride_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    price_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    discount_percentage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-
-
-class ProductFeedbackAnalytics(Base):
-    __tablename__ = "product_feedback_analytics"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    user_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
-    rating_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    feedback_category: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    comments: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    sentiment: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
-
-
-class ProviderHealthConfig(Base):
-    __tablename__ = "provider_health_configs"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    provider_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    provider_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    is_healthy: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    circuit_breaker_state: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    consecutive_failures: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    failover_provider_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    quota_used_percentage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    last_health_check_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class RedisNamespaceConfig(Base):
-    __tablename__ = "redis_namespace_configs"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    namespace: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    default_ttl_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    keys_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    memory_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    eviction_policy: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
-class RestoreDrillSchedule(Base):
-    __tablename__ = "restore_drill_schedules"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    drill_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    target_region: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    scheduled_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    rto_minutes_achieved: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    rpo_minutes_achieved: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    conducted_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
 
 
 class RideDestinationChangeRequest(Base):
@@ -849,33 +560,6 @@ class RidePass(Base):
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
 
 
-class ScheduledJobMonitor(Base):
-    __tablename__ = "scheduled_job_monitors"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    job_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    job_title: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    cron_schedule: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    last_duration_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    is_enabled: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-
-
-class SecretRotationWorkflow(Base):
-    __tablename__ = "secret_rotation_workflows"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    secret_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    vault_path: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    current_version: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    auto_rotate_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    last_rotated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    next_rotation_due: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
 class SupportResponseTemplate(Base):
     __tablename__ = "support_response_templates"
 
@@ -903,18 +587,6 @@ class UserNotificationSettings(Base):
     timezone_name: Mapped[str] = mapped_column(String(64), default="Asia/Kolkata", nullable=False)
     language_code: Mapped[str] = mapped_column(String(10), default="en", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
-
-
-class WhiteLabelTenantConfig(Base):
-    __tablename__ = "white_label_tenant_configs"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    tenant_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    brand_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    primary_color: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
-    secondary_color: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
-    custom_domain: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    logo_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
 
 
 class AccountDeletionRequest(Base):
@@ -1087,16 +759,48 @@ class GiftCard(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    code_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    pin: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     initial_value_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     remaining_value_cents: Mapped[int] = mapped_column(Integer, nullable=False)
-    purchased_by_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), default="INR", nullable=False)
+    purchased_by_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    card_design: Mapped[str] = mapped_column(String(32), default="ROYAL_GOLD", nullable=False)
+    recipient_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     recipient_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     recipient_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     sender_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    delivery_method: Mapped[str] = mapped_column(String(32), default="IN_APP", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="ACTIVE", nullable=False, index=True)
+    payment_status: Mapped[str] = mapped_column(String(32), default="COMPLETED", nullable=False)
+    payment_order_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    payment_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    redeemed_by_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    redeemed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=True)
+
+    transactions: Mapped[List["GiftCardTransaction"]] = relationship("GiftCardTransaction", back_populates="gift_card", cascade="all, delete-orphan", lazy="selectin")
+
+
+class GiftCardTransaction(Base):
+    __tablename__ = "gift_card_transactions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    gift_card_id: Mapped[str] = mapped_column(String(36), ForeignKey("gift_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    transaction_type: Mapped[str] = mapped_column(String(32), nullable=False)  # PURCHASE, REDEMPTION, PARTIAL_REDEMPTION, REFUND, ADMIN_ADJUSTMENT, EXPIRATION
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    balance_before_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    balance_after_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    reference_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    gift_card: Mapped["GiftCard"] = relationship("GiftCard", back_populates="transactions", lazy="selectin")
 
 
 class HelpArticleRating(Base):
@@ -1263,19 +967,6 @@ class SupportCallbackRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
-class TourismPlace(Base):
-    __tablename__ = "tourism_places"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    latitude: Mapped[float] = mapped_column(Float, nullable=False)
-    longitude: Mapped[float] = mapped_column(Float, nullable=False)
-    image_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-
-
 class TripTemplate(Base):
     __tablename__ = "trip_templates"
 
@@ -1340,5 +1031,91 @@ class UserSavedPhone(Base):
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+# =========================================================================
+# FEATURE 6: IN-CABIN AUDIO SAFETY RECORDING SUITE (DPDP / IT ACT COMPLIANT)
+# =========================================================================
+
+class AudioRecordingConsent(Base):
+    __tablename__ = "audio_recording_consents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    user_role: Mapped[str] = mapped_column(String(32), nullable=False)  # CUSTOMER, DRIVER
+    recording_session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    consent_purpose: Mapped[str] = mapped_column(String(128), default="IN_CABIN_SAFETY_DPDP_COMPLIANT")
+    consent_version: Mapped[str] = mapped_column(String(32), default="v1.0")
+    consent_status: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)  # NOT_REQUESTED, PENDING, GRANTED, DECLINED, WITHDRAWN, EXPIRED
+    granted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    withdrawn_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class AudioRecordingSession(Base):
+    __tablename__ = "audio_recording_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, index=True)
+    rider_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    driver_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    recording_status: Mapped[str] = mapped_column(String(32), default="IDLE", index=True)  # IDLE, AWAITING_CONSENT, AUTHORIZED, RECORDING, STOPPED, COMPLETED, FAILED, CANCELLED
+    authorization_status: Mapped[str] = mapped_column(String(32), default="PENDING")  # PENDING, AUTHORIZED, REVOKED, EXPIRED
+    rider_consent_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    driver_consent_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    stopped_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    stopped_reason: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    encryption_algorithm: Mapped[str] = mapped_column(String(32), default="AES-256-GCM")
+    encryption_key_id: Mapped[str] = mapped_column(String(64), default="managed-envelope-v1")
+    total_segments: Mapped[int] = mapped_column(Integer, default=0)
+    total_duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    last_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class AudioRecordingSegment(Base):
+    __tablename__ = "audio_recording_segments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, index=True)
+    segment_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_bucket: Mapped[str] = mapped_column(String(64), default="ride-audio-recordings")
+    storage_object_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    file_format: Mapped[str] = mapped_column(String(32), default="audio/aac")
+    encryption_nonce: Mapped[str] = mapped_column(String(64), nullable=False)
+    encryption_tag: Mapped[str] = mapped_column(String(64), nullable=False)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    file_size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    sha256_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    upload_status: Mapped[str] = mapped_column(String(32), default="UPLOADED")  # PENDING, UPLOADED, FAILED, VERIFIED
+    retention_expiry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
+    is_purged: Mapped[bool] = mapped_column(Boolean, default=False)
+    purged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AudioRecordingAuditLog(Base):
+    __tablename__ = "audio_recording_audit_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    ride_id: Mapped[Optional[str]] = mapped_column(String(36), index=True, nullable=True)
+    actor_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)  # CUSTOMER, DRIVER, ADMIN, SYSTEM
+    action: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    access_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    authorization_result: Mapped[str] = mapped_column(String(32), default="ALLOWED")  # ALLOWED, DENIED
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    correlation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
 
 

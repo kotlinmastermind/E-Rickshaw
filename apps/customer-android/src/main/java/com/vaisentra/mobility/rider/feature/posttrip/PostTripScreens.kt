@@ -34,6 +34,16 @@ fun RideReceiptScreen(onNavigate: (String) -> Unit) {
         RiderRepository.fetchRideReceipt(rideId)
     }
 
+    val total = receipt?.totalAmountRupees ?: 0.0
+    val baseFare = receipt?.baseFare ?: 0.0
+    val distanceCharge = receipt?.distanceCharge ?: 0.0
+    val timeCharge = receipt?.timeCharge ?: 0.0
+    val taxAmount = receipt?.taxAmount ?: 0.0
+    val discountAmount = receipt?.discountAmount ?: 0.0
+    val method = receipt?.paymentMethod ?: "UPI"
+    val distanceKm = receipt?.distanceKm ?: 0.0
+    val durationMin = receipt?.durationMinutes ?: 0.0
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -50,22 +60,23 @@ fun RideReceiptScreen(onNavigate: (String) -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "Amount Paid via UPI", color = TextMuted, fontSize = 12.sp)
+                Text(text = "Amount Paid via $method", color = TextMuted, fontSize = 12.sp)
                 NeoBadge(text = "PAID IN FULL ✓", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Text(text = "₹129.04", color = ElectricCyan, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+            Text(text = "₹${"%.2f".format(total)}", color = ElectricCyan, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(modifier = Modifier.height(14.dp))
             Divider(color = BorderSubtle)
             Spacer(modifier = Modifier.height(14.dp))
-            val items = listOf(
-                "Base Fare" to "₹20.00",
-                "Distance (3.96 km @ ₹10/km)" to "₹39.60",
-                "Time (13.3 min @ ₹1/min)" to "₹13.30",
-                "Fleet Cleanliness Fee" to "₹50.00",
-                "GST (5%)" to "₹6.14",
-                "Discounts & Promos" to "-₹0.00"
+            val items = mutableListOf(
+                "Base Fare" to "₹${"%.2f".format(baseFare)}",
+                "Distance (${"%.2f".format(distanceKm)} km)" to "₹${"%.2f".format(distanceCharge)}",
+                "Time (${"%.1f".format(durationMin)} mins)" to "₹${"%.2f".format(timeCharge)}",
+                "GST (5%)" to "₹${"%.2f".format(taxAmount)}"
             )
+            if (discountAmount > 0.0) {
+                items.add("Discounts & Promos" to "-₹${"%.2f".format(discountAmount)}")
+            }
             items.forEach { (k, v) ->
                 Row(
                     modifier = Modifier
@@ -280,6 +291,24 @@ fun PastTripsHistoryScreen(onNavigate: (String) -> Unit) {
 fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
     var recipientGstin by remember { mutableStateOf("07AAECV9988D1Z2") }
     var companyName by remember { mutableStateOf("Vaisentra Corp Labs") }
+    var invoiceData by remember { mutableStateOf<Map<String, Any>?>(null) }
+    var isEmailing by remember { mutableStateOf(false) }
+
+    val activeRide by RiderRepository.activeRide.collectAsState()
+    val rideId = activeRide?.id ?: "ride-latest"
+
+    LaunchedEffect(rideId) {
+        invoiceData = RiderRepository.fetchTaxInvoice(rideId)
+    }
+
+    val invNum = invoiceData?.get("invoice_number")?.toString() ?: "#INV-2026-${rideId.take(6).uppercase()}"
+    val platformName = invoiceData?.get("platform_name")?.toString() ?: "Vaisentra Mobility Technologies Pvt Ltd"
+    val platformGstin = invoiceData?.get("platform_gstin")?.toString() ?: "07AABCV1234F1Z8"
+    val sacCode = invoiceData?.get("sac_code")?.toString() ?: "996412"
+    val subtotal = (invoiceData?.get("subtotal_rupees") as? Number)?.toDouble() ?: 0.0
+    val cgst = (invoiceData?.get("cgst_rupees") as? Number)?.toDouble() ?: 0.0
+    val sgst = (invoiceData?.get("sgst_rupees") as? Number)?.toDouble() ?: 0.0
+    val totalVal = (invoiceData?.get("total_rupees") as? Number)?.toDouble() ?: (subtotal + cgst + sgst)
 
     Column(
         modifier = Modifier
@@ -296,7 +325,7 @@ fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Text(text = "TAX INVOICE", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text(text = "#INV-2026-9281", color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(text = invNum, color = TextWhite, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
                 }
                 NeoBadge(text = "IRN GENERATED ✓", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
             }
@@ -305,8 +334,8 @@ fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(text = "SUPPLIER DETAILS", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Text(text = "Vaisentra Mobility Technologies Pvt Ltd", color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            Text(text = "GSTIN: 07AABCV1234F1Z8 • SAC Code: 996412", color = TextMuted, fontSize = 11.sp)
+            Text(text = platformName, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "GSTIN: $platformGstin • SAC Code: $sacCode", color = TextMuted, fontSize = 11.sp)
             Text(text = "Reg. Office: Cyber City, Tower 9, Gurugram NCR", color = TextDim, fontSize = 10.sp)
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -332,14 +361,9 @@ fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
             Spacer(modifier = Modifier.height(6.dp))
 
             val items = listOf(
-                "Base Fare (First 1.5 km)" to "₹20.00",
-                "Distance Fare (2.46 km @ ₹12/km)" to "₹29.52",
-                "Trip Duration (14 mins @ ₹1/min)" to "₹14.00",
-                "Electric Mobility Green Fee" to "₹10.00",
-                "Dynamic Surge Charge (1.0x Normal)" to "₹0.00",
-                "Taxable Service Value" to "₹122.90",
-                "CGST @ 2.5%" to "₹3.07",
-                "SGST @ 2.5%" to "₹3.07"
+                "Taxable Service Value" to "₹${"%.2f".format(subtotal)}",
+                "CGST @ 2.5%" to "₹${"%.2f".format(cgst)}",
+                "SGST @ 2.5%" to "₹${"%.2f".format(sgst)}"
             )
 
             items.forEach { (desc, amt) ->
@@ -360,7 +384,7 @@ fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(text = "Total Invoice Value (INR):", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text(text = "₹129.04", color = ElectricCyan, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                Text(text = "₹${"%.2f".format(totalVal)}", color = ElectricCyan, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -388,7 +412,6 @@ fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
             NeoButton(
                 text = "Download PDF Slip",
                 onClick = {
-                    val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                         RiderRepository.fetchTaxInvoice(rideId)
                     }
@@ -399,9 +422,19 @@ fun GstInvoiceScreen(onNavigate: (String) -> Unit) {
                 backgroundColor = SapphirePrimary
             )
             NeoButton(
-                text = "Email Invoice",
+                text = if (isEmailing) "Sending..." else "Email Invoice",
+                enabled = !isEmailing,
                 onClick = {
-                    DialogController.showToast("Invoice sent to your corporate email!")
+                    isEmailing = true
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        val res = RiderRepository.sendInvoiceEmail(rideId, "billing@vaisentra.com")
+                        isEmailing = false
+                        if (res.isSuccess) {
+                            DialogController.showToast("Invoice sent to corporate email successfully!")
+                        } else {
+                            DialogController.showToast("Email send error: ${res.exceptionOrNull()?.message}")
+                        }
+                    }
                 },
                 modifier = Modifier.weight(1f),
                 icon = "✉️",

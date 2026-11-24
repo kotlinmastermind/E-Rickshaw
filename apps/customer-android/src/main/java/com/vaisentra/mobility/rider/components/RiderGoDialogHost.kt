@@ -1,5 +1,9 @@
 package com.vaisentra.mobility.rider.components
 
+import android.content.Context
+import android.location.LocationManager
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -144,7 +148,11 @@ private fun CancellationPopup() {
 // 2. SOS 112 Emergency Panic Alert
 @Composable
 private fun SosEmergencyPopup() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var countdown by remember { mutableStateOf(5) }
+    var isDispatching by remember { mutableStateOf(false) }
+
     LaunchedEffect(countdown) {
         if (countdown > 0) {
             delay(1000)
@@ -176,13 +184,46 @@ private fun SosEmergencyPopup() {
             Text(text = "${countdown}s", color = CrimsonRed, fontSize = 42.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(modifier = Modifier.height(12.dp))
-        NeoButton(text = "Dispatch SOS Immediately", backgroundColor = CrimsonRed, onClick = {
-            CoroutineScope(Dispatchers.IO).launch {
-                RiderRepository.triggerSos(28.6289, 77.3710)
+        NeoButton(
+            text = if (isDispatching) "Transmitting Telemetry..." else "Dispatch SOS Immediately",
+            backgroundColor = CrimsonRed,
+            enabled = !isDispatching,
+            onClick = {
+                isDispatching = true
+                scope.launch {
+                    var liveLat = 0.0
+                    var liveLng = 0.0
+                    try {
+                        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+                        val lastGps = lm?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                        val lastNet = lm?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                        val best = lastGps ?: lastNet
+                        if (best != null) {
+                            liveLat = best.latitude
+                            liveLng = best.longitude
+                        }
+                    } catch (e: SecurityException) {
+                        // Permission not granted, fallback to ride coordinates
+                    }
+
+                    if (liveLat == 0.0 && liveLng == 0.0) {
+                        val active = RiderRepository.activeRide.value
+                        liveLat = active?.driverLat ?: active?.pickupLatitude ?: RiderRepository.bookingDraft.value.pickupLat
+                        liveLng = active?.driverLng ?: active?.pickupLongitude ?: RiderRepository.bookingDraft.value.pickupLng
+                    }
+
+                    val currentRideId = RiderRepository.activeRide.value?.id
+                    val res = RiderRepository.triggerSos(liveLat, liveLng, currentRideId)
+                    isDispatching = false
+                    DialogController.dismiss()
+                    if (res.isSuccess) {
+                        DialogController.showToast("🚨 SOS Broadcasted to Fleet Command & Police 112!")
+                    } else {
+                        DialogController.showToast("⚠️ SOS transmission failed. Please dial 112 directly.")
+                    }
+                }
             }
-            DialogController.dismiss()
-            DialogController.showToast("🚨 SOS Broadcasted to FastAPI & Police 112!")
-        })
+        )
         Spacer(modifier = Modifier.height(8.dp))
         NeoButton(text = "Cancel False Alarm", backgroundColor = SurfaceDark, onClick = { DialogController.dismiss() })
     }
@@ -253,37 +294,191 @@ private fun LowWalletPopup() {
 // 6. Split Fare Request
 @Composable
 private fun SplitFarePopup() {
+    val scope = rememberCoroutineScope()
+    val activeRide = RiderRepository.activeRide.value
+    val rideId = activeRide?.id ?: "ride-active"
+    val totalFare = activeRide?.fare ?: 129.0
+
+    var phoneInput by remember { mutableStateOf("+91 98112 34567, +91 98711 55441") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    val phones = remember(phoneInput) {
+        phoneInput.split(",").map { it.trim() }.filter { it.isNotBlank() }
+    }
+    val splitCount = phones.size + 1
+    val sharePerPerson = if (splitCount > 0) totalFare / splitCount else totalFare
+
     NeoCard {
         Text(text = "➗ Split Fare with Co-Riders", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Divide ₹129.00 equally with co-passengers. Each rider pays ₹43.00 via UPI.", color = TextMuted, fontSize = 13.sp)
+        Text(
+            text = "Total Trip Fare: ₹${"%.2f".format(totalFare)}. Divided among $splitCount riders (₹${"%.2f".format(sharePerPerson)} per person via UPI).",
+            color = TextMuted,
+            fontSize = 13.sp
+        )
+        Spacer(modifier = Modifier.height(14.dp))
+        NeoTextField(
+            value = phoneInput,
+            onValueChange = { phoneInput = it },
+            placeholder = "Enter co-passenger mobile numbers",
+            label = "Co-Passenger Mobile Numbers (comma separated)"
+        )
         Spacer(modifier = Modifier.height(16.dp))
-        NeoButton(text = "Send Split Requests to Contacts", backgroundColor = SapphirePrimary, onClick = {
-            val rideId = RiderRepository.activeRide.value?.id ?: "ride-active"
-            CoroutineScope(Dispatchers.IO).launch {
-                RiderRepository.configureAutoTopup(false, 0, 0) // Keep state aligned
+        NeoButton(
+            text = if (isSubmitting) "Queuing Requests..." else "Send Split Requests (${phones.size} contacts)",
+            backgroundColor = SapphirePrimary,
+            enabled = phones.isNotEmpty() && !isSubmitting,
+            onClick = {
+                isSubmitting = true
+                scope.launch {
+                    val res = RiderRepository.initiateSplitFare(rideId, phones)
+                    isSubmitting = false
+                    DialogController.dismiss()
+                    if (res.isSuccess) {
+                        DialogController.showToast("Split requests queued in FastAPI payments! ₹${"%.2f".format(sharePerPerson)} / rider.")
+                    } else {
+                        DialogController.showToast("Failed to initiate split: ${res.exceptionOrNull()?.message ?: "Check ride status"}")
+                    }
+                }
             }
-            DialogController.dismiss()
-            DialogController.showToast("Split requests queued in FastAPI payments.")
-        })
+        )
     }
 }
 
-// 7. Audio Recording Consent
+// 7. Audio Recording Consent (DPDP Act 2023 Compliant)
 @Composable
 private fun AudioRecordingConsentPopup() {
-    NeoCard {
-        Text(text = "🎙️ In-Cabin Safety Recording", color = TextWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "For commuter peace of mind, trip audio is encrypted on-device and decrypted only during formal safety investigations.", color = TextMuted, fontSize = 13.sp)
-        Spacer(modifier = Modifier.height(16.dp))
-        NeoButton(text = "Grant Safety Consent", backgroundColor = SapphirePrimary, onClick = {
-            CoroutineScope(Dispatchers.IO).launch {
-                RiderRepository.savePreferences("22°C", true)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val activeRide = RiderRepository.activeRide.collectAsState().value
+    val rideId = activeRide?.id ?: "ride-active"
+    val audioStatus = RiderRepository.audioRecordingStatus.collectAsState().value
+    val isRecordingActive = RiderRepository.isAudioRecordingActive.collectAsState().value
+
+    NeoCard(borderColor = if (isRecordingActive) CrimsonRed else SapphirePrimary) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "🎙️ In-Cabin Safety Recording",
+                color = TextWhite,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            if (isRecordingActive) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = CrimsonRed.copy(alpha = 0.2f),
+                    border = BorderStroke(1.dp, CrimsonRed)
+                ) {
+                    Text(
+                        text = "● REC ACTIVE",
+                        color = CrimsonRed,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
-            DialogController.dismiss()
-            DialogController.showToast("Audio recording consent synced with backend.")
-        })
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Under the Digital Personal Data Protection (DPDP) Act 2023, in-cabin audio recording requires mutual opt-in consent from both passenger and driver. Recordings are encrypted on-device with AES-256-GCM and retained in private storage for maximum 7 days.",
+            color = TextMuted,
+            fontSize = 12.sp,
+            lineHeight = 16.sp
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Dual-Party Status Overview
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = SurfaceDark,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = "Passenger Consent:", color = TextMuted, fontSize = 12.sp)
+                    Text(
+                        text = if (audioStatus?.passengerConsent == true) "GRANTED" else "PENDING / NOT GIVEN",
+                        color = if (audioStatus?.passengerConsent == true) EmeraldGreen else AmberGold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = "Chauffeur Consent:", color = TextMuted, fontSize = 12.sp)
+                    Text(
+                        text = if (audioStatus?.driverConsent == true) "GRANTED" else "AWAITING CHAUFFEUR",
+                        color = if (audioStatus?.driverConsent == true) EmeraldGreen else AmberGold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Actions
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            NeoButton(
+                text = "Grant Consent",
+                backgroundColor = SapphirePrimary,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val result = RiderRepository.recordAudioConsent(rideId, true)
+                        if (result.isSuccess) {
+                            val data = result.getOrNull()
+                            if (data?.dualConsentAchieved == true) {
+                                // Start recording service
+                                try {
+                                    val intent = android.content.Intent(context, com.vaisentra.mobility.rider.service.AudioSafetyRecordingService::class.java).apply {
+                                        action = com.vaisentra.mobility.rider.service.AudioSafetyRecordingService.ACTION_START_RECORDING
+                                        putExtra(com.vaisentra.mobility.rider.service.AudioSafetyRecordingService.EXTRA_RIDE_ID, rideId)
+                                        putExtra(com.vaisentra.mobility.rider.service.AudioSafetyRecordingService.EXTRA_SESSION_ID, data.sessionId)
+                                    }
+                                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                        context.startForegroundService(intent)
+                                    } else {
+                                        context.startService(intent)
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                            RiderRepository.fetchAudioConsentStatus(rideId)
+                        }
+                    }
+                    DialogController.dismiss()
+                    DialogController.showToast("Passenger audio recording consent granted.")
+                }
+            )
+
+            NeoButton(
+                text = "Withdraw / Stop",
+                backgroundColor = SurfaceDark,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    CoroutineScope(Dispatchers.IO).launch {
+                        RiderRepository.withdrawAudioConsent(rideId, "Passenger withdrew consent via safety dialog")
+                        try {
+                            val intent = android.content.Intent(context, com.vaisentra.mobility.rider.service.AudioSafetyRecordingService::class.java).apply {
+                                action = com.vaisentra.mobility.rider.service.AudioSafetyRecordingService.ACTION_STOP_RECORDING
+                            }
+                            context.stopService(intent)
+                        } catch (_: Exception) {}
+                        RiderRepository.fetchAudioConsentStatus(rideId)
+                    }
+                    DialogController.dismiss()
+                    DialogController.showToast("Safety recording stopped and consent withdrawn.")
+                }
+            )
+        }
     }
 }
 
@@ -438,18 +633,70 @@ private fun BiometricPasskeyPopup() {
 // 15. Airport Delay
 @Composable
 private fun AirportDelayPopup() {
+    val scope = rememberCoroutineScope()
+    val activeRide = RiderRepository.activeRide.value
+    var flightCode by remember { mutableStateOf(activeRide?.flightNumber ?: "6E-204") }
+    var isRescheduling by remember { mutableStateOf(false) }
+
     NeoCard(borderColor = ElectricCyan) {
         Text(text = "✈️ Flight Delay Detected", color = ElectricCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(8.dp))
-        Text(text = "Flight 6E-204 is delayed by 45 mins. Would you like to reschedule your pickup time automatically?", color = TextMuted, fontSize = 13.sp)
+        Text(
+            text = "Flight $flightCode has reported an arrival delay. Would you like to reschedule your chauffeur pickup window by +45 mins?",
+            color = TextMuted,
+            fontSize = 13.sp
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        NeoTextField(
+            value = flightCode,
+            onValueChange = { flightCode = it },
+            placeholder = "e.g. 6E-204 or AI-101",
+            label = "Inbound Flight Code"
+        )
         Spacer(modifier = Modifier.height(16.dp))
-        NeoButton(text = "Reschedule +45 Mins (Free)", backgroundColor = ElectricCyan, textColor = CanvasBlack, onClick = {
-            CoroutineScope(Dispatchers.IO).launch {
-                RiderRepository.scheduleRideBooking("Airport Terminal 3", "Noida Sector 62", "2026-11-12T18:30:00Z")
+        NeoButton(
+            text = if (isRescheduling) "Rescheduling Pickup..." else "Reschedule +45 Mins (Free)",
+            backgroundColor = ElectricCyan,
+            textColor = CanvasBlack,
+            enabled = !isRescheduling,
+            onClick = {
+                isRescheduling = true
+                scope.launch {
+                    val now = java.time.Instant.now()
+                    val newPickupTimeIso = now.plusSeconds(45 * 60).toString()
+
+                    if (activeRide != null) {
+                        val res = RiderRepository.syncFlightDelay(activeRide.id, flightCode.trim())
+                        isRescheduling = false
+                        DialogController.dismiss()
+                        if (res.isSuccess) {
+                            DialogController.showToast("Chauffeur pickup rescheduled to +45 mins via FastAPI!")
+                        } else {
+                            val res2 = RiderRepository.rescheduleRide(activeRide.id, newPickupTimeIso, "Flight delay auto-reschedule", flightCode.trim())
+                            if (res2.isSuccess) {
+                                DialogController.showToast("Chauffeur pickup rescheduled via FastAPI.")
+                            } else {
+                                DialogController.showToast("Could not reschedule ride: ${res.exceptionOrNull()?.message}")
+                            }
+                        }
+                    } else {
+                        val dest = RiderRepository.bookingDraft.value.destinationAddress.ifBlank { "Connaught Place, New Delhi" }
+                        val res = RiderRepository.scheduleRideBooking(
+                            pickup = "IGI Airport Terminal 3 VIP Hub",
+                            dest = dest,
+                            pickupTimeIso = newPickupTimeIso
+                        )
+                        isRescheduling = false
+                        DialogController.dismiss()
+                        if (res.isSuccess) {
+                            DialogController.showToast("New airport pickup scheduled for delayed flight $flightCode.")
+                        } else {
+                            DialogController.showToast("Booking failed: ${res.exceptionOrNull()?.message}")
+                        }
+                    }
+                }
             }
-            DialogController.dismiss()
-            DialogController.showToast("Chauffeur pickup rescheduled to 18:30 via FastAPI.")
-        })
+        )
     }
 }
 

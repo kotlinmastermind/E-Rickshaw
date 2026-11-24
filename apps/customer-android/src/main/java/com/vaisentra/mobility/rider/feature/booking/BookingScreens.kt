@@ -570,16 +570,28 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
                             }
                         }
                     }
+                // In BookingScreens.kt (DestinationSearchScreen)
                 } else if (!isSearching) {
                     item {
                         NeoCard(
                             modifier = Modifier.clickable {
-                                RiderRepository.updateDestination(
-                                    query.trim(),
-                                    bookingDraft.pickupLat + 0.015,
-                                    bookingDraft.pickupLng + 0.015
-                                )
-                                onNavigate("fare_matrix")
+                                isSearching = true
+                                kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+                                    val resolved = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                        RiderRepository.resolveDestinationCoordinates(
+                                            query.trim(),
+                                            bookingDraft.pickupLat,
+                                            bookingDraft.pickupLng
+                                        )
+                                    }
+                                    isSearching = false
+                                    RiderRepository.updateDestination(
+                                        resolved.full_address,
+                                        resolved.latitude,
+                                        resolved.longitude
+                                    )
+                                    onNavigate("fare_matrix")
+                                }
                             },
                             cornerRadius = 14.dp
                         ) {
@@ -587,52 +599,79 @@ fun DestinationSearchScreen(onNavigate: (String) -> Unit) {
                                 Text(text = "🧭", fontSize = 18.sp)
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = "Set destination: \"${query.trim()}\"", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                    Text(text = "Tap to continue with custom pin", color = TextMuted, fontSize = 11.sp)
+                                    Text(
+                                        text = "Search landmark: \"${query.trim()}\"",
+                                        color = TextWhite,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Resolve real GPS location & calculate fare",
+                                        color = ElectricCyan,
+                                        fontSize = 11.sp
+                                    )
                                 }
-                                Text(text = "Go →", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(text = "Go →", color = EmeraldGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             } else {
-                items(savedPlaces) { place ->
-                    NeoCard(
-                        modifier = Modifier.clickable {
-                            RiderRepository.updateDestination(place.address, place.latitude, place.longitude)
-                            onNavigate("fare_matrix")
-                        },
-                        cornerRadius = 14.dp
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(SapphireGlow),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = when (place.tag) {
-                                        "HOME" -> "🏠"
-                                        "WORK" -> "💼"
-                                        "AIRPORT" -> "✈️"
-                                        else -> "🚇"
-                                    },
-                                    fontSize = 16.sp
-                                )
+                // When query < 2 chars, render real saved places from database
+                if (savedPlaces.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No saved places found in database.\nSearch destination above to plan your ride.",
+                                color = TextMuted,
+                                fontSize = 12.sp,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    items(savedPlaces) { place ->
+                        NeoCard(
+                            modifier = Modifier.clickable {
+                                RiderRepository.updateDestination(place.address, place.latitude, place.longitude)
+                                onNavigate("fare_matrix")
+                            },
+                            cornerRadius = 14.dp
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(SapphireGlow),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = when (place.tag.uppercase()) {
+                                            "HOME" -> "🏠"
+                                            "WORK" -> "💼"
+                                            "AIRPORT" -> "✈️"
+                                            else -> "📍"
+                                        },
+                                        fontSize = 16.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(text = place.name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text(text = place.address, color = TextMuted, fontSize = 12.sp, maxLines = 1)
+                                }
+                                Text(text = "Select →", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(text = place.name, color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                Text(text = place.address, color = TextMuted, fontSize = 12.sp, maxLines = 1)
-                            }
-                            Text(text = "Select →", color = ElectricCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
-        }
     }
 }
 
@@ -841,11 +880,17 @@ fun MultiStopRouteScreen(onNavigate: (String) -> Unit) {
 fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val bookingDraft by RiderRepository.bookingDraft.collectAsState()
+    val corpAccount by RiderRepository.corporateAccount.collectAsState()
+    var isCorporateBilling by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf(bookingDraft.selectedCategoryCode) }
     var fareComparisons by remember { mutableStateOf<List<com.vaisentra.mobility.rider.data.VehicleFareComparisonDto>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isNetworkError by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchCorporateAccount()
+    }
 
     val loadFares: () -> Unit = {
         scope.launch {
@@ -1122,6 +1167,41 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
                     )
                 }
 
+                if (corpAccount?.status in listOf("APPROVED", "ACTIVE")) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceDark)
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (!isCorporateBilling) SapphirePrimary else Color.Transparent)
+                                .clickable { isCorporateBilling = false }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("👤 Personal Ride", color = if (!isCorporateBilling) TextWhite else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isCorporateBilling) ElectricCyan else Color.Transparent)
+                                .clickable { isCorporateBilling = true }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🏢 Corporate Ride", color = if (isCorporateBilling) CanvasBlack else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
 
                 var isBooking by remember { mutableStateOf(false) }
@@ -1135,14 +1215,15 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
                     isLoading -> "Calculating Live Fare..."
                     errorMessage != null -> "Fare Unavailable — Retry Above"
                     fareComparisons.isEmpty() -> "Tariffs Not Configured"
+                    isCorporateBilling -> "Book Corporate $selectedTierName"
                     else -> "Book $selectedTierName"
                 }
 
                 NeoButton(
                     text = buttonText,
                     enabled = canBook && !isBooking,
-                    backgroundColor = if (canBook) SapphirePrimary else SurfaceCard,
-                    textColor = if (canBook) TextWhite else TextDim,
+                    backgroundColor = if (canBook) (if (isCorporateBilling) ElectricCyan else SapphirePrimary) else SurfaceCard,
+                    textColor = if (canBook) (if (isCorporateBilling) CanvasBlack else TextWhite) else TextDim,
                     onClick = {
                         if (!canBook || isBooking) return@NeoButton
                         scope.launch {
@@ -1152,6 +1233,9 @@ fun VehicleFareMatrixScreen(onNavigate: (String) -> Unit) {
                                 destinationAddress = destTitle,
                                 categoryId = selectedTier?.categoryId ?: selectedCategory,
                                 estimateId = selectedTier?.estimate?.estimateId,
+                                paymentMethod = if (isCorporateBilling) "CORPORATE_BILLING" else bookingDraft.paymentMethod,
+                                bookingMode = if (isCorporateBilling) "CORPORATE_BILLING" else "STANDARD",
+                                businessCostCenter = if (isCorporateBilling) corpAccount?.membership?.costCenter ?: corpAccount?.defaultCostCenter else null,
                                 pickupLat = bookingDraft.pickupLat,
                                 pickupLng = bookingDraft.pickupLng,
                                 destLat = bookingDraft.destinationLat,

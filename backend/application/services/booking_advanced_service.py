@@ -28,7 +28,7 @@ from fastapi import HTTPException, status
 from backend.domain.models import (
     Ride, RideStop, CustomerProfile, User, DriverProfile, FareEstimate,
     FareRule, RecurringRideSchedule, TripTemplate, UserDependent,
-    RideStatusEvent
+    RideStatusEvent, RideRescheduleLog
 )
 from backend.application.services.ride_service import RideService
 from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
@@ -163,6 +163,30 @@ class BookingAdvancedService:
         ride.dependent_id = dependent_id
         ride.shared_location_source = shared_location_source
 
+        # Corporate Billing Validation & Policy Enforcement
+        if booking_mode in ("CORPORATE_BILLING", "BUSINESS_EXPENSE") or payment_method == "CORPORATE_BILLING":
+            from backend.application.services.corporate_billing_service import CorporateBillingService
+            corp_svc = CorporateBillingService(self.db)
+            try:
+                corp_meta = await corp_svc.validate_and_apply_corporate_ride(
+                    customer_user_id=customer_user_id,
+                    category_id=category_id,
+                    estimated_fare_cents=ride.estimated_fare_cents,
+                    business_cost_center=business_cost_center
+                )
+                ride.corporate_id = corp_meta["corporate_id"]
+                ride.corporate_employee_id = corp_meta["corporate_employee_id"]
+                ride.corporate_approval_status = corp_meta["corporate_approval_status"]
+                ride.business_cost_center = corp_meta["business_cost_center"]
+                ride.business_tax_id = corp_meta["business_tax_id"]
+                ride.corporate_billing_ref = corp_meta["corporate_billing_ref"]
+                ride.booking_mode = "CORPORATE_BILLING"
+                ride.payment_method = "CORPORATE_BILLING"
+            except Exception:
+                await self.db.delete(ride)
+                await self.db.commit()
+                raise
+
         # Part 3 Bespoke Ride Customizations (Features 53-75)
         ride.child_seat_requested = child_seat_requested
         ride.child_seat_type = child_seat_type
@@ -270,7 +294,7 @@ class BookingAdvancedService:
         await self.db.refresh(ride)
 
         # Trigger Smart Dispatch Engine immediately for on-demand ride booking
-        if not is_scheduled:
+        if not is_scheduled and getattr(ride, "corporate_approval_status", "APPROVED") != "PENDING_APPROVAL":
             try:
                 import asyncio
                 asyncio.create_task(RideService._background_dispatch(ride.id))
@@ -289,6 +313,9 @@ class BookingAdvancedService:
             "passenger_name": ride.passenger_name,
             "passenger_phone": ride.passenger_phone,
             "booking_mode": ride.booking_mode,
+            "corporate_id": ride.corporate_id,
+            "corporate_billing_ref": ride.corporate_billing_ref,
+            "corporate_approval_status": ride.corporate_approval_status,
             "flight_number": ride.flight_number,
             "flight_delay_minutes": ride.flight_delay_minutes,
             "flight_status": ride.flight_status,
@@ -430,7 +457,7 @@ class BookingAdvancedService:
             "delay_mitigated": True
         }
 
-    async def sync_flight_delay_to_ride(self, ride_id: str, flight_number: str) -> Dict[str, Any]:
+    async def sync_flight_delay_to_ride(self, ride_id: str, flight_number: str, user_id: Optional[str] = None) -> Dict[str, Any]:
         ride = await self.db.get(Ride, ride_id)
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
@@ -442,19 +469,98 @@ class BookingAdvancedService:
         new_delay = flight_data["delay_minutes"]
         ride.flight_delay_minutes = new_delay
 
+        old_scheduled_time = ride.scheduled_pickup_time
         # Adjust scheduled pickup time forward if delay shifted
         diff_delay = new_delay - old_delay
         if diff_delay != 0 and ride.scheduled_pickup_time:
             ride.scheduled_pickup_time += timedelta(minutes=diff_delay)
+
+        log = RideRescheduleLog(
+            ride_id=ride.id,
+            requested_by_user_id=user_id or ride.customer_id,
+            previous_scheduled_time=old_scheduled_time,
+            new_scheduled_time=ride.scheduled_pickup_time or datetime.now(timezone.utc),
+            delay_minutes=new_delay,
+            flight_number=flight_data["flight_number"],
+            reason=f"Flight delay auto-sync ({flight_data['status']}: +{new_delay} mins)"
+        )
+        self.db.add(log)
 
         await self.db.commit()
         await self.db.refresh(ride)
         return {
             "ride_id": ride.id,
             "flight_number": ride.flight_number,
+            "airline_name": flight_data.get("airline_name"),
             "flight_status": ride.flight_status,
             "delay_minutes": ride.flight_delay_minutes,
-            "adjusted_pickup_time": ride.scheduled_pickup_time.isoformat() if ride.scheduled_pickup_time else None
+            "previous_pickup_time": old_scheduled_time.isoformat() if old_scheduled_time else None,
+            "adjusted_pickup_time": ride.scheduled_pickup_time.isoformat() if ride.scheduled_pickup_time else None,
+            "status": "RESCHEDULED" if diff_delay != 0 else "ON_TIME"
+        }
+
+    async def reschedule_ride(
+        self,
+        ride_id: str,
+        user_id: str,
+        new_pickup_time: datetime,
+        reason: Optional[str] = None,
+        flight_number: Optional[str] = None
+    ) -> Dict[str, Any]:
+        ride = await self.db.get(Ride, ride_id)
+        if not ride:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+        if ride.customer_id != user_id:
+            customer_prof = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user_id))).scalar_one_or_none()
+            if not customer_prof or ride.customer_id != customer_prof.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to reschedule this ride.")
+
+        if ride.status in ("COMPLETED", "CANCELLED"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot reschedule ride with status {ride.status}.")
+
+        now = datetime.now(timezone.utc)
+        if new_pickup_time <= now:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New scheduled pickup time must be in the future.")
+
+        old_pickup_time = ride.scheduled_pickup_time
+        ride.scheduled_pickup_time = new_pickup_time
+
+        shift_mins = int((new_pickup_time - old_pickup_time).total_seconds() / 60) if old_pickup_time else 0
+        delay_mins = max(0, shift_mins)
+
+        if flight_number:
+            flight_data = await self.get_flight_status_data(flight_number)
+            ride.flight_number = flight_data["flight_number"]
+            ride.flight_status = flight_data["status"]
+            ride.flight_delay_minutes = flight_data["delay_minutes"]
+            if delay_mins == 0:
+                delay_mins = flight_data["delay_minutes"]
+
+        log = RideRescheduleLog(
+            ride_id=ride.id,
+            requested_by_user_id=user_id,
+            previous_scheduled_time=old_pickup_time,
+            new_scheduled_time=new_pickup_time,
+            delay_minutes=delay_mins,
+            flight_number=flight_number,
+            reason=reason or "Rider requested schedule adjustment"
+        )
+        self.db.add(log)
+
+        await self.db.commit()
+        await self.db.refresh(ride)
+
+        return {
+            "ride_id": ride.id,
+            "status": "RESCHEDULED",
+            "previous_pickup_time": old_pickup_time.isoformat() if old_pickup_time else None,
+            "scheduled_pickup_time": ride.scheduled_pickup_time.isoformat(),
+            "flight_number": ride.flight_number,
+            "flight_status": ride.flight_status,
+            "delay_minutes": delay_mins,
+            "flight_delay_minutes": ride.flight_delay_minutes,
+            "message": f"Pickup rescheduled to {ride.scheduled_pickup_time.isoformat()}."
         }
 
     # ---------------------------------------------------------
