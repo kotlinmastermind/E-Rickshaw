@@ -26,6 +26,12 @@ VALID_PAYMENT_TRANSITIONS = {
     "EXPIRED": set(),
 }
 
+def validate_payment_transition(current_status: str, target_status: str) -> bool:
+    if current_status == target_status:
+        return True
+    allowed = VALID_PAYMENT_TRANSITIONS.get(current_status, set())
+    return target_status in allowed
+
 class PaymentService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -47,6 +53,10 @@ class PaymentService:
         """
         if payment.status == "CAPTURED":
             return {"status": "ALREADY_PROCESSED", "payment_id": payment.id}
+
+        if not validate_payment_transition(payment.status, "CAPTURED"):
+            logger.warning(f"Invalid payment state transition attempted: {payment.status} -> CAPTURED for payment {payment.id}")
+            raise ValueError(f"Invalid payment state transition: cannot transition from {payment.status} to CAPTURED")
 
         payment.status = "CAPTURED"
         payment.provider_payment_id = provider_payment_id
@@ -125,7 +135,12 @@ class PaymentService:
                         )
                         self.db.add(earn_entry)
 
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Database commit failed during finalize_payment_capture: {e}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during payment capture persistence.")
         return {
             "status": "CAPTURED",
             "payment_id": payment.id,
@@ -343,16 +358,16 @@ class PaymentService:
 
         # Handle lifecycle events with strict state machine and separation of AUTHORIZED vs CAPTURED
         if webhook_event == "payment.failed":
-            if payment.status in ["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"]:
-                logger.warning(f"Ignoring stale payment.failed for already captured payment {payment.id}")
+            if not validate_payment_transition(payment.status, "FAILED"):
+                logger.warning(f"Ignoring invalid transition to FAILED from {payment.status} for payment {payment.id}")
             else:
                 payment.status = "FAILED"
                 payment.provider_payment_id = payment_id_from_entity
 
         elif webhook_event == "payment.authorized":
             # Keep as AUTHORIZED, do NOT mark as CAPTURED; ignore if already captured
-            if payment.status in ["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"]:
-                logger.info(f"Ignoring payment.authorized for already captured payment {payment.id}")
+            if not validate_payment_transition(payment.status, "AUTHORIZED"):
+                logger.info(f"Ignoring invalid transition to AUTHORIZED from {payment.status} for payment {payment.id}")
             else:
                 payment.status = "AUTHORIZED"
                 payment.provider_payment_id = payment_id_from_entity
@@ -370,7 +385,13 @@ class PaymentService:
             )
             if existing_inbox and hasattr(existing_inbox, "event_digest"):
                 existing_inbox.status = "PROCESSED"
-            await self.db.commit()
+            try:
+                await self.db.commit()
+            except Exception as e:
+                await self.db.rollback()
+                logger.error(f"Database commit failed during finalize_payment_capture webhook: {e}")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during payment capture webhook persistence.")
+
             if fin_result.get("status") == "ALREADY_PROCESSED":
                 return {
                     "status": "ALREADY_PROCESSED",
@@ -404,6 +425,23 @@ class PaymentService:
             # 1. Handle refund.failed: records failure without clawback or payment balance mutation
             if webhook_event == "refund.failed" or gateway_status == "failed":
                 if existing_refund:
+                    if existing_refund.status == "CREDITED":
+                        logger.warning(f"Rejecting refund.failed transition for refund {existing_refund.id} already CREDITED")
+                        if existing_inbox and hasattr(existing_inbox, "event_digest"):
+                            existing_inbox.status = "PROCESSED"
+                        try:
+                            await self.db.commit()
+                        except Exception as e:
+                            await self.db.rollback()
+                            logger.error(f"Database commit failed during refund rejection: {e}")
+                            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during refund rejection persistence.")
+                        return {
+                            "status": "REJECTED_STATE_TRANSITION",
+                            "event": webhook_event,
+                            "payment_id": payment.id,
+                            "refund_id": refund_id,
+                            "message": "Cannot transition CREDITED refund to FAILED."
+                        }
                     existing_refund.status = "FAILED"
                 else:
                     new_refund = PaymentRefund(
@@ -419,7 +457,13 @@ class PaymentService:
                     self.db.add(new_refund)
                 if existing_inbox and hasattr(existing_inbox, "event_digest"):
                     existing_inbox.status = "PROCESSED"
-                await self.db.commit()
+                try:
+                    await self.db.commit()
+                except Exception as e:
+                    await self.db.rollback()
+                    logger.error(f"Database commit failed during refund.failed webhook: {e}")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during refund webhook persistence.")
+
                 return {
                     "status": "REFUND_FAILED",
                     "event": webhook_event,
@@ -430,6 +474,23 @@ class PaymentService:
 
             # 2. Handle refund.created / pending: records pending state without premature financial clawback
             if (webhook_event == "refund.created" or gateway_status == "pending") and webhook_event != "refund.processed":
+                if existing_refund and existing_refund.status == "CREDITED":
+                    logger.warning(f"Ignoring {webhook_event} for refund {existing_refund.id} already CREDITED")
+                    if existing_inbox and hasattr(existing_inbox, "event_digest"):
+                        existing_inbox.status = "PROCESSED"
+                    try:
+                        await self.db.commit()
+                    except Exception as e:
+                        await self.db.rollback()
+                        logger.error(f"Database commit failed during refund.created: {e}")
+                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during refund webhook persistence.")
+                    return {
+                        "status": "ALREADY_PROCESSED",
+                        "event": webhook_event,
+                        "payment_id": payment.id,
+                        "refund_id": refund_id,
+                        "message": "Refund is already CREDITED."
+                    }
                 if not existing_refund:
                     pending_refund = PaymentRefund(
                         payment_id=payment.id,
@@ -444,7 +505,13 @@ class PaymentService:
                     self.db.add(pending_refund)
                 if existing_inbox and hasattr(existing_inbox, "event_digest"):
                     existing_inbox.status = "PROCESSED"
-                await self.db.commit()
+                try:
+                    await self.db.commit()
+                except Exception as e:
+                    await self.db.rollback()
+                    logger.error(f"Database commit failed during refund.created webhook: {e}")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during refund webhook persistence.")
+
                 return {
                     "status": "REFUND_PENDING",
                     "event": webhook_event,
@@ -457,7 +524,12 @@ class PaymentService:
             if existing_refund and existing_refund.status == "CREDITED":
                 if existing_inbox and hasattr(existing_inbox, "event_digest"):
                     existing_inbox.status = "PROCESSED"
-                await self.db.commit()
+                try:
+                    await self.db.commit()
+                except Exception as e:
+                    await self.db.rollback()
+                    logger.error(f"Database commit failed during idempotent refund webhook: {e}")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during refund webhook persistence.")
                 return {
                     "status": "ALREADY_PROCESSED",
                     "event": webhook_event,
@@ -466,10 +538,47 @@ class PaymentService:
                     "message": "Refund event was previously processed idempotently."
                 }
 
-            # Enforce non-exceedance of captured payment amount
+            # Enforce non-exceedance of captured payment amount (Critical-1)
             current_refunded = payment.refunded_amount_cents or 0
             remaining_refundable = max(0, payment.amount_cents - current_refunded)
             applied_refund = min(raw_refund_amount, remaining_refundable) if remaining_refundable > 0 else 0
+
+            if applied_refund <= 0:
+                logger.warning(
+                    f"Excess refund or non-positive refund amount detected for payment {payment.id}. "
+                    f"raw_refund_amount={raw_refund_amount}, remaining_refundable={remaining_refundable}, "
+                    f"payment.amount_cents={payment.amount_cents}, current_refunded={current_refunded}"
+                )
+                if not existing_refund:
+                    anomaly_refund = PaymentRefund(
+                        payment_id=payment.id,
+                        ride_id=payment.ride_id,
+                        customer_id=payment.customer_id,
+                        amount_cents=0,
+                        is_partial=False,
+                        reason=f"ANOMALY: Refund amount {raw_refund_amount} exceeds remaining refundable ceiling {remaining_refundable}",
+                        status="ANOMALY_EXCESS",
+                        arn_reference=refund_id
+                    )
+                    self.db.add(anomaly_refund)
+                if existing_inbox and hasattr(existing_inbox, "event_digest"):
+                    existing_inbox.status = "PROCESSED"
+                try:
+                    await self.db.commit()
+                except Exception as e:
+                    await self.db.rollback()
+                    logger.error(f"Database commit failed during anomaly refund webhook: {e}")
+                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during refund webhook persistence.")
+
+                return {
+                    "status": "ANOMALY_EXCESS_REFUND",
+                    "event": webhook_event,
+                    "payment_id": payment.id,
+                    "refund_id": refund_id,
+                    "raw_refund_amount": raw_refund_amount,
+                    "remaining_refundable": remaining_refundable,
+                    "message": "Refund ignored because it exceeds the remaining captured payment amount."
+                }
 
             payment.refunded_amount_cents = current_refunded + applied_refund
             if payment.refunded_amount_cents >= payment.amount_cents:
@@ -480,14 +589,14 @@ class PaymentService:
             # Update or persist explicit PaymentRefund audit record
             if existing_refund:
                 existing_refund.status = "CREDITED"
-                existing_refund.amount_cents = applied_refund if applied_refund > 0 else raw_refund_amount
+                existing_refund.amount_cents = applied_refund
                 existing_refund.is_partial = (payment.status == "PARTIALLY_REFUNDED")
             else:
                 new_refund = PaymentRefund(
                     payment_id=payment.id,
                     ride_id=payment.ride_id,
                     customer_id=payment.customer_id,
-                    amount_cents=applied_refund if applied_refund > 0 else raw_refund_amount,
+                    amount_cents=applied_refund,
                     is_partial=(payment.status == "PARTIALLY_REFUNDED"),
                     reason=f"Authoritative webhook refund ({webhook_event})",
                     status="CREDITED",
@@ -496,7 +605,7 @@ class PaymentService:
                 self.db.add(new_refund)
 
             # If this is a wallet topup refund, execute durable clawback/liability tracking
-            if getattr(payment, "purpose", None) == "WALLET_TOPUP" and raw_refund_amount > 0:
+            if getattr(payment, "purpose", None) == "WALLET_TOPUP" and applied_refund > 0:
                 topup_user_id = payment.user_id
                 if not topup_user_id and payment.customer_id:
                     cust_prof = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.id == payment.customer_id))).scalar_one_or_none()
@@ -508,7 +617,7 @@ class PaymentService:
                     clawback_res = await WalletService.process_refund_clawback(
                         session=self.db,
                         user_id=topup_user_id,
-                        refund_amount_cents=applied_refund if applied_refund > 0 else raw_refund_amount,
+                        refund_amount_cents=applied_refund,
                         payment_id=payment.id,
                         gateway_refund_id=refund_id,
                         idempotency_key=refund_idem_key
@@ -519,8 +628,10 @@ class PaymentService:
             existing_inbox.status = "PROCESSED"
         try:
             await self.db.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Database commit failed during webhook processing: {e}", extra={"payment_id": payment.id if payment else None, "event": webhook_event})
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during payment webhook persistence.")
 
         return {
             "status": "SUCCESS",

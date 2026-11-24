@@ -895,3 +895,511 @@ async def test_admin_direct_api_rbac_and_compensation_authorization(db_session):
         assert comp_data["amount_rupees"] == 250.0
 
 
+@pytest.mark.asyncio
+async def test_refund_ceiling_bypass_anomaly_and_zero_fallback(db_session):
+    """
+    CRITICAL-1 Verification:
+    Payment refunded_amount_cents must never exceed payment.amount_cents.
+    Excess refunds beyond captured ceiling must record ANOMALY_EXCESS,
+    return ANOMALY_EXCESS_REFUND, and never claw back wallet balance or accrue debt.
+    """
+    user_id = str(uuid.uuid4())
+    user = User(
+        id=user_id,
+        phone_number=f"+9196{uuid.uuid4().int % 100000000:08d}",
+        full_name="Ceiling User",
+        role="customer"
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    # User starts with ₹50 in wallet
+    await WalletService.credit_wallet(
+        session=db_session,
+        user_id=user_id,
+        amount_cents=5000,
+        transaction_type="CREDIT",
+        source="TOP_UP",
+        description="Initial balance"
+    )
+
+    payment = Payment(
+        user_id=user_id,
+        amount_cents=10000,  # ₹100 captured
+        currency="INR",
+        purpose="WALLET_TOPUP",
+        status="CAPTURED",
+        provider_name="RAZORPAY",
+        provider_payment_id=f"pay_ceil_{user_id[:8]}",
+        provider_order_id=f"order_ceil_{user_id[:8]}",
+        idempotency_key=f"ceil_key_{user_id}"
+    )
+    db_session.add(payment)
+    await db_session.commit()
+
+    secret = "whsec_test_ceil_2026"
+    provider = get_payment_provider()
+    orig_wh = provider.webhook_secret
+    provider.webhook_secret = secret
+
+    try:
+        service = PaymentService(db_session)
+
+        # 1. First refund: ₹70 (7,000 cents) -> leaves ₹30 refundable
+        p1 = {
+            "event": "refund.processed",
+            "payload": {
+                "payment": {"entity": {"id": payment.provider_payment_id, "amount": 10000}},
+                "refund": {"entity": {"id": f"rfnd_c1_{uuid.uuid4().hex[:6]}", "amount": 7000}}
+            }
+        }
+        b1 = json.dumps(p1).encode("utf-8")
+        r1 = await service.process_webhook(b1, _generate_webhook_signature(b1, secret))
+        assert r1["status"] == "SUCCESS"
+        await db_session.refresh(payment)
+        assert payment.refunded_amount_cents == 7000
+        assert payment.status == "PARTIALLY_REFUNDED"
+
+        # 2. Second refund: ₹50 (5,000 cents) -> exceeds remaining ₹30! Clamped to ₹30!
+        p2 = {
+            "event": "refund.processed",
+            "payload": {
+                "payment": {"entity": {"id": payment.provider_payment_id, "amount": 10000}},
+                "refund": {"entity": {"id": f"rfnd_c2_{uuid.uuid4().hex[:6]}", "amount": 5000}}
+            }
+        }
+        b2 = json.dumps(p2).encode("utf-8")
+        r2 = await service.process_webhook(b2, _generate_webhook_signature(b2, secret))
+        assert r2["status"] == "SUCCESS"
+        await db_session.refresh(payment)
+        assert payment.refunded_amount_cents == 10000  # Exactly 10000, not 12000!
+        assert payment.status == "REFUNDED"
+
+        # Record wallet balance after valid refunds
+        w_after = await WalletService.get_or_create_wallet(db_session, user_id)
+        balance_before_excess = w_after.balance_cents
+        debt_before_excess = w_after.debt_cents
+
+        # 3. Third refund: ₹20 (2,000 cents) when payment is already fully refunded!
+        # Must NOT fallback to raw_refund_amount, must NOT debit wallet, must record anomaly
+        p3 = {
+            "event": "refund.processed",
+            "payload": {
+                "payment": {"entity": {"id": payment.provider_payment_id, "amount": 10000}},
+                "refund": {"entity": {"id": f"rfnd_c3_excess_{uuid.uuid4().hex[:6]}", "amount": 2000}}
+            }
+        }
+        b3 = json.dumps(p3).encode("utf-8")
+        r3 = await service.process_webhook(b3, _generate_webhook_signature(b3, secret))
+        assert r3["status"] == "ANOMALY_EXCESS_REFUND"
+
+        # Invariant checks: refunded cents strictly clamped, wallet balance & debt unchanged
+        await db_session.refresh(payment)
+        assert payment.refunded_amount_cents == 10000
+        await db_session.refresh(w_after)
+        assert w_after.balance_cents == balance_before_excess
+        assert w_after.debt_cents == debt_before_excess
+
+        # Verify explicit anomaly record in PaymentRefund
+        anomaly_stmt = select(PaymentRefund).where(
+            PaymentRefund.payment_id == payment.id,
+            PaymentRefund.status == "ANOMALY_EXCESS"
+        )
+        anomaly = (await db_session.execute(anomaly_stmt)).scalar_one_or_none()
+        assert anomaly is not None
+        assert "exceeds remaining refundable ceiling" in anomaly.reason
+    finally:
+        provider.webhook_secret = orig_wh
+
+
+@pytest.mark.asyncio
+async def test_webhook_commit_failure_raises_500_and_rolls_back(db_session):
+    """
+    CRITICAL-2 Verification:
+    Database commit failures during webhook processing must never be suppressed.
+    Must perform rollback and raise HTTPException 500 to signal gateway retry.
+    """
+    from fastapi import HTTPException
+    user_id = str(uuid.uuid4())
+    user = User(
+        id=user_id,
+        phone_number=f"+9195{uuid.uuid4().int % 100000000:08d}",
+        full_name="Commit Fail User",
+        role="customer"
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    payment = Payment(
+        user_id=user_id,
+        amount_cents=5000,
+        currency="INR",
+        purpose="WALLET_TOPUP",
+        status="CREATED",
+        provider_name="RAZORPAY",
+        provider_payment_id=f"pay_fail_{user_id[:8]}",
+        provider_order_id=f"order_fail_{user_id[:8]}",
+        idempotency_key=f"fail_key_{user_id}"
+    )
+    db_session.add(payment)
+    await db_session.commit()
+
+    secret = "whsec_test_commit_fail_2026"
+    provider = get_payment_provider()
+    orig_wh = provider.webhook_secret
+    provider.webhook_secret = secret
+
+    payload = {
+        "event": "payment.captured",
+        "payload": {
+            "payment": {
+                "entity": {
+                    "id": payment.provider_payment_id,
+                    "order_id": payment.provider_order_id,
+                    "amount": 5000,
+                    "status": "captured"
+                }
+            }
+        }
+    }
+    raw_body = json.dumps(payload).encode("utf-8")
+    sig = _generate_webhook_signature(raw_body, secret)
+
+    # Monkeypatch db_session.commit to raise operational error
+    original_commit = db_session.commit
+    async def failing_commit():
+        raise RuntimeError("Database connection terminated abruptly")
+
+    db_session.commit = failing_commit
+    try:
+        service = PaymentService(db_session)
+        with pytest.raises(HTTPException) as exc_info:
+            await service.process_webhook(raw_body, sig)
+        assert exc_info.value.status_code == 500
+        assert "Database commit failure" in exc_info.value.detail
+    finally:
+        db_session.commit = original_commit
+        provider.webhook_secret = orig_wh
+
+
+@pytest.mark.asyncio
+async def test_driver_payout_uses_driver_wallet_and_driver_ledger(db_session):
+    """
+    CRITICAL-3 Verification:
+    Driver payouts must be debited from DriverWallet and tracked in DriverLedgerEntry,
+    never using customer Wallet.
+    """
+    from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
+    from backend.application.services.admin_advanced_service import AdminAdvancedService
+
+    driver_user = User(
+        phone_number=f"+9188{uuid.uuid4().hex[:8]}",
+        full_name="Driver Payout Test",
+        role="driver"
+    )
+    db_session.add(driver_user)
+    await db_session.flush()
+
+    driver_prof = DriverProfile(
+        user_id=driver_user.id,
+        license_number=f"DL{uuid.uuid4().hex[:10].upper()}",
+        approval_status="APPROVED"
+    )
+    db_session.add(driver_prof)
+    await db_session.flush()
+
+    # Credit DriverWallet with ₹500 (50,000 cents)
+    d_wallet = DriverWallet(
+        driver_id=driver_prof.id,
+        balance_cents=50000,
+        currency="INR"
+    )
+    db_session.add(d_wallet)
+    await db_session.commit()
+
+    # 1. Request payout of ₹200 (20,000 cents)
+    payout = await DispatchAdvancedService.request_payout(
+        session=db_session,
+        driver_id_or_user_id=driver_prof.id,
+        amount_cents=20000,
+        bank_details={"account_number_mask": "HDFC *******1234"}
+    )
+    assert payout.id is not None
+    assert payout.status == "REQUESTED"
+    assert payout.amount_cents == 20000
+
+    # Verify DriverWallet balance reduced to ₹300 (30,000 cents)
+    await db_session.refresh(d_wallet)
+    assert d_wallet.balance_cents == 30000
+
+    # Verify DriverLedgerEntry exists with PAYOUT_HOLD
+    hold_entry_stmt = select(DriverLedgerEntry).where(
+        DriverLedgerEntry.driver_id == driver_prof.id,
+        DriverLedgerEntry.category == "PAYOUT_HOLD",
+        DriverLedgerEntry.reference_id == payout.id
+    )
+    hold_entry = (await db_session.execute(hold_entry_stmt)).scalar_one_or_none()
+    assert hold_entry is not None
+    assert hold_entry.amount_cents == 20000
+    assert hold_entry.balance_after_cents == 30000
+
+    # Verify customer Wallet was NEVER touched (no Wallet record for driver_user.id)
+    cust_wallet = (await db_session.execute(select(Wallet).where(Wallet.user_id == driver_user.id))).scalar_one_or_none()
+    assert cust_wallet is None
+
+    # 2. Admin approves payout
+    admin_id = str(uuid.uuid4())
+    approved_payout = await AdminAdvancedService.approve_payout(
+        session=db_session,
+        payout_id=payout.id,
+        admin_user_id=admin_id
+    )
+    assert approved_payout.status == "APPROVED"
+
+    # 3. Create second payout of ₹100 (10,000 cents) and test rejection reversal
+    payout2 = await DispatchAdvancedService.request_payout(
+        session=db_session,
+        driver_id_or_user_id=driver_prof.id,
+        amount_cents=10000,
+        bank_details={"account_number_mask": "HDFC *******1234"}
+    )
+    await db_session.refresh(d_wallet)
+    assert d_wallet.balance_cents == 20000
+
+    # Reject payout2 -> balance restored to 30,000 cents
+    rejected_payout = await AdminAdvancedService.reject_payout(
+        session=db_session,
+        payout_id=payout2.id,
+        admin_user_id=admin_id,
+        rejection_reason="Incorrect IFSC code"
+    )
+    assert rejected_payout.status == "REJECTED"
+    await db_session.refresh(d_wallet)
+    assert d_wallet.balance_cents == 30000
+
+    # Verify DriverLedgerEntry reversal
+    rev_entry_stmt = select(DriverLedgerEntry).where(
+        DriverLedgerEntry.driver_id == driver_prof.id,
+        DriverLedgerEntry.category == "PAYOUT_REVERSAL",
+        DriverLedgerEntry.reference_id == payout2.id
+    )
+    rev_entry = (await db_session.execute(rev_entry_stmt)).scalar_one_or_none()
+    assert rev_entry is not None
+    assert rev_entry.amount_cents == 10000
+    assert rev_entry.balance_after_cents == 30000
+
+
+@pytest.mark.asyncio
+async def test_driver_payout_history_query_matches_driver_profile_id(db_session):
+    """
+    MEDIUM-2 Verification:
+    Driver payout history queries by DriverProfile.id (not User.id),
+    correcting the ID mismatch.
+    """
+    from backend.domain.models import DriverPayoutRequest
+    driver_user = User(
+        phone_number=f"+9187{uuid.uuid4().hex[:8]}",
+        full_name="Driver Payout Hist Test",
+        role="driver",
+        is_active=True
+    )
+    db_session.add(driver_user)
+    await db_session.flush()
+
+    driver_prof = DriverProfile(
+        user_id=driver_user.id,
+        license_number=f"DL{uuid.uuid4().hex[:10].upper()}",
+        approval_status="APPROVED"
+    )
+    db_session.add(driver_prof)
+    await db_session.flush()
+
+    payout = DriverPayoutRequest(
+        driver_id=driver_prof.id,  # Stored by DriverProfile.id
+        amount_cents=15000,
+        status="REQUESTED",
+        bank_account_masked="SBI *******4321",
+        idempotency_key=f"payout_hist_{uuid.uuid4().hex}"
+    )
+    db_session.add(payout)
+
+    d_session = Session(
+        id=str(uuid.uuid4()),
+        user_id=driver_user.id,
+        token_hash=hash_secret("token_drv_hist"),
+        is_revoked=False,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+    db_session.add(d_session)
+    await db_session.commit()
+
+    token = create_jwt_token(user_id=driver_user.id, role="driver", session_id=d_session.id)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.get(
+            "/api/v1/drivers/payouts/history",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert res.status_code == 200
+        history = res.json()
+        assert len(history) >= 1
+        payout_ids = [h["id"] for h in history]
+        assert payout.id in payout_ids
+
+
+@pytest.mark.asyncio
+async def test_wallet_topup_unique_receipt_and_captured_status_enforcement(db_session):
+    """
+    MEDIUM-1 & HIGH-3 Verification:
+    1. Wallet topup order generates unique receipts with prefix 'wtop_'.
+    2. Wallet topup verify strictly rejects 'authorized' status from gateway and requires 'captured'.
+    """
+    from unittest.mock import AsyncMock, patch
+    user = User(
+        phone_number=f"+9194{uuid.uuid4().hex[:8]}",
+        full_name="Receipt User",
+        role="customer",
+        is_active=True
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    u_session = Session(
+        id=str(uuid.uuid4()),
+        user_id=user.id,
+        token_hash=hash_secret("token_receipt_test"),
+        is_revoked=False,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+    db_session.add(u_session)
+    await db_session.commit()
+
+    token = create_jwt_token(user_id=user.id, role="customer", session_id=u_session.id)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Create 2 topup orders -> receipts must be distinct
+        res1 = await client.post(
+            "/api/v1/wallets/topup/create-order",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"amount_cents": 10000, "currency": "INR"}
+        )
+        assert res1.status_code == 200
+        order1_id = res1.json()["order_id"]
+
+        res2 = await client.post(
+            "/api/v1/wallets/topup/create-order",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"amount_cents": 10000, "currency": "INR"}
+        )
+        assert res2.status_code == 200
+        order2_id = res2.json()["order_id"]
+        assert order1_id != order2_id
+
+        # Retrieve payments from DB and verify receipt IDs
+        p1 = (await db_session.execute(select(Payment).where(Payment.provider_order_id == order1_id))).scalar_one()
+        p2 = (await db_session.execute(select(Payment).where(Payment.provider_order_id == order2_id))).scalar_one()
+        assert p1.idempotency_key != p2.idempotency_key
+
+        # HIGH-3: Gateway returns 'authorized' instead of 'captured' -> must fail with 400
+        provider = get_payment_provider()
+        orig_key_secret = provider.key_secret
+        test_secret = "test_topup_secret_2026"
+        provider.key_secret = test_secret
+        try:
+            sig_data = f"{order1_id}|pay_mock_auth_123"
+            valid_sig = hmac.new(test_secret.encode("utf-8"), sig_data.encode("utf-8"), hashlib.sha256).hexdigest()
+
+            with patch.object(provider, "fetch_payment", new_callable=AsyncMock) as mock_fetch:
+                mock_fetch.return_value = {
+                    "id": "pay_mock_auth_123",
+                    "status": "authorized",  # NOT captured!
+                    "amount": 10000
+                }
+                res_verify = await client.post(
+                    "/api/v1/wallets/topup/verify",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "razorpay_order_id": order1_id,
+                        "razorpay_payment_id": "pay_mock_auth_123",
+                        "razorpay_signature": valid_sig
+                    }
+                )
+                assert res_verify.status_code == 400
+                assert "Payment status is authorized; expected captured" in res_verify.json()["detail"]
+        finally:
+            provider.key_secret = orig_key_secret
+
+
+@pytest.mark.asyncio
+async def test_refund_credited_cannot_regress_to_failed(db_session):
+    """
+    HIGH-2 Verification:
+    A refund that is CREDITED cannot regress to FAILED upon out-of-order webhook delivery.
+    """
+    user_id = str(uuid.uuid4())
+    user = User(
+        id=user_id,
+        phone_number=f"+9193{uuid.uuid4().int % 100000000:08d}",
+        full_name="Credited Refund User",
+        role="customer"
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    payment = Payment(
+        user_id=user_id,
+        amount_cents=10000,
+        currency="INR",
+        purpose="WALLET_TOPUP",
+        status="CAPTURED",
+        provider_name="RAZORPAY",
+        provider_payment_id=f"pay_cred_{user_id[:8]}",
+        provider_order_id=f"order_cred_{user_id[:8]}",
+        idempotency_key=f"cred_key_{user_id}"
+    )
+    db_session.add(payment)
+    await db_session.commit()
+
+    secret = "whsec_test_regress_2026"
+    provider = get_payment_provider()
+    orig_wh = provider.webhook_secret
+    provider.webhook_secret = secret
+
+    refund_arn = f"rfnd_cred_{uuid.uuid4().hex[:10]}"
+    try:
+        service = PaymentService(db_session)
+
+        # 1. Process refund.processed -> refund credited
+        p_proc = {
+            "event": "refund.processed",
+            "payload": {
+                "payment": {"entity": {"id": payment.provider_payment_id, "amount": 10000}},
+                "refund": {"entity": {"id": refund_arn, "amount": 10000, "status": "processed"}}
+            }
+        }
+        b_proc = json.dumps(p_proc).encode("utf-8")
+        r_proc = await service.process_webhook(b_proc, _generate_webhook_signature(b_proc, secret))
+        assert r_proc["status"] == "SUCCESS"
+
+        ref_stmt = select(PaymentRefund).where(PaymentRefund.arn_reference == refund_arn)
+        ref_record = (await db_session.execute(ref_stmt)).scalar_one()
+        assert ref_record.status == "CREDITED"
+
+        # 2. Subsequent out-of-order refund.failed -> must be rejected
+        p_fail = {
+            "event": "refund.failed",
+            "payload": {
+                "payment": {"entity": {"id": payment.provider_payment_id, "amount": 10000}},
+                "refund": {"entity": {"id": refund_arn, "amount": 10000, "status": "failed"}}
+            }
+        }
+        b_fail = json.dumps(p_fail).encode("utf-8")
+        r_fail = await service.process_webhook(b_fail, _generate_webhook_signature(b_fail, secret))
+        assert r_fail["status"] == "REJECTED_STATE_TRANSITION"
+
+        # Refund status remains CREDITED, never FAILED
+        await db_session.refresh(ref_record)
+        assert ref_record.status == "CREDITED"
+    finally:
+        provider.webhook_secret = orig_wh
+
+
+

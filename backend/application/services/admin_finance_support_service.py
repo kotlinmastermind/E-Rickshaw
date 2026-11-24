@@ -15,7 +15,7 @@ from backend.domain.models import (
     CommissionRule, DriverPayoutRequest, DriverProfile, FareDispute, InvoiceCorrectionRequest,
     Notification, Payment, PaymentEvent, PaymentRefund, PaymentWebhookInbox, Ride, SupportEscalationPolicy,
     SupportMessage, SupportResponseTemplate, SupportTicket, User, UserPreferences, Wallet,
-    WalletTransaction,
+    WalletTransaction, DriverLedgerEntry
 )
 from backend.application.services.wallet_service import WalletService
 
@@ -36,14 +36,18 @@ class AdminFinanceSupportService:
         rows = (await self.db.execute(stmt.order_by(desc(DriverPayoutRequest.created_at)).limit(500))).all()
         output = []
         for payout, driver, user in rows:
-            holds = (await self.db.execute(select(WalletTransaction).where(
-                WalletTransaction.source == "PAYOUT_HOLD", WalletTransaction.reference_id == payout.id
+            holds = (await self.db.execute(select(DriverLedgerEntry).where(
+                DriverLedgerEntry.category == "PAYOUT_HOLD", DriverLedgerEntry.reference_id == payout.id
             ))).scalars().all()
+            if not holds:
+                holds = (await self.db.execute(select(WalletTransaction).where(
+                    WalletTransaction.source == "PAYOUT_HOLD", WalletTransaction.reference_id == payout.id
+                ))).scalars().all()
             exception = None
             if payout.status != "REJECTED" and not holds:
-                exception = "Payout hold is missing from the wallet ledger."
+                exception = "Payout hold is missing from the ledger."
             elif len(holds) > 1:
-                exception = "Multiple wallet holds reference this payout."
+                exception = "Multiple holds reference this payout."
             elif holds and holds[0].amount_cents != payout.amount_cents:
                 exception = "Payout amount does not match the ledger hold."
             elif payout.status == "PAID" and not (payout.settlement_reference or payout.payout_reference):
@@ -63,7 +67,7 @@ class AdminFinanceSupportService:
         return {"checked_at": datetime.now(timezone.utc).isoformat(), "rows_checked": len(rows),
                 "exception_count": len(exceptions), "exceptions": exceptions,
                 "reconciled_count": len(rows) - len(exceptions),
-                "method": "Each payout request is matched to the immutable PAYOUT_HOLD wallet entry by payout ID and amount. External bank settlement is verified only by its recorded reference; no bank connection is configured here."}
+                "method": "Each payout request is matched to the immutable PAYOUT_HOLD ledger entry by payout ID and amount. External bank settlement is verified only by its recorded reference; no bank connection is configured here."}
 
     async def annotate_payout_exception(self, admin_id: str, payout_id: str, note: str) -> Dict[str, Any]:
         payout = await self.db.get(DriverPayoutRequest, payout_id)
@@ -79,10 +83,13 @@ class AdminFinanceSupportService:
         if not payout: raise HTTPException(404, "Payout request not found.")
         if payout.status != "REQUESTED": raise HTTPException(409, "Only requested payouts can be approved.")
         if len(reason.strip()) < 10: raise HTTPException(422, "Provide an approval reason of at least 10 characters.")
-        holds = (await self.db.execute(select(WalletTransaction).where(
-            WalletTransaction.source == "PAYOUT_HOLD", WalletTransaction.reference_id == payout.id))).scalars().all()
+        holds = (await self.db.execute(select(DriverLedgerEntry).where(
+            DriverLedgerEntry.category == "PAYOUT_HOLD", DriverLedgerEntry.reference_id == payout.id))).scalars().all()
+        if not holds:
+            holds = (await self.db.execute(select(WalletTransaction).where(
+                WalletTransaction.source == "PAYOUT_HOLD", WalletTransaction.reference_id == payout.id))).scalars().all()
         if len(holds) != 1 or holds[0].amount_cents != payout.amount_cents:
-            raise HTTPException(409, "Payout hold is missing or does not match the wallet ledger; investigate before approval.")
+            raise HTTPException(409, "Payout hold is missing or does not match the ledger; investigate before approval.")
         payout.status, payout.reviewed_by, payout.reviewed_at = "APPROVED", admin_id, datetime.now(timezone.utc)
         self.audit(admin_id, "PAYOUT_APPROVED", "driver_payout_requests", payout.id,
                    {"amount_cents": payout.amount_cents, "reason": reason.strip()})

@@ -17,7 +17,8 @@ from fastapi import HTTPException, status
 
 from backend.domain.models import (
     GeofenceZone, SurgeRule, CommissionRule, DriverPayoutRequest,
-    BroadcastNotification, Wallet, User, DriverProfile, AdministrativeAuditLog, WalletTransaction
+    BroadcastNotification, Wallet, User, DriverProfile, AdministrativeAuditLog, WalletTransaction,
+    DriverWallet, DriverLedgerEntry
 )
 from backend.application.services.wallet_service import WalletService
 
@@ -195,10 +196,14 @@ class AdminAdvancedService:
         if payout.status != "REQUESTED":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot approve payout in status {payout.status}")
 
-        holds = (await session.execute(select(WalletTransaction).where(
-            WalletTransaction.source == "PAYOUT_HOLD", WalletTransaction.reference_id == payout.id))).scalars().all()
+        holds = (await session.execute(select(DriverLedgerEntry).where(
+            DriverLedgerEntry.category == "PAYOUT_HOLD", DriverLedgerEntry.reference_id == payout.id))).scalars().all()
+        if not holds:
+            holds = (await session.execute(select(WalletTransaction).where(
+                WalletTransaction.source == "PAYOUT_HOLD", WalletTransaction.reference_id == payout.id))).scalars().all()
+
         if len(holds) != 1 or holds[0].amount_cents != payout.amount_cents:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payout hold is missing or does not match the immutable wallet ledger; investigate before approval.")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payout hold is missing or does not match the immutable driver ledger; investigate before approval.")
 
         payout.status = "APPROVED"
         payout.reviewed_by = admin_user_id
@@ -216,24 +221,52 @@ class AdminAdvancedService:
         if payout.status not in ["REQUESTED", "APPROVED"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot reject payout in status {payout.status}")
 
-        holds = (await session.execute(select(WalletTransaction).where(
+        driver_holds = (await session.execute(select(DriverLedgerEntry).where(
+            DriverLedgerEntry.category == "PAYOUT_HOLD", DriverLedgerEntry.reference_id == payout.id))).scalars().all()
+        wallet_holds = (await session.execute(select(WalletTransaction).where(
             WalletTransaction.source == "PAYOUT_HOLD", WalletTransaction.reference_id == payout.id))).scalars().all()
-        if len(holds) != 1 or holds[0].amount_cents != payout.amount_cents:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payout hold is missing or does not match the immutable wallet ledger; investigate before rejection.")
 
-        drv_prof = await session.get(DriverProfile, payout.driver_id)
-        driver_user_id = drv_prof.user_id if drv_prof else payout.driver_id
+        if not driver_holds and not wallet_holds:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payout hold is missing from the ledger; investigate before rejection.")
 
-        await WalletService.credit_wallet(
-            session=session,
-            user_id=driver_user_id,
-            amount_cents=payout.amount_cents,
-            transaction_type="CREDIT",
-            source="PAYOUT_REVERSAL",
-            reference_id=payout.id,
-            description=f"Refund for rejected payout: {rejection_reason}",
-            idempotency_key=f"payout_reversal_{payout.id}"
-        )
+        if driver_holds:
+            if len(driver_holds) != 1 or driver_holds[0].amount_cents != payout.amount_cents:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Driver payout hold does not match requested amount.")
+            stmt = select(DriverWallet).where(DriverWallet.driver_id == payout.driver_id).with_for_update()
+            d_wallet = (await session.execute(stmt)).scalar_one_or_none()
+            if not d_wallet:
+                d_wallet = DriverWallet(driver_id=payout.driver_id, balance_cents=0, currency="INR")
+                session.add(d_wallet)
+                await session.flush()
+
+            d_wallet.balance_cents += payout.amount_cents
+            d_wallet.updated_at = datetime.now(timezone.utc)
+            rev_entry = DriverLedgerEntry(
+                id=str(uuid.uuid4()),
+                driver_id=payout.driver_id,
+                entry_type="CREDIT",
+                category="PAYOUT_REVERSAL",
+                amount_cents=payout.amount_cents,
+                balance_after_cents=d_wallet.balance_cents,
+                reference_id=payout.id,
+                description=f"Refund for rejected payout: {rejection_reason}",
+                created_at=datetime.now(timezone.utc)
+            )
+            session.add(rev_entry)
+
+        if wallet_holds:
+            drv_prof = await session.get(DriverProfile, payout.driver_id)
+            driver_user_id = drv_prof.user_id if drv_prof else payout.driver_id
+            await WalletService.credit_wallet(
+                session=session,
+                user_id=driver_user_id,
+                amount_cents=payout.amount_cents,
+                transaction_type="CREDIT",
+                source="PAYOUT_REVERSAL",
+                reference_id=payout.id,
+                description=f"Refund for rejected payout: {rejection_reason}",
+                idempotency_key=f"payout_reversal_{payout.id}"
+            )
 
         payout.status = "REJECTED"
         payout.rejection_reason = rejection_reason

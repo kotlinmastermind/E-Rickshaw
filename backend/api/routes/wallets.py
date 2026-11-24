@@ -4,6 +4,7 @@ Enforces cryptographic Razorpay order binding, server-side signature verificatio
 pessimistic row locking, and strict separation between ride payments and wallet top-ups.
 """
 from typing import Optional, List, Dict, Any
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,7 +60,7 @@ async def create_wallet_topup_order(
     Persists a pending Payment entity with purpose=WALLET_TOPUP before client checkout.
     """
     provider = get_payment_provider()
-    receipt_id = f"rcpt_w_{user.id[:8]}_{int(db.bind.dialect.name != '')}"
+    receipt_id = f"wtop_{uuid.uuid4().hex[:20]}"
     
     order = await provider.create_razorpay_order(
         amount_cents=payload.amount_cents,
@@ -155,7 +156,7 @@ async def verify_wallet_topup(
 
     # 3. Server-side gateway verification via Razorpay REST API
     gateway_data = await provider.fetch_payment(payload.razorpay_payment_id, expected_amount_cents=payment.amount_cents)
-    if gateway_data.get("status") not in ["captured", "authorized"]:
+    if gateway_data.get("status") != "captured":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Payment status is {gateway_data.get('status')}; expected captured."

@@ -396,12 +396,15 @@ async def get_payout_history(
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
 ):
-    from backend.domain.models import DriverPayoutRequest
+    from backend.domain.models import DriverPayoutRequest, DriverProfile
     from sqlalchemy import select
+    driver_prof = (await db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))).scalar_one_or_none()
+    if not driver_prof:
+        return []
     stmt = (
         select(DriverPayoutRequest)
-        .where(DriverPayoutRequest.driver_id == user.id)
-        .order_by(DriverPayoutRequest.requested_at.desc())
+        .where(DriverPayoutRequest.driver_id == driver_prof.id)
+        .order_by(DriverPayoutRequest.created_at.desc())
     )
     res = await db.execute(stmt)
     payouts = res.scalars().all()
@@ -410,10 +413,10 @@ async def get_payout_history(
             "id": p.id,
             "amount_cents": p.amount_cents,
             "status": p.status,
-            "bank_account_mask": p.bank_account_mask,
-            "requested_at": p.requested_at.isoformat(),
+            "bank_account_mask": getattr(p, "bank_account_masked", getattr(p, "bank_account_mask", "")),
+            "requested_at": p.created_at.isoformat(),
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
-            "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+            "paid_at": p.updated_at.isoformat() if p.status == "PAID" and p.updated_at else None,
             "rejection_reason": p.rejection_reason
         }
         for p in payouts

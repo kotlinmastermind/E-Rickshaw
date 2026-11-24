@@ -21,7 +21,8 @@ from fastapi import HTTPException, status
 
 from backend.domain.models import (
     Ride, RideStop, DriverProfile, DriverAvailability, DriverDailyTarget,
-    DriverPayoutRequest, User, CustomerProfile, FareRule, Wallet
+    DriverPayoutRequest, User, CustomerProfile, FareRule, Wallet,
+    DriverWallet, DriverLedgerEntry
 )
 from backend.application.services.wallet_service import WalletService
 
@@ -501,11 +502,17 @@ class DispatchAdvancedService:
         if not driver_prof:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found")
 
-        wallet = await WalletService.get_or_create_wallet(session, driver_prof.user_id)
-        if wallet.balance_cents < amount_cents:
+        stmt = select(DriverWallet).where(DriverWallet.driver_id == driver_prof.id).with_for_update()
+        d_wallet = (await session.execute(stmt)).scalar_one_or_none()
+        if not d_wallet:
+            d_wallet = DriverWallet(driver_id=driver_prof.id, balance_cents=0, currency="INR")
+            session.add(d_wallet)
+            await session.flush()
+
+        if d_wallet.balance_cents < amount_cents:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Insufficient wallet balance. Available: ₹{wallet.balance_cents / 100:.2f}"
+                detail=f"Insufficient driver wallet balance. Available: ₹{d_wallet.balance_cents / 100:.2f}"
             )
 
         payout = DriverPayoutRequest(
@@ -517,14 +524,20 @@ class DispatchAdvancedService:
         )
         session.add(payout)
         await session.flush()
-        await WalletService.debit_wallet(
-            session=session,
-            user_id=driver_prof.user_id,
+
+        d_wallet.balance_cents -= amount_cents
+        d_wallet.updated_at = datetime.now(timezone.utc)
+        hold_entry = DriverLedgerEntry(
+            id=str(uuid.uuid4()),
+            driver_id=driver_prof.id,
+            entry_type="DEBIT",
+            category="PAYOUT_HOLD",
             amount_cents=amount_cents,
-            transaction_type="DEBIT",
-            source="PAYOUT_HOLD",
+            balance_after_cents=d_wallet.balance_cents,
             reference_id=payout.id,
-            description="Driver payout request placed under review",
-            idempotency_key=f"payout_hold_{payout.id}",
+            description=f"Driver payout request placed under review ({payout.id[:8]})",
+            created_at=datetime.now(timezone.utc)
         )
+        session.add(hold_entry)
+        await session.flush()
         return payout
