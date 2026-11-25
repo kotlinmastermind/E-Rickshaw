@@ -814,3 +814,301 @@ async def test_lost_order_recovery_wallet_anomaly_and_support_ledger_credit(db_s
     await db_session.refresh(lost_pay)
     assert lost_pay.provider_order_id == "order_recov_lost_1"
 
+
+# ------------------------------------------------------------------------------
+# 6. Concurrent Order Lease, Network Timeout Recovery, Notification Webhooks & Concurrency
+# ------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_order_creation_uses_db_lease_single_gateway_call(db_session):
+    import asyncio
+    from backend.domain.models import PaymentOrderAttempt
+    from backend.infrastructure.database.session import async_session_maker
+
+    user, token = await _make_user_and_token(db_session, role="customer")
+    cat_id, rule_id = await _get_category_and_rule(db_session)
+    cust = CustomerProfile(user_id=user.id, preferred_payment_method="RAZORPAY", rating_average=5.0, rating_count=0)
+    db_session.add(cust)
+    await db_session.flush()
+    ride = Ride(
+        customer_id=cust.id,
+        vehicle_category_id=cat_id,
+        fare_rule_id=rule_id,
+        pickup_latitude=28.61,
+        pickup_longitude=77.20,
+        destination_latitude=28.63,
+        destination_longitude=77.22,
+        pickup_address="Lease Start",
+        destination_address="Lease End",
+        start_otp="9876",
+        estimated_distance_km=5.0,
+        estimated_duration_minutes=15.0,
+        estimated_fare_cents=22000,
+        final_fare_cents=22000,
+        payment_method="RAZORPAY",
+        status="COMPLETED",
+    )
+    db_session.add(ride)
+    await db_session.commit()
+
+    provider = get_payment_provider()
+    gw_calls = 0
+
+    async def _slow_create_order(**kwargs):
+        nonlocal gw_calls
+        gw_calls += 1
+        await asyncio.sleep(0.2)
+        return {
+            "id": f"order_conc_single_{gw_calls}",
+            "amount": kwargs["amount_cents"],
+            "currency": "INR",
+            "receipt": kwargs["receipt"],
+            "status": "created",
+        }
+
+    # Pre-seed not needed: two independent sessions racing on the same ride & wallet topup
+    async def _worker_ride(idem_k: str):
+        async with async_session_maker() as s:
+            return await PaymentService(s).create_payment_intent(user.id, ride.id, idem_k)
+
+    with patch.object(provider, "create_razorpay_order", side_effect=_slow_create_order):
+        r1, r2 = await asyncio.gather(
+            _worker_ride("conc_ride_key_alpha"),
+            _worker_ride("conc_ride_key_beta"),
+        )
+
+    assert gw_calls == 1, f"Expected single Razorpay order call under race, got {gw_calls}"
+    assert r1["order_id"] == r2["order_id"] == "order_conc_single_1"
+    assert r1["payment_id"] == r2["payment_id"]
+
+    # Also test two simultaneous HTTP wallet topup requests with the same idempotency_key
+    gw_calls_w = 0
+
+    async def _slow_wallet_order(**kwargs):
+        nonlocal gw_calls_w
+        gw_calls_w += 1
+        await asyncio.sleep(0.2)
+        return {
+            "id": f"order_wtop_conc_{gw_calls_w}",
+            "amount": kwargs["amount_cents"],
+            "currency": "INR",
+            "receipt": kwargs["receipt"],
+            "status": "created",
+        }
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with patch.object(provider, "create_razorpay_order", side_effect=_slow_wallet_order):
+            w1, w2 = await asyncio.gather(
+                ac.post(
+                    "/api/v1/wallets/topup/create-order",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"amount_cents": 30000, "currency": "INR", "idempotency_key": "same_concurrent_wallet_key_01"},
+                ),
+                ac.post(
+                    "/api/v1/wallets/topup/create-order",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"amount_cents": 30000, "currency": "INR", "idempotency_key": "same_concurrent_wallet_key_01"},
+                ),
+            )
+    assert w1.status_code == 200 and w2.status_code == 200
+    assert gw_calls_w == 1
+    assert w1.json()["order_id"] == w2.json()["order_id"] == "order_wtop_conc_1"
+
+
+@pytest.mark.asyncio
+async def test_order_creation_network_timeout_reconciles_on_retry_and_blocks_failed_attempts(db_session):
+    from backend.domain.models import PaymentOrderAttempt
+
+    user, _ = await _make_user_and_token(db_session, role="customer")
+    cat_id, rule_id = await _get_category_and_rule(db_session)
+    cust = CustomerProfile(user_id=user.id, preferred_payment_method="RAZORPAY", rating_average=5.0, rating_count=0)
+    db_session.add(cust)
+    await db_session.flush()
+    ride = Ride(
+        customer_id=cust.id,
+        vehicle_category_id=cat_id,
+        fare_rule_id=rule_id,
+        pickup_latitude=28.61,
+        pickup_longitude=77.20,
+        destination_latitude=28.63,
+        destination_longitude=77.22,
+        pickup_address="Timeout A",
+        destination_address="Timeout B",
+        start_otp="2468",
+        estimated_distance_km=4.0,
+        estimated_duration_minutes=12.0,
+        estimated_fare_cents=19000,
+        final_fare_cents=19000,
+        payment_method="RAZORPAY",
+        status="COMPLETED",
+    )
+    db_session.add(ride)
+    await db_session.commit()
+
+    provider = get_payment_provider()
+    svc = PaymentService(db_session)
+
+    # 1. Gateway rejects with 400 -> attempt marked FAILED & never active
+    with patch.object(provider, "create_razorpay_order", side_effect=HTTPException(status_code=400, detail="Bad amount")):
+        with pytest.raises(HTTPException) as exc400:
+            await svc.create_payment_intent(user.id, ride.id, "idem_timeout_flow_01")
+        assert exc400.value.status_code == 400
+
+    # 2. Gateway times out -> attempt marked UNCERTAIN, lease cleared
+    with patch.object(provider, "create_razorpay_order", side_effect=TimeoutError("Razorpay timeout")):
+        with pytest.raises(HTTPException) as exc504:
+            await svc.create_payment_intent(user.id, ride.id, "idem_timeout_flow_01")
+        assert exc504.value.status_code == 504
+
+    attempts_mid = (
+        await db_session.execute(select(PaymentOrderAttempt).where(PaymentOrderAttempt.amount_cents == 19000))
+    ).scalars().all()
+    statuses = {a.status for a in attempts_mid}
+    assert "FAILED" in statuses
+    assert "UNCERTAIN" in statuses
+
+    # 3. Retry reconciles uncertain attempt by receipt BEFORE calling create_razorpay_order!
+    rec_order_id = "order_recovered_from_uncertain_01"
+    with patch.object(
+        provider,
+        "fetch_orders_by_receipt",
+        new=AsyncMock(return_value={"items": [{"id": rec_order_id, "amount": 19000, "currency": "INR", "status": "created"}]}),
+    ), patch.object(provider, "create_razorpay_order", new=AsyncMock(side_effect=AssertionError("Must not create duplicate order"))):
+        retried = await svc.create_payment_intent(user.id, ride.id, "idem_timeout_flow_01")
+
+    assert retried["order_id"] == rec_order_id
+    assert retried["recovered_order"] is True
+
+
+@pytest.mark.asyncio
+async def test_notification_webhooks_diagnostic_sync_concurrent_refunds_and_dup_failed(db_session):
+    import asyncio
+
+    provider = get_payment_provider()
+    orig_wh = provider.webhook_secret
+    wh_secret = "whsec_notif_matrix_2026"
+    provider.webhook_secret = wh_secret
+
+    try:
+        user, _ = await _make_user_and_token(db_session)
+        await WalletService.credit_wallet(
+            session=db_session,
+            user_id=user.id,
+            amount_cents=50000,
+            transaction_type="CREDIT",
+            source="TOP_UP",
+            reference_id="pay_dupfail_seed",
+            description="Seed for refund reversal",
+            idempotency_key=f"seed_df_{uuid.uuid4().hex[:8]}",
+        )
+        pay = Payment(
+            user_id=user.id,
+            amount_cents=50000,
+            currency="INR",
+            purpose="WALLET_TOPUP",
+            status="CAPTURED",
+            payment_method="RAZORPAY",
+            provider_name="RAZORPAY",
+            provider_order_id=f"order_notif_{uuid.uuid4().hex[:8]}",
+            provider_payment_id=f"pay_notif_{uuid.uuid4().hex[:8]}",
+            idempotency_key=f"idem_notif_{uuid.uuid4().hex[:8]}",
+        )
+        db_session.add(pay)
+        await db_session.commit()
+
+        # 1. Notification webhooks & diagnostic endpoint sync
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            diag = await ac.get("/api/v1/payments/webhook")
+            assert diag.status_code == 200
+            diag_json = diag.json()
+            assert "order.notification.delivered" in diag_json["supported_events"]
+            assert "order.notification.failed" in diag_json["supported_events"]
+            assert "payment.dispute.action_required" in diag_json["supported_events"]
+            assert "settlement.processed" in diag_json["supported_events"]
+
+        svc = PaymentService(db_session)
+        for ev in ("order.notification.delivered", "order.notification.failed"):
+            raw_n = json.dumps({
+                "event": ev,
+                "payload": {"order": {"entity": {"id": pay.provider_order_id}}},
+            }).encode()
+            res_n = await svc.process_webhook(raw_n, _sign(raw_n, wh_secret))
+            assert res_n["status"] == "ACKNOWLEDGED_NOTIFICATION"
+
+        # 2. Provisional RefundLiability reversal on duplicate refund.failed delivery
+        fail_gw_id = f"rfnd_fail_dup_{uuid.uuid4().hex[:8]}"
+        await WalletService.process_refund_clawback(
+            session=db_session,
+            user_id=user.id,
+            refund_amount_cents=50000,
+            payment_id=pay.id,
+            gateway_refund_id=fail_gw_id,
+            idempotency_key=f"prov_cb_{fail_gw_id}",
+        )
+        pay.status = "REFUND_PENDING"
+        db_session.add(
+            PaymentRefund(
+                payment_id=pay.id,
+                amount_cents=50000,
+                reason="Provisional async refund",
+                status="GATEWAY_PROCESSING",
+                provider_refund_id=fail_gw_id,
+            )
+        )
+        await db_session.commit()
+
+        fail_raw = json.dumps({
+            "event": "refund.failed",
+            "payload": {"refund": {"entity": {"id": fail_gw_id, "payment_id": pay.provider_payment_id, "amount": 50000, "currency": "INR", "status": "failed"}}},
+        }).encode()
+        fail_res_1 = await svc.process_webhook(fail_raw, _sign(fail_raw, wh_secret))
+        fail_res_2 = await svc.process_webhook(fail_raw, _sign(fail_raw, wh_secret))
+        assert fail_res_1["status"] == "REFUND_FAILED"
+        assert fail_res_2["status"] == "ALREADY_PROCESSED"
+
+        bal_restored = await WalletService.get_balance(db_session, user.id)
+        assert bal_restored["balance_cents"] == 50000  # restored ONCE, not doubled!
+        await db_session.refresh(pay)
+        assert pay.status == "CAPTURED"
+
+        # 3. Concurrent partial refunds respect ceiling (only one 35000 refund succeeds out of 50000)
+        from backend.infrastructure.database.session import async_session_maker
+        ref_count = 0
+
+        async def _slow_refund(**kwargs):
+            nonlocal ref_count
+            ref_count += 1
+            my_ref = ref_count
+            await asyncio.sleep(0.1)
+            return {"id": f"rfnd_c_{my_ref}", "amount": kwargs["amount_cents"], "status": "processed", "acquirer_data": {}}
+
+        async def _try_partial(amt: int):
+            async with async_session_maker() as s:
+                try:
+                    return await SettlementAdvancedService(s).create_refund(
+                        payment_id=pay.id,
+                        amount_cents=amt,
+                        reason="Concurrent partial refund test",
+                        is_partial=True,
+                    )
+                except HTTPException as exc:
+                    return {"error_status": exc.status_code}
+
+        with patch.object(provider, "create_refund", side_effect=_slow_refund):
+            p1, p2 = await asyncio.gather(_try_partial(35000), _try_partial(35000))
+
+        outcomes = [p1, p2]
+        assert sum(1 for o in outcomes if o.get("status") == "PROCESSED") == 1
+        assert sum(1 for o in outcomes if o.get("error_status") == 400) == 1
+
+        # 4. Android checkout isolation check (no mutable global checkout state or placeholder keys)
+        rider_repo_src = pathlib.Path("apps/customer-android/src/main/java/com/vaisentra/mobility/rider/data/RiderRepository.kt").read_text(encoding="utf-8")
+        assert "activeCheckoutType" not in rider_repo_src
+        assert "activeCheckoutRideId" not in rider_repo_src
+        assert "rzp_test_placeholder" not in rider_repo_src
+    finally:
+        provider.webhook_secret = orig_wh
+
+

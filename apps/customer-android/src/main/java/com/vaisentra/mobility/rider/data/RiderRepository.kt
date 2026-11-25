@@ -1645,17 +1645,18 @@ object RiderRepository {
         }
     }
 
-    enum class CheckoutType {
-        WALLET_TOPUP,
-        RIDE_FARE
+    private var activeTopupLaunchInProgress = false
+    private var activeRideLaunchInProgress = false
+
+    fun hasPendingVerification(flowType: CheckoutFlowType? = null): Boolean {
+        val store = NetworkClient.checkoutSessionStore
+        return if (flowType == null) {
+            store.getRetryableSession(CheckoutFlowType.WALLET_TOPUP) != null ||
+                store.getRetryableSession(CheckoutFlowType.RIDE_FARE) != null
+        } else {
+            store.getRetryableSession(flowType) != null
+        }
     }
-
-    private var activeCheckoutType: CheckoutType = CheckoutType.WALLET_TOPUP
-    private var activeCheckoutRideId: String? = null
-    private var activeTopupIdempotencyKey: String? = null
-    private var activeRideIdempotencyKey: String? = null
-
-    fun hasPendingVerification(): Boolean = NetworkClient.getPendingVerification() != null
 
     // Sealed class for UI state management
     sealed class TopupState {
@@ -1683,7 +1684,8 @@ object RiderRepository {
     val ridePaymentState: StateFlow<RidePaymentState> = _ridePaymentState.asStateFlow()
 
     fun launchWalletTopupCheckout(activity: android.app.Activity, amountRupees: Double) {
-        if (_topupState.value is TopupState.CreatingOrder ||
+        if (activeTopupLaunchInProgress ||
+            _topupState.value is TopupState.CreatingOrder ||
             _topupState.value is TopupState.CheckoutOpen ||
             _topupState.value is TopupState.Verifying
         ) {
@@ -1694,10 +1696,9 @@ object RiderRepository {
             _topupState.value = TopupState.Error("Minimum wallet top-up is ₹100.00")
             return
         }
-        val idemKey = activeTopupIdempotencyKey ?: "topup_${java.util.UUID.randomUUID()}"
-        activeTopupIdempotencyKey = idemKey
-        activeCheckoutType = CheckoutType.WALLET_TOPUP
-        activeCheckoutRideId = null
+        activeTopupLaunchInProgress = true
+        val intentScopeKey = "WALLET_TOPUP_${amountCents}"
+        val idemKey = NetworkClient.checkoutSessionStore.getOrCreateScopedIdempotencyKey(intentScopeKey, "topup")
         _topupState.value = TopupState.CreatingOrder
 
         scope.launch {
@@ -1713,17 +1714,25 @@ object RiderRepository {
                     val keyId = body.keyId?.trim().orEmpty()
                     val orderId = body.orderId.trim()
                     val serverAmountCents = body.amountCents
-                    if (keyId.isEmpty() || orderId.isEmpty() || serverAmountCents <= 0) {
-                        _topupState.value = TopupState.Error("Incomplete server order configuration received.")
+                    if (!CheckoutSessionStore.isValidRazorpayPublicKey(keyId) || orderId.isEmpty() || serverAmountCents <= 0) {
+                        if (res.isSuccessful) {
+                            NetworkClient.checkoutSessionStore.clearScopedIdempotencyKey(intentScopeKey)
+                        }
+                        _topupState.value = TopupState.Error("Razorpay configuration unavailable or invalid; checkout aborted safely.")
                         return@launch
                     }
 
-                    NetworkClient.savePendingCheckout(
-                        orderId = orderId,
-                        checkoutType = CheckoutType.WALLET_TOPUP.name,
-                        rideId = null,
-                        amountCents = serverAmountCents,
-                        idempotencyKey = idemKey
+                    NetworkClient.checkoutSessionStore.saveSession(
+                        CheckoutSession(
+                            orderId = orderId,
+                            backendPaymentId = body.paymentId,
+                            checkoutType = CheckoutFlowType.WALLET_TOPUP,
+                            rideId = null,
+                            amountCents = serverAmountCents,
+                            currency = body.currency.ifBlank { "INR" },
+                            idempotencyKey = idemKey,
+                            state = CheckoutSessionState.CREATED
+                        )
                     )
                     _topupState.value = TopupState.CheckoutOpen
 
@@ -1742,11 +1751,15 @@ object RiderRepository {
                         checkout.open(activity, options)
                     }
                 } else {
-                    activeTopupIdempotencyKey = null
+                    if (res.code() in 400..499) {
+                        NetworkClient.checkoutSessionStore.clearScopedIdempotencyKey(intentScopeKey)
+                    }
                     _topupState.value = TopupState.Error("Order creation failed: HTTP ${res.code()}")
                 }
             } catch (e: Exception) {
                 _topupState.value = TopupState.Error(e.message ?: "Network error creating top-up order")
+            } finally {
+                activeTopupLaunchInProgress = false
             }
         }
     }
@@ -1756,16 +1769,16 @@ object RiderRepository {
             _ridePaymentState.value = RidePaymentState.Error("Invalid ride reference for payment.")
             return
         }
-        if (_ridePaymentState.value is RidePaymentState.CreatingOrder ||
+        if (activeRideLaunchInProgress ||
+            _ridePaymentState.value is RidePaymentState.CreatingOrder ||
             _ridePaymentState.value is RidePaymentState.CheckoutOpen ||
             _ridePaymentState.value is RidePaymentState.Verifying
         ) {
             return
         }
-        val idemKey = activeRideIdempotencyKey ?: "ride_${rideId.take(16)}_${java.util.UUID.randomUUID()}"
-        activeRideIdempotencyKey = idemKey
-        activeCheckoutType = CheckoutType.RIDE_FARE
-        activeCheckoutRideId = rideId
+        activeRideLaunchInProgress = true
+        val intentScopeKey = "RIDE_FARE_${rideId}"
+        val idemKey = NetworkClient.checkoutSessionStore.getOrCreateScopedIdempotencyKey(intentScopeKey, "ride_${rideId.take(12)}")
         _ridePaymentState.value = RidePaymentState.CreatingOrder
 
         scope.launch {
@@ -1782,17 +1795,23 @@ object RiderRepository {
                     val effectiveOrderId = body.effectiveOrderId.trim()
                     val keyId = body.keyId?.trim().orEmpty()
                     val serverAmountCents = body.amountCents
-                    if (keyId.isEmpty() || effectiveOrderId.isEmpty() || serverAmountCents <= 0) {
-                        _ridePaymentState.value = RidePaymentState.Error("Invalid server order configuration for ride payment.")
+                    if (!CheckoutSessionStore.isValidRazorpayPublicKey(keyId) || effectiveOrderId.isEmpty() || serverAmountCents <= 0) {
+                        NetworkClient.checkoutSessionStore.clearScopedIdempotencyKey(intentScopeKey)
+                        _ridePaymentState.value = RidePaymentState.Error("Razorpay configuration unavailable or invalid for ride payment.")
                         return@launch
                     }
 
-                    NetworkClient.savePendingCheckout(
-                        orderId = effectiveOrderId,
-                        checkoutType = CheckoutType.RIDE_FARE.name,
-                        rideId = rideId,
-                        amountCents = serverAmountCents,
-                        idempotencyKey = idemKey
+                    NetworkClient.checkoutSessionStore.saveSession(
+                        CheckoutSession(
+                            orderId = effectiveOrderId,
+                            backendPaymentId = body.paymentId,
+                            checkoutType = CheckoutFlowType.RIDE_FARE,
+                            rideId = rideId,
+                            amountCents = serverAmountCents,
+                            currency = body.currency.ifBlank { "INR" },
+                            idempotencyKey = idemKey,
+                            state = CheckoutSessionState.CREATED
+                        )
                     )
                     _ridePaymentState.value = RidePaymentState.CheckoutOpen
 
@@ -1811,136 +1830,139 @@ object RiderRepository {
                         checkout.open(activity, options)
                     }
                 } else {
-                    activeRideIdempotencyKey = null
+                    if (res.code() in 400..499) {
+                        NetworkClient.checkoutSessionStore.clearScopedIdempotencyKey(intentScopeKey)
+                    }
                     _ridePaymentState.value = RidePaymentState.Error("Ride order creation failed: HTTP ${res.code()}")
                 }
             } catch (e: Exception) {
                 _ridePaymentState.value = RidePaymentState.Error(e.message ?: "Network error creating ride payment order")
+            } finally {
+                activeRideLaunchInProgress = false
             }
         }
     }
 
     fun handleRazorpaySuccess(orderId: String, paymentId: String, signature: String) {
-        if (orderId.isBlank() || paymentId.isBlank() || signature.isBlank()) {
+        val cleanOrderId = orderId.trim()
+        if (cleanOrderId.isEmpty() || paymentId.isBlank() || signature.isBlank()) {
             val msg = "Gateway returned incomplete verification parameters."
-            if (activeCheckoutType == CheckoutType.RIDE_FARE) _ridePaymentState.value = RidePaymentState.Error(msg)
-            else _topupState.value = TopupState.Error(msg)
+            if (_ridePaymentState.value is RidePaymentState.CheckoutOpen) _ridePaymentState.value = RidePaymentState.Error(msg)
+            if (_topupState.value is TopupState.CheckoutOpen) _topupState.value = TopupState.Error(msg)
             return
         }
 
-        // Recover persisted checkout context even across Activity/process recreation
-        val persisted = NetworkClient.getPendingCheckout(orderId) ?: NetworkClient.getPendingCheckout()
-        val resolvedType = when (persisted?.optString("checkout_type")) {
-            CheckoutType.RIDE_FARE.name -> CheckoutType.RIDE_FARE
-            CheckoutType.WALLET_TOPUP.name -> CheckoutType.WALLET_TOPUP
-            else -> activeCheckoutType
+        val store = NetworkClient.checkoutSessionStore
+        val existing = store.getSessionByOrderId(cleanOrderId)
+        if (existing == null) {
+            val err = "Unrecognized checkout order $cleanOrderId; cannot safely associate payment without persisted order context."
+            if (_ridePaymentState.value is RidePaymentState.CheckoutOpen) _ridePaymentState.value = RidePaymentState.Error(err)
+            if (_topupState.value is TopupState.CheckoutOpen) _topupState.value = TopupState.Error(err)
+            return
         }
-        val targetRideId = persisted?.optString("ride_id")?.takeIf { it.isNotBlank() } ?: activeCheckoutRideId
 
-        NetworkClient.savePendingVerification(
-            orderId = orderId,
-            paymentId = paymentId,
-            signature = signature,
-            checkoutType = resolvedType.name,
-            rideId = targetRideId
-        )
-        executePendingVerification(orderId, paymentId, signature, resolvedType, targetRideId)
+        val lockedSession = store.tryBeginVerification(cleanOrderId, paymentId, signature) ?: return
+        executeSessionVerification(lockedSession)
     }
 
-    fun retryPendingVerification() {
-        val pending = NetworkClient.getPendingVerification() ?: return
-        val orderId = pending.optString("order_id")
-        val paymentId = pending.optString("payment_id")
-        val signature = pending.optString("signature")
-        val resolvedType = if (pending.optString("checkout_type") == CheckoutType.RIDE_FARE.name) {
-            CheckoutType.RIDE_FARE
-        } else {
-            CheckoutType.WALLET_TOPUP
-        }
-        val rideId = pending.optString("ride_id").takeIf { it.isNotBlank() }
-        if (orderId.isBlank() || paymentId.isBlank() || signature.isBlank()) return
-        executePendingVerification(orderId, paymentId, signature, resolvedType, rideId)
+    fun retryPendingVerification(flowType: CheckoutFlowType = CheckoutFlowType.WALLET_TOPUP) {
+        val retryable = NetworkClient.checkoutSessionStore.getRetryableSession(flowType) ?: return
+        val lockedSession = NetworkClient.checkoutSessionStore.tryBeginVerification(
+            retryable.orderId,
+            retryable.paymentId.orEmpty(),
+            retryable.signature.orEmpty()
+        ) ?: return
+        executeSessionVerification(lockedSession)
     }
 
-    private fun executePendingVerification(
-        orderId: String,
-        paymentId: String,
-        signature: String,
-        resolvedType: CheckoutType,
-        targetRideId: String?
-    ) {
-        if (resolvedType == CheckoutType.RIDE_FARE) {
+    private fun executeSessionVerification(session: CheckoutSession) {
+        val store = NetworkClient.checkoutSessionStore
+        val paymentId = session.paymentId.orEmpty()
+        val signature = session.signature.orEmpty()
+        if (session.checkoutType == CheckoutFlowType.RIDE_FARE) {
+            val targetRideId = session.rideId
+            val intentScopeKey = "RIDE_FARE_${targetRideId ?: session.orderId}"
             _ridePaymentState.value = RidePaymentState.Verifying
             scope.launch {
                 try {
                     val res = NetworkClient.apiService.verifyRidePayment(
                         RidePaymentVerifyRequest(
-                            razorpayOrderId = orderId,
+                            razorpayOrderId = session.orderId,
                             razorpayPaymentId = paymentId,
                             razorpaySignature = signature,
                             rideId = targetRideId
                         )
                     )
                     if (res.isSuccessful && res.body() != null) {
-                        NetworkClient.clearPendingCheckout()
-                        NetworkClient.clearPendingVerification()
-                        activeRideIdempotencyKey = null
+                        store.markVerifiedAndClearIntentKey(session.orderId, intentScopeKey)
                         _ridePaymentState.value = RidePaymentState.Success("Ride payment verified successfully!", targetRideId)
                         fetchActiveRide()
-                    } else {
-                        if (res.code() in 400..499) {
-                            NetworkClient.clearPendingCheckout()
-                            NetworkClient.clearPendingVerification()
-                            activeRideIdempotencyKey = null
-                        }
+                    } else if (res.code() in 400..499) {
+                        store.markTerminalAndClearIntentKey(session.orderId, intentScopeKey, CheckoutSessionState.FAILED)
                         _ridePaymentState.value = RidePaymentState.Error("Verification rejected (HTTP ${res.code()}).")
+                    } else {
+                        store.markRetryableFailure(session.orderId)
+                        _ridePaymentState.value = RidePaymentState.Error("Verification temporarily unavailable (HTTP ${res.code()}); retry available.")
                     }
                 } catch (e: Exception) {
+                    store.markRetryableFailure(session.orderId)
                     _ridePaymentState.value = RidePaymentState.Error(e.message ?: "Verification network timeout; retry available.")
                 }
             }
         } else {
+            val intentScopeKey = "WALLET_TOPUP_${session.amountCents}"
             _topupState.value = TopupState.Verifying
             scope.launch {
                 try {
                     val res = NetworkClient.apiService.verifyWalletTopup(
                         TopupVerifyRequest(
-                            razorpayOrderId = orderId,
+                            razorpayOrderId = session.orderId,
                             razorpayPaymentId = paymentId,
                             razorpaySignature = signature
                         )
                     )
                     if (res.isSuccessful && res.body() != null) {
-                        NetworkClient.clearPendingCheckout()
-                        NetworkClient.clearPendingVerification()
-                        activeTopupIdempotencyKey = null
+                        store.markVerifiedAndClearIntentKey(session.orderId, intentScopeKey)
                         val updated = res.body()!!
                         _topupState.value = TopupState.Success(updated.balanceRupees)
                         fetchWalletBalance()
-                    } else {
-                        if (res.code() in 400..499) {
-                            NetworkClient.clearPendingCheckout()
-                            NetworkClient.clearPendingVerification()
-                            activeTopupIdempotencyKey = null
-                        }
+                    } else if (res.code() in 400..499) {
+                        store.markTerminalAndClearIntentKey(session.orderId, intentScopeKey, CheckoutSessionState.FAILED)
                         _topupState.value = TopupState.Error("Verification rejected (HTTP ${res.code()}).")
+                    } else {
+                        store.markRetryableFailure(session.orderId)
+                        _topupState.value = TopupState.Error("Verification temporarily unavailable (HTTP ${res.code()}); retry available.")
                     }
                 } catch (e: Exception) {
+                    store.markRetryableFailure(session.orderId)
                     _topupState.value = TopupState.Error(e.message ?: "Verification network timeout; retry available.")
                 }
             }
         }
     }
 
-    fun handleRazorpayFailure(code: Int, description: String) {
-        val persisted = NetworkClient.getPendingCheckout()
-        val isRide = persisted?.optString("checkout_type") == CheckoutType.RIDE_FARE.name || activeCheckoutType == CheckoutType.RIDE_FARE
-        NetworkClient.clearPendingCheckout()
-        if (isRide) {
-            activeRideIdempotencyKey = null
+    fun handleRazorpayFailure(code: Int, description: String, orderId: String? = null) {
+        val store = NetworkClient.checkoutSessionStore
+        val session = store.getSessionByOrderId(orderId)
+        if (session != null) {
+            if (session.state == CheckoutSessionState.VERIFIED || session.state == CheckoutSessionState.CANCELLED) {
+                return
+            }
+            if (session.checkoutType == CheckoutFlowType.RIDE_FARE) {
+                val scopeKey = "RIDE_FARE_${session.rideId ?: session.orderId}"
+                store.markTerminalAndClearIntentKey(session.orderId, scopeKey, CheckoutSessionState.CANCELLED)
+                _ridePaymentState.value = RidePaymentState.Error("Payment cancelled ($code): $description")
+            } else {
+                val scopeKey = "WALLET_TOPUP_${session.amountCents}"
+                store.markTerminalAndClearIntentKey(session.orderId, scopeKey, CheckoutSessionState.CANCELLED)
+                _topupState.value = TopupState.Error("Payment cancelled ($code): $description")
+            }
+            return
+        }
+        // Fallback when Razorpay error omits orderId: only update a currently open flow without touching the other
+        if (_ridePaymentState.value is RidePaymentState.CheckoutOpen || _ridePaymentState.value is RidePaymentState.CreatingOrder) {
             _ridePaymentState.value = RidePaymentState.Error("Payment cancelled ($code): $description")
-        } else {
-            activeTopupIdempotencyKey = null
+        } else if (_topupState.value is TopupState.CheckoutOpen || _topupState.value is TopupState.CreatingOrder) {
             _topupState.value = TopupState.Error("Payment cancelled ($code): $description")
         }
     }

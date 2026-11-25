@@ -73,6 +73,8 @@ class PaymentReconciliationService:
                         )
                         if match:
                             pay.provider_order_id = match["id"]
+                            pay.order_creation_lease_owner = None
+                            pay.order_creation_lease_expires_at = None
                             session.add(
                                 PaymentOrderAttempt(
                                     payment_id=pay.id,
@@ -89,6 +91,49 @@ class PaymentReconciliationService:
                             break
                     except Exception as exc:
                         logger.warning("Lost-order receipt lookup failed for payment %s: %s", pay.id, exc)
+
+            # Also audit stuck CREATING / UNCERTAIN PaymentOrderAttempt rows
+            att_stmt = select(PaymentOrderAttempt).where(
+                PaymentOrderAttempt.status.in_(["CREATING", "UNCERTAIN"]),
+                PaymentOrderAttempt.updated_at <= cutoff,
+            ).limit(20)
+            stuck_attempts = (await session.execute(att_stmt)).scalars().all()
+            for att in stuck_attempts:
+                if not att.receipt:
+                    continue
+                try:
+                    orders_resp = await provider.fetch_orders_by_receipt(att.receipt)
+                    orders = orders_resp.get("items", []) if isinstance(orders_resp, dict) else (orders_resp or [])
+                    match = next(
+                        (
+                            o
+                            for o in orders
+                            if o.get("id")
+                            and o.get("amount") == att.amount_cents
+                            and str(o.get("currency") or "INR").upper() == att.currency.upper()
+                            and str(o.get("status") or "").lower() != "attempted_failed"
+                        ),
+                        None,
+                    )
+                    if match:
+                        pay = (await session.execute(select(Payment).where(Payment.id == att.payment_id).with_for_update())).scalar_one_or_none()
+                        att.provider_order_id = match["id"]
+                        att.status = "CREATED"
+                        att.lease_owner = None
+                        att.failure_reason = None
+                        if pay and pay.status in ("CREATED", "PENDING") and not pay.provider_order_id:
+                            pay.provider_order_id = match["id"]
+                            pay.order_creation_lease_owner = None
+                            pay.order_creation_lease_expires_at = None
+                        await session.commit()
+                        recovered_count += 1
+                    elif att.created_at <= datetime.now(timezone.utc) - timedelta(minutes=15):
+                        att.status = "FAILED"
+                        att.lease_owner = None
+                        att.failure_reason = att.failure_reason or "Reconciliation timed out: no gateway order created."
+                        await session.commit()
+                except Exception as exc:
+                    logger.warning("Stuck attempt reconciliation failed for %s: %s", att.id, exc)
             return {"recovered_orders": recovered_count}
 
     @staticmethod

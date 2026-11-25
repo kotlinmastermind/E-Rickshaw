@@ -113,7 +113,15 @@ async def payment_webhook(
 @router.get("/razorpay/webhook")
 @router.get("/webhook")
 async def payment_webhook_status():
-    """Diagnostic health check for the Razorpay Webhook endpoint."""
+    """Diagnostic health check reporting exact live Razorpay webhook event compatibility."""
+    from backend.application.services.payment_service import (
+        INFORMATIONAL_WEBHOOK_EVENTS,
+        NOTIFICATION_WEBHOOK_EVENTS,
+        SUPPORTED_DISPUTE_WEBHOOK_EVENTS,
+        SUPPORTED_FINANCIAL_WEBHOOK_EVENTS,
+        SUPPORTED_WEBHOOK_EVENTS,
+    )
+
     return {
         "status": "ready",
         "endpoints": [
@@ -122,17 +130,16 @@ async def payment_webhook_status():
         ],
         "method": "POST",
         "signature_header": "X-Razorpay-Signature",
-        "description": "Cryptographically verifies HMAC-SHA256 signature and captures payment states.",
+        "description": "Cryptographically verifies raw-body HMAC-SHA256 signature (supporting secret overlap rotation) and processes financial, dispute, notification, and informational events.",
         "active_provider": "RAZORPAY",
-        "supported_events": [
-            "payment.captured",
-            "payment.authorized",
-            "order.paid",
-            "payment.failed",
-            "refund.processed",
-            "refund.created",
-            "refund.failed"
-        ]
+        "supported_events": sorted(SUPPORTED_WEBHOOK_EVENTS),
+        "event_categories": {
+            "financial": sorted(SUPPORTED_FINANCIAL_WEBHOOK_EVENTS),
+            "dispute": sorted(SUPPORTED_DISPUTE_WEBHOOK_EVENTS),
+            "informational": sorted(INFORMATIONAL_WEBHOOK_EVENTS),
+            "notification": sorted(NOTIFICATION_WEBHOOK_EVENTS),
+        },
+        "unknown_event_policy": "Persist in webhook inbox as FAILED and reject with HTTP 400 (no silent 200 on unknown financial events).",
     }
 
 @router.get("/razorpay/config")
@@ -213,89 +220,78 @@ async def create_razorpay_order(
     if amount_paise <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order amount must be positive.")
 
+    actor_user_id = user.id
     clean_idem = (payload.idempotency_key or "").strip() or None
     receipt = (
         payload.receipt
-        or (f"rcpt_{hashlib.sha256(f'{user.id}:{clean_idem}'.encode()).hexdigest()[:24]}" if clean_idem else f"rcpt_{uuid.uuid4().hex[:20]}")
+        or (f"rcpt_{hashlib.sha256(f'{actor_user_id}:{clean_idem}'.encode()).hexdigest()[:24]}" if clean_idem else f"rcpt_{uuid.uuid4().hex[:20]}")
     )
-    scoped_idem = f"gen_ord_{user.id}_{clean_idem}" if clean_idem else f"gen_pend_{receipt}"
+    scoped_digest = hashlib.sha256(f"GEN_ORD:{actor_user_id}:{clean_idem}".encode("utf-8")).hexdigest()[:48] if clean_idem else f"pend_{receipt}"[:48]
+    scoped_idem = f"gen_{scoped_digest}"
 
-    if clean_idem:
-        existing_gen = (
-            await db.execute(select(Payment).where(Payment.idempotency_key == scoped_idem).with_for_update())
-        ).scalar_one_or_none()
-        if existing_gen:
-            if existing_gen.user_id != user.id:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Idempotency key belongs to another user.")
-            if existing_gen.amount_cents != amount_paise:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key reused with a different amount.")
-            if existing_gen.provider_order_id:
-                return {
-                    "order_id": existing_gen.provider_order_id,
-                    "payment_id": existing_gen.id,
-                    "amount": existing_gen.amount_cents,
-                    "amount_cents": existing_gen.amount_cents,
-                    "amount_rupees": round(existing_gen.amount_cents / 100.0, 2),
-                    "currency": existing_gen.currency,
-                    "key_id": settings.RAZORPAY_KEY_ID or "",
-                    "receipt": receipt,
-                    "status": "created",
-                    "reused_existing_order": True,
-                }
+    stmt_gen = select(Payment).where(Payment.idempotency_key == scoped_idem)
+    payment = (await db.execute(stmt_gen)).scalar_one_or_none()
+    if not payment:
+        notes = dict(payload.notes or {})
+        notes["user_id"] = actor_user_id
+        payment = Payment(
+            ride_id=None,
+            user_id=actor_user_id,
+            customer_id=None,
+            amount_cents=amount_paise,
+            currency="INR",
+            status="CREATED",
+            purpose=str(notes.get("purpose") or "GENERAL_PAYMENT"),
+            payment_method="RAZORPAY",
+            provider_name="RAZORPAY",
+            merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or None,
+            idempotency_key=scoped_idem,
+        )
+        db.add(payment)
+        try:
+            await db.commit()
+            await db.refresh(payment)
+        except IntegrityError:
+            await db.rollback()
+            payment = (await db.execute(stmt_gen)).scalar_one()
+
+    if payment.user_id != actor_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Idempotency key belongs to another user.")
+    requested_purpose = str((payload.notes or {}).get("purpose") or payment.purpose or "GENERAL_PAYMENT")
+    if payment.purpose != requested_purpose:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key reused with a different payment purpose.")
+    if payment.amount_cents != amount_paise:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key reused with a different amount.")
 
     notes = dict(payload.notes or {})
-    notes["user_id"] = user.id
-    payment = Payment(
-        ride_id=None,
-        user_id=user.id,
-        customer_id=None,
+    notes["user_id"] = actor_user_id
+    notes["payment_id"] = payment.id
+    order_res = await PaymentService(db).execute_order_creation_with_lease(
+        payment=payment,
         amount_cents=amount_paise,
         currency="INR",
-        status="CREATED",
-        purpose=str(notes.get("purpose") or "GENERAL_PAYMENT"),
-        payment_method="RAZORPAY",
-        provider_name="RAZORPAY",
-        merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or None,
-        idempotency_key=scoped_idem,
-    )
-    db.add(payment)
-    await db.commit()
-    await db.refresh(payment)
-
-    order = await provider.create_razorpay_order(
-        amount_cents=amount_paise,
-        currency="INR",
-        receipt=receipt,
+        deterministic_receipt=receipt,
+        idempotency_key=clean_idem,
         notes=notes,
+        allow_supersede_on_amount_change=False,
     )
-    locked_pay = (await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())).scalar_one()
-    locked_pay.provider_order_id = order.get("id")
-    if order.get("id"):
-        db.add(
-            PaymentOrderAttempt(
-                payment_id=locked_pay.id,
-                provider_order_id=order.get("id"),
-                receipt=receipt,
-                idempotency_key=clean_idem,
-                amount_cents=amount_paise,
-                currency="INR",
-                merchant_account_id=locked_pay.merchant_account_id,
-                status="CREATED",
-            )
+    if order_res.get("already_settled"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Order for this idempotency key is already settled ({order_res.get('status')}).",
         )
-    await db.commit()
-
+    amt = int(order_res.get("amount_cents") or amount_paise)
     return {
-        "order_id": order.get("id"),
-        "payment_id": locked_pay.id,
-        "amount": order.get("amount", amount_paise),
-        "amount_cents": order.get("amount", amount_paise),
-        "amount_rupees": round(amount_paise / 100.0, 2),
-        "currency": order.get("currency", "INR"),
+        "order_id": order_res.get("order_id"),
+        "payment_id": order_res.get("payment_id"),
+        "amount": amt,
+        "amount_cents": amt,
+        "amount_rupees": round(amt / 100.0, 2),
+        "currency": order_res.get("currency", "INR"),
         "key_id": settings.RAZORPAY_KEY_ID or "",
-        "receipt": order.get("receipt", receipt),
-        "status": order.get("status", "created"),
-        "reused_existing_order": False,
+        "receipt": order_res.get("receipt", receipt),
+        "status": "created",
+        "reused_existing_order": bool(order_res.get("reused_existing_order")),
     }
 
 @router.post("/razorpay/verify")

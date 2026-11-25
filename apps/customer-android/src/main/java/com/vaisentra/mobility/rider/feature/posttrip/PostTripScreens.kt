@@ -94,13 +94,44 @@ fun RideReceiptScreen(onNavigate: (String) -> Unit) {
         }
 
         if (method != "WALLET" && total > 0) {
+            val ridePayState by RiderRepository.ridePaymentState.collectAsState()
             Spacer(modifier = Modifier.height(14.dp))
+            when (val rState = ridePayState) {
+                is RiderRepository.RidePaymentState.CreatingOrder -> {
+                    Text("Creating secure Razorpay order...", color = AmberGold, fontSize = 12.sp)
+                }
+                is RiderRepository.RidePaymentState.Verifying -> {
+                    Text("Verifying payment with backend...", color = ElectricCyan, fontSize = 12.sp)
+                }
+                is RiderRepository.RidePaymentState.Success -> {
+                    Text("✓ ${rState.message}", color = EmeraldGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                is RiderRepository.RidePaymentState.Error -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("⚠️ ${rState.message}", color = CrimsonRed, fontSize = 12.sp)
+                        if (RiderRepository.hasPendingVerification(com.vaisentra.mobility.rider.data.CheckoutFlowType.RIDE_FARE)) {
+                            NeoButton(
+                                text = "Retry Verification",
+                                onClick = { RiderRepository.retryPendingVerification(com.vaisentra.mobility.rider.data.CheckoutFlowType.RIDE_FARE) },
+                                backgroundColor = ElectricCyan,
+                                textColor = CanvasBlack
+                            )
+                        }
+                    }
+                }
+                else -> {}
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             NeoButton(
                 text = "Pay ₹${"%.2f".format(total)} via Razorpay",
                 onClick = {
                     (context as? android.app.Activity)?.let { activity ->
-                        val targetRideId = receipt?.rideId ?: activeRide?.id ?: "ride-latest"
-                        RiderRepository.launchRidePaymentCheckout(activity, targetRideId, total)
+                        val targetRideId = receipt?.rideId ?: activeRide?.id.orEmpty()
+                        if (targetRideId.isNotBlank()) {
+                            RiderRepository.launchRidePaymentCheckout(activity, targetRideId)
+                        } else {
+                            DialogController.showToast("Missing ride identifier for payment.")
+                        }
                     }
                 },
                 backgroundColor = AmberGold,

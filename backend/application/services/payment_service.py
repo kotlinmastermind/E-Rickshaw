@@ -9,6 +9,7 @@ Provides:
   excess refund protection, and dedicated reconciliation anomaly recording
 - Separated physical cash settlement handler
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -71,10 +72,16 @@ INFORMATIONAL_WEBHOOK_EVENTS = frozenset({
     "refund.speed_changed",
 })
 
+NOTIFICATION_WEBHOOK_EVENTS = frozenset({
+    "order.notification.delivered",
+    "order.notification.failed",
+})
+
 SUPPORTED_WEBHOOK_EVENTS = (
     SUPPORTED_FINANCIAL_WEBHOOK_EVENTS
     | SUPPORTED_DISPUTE_WEBHOOK_EVENTS
     | INFORMATIONAL_WEBHOOK_EVENTS
+    | NOTIFICATION_WEBHOOK_EVENTS
 )
 
 VALID_PAYMENT_TRANSITIONS: Dict[str, set[str]] = {
@@ -328,6 +335,423 @@ class PaymentService:
             "amount_cents": payment.amount_cents,
         }
 
+    async def _reconcile_uncertain_attempts(
+        self,
+        *,
+        payment: Payment,
+        amount_cents: int,
+        currency: str,
+        fallback_receipt: str,
+    ) -> Optional[PaymentOrderAttempt]:
+        """Reconcile prior CREATING/UNCERTAIN attempts against Razorpay receipt API before creating a new order."""
+        pay_id = payment.id
+        currency_upper = (currency or "INR").upper()
+        stmt = (
+            select(PaymentOrderAttempt)
+            .where(
+                PaymentOrderAttempt.payment_id == pay_id,
+                PaymentOrderAttempt.status.in_(("CREATING", "UNCERTAIN")),
+            )
+            .order_by(PaymentOrderAttempt.created_at.desc())
+        )
+        prior_attempts = (await self.db.execute(stmt)).scalars().all()
+        checked_receipts: set[str] = set()
+
+        for att in prior_attempts:
+            rcpt = (att.receipt or fallback_receipt or "").strip()
+            if att.amount_cents == amount_cents and rcpt and rcpt not in checked_receipts:
+                checked_receipts.add(rcpt)
+                try:
+                    found = await self.provider.fetch_orders_by_receipt(rcpt)
+                    items = found.get("items", []) if isinstance(found, dict) else (found or [])
+                    matched = next(
+                        (
+                            o
+                            for o in items
+                            if o.get("id")
+                            and o.get("amount") == amount_cents
+                            and str(o.get("currency") or "INR").upper() == currency_upper
+                            and str(o.get("status") or "").lower() != "attempted_failed"
+                        ),
+                        None,
+                    )
+                    if matched:
+                        rec_order_id = matched["id"]
+                        await self.db.execute(
+                            update(PaymentOrderAttempt)
+                            .where(
+                                PaymentOrderAttempt.payment_id == pay_id,
+                                PaymentOrderAttempt.status == "CREATED",
+                                PaymentOrderAttempt.id != att.id,
+                            )
+                            .values(status="SUPERSEDED")
+                        )
+                        att.provider_order_id = rec_order_id
+                        att.status = "CREATED"
+                        att.lease_owner = None
+                        att.failure_reason = None
+                        payment.provider_order_id = rec_order_id
+                        payment.amount_cents = amount_cents
+                        payment.order_creation_lease_owner = None
+                        payment.order_creation_lease_expires_at = None
+                        self.db.add(
+                            PaymentEvent(
+                                payment_id=pay_id,
+                                event_type="ORDER_RECOVERED_BY_RECEIPT",
+                                payload_json=json.dumps({"order_id": rec_order_id, "receipt": rcpt}),
+                            )
+                        )
+                        await self.db.commit()
+                        await self.db.refresh(att)
+                        return att
+                except Exception as rec_err:
+                    logger.warning("Uncertain order receipt check failed for %s: %s", rcpt, rec_err)
+
+            if att.status == "CREATING":
+                att.status = "FAILED"
+                att.lease_owner = None
+                att.failure_reason = att.failure_reason or "Stale CREATING attempt retired after lease timeout."
+
+        if prior_attempts:
+            await self.db.commit()
+        return None
+
+    async def execute_order_creation_with_lease(
+        self,
+        *,
+        payment: Payment,
+        amount_cents: int,
+        currency: str,
+        deterministic_receipt: str,
+        idempotency_key: Optional[str],
+        notes: Dict[str, Any],
+        allow_supersede_on_amount_change: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Multi-worker safe Razorpay order creation orchestrator using an atomic DB lease
+        and PaymentOrderAttempt history (`CREATING -> CREATED | SUPERSEDED | UNCERTAIN | FAILED`).
+        """
+        clean_currency = (currency or "INR").upper()
+        if amount_cents <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order amount must be positive.")
+        target_payment_id = payment.id
+
+        def _reuse_payload(pay_obj: Payment, reused: bool = True, recovered: bool = False) -> Dict[str, Any]:
+            return {
+                "payment_id": pay_obj.id,
+                "order_id": pay_obj.provider_order_id,
+                "amount": pay_obj.amount_cents,
+                "amount_cents": pay_obj.amount_cents,
+                "currency": pay_obj.currency,
+                "client_token": pay_obj.provider_order_id,
+                "provider": "RAZORPAY",
+                "key_id": settings.RAZORPAY_KEY_ID or "",
+                "receipt": pay_obj.order_creation_receipt or deterministic_receipt,
+                "status": "created",
+                "reused_existing_order": reused,
+                "recovered_order": recovered,
+            }
+
+        for _cycle in range(2):
+            current = (await self.db.execute(select(Payment).where(Payment.id == target_payment_id))).scalar_one()
+            if current.status in ("CAPTURED", "AUTHORIZED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED", "SUCCESS"):
+                return {
+                    "payment_id": target_payment_id,
+                    "order_id": current.provider_order_id,
+                    "status": current.status,
+                    "amount": current.amount_cents,
+                    "amount_cents": current.amount_cents,
+                    "currency": current.currency,
+                    "already_settled": True,
+                }
+            if current.status in ("FAILED", "EXPIRED"):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Cannot reuse failed or expired payment record; initialize a new payment intent.",
+                )
+            if current.currency.upper() != clean_currency:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Payment currency disagrees with requested currency.",
+                )
+
+            if current.provider_order_id and current.status in ("CREATED", "PENDING"):
+                if current.amount_cents == amount_cents:
+                    return _reuse_payload(current, reused=True)
+                if not allow_supersede_on_amount_change:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Idempotency conflict: order already exists for a different amount.",
+                    )
+                if (settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET) and not current.provider_order_id.startswith("order_test_"):
+                    try:
+                        existing_gw = await self.provider.fetch_order_payments(current.provider_order_id)
+                        gw_items = existing_gw.get("items", []) if isinstance(existing_gw, dict) else (existing_gw or [])
+                        captured = next(
+                            (p for p in gw_items if str(p.get("status") or "").lower() == "captured"),
+                            None,
+                        )
+                        if captured:
+                            locked_cap = (
+                                await self.db.execute(select(Payment).where(Payment.id == target_payment_id).with_for_update())
+                            ).scalar_one()
+                            captured_order_id = locked_cap.provider_order_id
+                            cap_res = await self.finalize_payment_capture(payment=locked_cap, provider_payment_id=captured["id"])
+                            return {
+                                "payment_id": target_payment_id,
+                                "order_id": captured_order_id,
+                                "status": cap_res.get("status", "CAPTURED"),
+                                "amount": cap_res.get("amount_cents", amount_cents),
+                                "amount_cents": cap_res.get("amount_cents", amount_cents),
+                                "currency": clean_currency,
+                                "already_settled": True,
+                            }
+                    except HTTPException:
+                        pass
+                    except Exception as exc:
+                        logger.warning("Order pre-supersede check failed for %s: %s", current.provider_order_id, exc)
+
+            # Atomic DB lease acquisition across workers & Render instances
+            now = datetime.now(timezone.utc)
+            lease_owner = f"lease_{uuid.uuid4().hex[:24]}"
+            lease_expires = now + timedelta(seconds=30)
+
+            lease_stmt = (
+                update(Payment)
+                .where(
+                    Payment.id == target_payment_id,
+                    Payment.status.in_(("CREATED", "PENDING")),
+                    or_(
+                        Payment.order_creation_lease_owner.is_(None),
+                        Payment.order_creation_lease_expires_at < now,
+                    ),
+                )
+                .values(
+                    order_creation_lease_owner=lease_owner,
+                    order_creation_lease_expires_at=lease_expires,
+                    order_creation_receipt=deterministic_receipt,
+                )
+            )
+            if not allow_supersede_on_amount_change:
+                lease_stmt = lease_stmt.where(Payment.provider_order_id.is_(None))
+
+            lease_res = await self.db.execute(lease_stmt)
+            if lease_res.rowcount == 1:
+                await self.db.commit()
+                try:
+                    locked_pay = (await self.db.execute(select(Payment).where(Payment.id == target_payment_id))).scalar_one()
+                    recovered_att = await self._reconcile_uncertain_attempts(
+                        payment=locked_pay,
+                        amount_cents=amount_cents,
+                        currency=clean_currency,
+                        fallback_receipt=deterministic_receipt,
+                    )
+                    if recovered_att and recovered_att.provider_order_id:
+                        refreshed = (await self.db.execute(select(Payment).where(Payment.id == target_payment_id))).scalar_one()
+                        return _reuse_payload(refreshed, reused=True, recovered=True)
+
+                    attempt_id = str(uuid.uuid4())
+                    attempt = PaymentOrderAttempt(
+                        id=attempt_id,
+                        payment_id=target_payment_id,
+                        provider_order_id=None,
+                        receipt=deterministic_receipt,
+                        idempotency_key=idempotency_key,
+                        amount_cents=amount_cents,
+                        currency=clean_currency,
+                        merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or locked_pay.merchant_account_id,
+                        lease_owner=lease_owner,
+                        status="CREATING",
+                    )
+                    self.db.add(attempt)
+                    try:
+                        await self.db.commit()
+                    except IntegrityError:
+                        # Defense-in-depth partial unique index uq_payment_order_attempts_one_creating blocked a race
+                        await self.db.rollback()
+                        await self.db.execute(
+                            update(Payment)
+                            .where(Payment.id == target_payment_id, Payment.order_creation_lease_owner == lease_owner)
+                            .values(order_creation_lease_owner=None, order_creation_lease_expires_at=None)
+                        )
+                        await self.db.commit()
+                        continue
+
+                    try:
+                        gw_order = await self.provider.create_razorpay_order(
+                            amount_cents=amount_cents,
+                            currency=clean_currency,
+                            receipt=deterministic_receipt,
+                            notes=notes,
+                        )
+                    except HTTPException as gw_http:
+                        is_client_rej = 400 <= gw_http.status_code < 500
+                        locked_att = (
+                            await self.db.execute(select(PaymentOrderAttempt).where(PaymentOrderAttempt.id == attempt_id).with_for_update())
+                        ).scalar_one_or_none()
+                        if locked_att:
+                            locked_att.status = "FAILED" if is_client_rej else "UNCERTAIN"
+                            locked_att.failure_reason = str(gw_http.detail)[:500]
+                            locked_att.lease_owner = None
+                        await self.db.execute(
+                            update(Payment)
+                            .where(Payment.id == target_payment_id, Payment.order_creation_lease_owner == lease_owner)
+                            .values(order_creation_lease_owner=None, order_creation_lease_expires_at=None)
+                        )
+                        self.db.add(
+                            PaymentEvent(
+                                payment_id=target_payment_id,
+                                event_type="ORDER_CREATE_FAILED" if is_client_rej else "ORDER_CREATE_UNCERTAIN",
+                                payload_json=json.dumps({"receipt": deterministic_receipt, "detail": str(gw_http.detail)[:250]}),
+                            )
+                        )
+                        await self.db.commit()
+                        raise
+                    except Exception as gw_err:
+                        locked_att = (
+                            await self.db.execute(select(PaymentOrderAttempt).where(PaymentOrderAttempt.id == attempt_id).with_for_update())
+                        ).scalar_one_or_none()
+                        if locked_att:
+                            locked_att.status = "UNCERTAIN"
+                            locked_att.failure_reason = str(gw_err)[:500]
+                            locked_att.lease_owner = None
+                        await self.db.execute(
+                            update(Payment)
+                            .where(Payment.id == target_payment_id, Payment.order_creation_lease_owner == lease_owner)
+                            .values(order_creation_lease_owner=None, order_creation_lease_expires_at=None)
+                        )
+                        self.db.add(
+                            PaymentEvent(
+                                payment_id=target_payment_id,
+                                event_type="ORDER_CREATE_UNCERTAIN",
+                                payload_json=json.dumps({"receipt": deterministic_receipt, "error": str(gw_err)[:250]}),
+                            )
+                        )
+                        await self.db.commit()
+                        raise HTTPException(
+                            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                            detail="Gateway order creation timed out; retry safely to reconcile before recreating.",
+                        )
+
+                    new_order_id = gw_order.get("id") if isinstance(gw_order, dict) else None
+                    if not new_order_id:
+                        locked_att = (
+                            await self.db.execute(select(PaymentOrderAttempt).where(PaymentOrderAttempt.id == attempt_id).with_for_update())
+                        ).scalar_one_or_none()
+                        if locked_att:
+                            locked_att.status = "UNCERTAIN"
+                            locked_att.failure_reason = "Gateway returned missing order id."
+                            locked_att.lease_owner = None
+                        await self.db.execute(
+                            update(Payment)
+                            .where(Payment.id == target_payment_id, Payment.order_creation_lease_owner == lease_owner)
+                            .values(order_creation_lease_owner=None, order_creation_lease_expires_at=None)
+                        )
+                        await self.db.commit()
+                        raise HTTPException(status_code=502, detail="Gateway returned invalid Razorpay order identifier.")
+
+                    # Success: finalize Payment + preserve prior attempts as SUPERSEDED
+                    locked_pay = (
+                        await self.db.execute(select(Payment).where(Payment.id == target_payment_id).with_for_update())
+                    ).scalar_one()
+                    locked_att = (
+                        await self.db.execute(select(PaymentOrderAttempt).where(PaymentOrderAttempt.id == attempt_id).with_for_update())
+                    ).scalar_one()
+                    previous_order_id = locked_pay.provider_order_id
+
+                    await self.db.execute(
+                        update(PaymentOrderAttempt)
+                        .where(
+                            PaymentOrderAttempt.payment_id == target_payment_id,
+                            PaymentOrderAttempt.status == "CREATED",
+                            PaymentOrderAttempt.id != attempt_id,
+                        )
+                        .values(status="SUPERSEDED")
+                    )
+
+                    locked_att.provider_order_id = new_order_id
+                    locked_att.status = "CREATED"
+                    locked_att.lease_owner = None
+                    locked_att.failure_reason = None
+
+                    locked_pay.provider_order_id = new_order_id
+                    locked_pay.amount_cents = amount_cents
+                    locked_pay.merchant_account_id = (
+                        (settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or locked_pay.merchant_account_id
+                    )
+                    locked_pay.order_creation_lease_owner = None
+                    locked_pay.order_creation_lease_expires_at = None
+
+                    self.db.add(
+                        PaymentEvent(
+                            payment_id=target_payment_id,
+                            event_type="ORDER_CREATED",
+                            payload_json=json.dumps(
+                                {
+                                    "order_id": new_order_id,
+                                    "previous_order_id": previous_order_id,
+                                    "amount_cents": amount_cents,
+                                    "receipt": deterministic_receipt,
+                                }
+                            ),
+                        )
+                    )
+                    result_payload = _reuse_payload(locked_pay, reused=False)
+                    await self.db.commit()
+                    return result_payload
+                except HTTPException:
+                    raise
+                except Exception:
+                    await self.db.rollback()
+                    await self.db.execute(
+                        update(Payment)
+                        .where(Payment.id == target_payment_id, Payment.order_creation_lease_owner == lease_owner)
+                        .values(order_creation_lease_owner=None, order_creation_lease_expires_at=None)
+                    )
+                    await self.db.commit()
+                    raise
+
+            # Lease held by peer worker -> wait in non-locking read snapshots for peer completion
+            await self.db.rollback()
+            peer_cleared_without_order = False
+            for _poll in range(40):
+                await asyncio.sleep(0.1)
+                self.db.expire_all()
+                polled = (await self.db.execute(select(Payment).where(Payment.id == target_payment_id))).scalar_one_or_none()
+                if not polled:
+                    break
+                if polled.status in ("CAPTURED", "AUTHORIZED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED", "SUCCESS"):
+                    return {
+                        "payment_id": polled.id,
+                        "order_id": polled.provider_order_id,
+                        "status": polled.status,
+                        "amount": polled.amount_cents,
+                        "amount_cents": polled.amount_cents,
+                        "currency": polled.currency,
+                        "already_settled": True,
+                    }
+                if polled.provider_order_id and polled.amount_cents == amount_cents and polled.status in ("CREATED", "PENDING"):
+                    return _reuse_payload(polled, reused=True)
+                now_poll = datetime.now(timezone.utc)
+                lease_expires_at = polled.order_creation_lease_expires_at
+                if lease_expires_at and lease_expires_at.tzinfo is None:
+                    lease_expires_at = lease_expires_at.replace(tzinfo=timezone.utc)
+                lease_inactive = (
+                    not polled.order_creation_lease_owner
+                    or (lease_expires_at and lease_expires_at < now_poll)
+                )
+                if lease_inactive and polled.provider_order_id is None:
+                    peer_cleared_without_order = True
+                    break
+
+            if peer_cleared_without_order:
+                continue
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Concurrent Razorpay order creation already in progress for this payment; please retry.",
+        )
+
     async def create_payment_intent(
         self,
         user_id: str,
@@ -337,9 +761,8 @@ class PaymentService:
         force_new_order_if_amount_changed: bool = True,
     ) -> Dict[str, Any]:
         """
-        Creates or idempotently reuses an authoritative Razorpay payment intent for a ride.
-        Enforces customer ownership, server-side fare calculation, active order reuse,
-        lost-response recovery via receipt, and attempt auditability.
+        Creates or idempotently reuses an authoritative Razorpay payment intent for a ride
+        using DB-backed leases so concurrent calls across workers never create duplicate orders.
         """
         prof_res = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user_id))
         prof = prof_res.scalar_one_or_none()
@@ -360,146 +783,52 @@ class PaymentService:
         if fare <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ride fare has not been calculated.")
 
-        # Idempotent match by explicit client idempotency_key first
+        # Validate explicit idempotency key does not collide with another ride/user/purpose
         idem_pay = (
             await self.db.execute(select(Payment).where(Payment.idempotency_key == idempotency_key))
         ).scalar_one_or_none()
         if idem_pay:
-            if idem_pay.ride_id and idem_pay.ride_id != ride_id:
+            if idem_pay.user_id and idem_pay.user_id != user_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Idempotency key belongs to a different user.")
+            if idem_pay.ride_id != ride_id or getattr(idem_pay, "purpose", "RIDE_FARE") != "RIDE_FARE":
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Idempotency key is already bound to a different ride.",
+                    detail="Idempotency key is already bound to a different ride or payment purpose.",
                 )
-            if idem_pay.provider_order_id and idem_pay.amount_cents == fare and idem_pay.status in ("CREATED", "PENDING"):
-                return {
-                    "payment_id": idem_pay.id,
-                    "order_id": idem_pay.provider_order_id,
-                    "amount": idem_pay.amount_cents,
-                    "amount_cents": idem_pay.amount_cents,
-                    "currency": idem_pay.currency,
-                    "client_token": idem_pay.provider_order_id,
-                    "provider": "RAZORPAY",
-                    "key_id": settings.RAZORPAY_KEY_ID,
-                    "reused_existing_order": True,
-                }
 
-        stmt = select(Payment).where(Payment.ride_id == ride_id).with_for_update()
-        res = await self.db.execute(stmt)
-        payment = res.scalar_one_or_none()
-
+        stmt = select(Payment).where(Payment.ride_id == ride_id)
+        payment = (await self.db.execute(stmt)).scalar_one_or_none()
         if not payment:
+            scoped_idem = idempotency_key[:128] if idempotency_key else f"ride_{ride_id}"[:128]
+            new_pay = Payment(
+                ride_id=ride_id,
+                user_id=user_id,
+                customer_id=customer_profile_id,
+                amount_cents=fare,
+                currency="INR",
+                purpose="RIDE_FARE",
+                status="CREATED",
+                payment_method="RAZORPAY",
+                provider_name="RAZORPAY",
+                merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or None,
+                idempotency_key=scoped_idem,
+            )
+            self.db.add(new_pay)
             try:
-                async with self.db.begin_nested():
-                    payment = Payment(
-                        ride_id=ride_id,
-                        user_id=user_id,
-                        customer_id=customer_profile_id,
-                        amount_cents=fare,
-                        currency="INR",
-                        purpose="RIDE_FARE",
-                        status="CREATED",
-                        payment_method="RAZORPAY",
-                        provider_name="RAZORPAY",
-                        merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or None,
-                        idempotency_key=idempotency_key,
-                    )
-                    self.db.add(payment)
-                    await self.db.flush()
+                await self.db.commit()
+                await self.db.refresh(new_pay)
+                payment = new_pay
             except IntegrityError:
+                await self.db.rollback()
                 payment = (await self.db.execute(stmt)).scalar_one()
 
-        if payment.status in ["CAPTURED", "AUTHORIZED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED"]:
-            return {
-                "payment_id": payment.id,
-                "order_id": payment.provider_order_id,
-                "status": payment.status,
-                "amount": payment.amount_cents,
-                "amount_cents": payment.amount_cents,
-                "currency": payment.currency,
-                "already_settled": True,
-            }
-
-        # Reuse active unpaid Razorpay order if amount matches (prevents duplicate orders & overwrites)
-        if payment.provider_order_id and payment.status in ("CREATED", "PENDING"):
-            if payment.amount_cents == fare or not force_new_order_if_amount_changed:
-                return {
-                    "payment_id": payment.id,
-                    "order_id": payment.provider_order_id,
-                    "amount": payment.amount_cents,
-                    "amount_cents": payment.amount_cents,
-                    "currency": payment.currency,
-                    "client_token": payment.provider_order_id,
-                    "provider": "RAZORPAY",
-                    "key_id": settings.RAZORPAY_KEY_ID,
-                    "reused_existing_order": True,
-                }
-            # Before superseding an order on fare change, check if earlier order was already captured/paid at gateway
-            if (settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET) and not payment.provider_order_id.startswith("order_test_"):
-                try:
-                    existing_gw = await self.provider.fetch_order_payments(payment.provider_order_id)
-                    captured = next(
-                        (
-                            p for p in existing_gw.get("items", [])
-                            if str(p.get("status") or "").lower() == "captured"
-                        ),
-                        None,
-                    )
-                    if captured:
-                        await self.finalize_payment_capture(payment=payment, provider_payment_id=captured["id"])
-                        return {
-                            "payment_id": payment.id,
-                            "order_id": payment.provider_order_id,
-                            "status": payment.status,
-                            "amount": payment.amount_cents,
-                            "amount_cents": payment.amount_cents,
-                            "currency": payment.currency,
-                            "already_settled": True,
-                        }
-                except HTTPException:
-                    pass
-                except Exception as exc:
-                    logger.warning("Order pre-supersede check failed for %s: %s", payment.provider_order_id, exc)
-
-        # Deterministic receipt tied to internal payment & fare to enable lost-response recovery
         deterministic_receipt = f"ride_{payment.id.replace('-', '')[:24]}_{fare}"[:40]
-        if payment.provider_order_id is None and settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET:
-            try:
-                found_orders = await self.provider.fetch_orders_by_receipt(deterministic_receipt)
-                matched = next(
-                    (
-                        o for o in found_orders.get("items", [])
-                        if o.get("amount") == fare and str(o.get("currency", "INR")).upper() == "INR"
-                    ),
-                    None,
-                )
-                if matched and matched.get("id"):
-                    payment.provider_order_id = matched["id"]
-                    await self.db.commit()
-                    return {
-                        "payment_id": payment.id,
-                        "order_id": matched["id"],
-                        "amount": payment.amount_cents,
-                        "amount_cents": payment.amount_cents,
-                        "currency": payment.currency,
-                        "client_token": matched["id"],
-                        "provider": "RAZORPAY",
-                        "key_id": settings.RAZORPAY_KEY_ID,
-                        "reused_existing_order": True,
-                    }
-            except Exception as rec_err:
-                logger.warning("Lost order receipt recovery skipped for %s: %s", deterministic_receipt, rec_err)
-
-        # Persist baseline intent before external HTTP (commit so lock is not held over HTTP)
-        previous_order_id = payment.provider_order_id
-        payment.amount_cents = fare
-        payment.user_id = payment.user_id or user_id
-        payment.merchant_account_id = (settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or payment.merchant_account_id
-        await self.db.commit()
-
-        intent_order = await self.provider.create_razorpay_order(
+        return await self.execute_order_creation_with_lease(
+            payment=payment,
             amount_cents=fare,
-            currency=payment.currency,
-            receipt=deterministic_receipt,
+            currency="INR",
+            deterministic_receipt=deterministic_receipt,
+            idempotency_key=idempotency_key,
             notes={
                 "internal_payment_id": payment.id,
                 "ride_id": ride_id,
@@ -507,79 +836,8 @@ class PaymentService:
                 "customer_id": customer_profile_id,
                 "purpose": "RIDE_FARE",
             },
+            allow_supersede_on_amount_change=force_new_order_if_amount_changed,
         )
-        new_order_id = intent_order.get("id")
-        if not new_order_id:
-            raise HTTPException(status_code=502, detail="Gateway returned invalid Razorpay order identifier.")
-
-        # Re-lock payment and record attempt history cleanly
-        payment = (await self.db.execute(stmt)).scalar_one()
-        if payment.status in ["CAPTURED", "AUTHORIZED", "PARTIALLY_REFUNDED", "REFUNDED"]:
-            return {
-                "payment_id": payment.id,
-                "order_id": payment.provider_order_id,
-                "status": payment.status,
-                "amount": payment.amount_cents,
-                "amount_cents": payment.amount_cents,
-                "currency": payment.currency,
-                "already_settled": True,
-            }
-
-        if previous_order_id and previous_order_id != new_order_id:
-            prev_attempt = (
-                await self.db.execute(
-                    select(PaymentOrderAttempt).where(PaymentOrderAttempt.provider_order_id == previous_order_id)
-                )
-            ).scalar_one_or_none()
-            if prev_attempt and prev_attempt.status == "CREATED":
-                prev_attempt.status = "SUPERSEDED"
-
-        payment.provider_order_id = new_order_id
-        existing_attempt = (
-            await self.db.execute(
-                select(PaymentOrderAttempt).where(PaymentOrderAttempt.provider_order_id == new_order_id)
-            )
-        ).scalar_one_or_none()
-        if not existing_attempt:
-            self.db.add(
-                PaymentOrderAttempt(
-                    payment_id=payment.id,
-                    provider_order_id=new_order_id,
-                    receipt=deterministic_receipt,
-                    idempotency_key=idempotency_key,
-                    amount_cents=fare,
-                    currency=payment.currency,
-                    merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or None,
-                    status="CREATED",
-                )
-            )
-        self.db.add(
-            PaymentEvent(
-                payment_id=payment.id,
-                event_type="ORDER_CREATED",
-                payload_json=json.dumps(
-                    {
-                        "order_id": new_order_id,
-                        "previous_order_id": previous_order_id,
-                        "amount_cents": fare,
-                        "receipt": deterministic_receipt,
-                    }
-                ),
-            )
-        )
-        await self.db.commit()
-
-        return {
-            "payment_id": payment.id,
-            "order_id": new_order_id,
-            "amount": payment.amount_cents,
-            "amount_cents": payment.amount_cents,
-            "currency": payment.currency,
-            "client_token": new_order_id,
-            "provider": "RAZORPAY",
-            "key_id": settings.RAZORPAY_KEY_ID,
-            "reused_existing_order": False,
-        }
 
     async def _resolve_customer_user_id(self, payment: Payment) -> Optional[str]:
         """Resolve the customer's User.id from Payment.user_id or CustomerProfile.user_id."""
@@ -1113,6 +1371,55 @@ class PaymentService:
                 "secret_slot": secret_slot,
                 "merchant_account_id": effective_account,
                 "message": f"Informational Razorpay event {webhook_event} recorded cleanly.",
+            }
+
+        # Supported Order Notification Events (order.notification.*): record safely without retries
+        if webhook_event in NOTIFICATION_WEBHOOK_EVENTS:
+            ord_ent = (payload_obj.get("order") or {}).get("entity") if isinstance(payload_obj.get("order"), dict) else {}
+            notif_ent = (payload_obj.get("order_notification") or {}).get("entity") if isinstance(payload_obj.get("order_notification"), dict) else {}
+            notif_order_id = (
+                (ord_ent.get("id") if isinstance(ord_ent, dict) else None)
+                or (notif_ent.get("order_id") if isinstance(notif_ent, dict) else None)
+                or data.get("order_id")
+            )
+            matched_pay: Optional[Payment] = None
+            if notif_order_id:
+                clean_notif_order = str(notif_order_id).strip()
+                matched_pay = (
+                    await self.db.execute(select(Payment).where(Payment.provider_order_id == clean_notif_order))
+                ).scalar_one_or_none()
+                if not matched_pay:
+                    att = (
+                        await self.db.execute(
+                            select(PaymentOrderAttempt).where(PaymentOrderAttempt.provider_order_id == clean_notif_order)
+                        )
+                    ).scalar_one_or_none()
+                    if att:
+                        matched_pay = (
+                            await self.db.execute(select(Payment).where(Payment.id == att.payment_id))
+                        ).scalar_one_or_none()
+            if matched_pay:
+                self.db.add(
+                    PaymentEvent(
+                        payment_id=matched_pay.id,
+                        event_type=webhook_event.upper().replace(".", "_"),
+                        payload_json=json.dumps({"inbox_id": inbox.id, "order_id": notif_order_id}),
+                    )
+                )
+            if webhook_event == "order.notification.failed":
+                logger.warning("Razorpay order notification failed for order %s", notif_order_id)
+            inbox.status = "PROCESSED"
+            inbox.processed_at = now
+            inbox.last_error = None
+            await self._commit_or_500(f"notification webhook {webhook_event}")
+            return {
+                "status": "ACKNOWLEDGED_NOTIFICATION",
+                "event": webhook_event,
+                "order_id": notif_order_id,
+                "payment_id": matched_pay.id if matched_pay else None,
+                "secret_slot": secret_slot,
+                "merchant_account_id": effective_account,
+                "message": f"Notification Razorpay event {webhook_event} recorded cleanly.",
             }
 
         try:

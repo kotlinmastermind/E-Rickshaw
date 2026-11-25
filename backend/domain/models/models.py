@@ -996,7 +996,10 @@ class Payment(Base):
     provider_order_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
     provider_payment_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
     provider_signature: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
-    idempotency_key: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    order_creation_lease_owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    order_creation_lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    order_creation_receipt: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     
     cash_collected_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     cash_confirmed_by_driver_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1396,7 +1399,8 @@ class RefundLiability(Base):
 class PaymentOrderAttempt(Base):
     """
     Preserves every Razorpay order attempt associated with an internal Payment,
-    enabling safe recovery of late captures on superseded orders and lost order responses.
+    enabling safe recovery of late captures on superseded orders, concurrency lease tracking,
+    and lost order responses.
     """
     __tablename__ = "payment_order_attempts"
 
@@ -1404,13 +1408,26 @@ class PaymentOrderAttempt(Base):
     payment_id: Mapped[str] = mapped_column(String(36), ForeignKey("payments.id"), nullable=False, index=True)
     provider_order_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
     receipt: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
-    idempotency_key: Mapped[Optional[str]] = mapped_column(String(96), index=True, nullable=True)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), index=True, nullable=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
     merchant_account_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    lease_owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    failure_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="CREATED", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("ix_payment_order_attempts_payment_status", "payment_id", "status"),
+        Index(
+            "uq_payment_order_attempts_one_creating",
+            "payment_id",
+            unique=True,
+            postgresql_where=text("status = 'CREATING'"),
+            sqlite_where=text("status = 'CREATING'"),
+        ),
+    )
 
 
 class PaymentReconciliationAnomaly(Base):

@@ -99,58 +99,12 @@ class RazorpayPaymentProvider(PaymentProvider):
             "notes": merged_notes,
         }
 
-        # Avoid outbound unauthenticated network calls when running synthetic tests without keys
+        # Avoid outbound network calls only when explicit synthetic test credentials are active
         if (
             os.getenv("TESTING") == "1"
-            and settings.ENVIRONMENT != "production"
-            and (not self.key_id or not self.key_secret)
+            and (settings.ENVIRONMENT or "").strip().lower() != "production"
+            and (not self.key_id or not self.key_secret or self.key_id.startswith("rzp_test_mock"))
         ):
-            fallback_order_id = f"order_test_{uuid.uuid4().hex[:14]}"
-            return {
-                "id": fallback_order_id,
-                "entity": "order",
-                "amount": amount_cents,
-                "amount_paid": 0,
-                "amount_due": amount_cents,
-                "currency": currency or "INR",
-                "receipt": receipt_str,
-                "status": "created",
-                "attempts": 0,
-                "notes": notes or {},
-                "created_at": 1730440000
-            }
-
-        # 1. Try Razorpay official SDK client
-        if self._client:
-            try:
-                order = self._client.order.create(data=order_payload)
-                logger.info(f"Razorpay live order created via SDK: {order.get('id')}")
-                return order
-            except Exception as e:
-                logger.warning(f"Razorpay SDK order creation failed, trying HTTPX: {e}")
-
-        # 2. Try HTTPX direct REST API
-        import httpx
-        url = "https://api.razorpay.com/v1/orders"
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    url,
-                    json=order_payload,
-                    auth=(self.key_id, self.key_secret),
-                    timeout=10.0
-                )
-                if resp.status_code in [200, 201]:
-                    data = resp.json()
-                    logger.info(f"Razorpay live order created via HTTPX: {data.get('id')}")
-                    return data
-                else:
-                    logger.error(f"Razorpay HTTP order error {resp.status_code}: {resp.text}")
-        except Exception as e:
-            logger.error(f"Razorpay HTTP request exception: {e}")
-
-        # 3. Handle failure: never fake production orders
-        if os.getenv("TESTING") == "1" and (settings.ENVIRONMENT or "").strip().lower() != "production":
             fallback_order_id = f"order_test_{uuid.uuid4().hex[:14]}"
             return {
                 "id": fallback_order_id,
@@ -166,10 +120,54 @@ class RazorpayPaymentProvider(PaymentProvider):
                 "created_at": 1730440000
             }
 
-        raise HTTPException(
-            status_code=502,
-            detail="Razorpay payment gateway order creation failed. Verify credentials and connectivity."
-        )
+        # 1. Try Razorpay official SDK client
+        if self._client:
+            try:
+                order = self._client.order.create(data=order_payload)
+                logger.info(f"Razorpay live order created via SDK: {order.get('id')}")
+                return order
+            except Exception as e:
+                logger.warning(f"Razorpay SDK order creation failed, trying HTTPX: {e}")
+
+        # 2. Try HTTPX direct REST API with distinct handling of 4xx vs timeout/5xx
+        import httpx
+        url = "https://api.razorpay.com/v1/orders"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    json=order_payload,
+                    auth=(self.key_id, self.key_secret),
+                    timeout=10.0
+                )
+                if resp.status_code in [200, 201]:
+                    data = resp.json()
+                    logger.info(f"Razorpay live order created via HTTPX: {data.get('id')}")
+                    return data
+                logger.error(f"Razorpay HTTP order error {resp.status_code}: {resp.text}")
+                if 400 <= resp.status_code < 500:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST if resp.status_code == 400 else resp.status_code,
+                        detail=f"Razorpay order creation rejected by gateway ({resp.status_code}).",
+                    )
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Razorpay gateway upstream error ({resp.status_code}).",
+                )
+        except HTTPException:
+            raise
+        except httpx.TimeoutException as exc:
+            logger.error(f"Razorpay order creation timeout: {exc}")
+            raise HTTPException(
+                status_code=504,
+                detail="Razorpay order creation timed out; retry safely to reconcile before recreating.",
+            )
+        except Exception as e:
+            logger.error(f"Razorpay HTTP request exception: {e}")
+            raise HTTPException(
+                status_code=502,
+                detail="Razorpay payment gateway order creation failed. Verify credentials and connectivity."
+            )
 
     async def create_payment_intent(self, amount_cents: int, currency: str, idempotency_key: str) -> PaymentIntentResult:
         order = await self.create_razorpay_order(

@@ -20,74 +20,18 @@ object NetworkClient {
     private const val PREF_NAME = "ridergo_secure_prefs"
     private const val KEY_TOKEN = "access_token"
     private const val KEY_REFRESH_TOKEN = "refresh_token"
-    private const val KEY_PENDING_CHECKOUT = "pending_razorpay_checkout"
-    private const val KEY_PENDING_VERIFICATION = "pending_razorpay_verification"
     private var sharedPrefs: android.content.SharedPreferences? = null
     var onAuthExpired: (() -> Unit)? = null
 
-    fun savePendingCheckout(
-        orderId: String,
-        checkoutType: String,
-        rideId: String?,
-        amountCents: Int,
-        idempotencyKey: String
-    ) {
-        val payload = JSONObject().apply {
-            put("order_id", orderId)
-            put("checkout_type", checkoutType)
-            if (!rideId.isNullOrBlank()) put("ride_id", rideId)
-            put("amount_cents", amountCents)
-            put("idempotency_key", idempotencyKey)
-        }.toString()
-        sharedPrefs?.edit { putString(KEY_PENDING_CHECKOUT, payload) }
-    }
-
-    fun getPendingCheckout(expectedOrderId: String? = null): JSONObject? {
-        val raw = sharedPrefs?.getString(KEY_PENDING_CHECKOUT, null) ?: return null
-        return try {
-            val obj = JSONObject(raw)
-            if (!expectedOrderId.isNullOrBlank() && obj.optString("order_id") != expectedOrderId) {
-                null
-            } else {
-                obj
+    val checkoutSessionStore: CheckoutSessionStore by lazy {
+        CheckoutSessionStore(object : CheckoutStorage {
+            override fun readString(key: String): String? = sharedPrefs?.getString(key, null)
+            override fun writeString(key: String, value: String?) {
+                sharedPrefs?.edit {
+                    if (value == null) remove(key) else putString(key, value)
+                }
             }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun clearPendingCheckout() {
-        sharedPrefs?.edit { remove(KEY_PENDING_CHECKOUT) }
-    }
-
-    fun savePendingVerification(
-        orderId: String,
-        paymentId: String,
-        signature: String,
-        checkoutType: String,
-        rideId: String?
-    ) {
-        val payload = JSONObject().apply {
-            put("order_id", orderId)
-            put("payment_id", paymentId)
-            put("signature", signature)
-            put("checkout_type", checkoutType)
-            if (!rideId.isNullOrBlank()) put("ride_id", rideId)
-        }.toString()
-        sharedPrefs?.edit { putString(KEY_PENDING_VERIFICATION, payload) }
-    }
-
-    fun getPendingVerification(): JSONObject? {
-        val raw = sharedPrefs?.getString(KEY_PENDING_VERIFICATION, null) ?: return null
-        return try {
-            JSONObject(raw)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun clearPendingVerification() {
-        sharedPrefs?.edit { remove(KEY_PENDING_VERIFICATION) }
+        })
     }
 
     fun init(context: android.content.Context) {

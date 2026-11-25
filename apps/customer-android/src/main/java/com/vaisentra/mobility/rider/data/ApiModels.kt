@@ -244,6 +244,7 @@ data class TopupCreateOrderRequest(
 
 data class TopupOrderResponse(
     @SerializedName("order_id") val orderId: String,
+    @SerializedName("payment_id") val paymentId: String? = null,
     @SerializedName(value = "amount_cents", alternate = ["amount"]) val amountCents: Int = 0,
     @SerializedName("amount_rupees") val amountRupees: Double = 0.0,
     @SerializedName("currency") val currency: String = "INR",
