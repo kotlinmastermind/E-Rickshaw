@@ -132,9 +132,15 @@ class DriverFinancialService:
         rides = res.scalars().all()
 
         total_gross_cents = sum(r.final_fare_cents or 0 for r in rides)
-        # Standard platform commission is 20%
-        commission_rate = 0.20
-        total_commission_cents = round(total_gross_cents * commission_rate)
+        from backend.application.services.commission_service import CommissionService
+        active_rule = await CommissionService.resolve_rule(self.db)
+        commission_pct = (
+            float(active_rule.platform_commission_percentage)
+            if active_rule and active_rule.platform_commission_percentage is not None
+            else 15.0
+        )
+        commission_rate = commission_pct / 100.0
+        total_commission_cents = CommissionService.compute_commission_cents(total_gross_cents, commission_pct)
         total_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in rides)
         total_net_cents = (total_gross_cents - total_commission_cents) + total_tips_cents
 

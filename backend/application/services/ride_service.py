@@ -624,10 +624,17 @@ class RideService:
 
         # Update driver stats and driver_wallets table
         driver.total_trips += 1
+        from backend.application.services.commission_service import CommissionService
         fare_cents = int(ride.final_fare_cents or ride.estimated_fare_cents or 0)
-        commission_rate = 0.15
-        commission_cents = int(round(fare_cents * commission_rate))
-        driver_earnings = fare_cents - commission_cents
+        snap = await CommissionService.calculate_for_ride(
+            self.db,
+            gross_cents=fare_cents,
+            category_id=getattr(ride, "category_id", None),
+            effective_at=getattr(ride, "completed_at", None) or getattr(ride, "requested_at", None) or now,
+            calculation_basis="RIDE_COMPLETION",
+        )
+        commission_cents = snap.commission_cents
+        driver_earnings = snap.net_cents
 
         stmt_w = select(DriverWallet).where(DriverWallet.driver_id == driver.id).with_for_update()
         d_wallet = (await self.db.execute(stmt_w)).scalar_one_or_none()

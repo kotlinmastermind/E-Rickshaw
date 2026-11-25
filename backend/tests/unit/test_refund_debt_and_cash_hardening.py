@@ -523,7 +523,8 @@ async def test_cash_ride_concurrency_and_commission_deduction(db_session):
     assert res["cash_collected_cents"] == 20000
     assert res["commission_receivable_cents"] == 3000  # 15% of ₹200
     assert res["driver_net_earnings_cents"] == 17000   # 85% of ₹200
-    assert res["driver_wallet_balance_cents"] == -3000
+    assert res["driver_wallet_balance_cents"] == 0
+    assert res["commission_receivable_cents"] == 3000
 
     # Second confirmation attempt raises 400 Bad Request
     with pytest.raises(Exception) as exc:

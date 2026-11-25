@@ -478,8 +478,14 @@ async def admin_financial_summary(
     rides_count, gross_cents, tip_cents = ride_res.one_or_none() or (0, 0, 0)
     gross_cents = gross_cents or 0
     tip_cents = tip_cents or 0
-    commission_cents = round(gross_cents * 0.20)
-    net_driver_cents = (gross_cents - commission_cents) + tip_cents
+    from backend.application.services.commission_service import CommissionService
+    snap = await CommissionService.calculate_for_ride(
+        db,
+        gross_cents=gross_cents,
+        calculation_basis="AGGREGATE_REPORT",
+    )
+    commission_cents = snap.commission_cents
+    net_driver_cents = snap.net_cents + tip_cents
 
     welfare_stmt = select(func.count(DriverFinancialSupportRequest.id)).where(DriverFinancialSupportRequest.status == "PENDING")
     welfare_res = await db.execute(welfare_stmt)

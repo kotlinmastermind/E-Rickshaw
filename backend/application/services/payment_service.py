@@ -269,9 +269,16 @@ class PaymentService:
                     ride.assigned_driver_id = payment.driver_id
 
                 if ride.assigned_driver_id:
+                    from backend.application.services.commission_service import CommissionService
                     fare_cents = payment.amount_cents
-                    commission_cents = int(round(fare_cents * 0.15))
-                    driver_earnings = fare_cents - commission_cents
+                    snap = await CommissionService.calculate_for_ride(
+                        self.db,
+                        gross_cents=fare_cents,
+                        category_id=getattr(ride, "category_id", None),
+                        effective_at=getattr(ride, "completed_at", None) or getattr(ride, "requested_at", None),
+                        calculation_basis="RIDE_COMPLETION",
+                    )
+                    commission_cents = snap.commission_cents
 
                     d_w_res = await self.db.execute(
                         select(DriverWallet)
@@ -299,21 +306,47 @@ class PaymentService:
                     ).scalar_one_or_none()
 
                     if not existing_earn:
-                        d_wallet.balance_cents += driver_earnings
-                        d_wallet.updated_at = datetime.now(timezone.utc)
+                        now_ts = datetime.now(timezone.utc)
+                        d_wallet.balance_cents += fare_cents
+                        d_wallet.updated_at = now_ts
                         self.db.add(
                             DriverLedgerEntry(
                                 id=str(uuid.uuid4()),
                                 driver_id=ride.assigned_driver_id,
                                 entry_type="CREDIT",
                                 category="TRIP_EARNING",
-                                amount_cents=driver_earnings,
+                                amount_cents=fare_cents,
                                 balance_after_cents=d_wallet.balance_cents,
                                 reference_id=ride.id,
-                                description=f"Net earnings (85%) for online card/UPI ride #{ride.id[:8]}",
-                                created_at=datetime.now(timezone.utc),
+                                description=f"Gross earnings for online ride #{ride.id[:8]}",
+                                created_at=now_ts,
                             )
                         )
+                        existing_comm = (
+                            await self.db.execute(
+                                select(DriverLedgerEntry).where(
+                                    DriverLedgerEntry.driver_id == ride.assigned_driver_id,
+                                    DriverLedgerEntry.reference_id == ride.id,
+                                    DriverLedgerEntry.category.in_(["COMMISSION_PAYABLE", "COMMISSION"]),
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if not existing_comm and commission_cents > 0:
+                            d_wallet.balance_cents -= commission_cents
+                            d_wallet.updated_at = now_ts
+                            self.db.add(
+                                DriverLedgerEntry(
+                                    id=str(uuid.uuid4()),
+                                    driver_id=ride.assigned_driver_id,
+                                    entry_type="DEBIT",
+                                    category="COMMISSION_PAYABLE",
+                                    amount_cents=-commission_cents,
+                                    balance_after_cents=d_wallet.balance_cents,
+                                    reference_id=ride.id,
+                                    description=f"Platform commission ({snap.percentage}% v{snap.version}) for online ride #{ride.id[:8]}",
+                                    created_at=now_ts,
+                                )
+                            )
 
         if auto_commit:
             try:
@@ -2637,12 +2670,23 @@ class PaymentService:
         if ride.status != "COMPLETED":
             ride.status = "COMPLETED"
 
+        from backend.application.services.commission_service import CommissionService
+        fare_cents = payment.amount_cents
+        snap = await CommissionService.calculate_for_ride(
+            self.db,
+            gross_cents=fare_cents,
+            category_id=getattr(ride, "category_id", None),
+            effective_at=getattr(ride, "completed_at", None) or getattr(ride, "requested_at", None) or now,
+            calculation_basis="RIDE_COMPLETION",
+        )
+        commission_cents = snap.commission_cents
+
         existing_comm = (
             await self.db.execute(
                 select(DriverLedgerEntry).where(
                     DriverLedgerEntry.driver_id == driver_prof.id,
                     DriverLedgerEntry.reference_id == ride.id,
-                    DriverLedgerEntry.category == "COMMISSION",
+                    DriverLedgerEntry.category.in_(["COMMISSION_RECEIVABLE", "COMMISSION"]),
                 )
             )
         ).scalars().first()
@@ -2658,27 +2702,38 @@ class PaymentService:
             await self.db.flush()
 
         if not existing_comm:
-            fare_cents = payment.amount_cents
-            commission_cents = int(round(fare_cents * 0.15))
-            wallet.balance_cents -= commission_cents
+            # Record gross cash earning and commission receivable separately.
+            # Do NOT immediately deduct commission from the driver's wallet on cash collection.
             self.db.add(
                 DriverLedgerEntry(
                     id=str(uuid.uuid4()),
                     driver_id=driver_prof.id,
-                    entry_type="DEBIT",
-                    category="COMMISSION",
-                    amount_cents=-commission_cents,
+                    entry_type="CREDIT",
+                    category="CASH_TRIP_EARNING",
+                    amount_cents=fare_cents,
                     balance_after_cents=wallet.balance_cents,
                     reference_id=ride.id,
-                    description=f"Platform commission (15%) for cash ride #{ride.id[:8]}",
+                    description=f"Gross cash earning for ride #{ride.id[:8]}",
                     created_at=now,
                 )
             )
+            if commission_cents > 0:
+                self.db.add(
+                    DriverLedgerEntry(
+                        id=str(uuid.uuid4()),
+                        driver_id=driver_prof.id,
+                        entry_type="DEBIT",
+                        category="COMMISSION_RECEIVABLE",
+                        amount_cents=-commission_cents,
+                        balance_after_cents=wallet.balance_cents,
+                        reference_id=ride.id,
+                        description=f"Platform commission receivable ({snap.percentage}% v{snap.version}) for cash ride #{ride.id[:8]}",
+                        created_at=now,
+                    )
+                )
 
         await self._commit_or_500("cash collection confirmation")
 
-        fare_cents = payment.amount_cents
-        commission_cents = int(round(fare_cents * 0.15))
         driver_net_earnings_cents = fare_cents - commission_cents
 
         return {
@@ -2687,9 +2742,12 @@ class PaymentService:
             "payment_method": "CASH",
             "provider_name": "CASH",
             "cash_collected_cents": fare_cents,
+            "driver_gross_earnings_cents": fare_cents,
             "driver_net_earnings_cents": driver_net_earnings_cents,
             "commission_receivable_cents": commission_cents,
-            "commission_deducted_cents": commission_cents,
+            "commission_deducted_cents": 0,
+            "commission_percentage": snap.percentage,
+            "commission_version": snap.version,
             "driver_wallet_balance_cents": wallet.balance_cents,
             "cash_collected": True,
             "amount_cents": payment.amount_cents,

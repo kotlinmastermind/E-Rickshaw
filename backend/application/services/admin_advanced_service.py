@@ -148,30 +148,19 @@ class AdminAdvancedService:
         session: AsyncSession,
         category_id: Optional[str],
         percentage: float,
-        admin_user_id: Optional[str] = None
+        admin_user_id: Optional[str] = None,
+        reason: Optional[str] = None,
+        effective_from: Optional[datetime] = None,
     ) -> CommissionRule:
-        current_time = datetime.now(timezone.utc)
-        latest_version = (await session.execute(select(func.max(CommissionRule.version)).where(
-            CommissionRule.category_id == category_id))).scalar() or 0
-        active_rules = (await session.execute(select(CommissionRule).where(
-            CommissionRule.category_id == category_id, CommissionRule.is_active.is_(True)).with_for_update())).scalars().all()
-        for previous in active_rules:
-            previous.is_active = False
-            previous.effective_until = current_time
-        rule = CommissionRule(
+        from backend.application.services.commission_service import CommissionService
+        return await CommissionService.create_and_activate_rule(
+            session,
             category_id=category_id,
-            version=latest_version + 1,
-            platform_commission_percentage=percentage,
-            driver_share_percentage=max(0.0, 100.0 - percentage),
-            effective_from=current_time,
-            is_active=True,
-            created_by=admin_user_id
+            percentage=percentage,
+            admin_user_id=admin_user_id,
+            reason=reason,
+            effective_from=effective_from,
         )
-        session.add(rule)
-        await session.flush()
-        if admin_user_id:
-            session.add(AdministrativeAuditLog(admin_user_id=admin_user_id, action="COMMISSION_RULE_ACTIVATED", target_resource="commission_rules", target_id=rule.id, changes_json=json.dumps({"version": rule.version, "commission_percent": percentage, "category_id": category_id})))
-        return rule
 
     @staticmethod
     async def list_commission_rules(session: AsyncSession) -> List[CommissionRule]:

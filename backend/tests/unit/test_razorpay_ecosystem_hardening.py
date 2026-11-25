@@ -279,8 +279,9 @@ async def test_cash_collection_commission_double_debit_prevention(db_session):
 
     service = PaymentService(db_session)
     res1 = await service.confirm_cash_collection(driver_user_id=driver_user_id, ride_id=ride.id)
-    assert res1["commission_deducted_cents"] == 1500
-    assert res1["driver_wallet_balance_cents"] == -1500
+    assert res1["commission_deducted_cents"] == 0
+    assert res1["commission_receivable_cents"] == 1500
+    assert res1["driver_wallet_balance_cents"] == 0
 
     # Second call is rejected because cash collection is already processed
     with pytest.raises(HTTPException) as exc_info:

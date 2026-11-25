@@ -1288,7 +1288,7 @@ async def test_concurrent_cash_collection_prevents_double_commission(db_session:
     refreshed_wallet = (await db_session.execute(
         select(DriverWallet).where(DriverWallet.driver_id == driver_prof.id)
     )).scalar_one()
-    assert refreshed_wallet.balance_cents == 7000
+    assert refreshed_wallet.balance_cents == 10000
 
     # Second call (duplicate/race): must be rejected with HTTP 400
     with pytest.raises(HTTPException) as exc_dup:
@@ -1300,7 +1300,7 @@ async def test_concurrent_cash_collection_prevents_double_commission(db_session:
     wallet_after_dup = (await db_session.execute(
         select(DriverWallet).where(DriverWallet.driver_id == driver_prof.id)
     )).scalar_one()
-    assert wallet_after_dup.balance_cents == 7000
+    assert wallet_after_dup.balance_cents == 10000
 
 
 @pytest.mark.asyncio
