@@ -112,19 +112,28 @@ class MapsProvider(ABC):
         }
 
     async def validate_address(self, address_line: str, locality: Optional[str] = None, postal_code: Optional[str] = None) -> Dict[str, Any]:
-        formatted = f"{address_line}, {locality}" if locality else address_line
+        if not address_line or not address_line.strip():
+            return {
+                "valid": False,
+                "verdict": "INVALID_INPUT",
+                "formatted_address": "",
+                "components": {},
+                "confidence": "NONE",
+                "provider_mode": "VALIDATION_REJECTED"
+            }
+        # Base provider cannot verify addresses without a live geocoding backend.
         return {
-            "valid": True,
-            "verdict": "CONFIRMED",
-            "formatted_address": formatted,
+            "valid": False,
+            "verdict": "UNVERIFIED",
+            "formatted_address": f"{address_line}, {locality}" if locality else address_line,
             "components": {
                 "street": address_line,
-                "locality": locality or "Metropolitan Area",
-                "postal_code": postal_code or "10001",
-                "country": "GLOBAL"
+                "locality": locality or "",
+                "postal_code": postal_code or "",
+                "country": ""
             },
-            "confidence": "HIGH",
-            "provider_mode": "APPROXIMATE_VALIDATOR"
+            "confidence": "NONE",
+            "provider_mode": "UNCONFIGURED_VALIDATOR"
         }
 
     async def get_navigation_guidance(self, origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float) -> Dict[str, Any]:
@@ -410,6 +419,93 @@ class MapboxProvider(MapsProvider):
             "live_data": True,
             "message": "Mapbox Vector Navigation, Matrix, Geocoding, and Directions API active."
         }
+
+    async def validate_address(
+        self,
+        address_line: str,
+        locality: Optional[str] = None,
+        postal_code: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if not address_line or not address_line.strip():
+            return {
+                "valid": False,
+                "verdict": "INVALID_INPUT",
+                "formatted_address": "",
+                "components": {},
+                "confidence": "NONE",
+                "provider_mode": "MAPBOX_GEOCODING",
+            }
+        if not self.access_token or "dummy" in self.access_token:
+            return await super().validate_address(address_line, locality, postal_code)
+
+        parts = [address_line.strip()]
+        if locality and locality.strip():
+            parts.append(locality.strip())
+        if postal_code and postal_code.strip():
+            parts.append(postal_code.strip())
+        query = ", ".join(parts)
+
+        from urllib.parse import quote
+        url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{quote(query)}.json"
+        params = {
+            "access_token": self.access_token,
+            "country": "in",
+            "limit": 3,
+            "types": "address,place,locality,postcode,poi",
+        }
+        async with httpx.AsyncClient(timeout=7.0) as client:
+            try:
+                resp = await client.get(url, params=params)
+                if resp.status_code != 200:
+                    return {
+                        "valid": False,
+                        "verdict": "PROVIDER_ERROR",
+                        "formatted_address": query,
+                        "components": {},
+                        "confidence": "NONE",
+                        "provider_mode": "MAPBOX_GEOCODING",
+                    }
+                features = resp.json().get("features", [])
+                if not features:
+                    return {
+                        "valid": False,
+                        "verdict": "NOT_FOUND",
+                        "formatted_address": query,
+                        "components": {},
+                        "confidence": "NONE",
+                        "provider_mode": "MAPBOX_GEOCODING",
+                    }
+                top = features[0]
+                relevance = float(top.get("relevance", 0.0))
+                center = top.get("center", [None, None])
+                context = {c.get("id", "").split(".")[0]: c.get("text", "") for c in top.get("context", [])}
+                is_valid = relevance >= 0.6 and len(center) == 2 and center[0] is not None
+                confidence = "HIGH" if relevance >= 0.85 else ("MEDIUM" if relevance >= 0.6 else "LOW")
+                return {
+                    "valid": is_valid,
+                    "verdict": "CONFIRMED" if is_valid else "AMBIGUOUS",
+                    "formatted_address": top.get("place_name", query),
+                    "coordinates": {"latitude": center[1], "longitude": center[0]} if len(center) == 2 else None,
+                    "components": {
+                        "street": top.get("text", address_line),
+                        "locality": context.get("locality") or context.get("place") or locality or "",
+                        "state": context.get("region") or "",
+                        "postal_code": context.get("postcode") or postal_code or "",
+                        "country": context.get("country") or "IN",
+                    },
+                    "confidence": confidence,
+                    "relevance": round(relevance, 3),
+                    "provider_mode": "MAPBOX_GEOCODING",
+                }
+            except Exception:
+                return {
+                    "valid": False,
+                    "verdict": "UNAVAILABLE",
+                    "formatted_address": query,
+                    "components": {},
+                    "confidence": "NONE",
+                    "provider_mode": "MAPBOX_GEOCODING",
+                }
 
     async def get_route(
         self, origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float

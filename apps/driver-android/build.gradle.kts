@@ -95,4 +95,6 @@ dependencies {
 
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+} else if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
+    throw GradleException("Missing google-services.json for release build. Firebase FCM will not function.")
 }

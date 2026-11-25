@@ -5,9 +5,30 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional, Any, Dict, Tuple, Set
+from urllib.parse import urlparse, urlunparse
 from backend.core.config import settings
 
 logger = logging.getLogger("cache.redis")
+
+
+def _redact_redis_url(url: Optional[str]) -> str:
+    """Redact credentials from a Redis URL before logging."""
+    if not url:
+        return "<unset>"
+    try:
+        parsed = urlparse(url)
+        if parsed.password or parsed.username:
+            netloc = parsed.hostname or ""
+            if parsed.port:
+                netloc = f"{netloc}:{parsed.port}"
+            if parsed.username:
+                netloc = f"{parsed.username}:***@{netloc}"
+            else:
+                netloc = f"***@{netloc}"
+            return urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+    except Exception:
+        return "<redacted-redis-url>"
 
 class CacheStats:
     def __init__(self):
@@ -293,7 +314,7 @@ class RedisManager:
             await self._redis.ping()
             self.is_connected = True
             self._reconnect_backoff = 1.0
-            logger.info(f"Connected/reconnected to Redis cluster at {self.redis_url}")
+            logger.info(f"Connected/reconnected to Redis cluster at {_redact_redis_url(self.redis_url)}")
             return self._redis
         except Exception as e:
             self.is_connected = False
@@ -493,8 +514,11 @@ class RedisManager:
                 res = await client.set(key, token, nx=True, px=int(timeout_seconds * 1000))
                 return bool(res)
         except Exception as e:
-            logger.warning(f"Redis acquire_lock failed, using memory fallback: {e}")
+            logger.warning(f"Redis acquire_lock failed: {e}")
             self.is_connected = False
+        if (getattr(settings, "ENVIRONMENT", "") or "").strip().lower() == "production":
+            logger.error(f"Refusing local in-memory lock fallback in production for key={key}")
+            return False
         return await self._fallback.acquire_lock(key, token, timeout_seconds)
 
     async def release_lock(self, key: str, token: str) -> bool:

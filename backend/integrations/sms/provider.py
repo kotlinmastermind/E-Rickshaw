@@ -72,7 +72,7 @@ class TwilioVerifyProvider(SMSProvider):
         """
         self._ensure_configured()
         e164_phone = normalize_e164_phone(phone_number)
-        if len(e164_phone) < 10:
+        if not re.match(r"^\+[1-9]\d{7,14}$", e164_phone):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid mobile phone number format."
@@ -127,9 +127,15 @@ class TwilioVerifyProvider(SMSProvider):
                     detail=f"The phone number {e164_phone} is not a valid mobile phone number."
                 )
 
+            if response.status_code in (401, 403):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="SMS verification service authentication failed."
+                )
+
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Twilio error: {err_msg}"
+                status_code=status.HTTP_400_BAD_REQUEST if 400 <= response.status_code < 500 else status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to send verification code. Please check the phone number or try again later."
             )
 
     async def verify_otp(self, phone_number: str, otp_code: str) -> bool:
@@ -172,7 +178,8 @@ class TwilioVerifyProvider(SMSProvider):
 
             if response.status_code == 404:
                 # Expired or no pending verification found
-                logger.warning(f"[TWILIO_VERIFY_EXPIRED] No pending verification for {e164_phone}")
+                masked = e164_phone[-4:].rjust(len(e164_phone), "*") if len(e164_phone) >= 4 else "***"
+                logger.warning(f"[TWILIO_VERIFY_EXPIRED] No pending verification for {masked}")
                 return False
 
             resp_data = {}
@@ -190,6 +197,9 @@ _sms_provider_instance: Optional[SMSProvider] = None
 def get_sms_provider() -> SMSProvider:
     global _sms_provider_instance
     if _sms_provider_instance is None:
+        configured = (getattr(settings, "SMS_PROVIDER", "twilio") or "twilio").strip().lower()
+        if configured != "twilio":
+            raise ValueError(f"Unsupported SMS_PROVIDER '{configured}'. Only 'twilio' is supported.")
         _sms_provider_instance = TwilioVerifyProvider()
     return _sms_provider_instance
 

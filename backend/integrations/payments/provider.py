@@ -6,7 +6,7 @@ import hmac
 import hashlib
 import json
 import logging
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from backend.core.config import settings
 from backend.infrastructure.security.crypto import verify_hmac_signature
 
