@@ -195,9 +195,27 @@ private fun SosEmergencyPopup() {
                     var liveLng = 0.0
                     try {
                         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-                        val lastGps = lm?.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                        val lastNet = lm?.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                        val best = lastGps ?: lastNet
+                        val candidates = listOf(
+                            LocationManager.GPS_PROVIDER,
+                            LocationManager.NETWORK_PROVIDER,
+                            LocationManager.PASSIVE_PROVIDER
+                        ).mapNotNull { prov ->
+                            val loc = try {
+                                lm?.getLastKnownLocation(prov)
+                            } catch (_: Exception) {
+                                null
+                            }
+                            loc?.let {
+                                com.vaisentra.mobility.rider.data.RiderLocationSample(
+                                    latitude = it.latitude,
+                                    longitude = it.longitude,
+                                    provider = it.provider ?: prov,
+                                    accuracyMeters = if (it.hasAccuracy()) it.accuracy else 35f,
+                                    timestampMs = if (it.time > 0L) it.time else System.currentTimeMillis()
+                                )
+                            }
+                        }
+                        val best = com.vaisentra.mobility.rider.data.NativeLocationEvaluator.selectBestLastKnown(candidates)
                         if (best != null) {
                             liveLat = best.latitude
                             liveLng = best.longitude

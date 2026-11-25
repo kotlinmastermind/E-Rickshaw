@@ -1,11 +1,14 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_customer
+from backend.api.routes.notifications import DeviceTokenDeactivatePayload, DeviceTokenPayload
+from backend.application.services.notification_service import NotificationService
 from backend.domain.models import User, CustomerProfile, Notification
+from backend.infrastructure.security.rate_limiter import device_token_rate_limiter
 
 router = APIRouter(prefix="/customers", tags=["Customer Profiles"])
 
@@ -252,6 +255,43 @@ async def get_notifications(
         }
         for n in notifications
     ]
+
+@router.post("/device-token")
+async def register_customer_device_token(
+    request: Request,
+    payload: DeviceTokenPayload,
+    user: User = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    request.state.user = user
+    await device_token_rate_limiter(request)
+    return await NotificationService(db).register_token(
+        user_id=user.id,
+        fcm_token=payload.fcm_token,
+        device_os=payload.platform or payload.device_os,
+        target_user_id=payload.user_id,
+        actor_role=user.role,
+        device_label=payload.device_label,
+    )
+
+
+@router.delete("/device-token")
+async def deactivate_customer_device_token(
+    request: Request,
+    fcm_token: Optional[str] = Query(None, max_length=512),
+    payload: Optional[DeviceTokenDeactivatePayload] = Body(default=None),
+    user: User = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    request.state.user = user
+    await device_token_rate_limiter(request)
+    token = payload.fcm_token if payload and payload.fcm_token else fcm_token
+    return await NotificationService(db).deactivate_token(
+        user_id=user.id,
+        fcm_token=token,
+        actor_role=user.role,
+    )
+
 
 @router.delete("/account")
 async def delete_customer_account(

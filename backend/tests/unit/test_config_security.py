@@ -41,6 +41,7 @@ def test_production_succeeds_with_valid_configuration(monkeypatch):
     monkeypatch.setenv("RAZORPAY_KEY_ID", "rzp_live_12345678901234")
     monkeypatch.setenv("RAZORPAY_KEY_SECRET", "production_secret_key_12345678")
     monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", "production_webhook_secret_123456")
+    monkeypatch.setenv("RAZORPAY_MERCHANT_ACCOUNT_ID", "acc_FourthMerchant01")
 
     cfg = Settings(_env_file=None)
     assert cfg.ENVIRONMENT == "production"

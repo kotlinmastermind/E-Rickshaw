@@ -37,7 +37,7 @@ class LiveLocationService:
         speed_mps: Optional[float] = None,
         accuracy_m: Optional[float] = None,
         is_mock_location: bool = False,
-        location_source: str = "FUSED",
+        location_source: str = "GPS",
         is_online: bool = True,
         is_busy: bool = False,
         active_ride_id: Optional[str] = None

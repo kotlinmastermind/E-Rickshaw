@@ -14,8 +14,13 @@ from backend.domain.models import (
     CustomerRidePass, SavedPaymentMethod, RideFareSplit, GiftCard,
     PaymentRefund, FareDispute
 )
+from sqlalchemy import func
 from backend.application.services.wallet_service import WalletService
-from backend.application.services.payment_service import transition_payment_status
+from backend.application.services.payment_service import (
+    PaymentService,
+    transition_payment_status,
+    transition_refund_status,
+)
 from backend.integrations.payments.provider import get_payment_provider
 class SettlementAdvancedService:
     def __init__(self, db: AsyncSession):
@@ -402,21 +407,31 @@ class SettlementAdvancedService:
     async def generate_upi_deep_link(
         self,
         ride_id: str,
-        amount_cents: int,
+        amount_cents: Optional[int] = None,
         custom_vpa: Optional[str] = None
     ) -> Dict[str, Any]:
-        amount_rupees = f"{(amount_cents / 100):.2f}"
-        merchant_vpa = "grandchauffeur.escrow@icici"
-        merchant_name = "Grand Chauffeur Mobility"
-        txn_ref = f"GC{ride_id[:8].upper()}"
+        stmt = select(Payment).where(Payment.ride_id == ride_id)
+        payment = (await self.db.execute(stmt)).scalar_one_or_none()
+        ride = (await self.db.execute(select(Ride).where(Ride.id == ride_id))).scalar_one_or_none()
 
-        # Standard NPCI UPI Intent URI
+        # Never trust client-supplied amount when an authoritative ride/payment amount exists
+        authoritative_cents = 0
+        if payment and int(payment.amount_cents or 0) > 0:
+            authoritative_cents = int(payment.amount_cents)
+        elif ride and int(ride.final_fare_cents or ride.estimated_fare_cents or 0) > 0:
+            authoritative_cents = int(ride.final_fare_cents or ride.estimated_fare_cents or 0)
+        elif amount_cents and int(amount_cents) > 0:
+            authoritative_cents = int(amount_cents)
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to determine valid ride fare for UPI QR.")
+
+        amount_rupees = f"{(authoritative_cents / 100):.2f}"
+        merchant_vpa = (custom_vpa or "").strip() or "vaisentra.mobility@icici"
+        merchant_name = "Vaisentra Mobility"
+        txn_ref = f"VM{ride_id[:8].upper()}"
+
         upi_intent_uri = f"upi://pay?pa={merchant_vpa}&pn={merchant_name}&am={amount_rupees}&cu=INR&tn=Ride_{ride_id}&tr={txn_ref}"
 
-        # Update payment record with UPI URI
-        stmt = select(Payment).where(Payment.ride_id == ride_id)
-        res = await self.db.execute(stmt)
-        payment = res.scalar_one_or_none()
         if payment:
             payment.upi_intent_uri = upi_intent_uri
             payment.payment_method = "UPI"
@@ -424,11 +439,15 @@ class SettlementAdvancedService:
 
         return {
             "ride_id": ride_id,
+            "amount_cents": authoritative_cents,
             "amount_rupees": float(amount_rupees),
             "merchant_vpa": merchant_vpa,
             "merchant_name": merchant_name,
             "upi_intent_uri": upi_intent_uri,
+            "upi_intent_url": upi_intent_uri,
             "qr_payload": upi_intent_uri,
+            "qr_code_payload": upi_intent_uri,
+            "payment_status": payment.status if payment else "CREATED",
             "supported_apps": ["Google Pay", "PhonePe", "Paytm", "BHIM", "CRED"]
         }
 
@@ -629,97 +648,248 @@ class SettlementAdvancedService:
         payment_id: str,
         amount_cents: int,
         reason: str,
-        is_partial: bool = False
+        is_partial: bool = False,
+        idempotency_key: Optional[str] = None,
+        allow_debt_clawback: bool = False,
+        actor_admin_id: Optional[str] = None,
+        existing_refund_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Initiate authentic gateway refund via Razorpay API."""
+        """
+        Initiate authoritative gateway refund via Razorpay API with crash-safe two-phase reservation:
+        1. Locks payment row, checks idempotency_key + remaining unreserved ceiling + wallet balance (for user top-up refunds),
+           and inserts (or transitions an approved) provisional INITIATED PaymentRefund record committed BEFORE outbound HTTP.
+        2. Executes gateway call outside long DB locks.
+        3. Applies confirmed settlement ONLY once gateway confirms 'processed' (either here synchronously or
+           via refund.processed webhook), keeping pending gateway refunds in GATEWAY_PROCESSING without premature
+           wallet debits or inflated refunded_amount_cents.
+        """
         if not isinstance(amount_cents, int) or isinstance(amount_cents, bool) or amount_cents <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Refund amount must be a positive integer in paise.")
+        if not reason or not reason.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Refund reason is required.")
 
+        clean_idem = idempotency_key.strip() if isinstance(idempotency_key, str) and idempotency_key.strip() else None
+        if clean_idem and not existing_refund_id:
+            existing_by_idem = (
+                await self.db.execute(select(PaymentRefund).where(PaymentRefund.idempotency_key == clean_idem))
+            ).scalar_one_or_none()
+            if existing_by_idem:
+                if existing_by_idem.payment_id != payment_id or existing_by_idem.amount_cents != amount_cents:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Refund idempotency_key is already bound to a different payment or amount.",
+                    )
+                return {
+                    "refund_id": existing_by_idem.provider_refund_id or existing_by_idem.id,
+                    "internal_refund_id": existing_by_idem.id,
+                    "payment_id": existing_by_idem.payment_id,
+                    "amount_rupees": round(existing_by_idem.amount_cents / 100.0, 2),
+                    "status": existing_by_idem.status,
+                    "arn_reference": existing_by_idem.arn_reference,
+                    "gateway_status": existing_by_idem.status.lower(),
+                    "idempotent_replay": True,
+                }
+
+        # Step 1: Lock Payment & reserve refundable capacity before outbound gateway call
         stmt = select(Payment).where(Payment.id == payment_id).with_for_update()
-        res = await self.db.execute(stmt)
-        payment = res.scalar_one_or_none()
+        payment = (await self.db.execute(stmt)).scalar_one_or_none()
         if not payment:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record not found.")
 
-        if payment.status not in {"CAPTURED", "PARTIALLY_REFUNDED"}:
+        if payment.provider_name == "CASH" or payment.payment_method == "CASH":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Physical CASH payments cannot be refunded via Razorpay.")
+
+        if not payment.provider_payment_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment has no captured Razorpay payment ID.")
+
+        if payment.status not in {"CAPTURED", "PARTIALLY_REFUNDED", "REFUND_PENDING", "PAID", "SETTLED", "SUCCESS"}:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CAPTURED or PARTIALLY_REFUNDED payments can be refunded.")
 
-        remaining = int(payment.amount_cents) - int(payment.refunded_amount_cents or 0)
+        in_flight_statuses = ("INITIATED", "PENDING", "GATEWAY_PROCESSING", "APPROVED_AWAITING_PROVIDER")
+        reserved_in_flight = int(
+            await self.db.scalar(
+                select(func.coalesce(func.sum(PaymentRefund.amount_cents), 0)).where(
+                    PaymentRefund.payment_id == payment.id,
+                    PaymentRefund.status.in_(in_flight_statuses),
+                    PaymentRefund.id != (existing_refund_id or ""),
+                )
+            ) or 0
+        )
+        remaining = int(payment.amount_cents) - int(payment.refunded_amount_cents or 0) - reserved_in_flight
         if amount_cents > remaining:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Refund amount (₹{amount_cents/100:.2f}) exceeds remaining balance (₹{remaining/100:.2f})."
+                detail=f"Refund amount (₹{amount_cents/100:.2f}) exceeds remaining unreserved balance (₹{max(0, remaining)/100:.2f}).",
             )
 
-        # Double-dip protection: If this payment was for a commuter wallet topup,
-        # debit the commuter wallet balance atomically BEFORE issuing gateway refund.
-        if getattr(payment, "purpose", None) == "WALLET_TOPUP":
-            topup_user_id = payment.user_id
-            if not topup_user_id and payment.customer_id:
-                cust_prof = (await self.db.execute(select(CustomerProfile).where(CustomerProfile.id == payment.customer_id))).scalar_one_or_none()
-                if cust_prof:
-                    topup_user_id = cust_prof.user_id
-                else:
-                    topup_user_id = payment.customer_id
+        payment_svc = PaymentService(self.db)
+        if getattr(payment, "purpose", None) == "WALLET_TOPUP" and not allow_debt_clawback:
+            topup_user_id = await payment_svc._resolve_customer_user_id(payment)
             if topup_user_id:
-                await WalletService.debit_wallet(
-                    session=self.db,
-                    user_id=topup_user_id,
-                    amount_cents=amount_cents,
-                    source="TOPUP_REFUND",
-                    reference_id=payment.id,
-                    description=f"Gateway refund reversal for top-up {payment.id}",
-                    allow_negative=False
-                )
+                wallet = await WalletService.get_or_create_wallet(self.db, topup_user_id, for_update=True)
+                if wallet.balance_cents < amount_cents:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"Insufficient wallet balance to refund wallet top-up. "
+                            f"Available: {wallet.balance_cents} cents, Required: {amount_cents} cents"
+                        ),
+                    )
 
+        if existing_refund_id:
+            provisional_refund = (
+                await self.db.execute(
+                    select(PaymentRefund).where(PaymentRefund.id == existing_refund_id).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if not provisional_refund or provisional_refund.payment_id != payment.id:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approved refund record not found for payment.")
+            if provisional_refund.status not in {"APPROVED_AWAITING_PROVIDER", "INITIATED", "FAILED"}:
+                return {
+                    "refund_id": provisional_refund.provider_refund_id or provisional_refund.id,
+                    "internal_refund_id": provisional_refund.id,
+                    "payment_id": provisional_refund.payment_id,
+                    "amount_rupees": round(provisional_refund.amount_cents / 100.0, 2),
+                    "status": provisional_refund.status,
+                    "arn_reference": provisional_refund.arn_reference,
+                    "gateway_status": provisional_refund.status.lower(),
+                    "idempotent_replay": True,
+                }
+            internal_refund_id = provisional_refund.id
+            transition_refund_status(provisional_refund, "INITIATED", context="create_refund from approved")
+            provisional_refund.idempotency_key = provisional_refund.idempotency_key or clean_idem or f"ref_req_{internal_refund_id}"
+            provisional_refund.estimated_settlement_date = provisional_refund.estimated_settlement_date or (
+                datetime.now(timezone.utc) + timedelta(days=3)
+            )
+            await self.db.commit()
+        else:
+            internal_refund_id = str(uuid.uuid4())
+            provisional_refund = PaymentRefund(
+                id=internal_refund_id,
+                payment_id=payment.id,
+                ride_id=payment.ride_id,
+                customer_id=payment.customer_id,
+                amount_cents=amount_cents,
+                raw_gateway_amount_cents=None,
+                excess_amount_cents=0,
+                is_partial=is_partial or (int(payment.refunded_amount_cents or 0) + amount_cents < int(payment.amount_cents)),
+                reason=reason.strip()[:255],
+                status="INITIATED",
+                provider_refund_id=None,
+                idempotency_key=clean_idem or f"ref_req_{internal_refund_id}",
+                requested_by_admin_id=actor_admin_id,
+                estimated_settlement_date=datetime.now(timezone.utc) + timedelta(days=3),
+            )
+            self.db.add(provisional_refund)
+            await self.db.commit()
+
+        # Step 2: Execute Razorpay gateway refund API outside long DB row lock
         provider = get_payment_provider()
-        gateway_refund = await provider.create_refund(
-            payment_id=payment.provider_payment_id,
-            amount_cents=amount_cents,
-            notes={"reason": reason, "payment_id": payment.id}
-        )
+        try:
+            gateway_refund = await provider.create_refund(
+                payment_id=payment.provider_payment_id,
+                amount_cents=amount_cents,
+                notes={
+                    "reason": reason.strip()[:120],
+                    "payment_id": payment.id,
+                    "internal_refund_id": internal_refund_id,
+                },
+            )
+        except HTTPException as gw_err:
+            locked_refund = (
+                await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
+            ).scalar_one_or_none()
+            if locked_refund and gw_err.status_code < 500:
+                transition_refund_status(locked_refund, "FAILED", context="create_refund gateway 4xx")
+                locked_refund.last_error = str(gw_err.detail)[:500]
+            elif locked_refund:
+                transition_refund_status(locked_refund, "PENDING", context="create_refund uncertain gateway outcome")
+                locked_refund.last_error = str(gw_err.detail)[:500]
+            await self.db.commit()
+            raise
+        except Exception as net_err:
+            locked_refund = (
+                await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
+            ).scalar_one_or_none()
+            if locked_refund:
+                transition_refund_status(locked_refund, "PENDING", context="create_refund network error")
+                locked_refund.last_error = str(net_err)[:500]
+                await self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Payment gateway timeout/network error during refund; refund queued for reconciliation.",
+            )
 
         real_refund_id = gateway_refund.get("id")
         if not real_refund_id:
-            await self.db.rollback()
+            locked_refund = (
+                await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
+            ).scalar_one_or_none()
+            if locked_refund:
+                transition_refund_status(locked_refund, "FAILED", context="create_refund missing gateway refund id")
+                locked_refund.last_error = "Gateway did not return a valid refund identifier."
+                await self.db.commit()
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Gateway did not return a valid refund identifier.")
 
+        # Step 3: Re-lock Payment & PaymentRefund and apply gateway outcome atomically
+        payment = (await self.db.execute(stmt)).scalar_one()
+        refund = (
+            await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
+        ).scalar_one()
+
+        gw_status = str(gateway_refund.get("status") or "").lower()
         real_arn = (gateway_refund.get("acquirer_data") or {}).get("arn") or real_refund_id
-        settlement_status = "PROCESSED" if gateway_refund.get("status") == "processed" else "GATEWAY_PROCESSING"
+        gw_amount = gateway_refund.get("amount") or amount_cents
 
-        refund = PaymentRefund(
-            id=real_refund_id,
-            payment_id=payment.id,
-            ride_id=payment.ride_id,
-            customer_id=payment.customer_id,
-            amount_cents=amount_cents,
-            raw_gateway_amount_cents=gateway_refund.get("amount") or amount_cents,
-            excess_amount_cents=0,
-            is_partial=is_partial or (int(payment.refunded_amount_cents or 0) + amount_cents < int(payment.amount_cents)),
-            reason=reason,
-            status=settlement_status,
-            provider_refund_id=real_refund_id,
-            arn_reference=real_arn,
-            estimated_settlement_date=datetime.now(timezone.utc) + timedelta(days=3)
-        )
-        self.db.add(refund)
+        refund.provider_refund_id = real_refund_id
+        refund.arn_reference = real_arn
+        refund.raw_gateway_amount_cents = gw_amount
 
-        payment.refunded_amount_cents = int(payment.refunded_amount_cents or 0) + amount_cents
-        target_status = "REFUNDED" if payment.refunded_amount_cents >= int(payment.amount_cents) else "PARTIALLY_REFUNDED"
-        try:
-            transition_payment_status(payment, target_status, context="create_refund")
-        except ValueError as err:
-            await self.db.rollback()
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
+        if gw_status == "processed":
+            await payment_svc.apply_confirmed_refund_settlement(
+                payment=payment,
+                refund_obj=refund,
+                refund_id=real_refund_id,
+                raw_refund_amount=int(gw_amount),
+                reason=reason.strip(),
+                arn_reference=real_arn,
+                settled_status="PROCESSED",
+                now=datetime.now(timezone.utc),
+            )
+            await self.db.commit()
+        elif gw_status == "failed":
+            await payment_svc.apply_failed_refund_reversal(
+                payment=payment,
+                refund_obj=refund,
+                refund_id=real_refund_id,
+                raw_refund_amount=int(gw_amount),
+                failure_reason="Gateway returned failed synchronously.",
+                now=datetime.now(timezone.utc),
+            )
+            await self.db.commit()
+        else:
+            # Gateway accepted refund asynchronously ('created' / 'pending'): do NOT bump refunded_amount_cents or debit wallet yet
+            transition_refund_status(refund, "GATEWAY_PROCESSING", context="create_refund gateway processing")
+            if payment.status == "CAPTURED":
+                transition_payment_status(payment, "REFUND_PENDING", context="create_refund gateway processing")
+            self.db.add(
+                PaymentEvent(
+                    payment_id=payment.id,
+                    event_type="REFUND_GATEWAY_PROCESSING",
+                    payload_json=json.dumps({"refund_id": real_refund_id, "amount_cents": amount_cents, "gateway_status": gw_status}),
+                )
+            )
+            await self.db.commit()
 
-        await self.db.commit()
+        await self.db.refresh(refund)
         return {
-            "refund_id": refund.id,
+            "refund_id": refund.provider_refund_id or refund.id,
+            "internal_refund_id": refund.id,
             "payment_id": payment.id,
             "amount_rupees": round(amount_cents / 100.0, 2),
             "status": refund.status,
             "arn_reference": refund.arn_reference,
-            "gateway_status": gateway_refund.get("status")
+            "gateway_status": gw_status,
         }
     async def get_refund_status(self, refund_id: str) -> Dict[str, Any]:
         stmt = select(PaymentRefund).where(PaymentRefund.id == refund_id)

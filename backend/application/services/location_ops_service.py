@@ -530,7 +530,7 @@ class LocationOpsService:
             "estimated_arrival_iso": arrival_time.isoformat(),
             "last_refreshed_at": now.isoformat(),
             "recommended_next_refresh_seconds": 15,
-            "traffic_source": "TELEMETRY_STREAM_FUSED"
+            "traffic_source": "TELEMETRY_STREAM_GNSS"
         }
 
     # =========================================================================

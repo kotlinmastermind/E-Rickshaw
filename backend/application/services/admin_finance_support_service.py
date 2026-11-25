@@ -13,12 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.domain.models import (
     AdminWalletAdjustmentRequest, AdministrativeAuditLog, BroadcastDelivery, BroadcastNotification,
     CommissionRule, DriverPayoutRequest, DriverProfile, FareDispute, InvoiceCorrectionRequest,
-    Notification, Payment, PaymentEvent, PaymentRefund, PaymentWebhookInbox, Ride, SupportEscalationPolicy,
+    Notification, Payment, PaymentEvent, PaymentOrderAttempt, PaymentReconciliationAnomaly,
+    PaymentRefund, PaymentWebhookInbox, Ride, SupportEscalationPolicy,
     SupportMessage, SupportResponseTemplate, SupportTicket, User, UserPreferences, Wallet,
     WalletTransaction, DriverLedgerEntry
 )
 from backend.application.services.wallet_service import WalletService
 from backend.application.services.payment_service import PaymentService, transition_refund_status
+from backend.core.config import settings
 
 
 class AdminFinanceSupportService:
@@ -194,24 +196,30 @@ class AdminFinanceSupportService:
         return {"id": row.id, "version": row.version, "approval_status": row.approval_status, "is_active": row.is_active,
                 "effective_from": row.effective_from.isoformat()}
 
-    # Finance: refund approval and external provider boundary
+    # Finance: refund approval and external provider execution
     async def refund_requests(self) -> List[Dict[str, Any]]:
         rows = (await self.db.execute(select(PaymentRefund, Payment).join(Payment, Payment.id == PaymentRefund.payment_id)
                     .order_by(desc(PaymentRefund.created_at)).limit(500))).all()
         return [{"id": r.id, "payment_id": p.id, "ride_id": r.ride_id, "amount_cents": r.amount_cents,
+                 "raw_gateway_amount_cents": r.raw_gateway_amount_cents, "excess_amount_cents": r.excess_amount_cents,
                  "reason": r.reason, "status": r.status, "approval_status": r.approval_status,
+                 "idempotency_key": r.idempotency_key, "last_error": r.last_error,
                  "provider_name": p.provider_name, "provider_payment_id": p.provider_payment_id,
-                 "arn_reference": r.arn_reference, "created_at": r.created_at.isoformat(),
+                 "provider_refund_id": r.provider_refund_id, "arn_reference": r.arn_reference,
+                 "created_at": r.created_at.isoformat(),
+                 "settled_at": r.settled_at.isoformat() if getattr(r, "settled_at", None) else None,
                  "review_reason": r.review_reason} for r, p in rows]
 
     async def create_refund_request(self, admin_id: str, payment_id: str, amount: int, reason: str) -> Dict[str, Any]:
         payment = await self.db.get(Payment, payment_id)
         if not payment: raise HTTPException(404, "Payment not found.")
         pending_or_approved = int(await self.db.scalar(select(func.coalesce(func.sum(PaymentRefund.amount_cents), 0)).where(
-            PaymentRefund.payment_id == payment.id, PaymentRefund.status.in_(["PENDING_APPROVAL", "APPROVED_AWAITING_PROVIDER"]))) or 0)
+            PaymentRefund.payment_id == payment.id,
+            PaymentRefund.status.in_(["INITIATED", "PENDING", "GATEWAY_PROCESSING", "PENDING_APPROVAL", "APPROVED_AWAITING_PROVIDER"])
+        )) or 0)
         remaining = payment.amount_cents - (payment.refunded_amount_cents or 0) - pending_or_approved
         if amount <= 0 or amount > remaining: raise HTTPException(422, "Refund amount must be positive and no greater than the unrefunded captured amount.")
-        if payment.status not in {"CAPTURED", "SETTLED", "SUCCESS", "PARTIALLY_REFUNDED"}:
+        if payment.status not in {"CAPTURED", "SETTLED", "SUCCESS", "PARTIALLY_REFUNDED", "REFUND_PENDING"}:
             raise HTTPException(409, "Only captured or settled payments can be submitted for refund review.")
         row = PaymentRefund(payment_id=payment.id, ride_id=payment.ride_id, customer_id=payment.customer_id,
                             amount_cents=amount, is_partial=amount < remaining, reason=reason.strip(),
@@ -223,7 +231,7 @@ class AdminFinanceSupportService:
         return {"id": row.id, "approval_status": row.approval_status, "status": row.status, "amount_cents": row.amount_cents}
 
     async def review_refund(self, admin_id: str, refund_id: str, approve: bool, reason: str) -> Dict[str, Any]:
-        row = await self.db.get(PaymentRefund, refund_id)
+        row = (await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())).scalar_one_or_none()
         if not row or row.approval_status != "PENDING": raise HTTPException(409, "Refund request is not awaiting review.")
         if len(reason.strip()) < 10: raise HTTPException(422, "Provide a review reason of at least 10 characters.")
         row.reviewed_by_admin_id, row.reviewed_at, row.review_reason = admin_id, datetime.now(timezone.utc), reason.strip()
@@ -234,14 +242,37 @@ class AdminFinanceSupportService:
             raise HTTPException(409, str(err))
         self.audit(admin_id, "REFUND_APPROVED" if approve else "REFUND_REJECTED", "payment_refunds", row.id, {"reason": reason.strip(), "amount_cents": row.amount_cents})
         await self.db.commit()
-        return {"id": row.id, "approval_status": row.approval_status, "status": row.status,
-                "message": "Approved. Refund execution remains pending until a supported payment-provider refund credential is configured." if approve else "Refund request rejected."}
+
+        if not approve:
+            return {"id": row.id, "approval_status": row.approval_status, "status": row.status, "message": "Refund request rejected."}
+
+        from backend.application.services.settlement_advanced_service import SettlementAdvancedService
+        exec_res = await SettlementAdvancedService(self.db).create_refund(
+            payment_id=row.payment_id,
+            amount_cents=row.amount_cents,
+            reason=row.reason or reason.strip(),
+            is_partial=bool(row.is_partial),
+            idempotency_key=row.idempotency_key or f"adm_rev_{row.id}",
+            allow_debt_clawback=True,
+            actor_admin_id=admin_id,
+            existing_refund_id=row.id,
+        )
+        return {
+            "id": row.id,
+            "approval_status": row.approval_status,
+            "status": exec_res.get("status", row.status),
+            "refund_id": exec_res.get("refund_id"),
+            "arn_reference": exec_res.get("arn_reference"),
+            "gateway_status": exec_res.get("gateway_status"),
+            "message": "Refund approved and executed via Razorpay.",
+        }
 
     # Finance: verified webhook inbox/replay
     async def webhook_inbox(self) -> List[Dict[str, Any]]:
         rows = (await self.db.execute(select(PaymentWebhookInbox).order_by(desc(PaymentWebhookInbox.received_at)).limit(200))).scalars().all()
-        return [{"id": r.id, "provider_name": r.provider_name, "status": r.status, "attempts": r.attempts,
-                 "last_error": r.last_error, "received_at": r.received_at.isoformat(),
+        return [{"id": r.id, "provider_name": r.provider_name, "event_type": r.event_type,
+                 "merchant_account_id": getattr(r, "merchant_account_id", None), "status": r.status,
+                 "attempts": r.attempts, "last_error": r.last_error, "received_at": r.received_at.isoformat(),
                  "last_attempt_at": r.last_attempt_at.isoformat() if r.last_attempt_at else None,
                  "signature_verified": r.signature_verified} for r in rows]
 
@@ -249,49 +280,182 @@ class AdminFinanceSupportService:
         row = (
             await self.db.execute(select(PaymentWebhookInbox).where(PaymentWebhookInbox.id == inbox_id).with_for_update())
         ).scalar_one_or_none()
-        if not row or row.status != "FAILED" or not row.signature_verified:
-            raise HTTPException(409, "Only failed, signature-verified webhook deliveries can be replayed.")
+        if not row or row.status not in {"FAILED", "RECONCILIATION_REQUIRED", "UNMATCHED_PAYMENT"} or not row.signature_verified:
+            raise HTTPException(409, "Only failed or unresolved signature-verified webhook deliveries can be replayed.")
         if row.attempts >= 5:
             raise HTTPException(429, "Replay limit reached. Investigate the payment/provider before retrying.")
         data = json.loads(row.payload_json)
-        if data.get("event") not in ("payment.captured", "order.paid"):
-            raise HTTPException(409, "Only verified capture events can be safely reapplied; inspect this event with the provider.")
-        entity = (data.get("payload") or {}).get("payment", {}).get("entity", {})
-        order_id = entity.get("order_id") or data.get("order_id")
-        payment = (
-            await self.db.execute(select(Payment).where(Payment.provider_order_id == order_id).with_for_update())
-        ).scalar_one_or_none() if order_id else None
+        event_name = str(data.get("event") or "").strip()
+        if event_name not in ("payment.captured", "order.paid", "payment.authorized", "refund.processed", "refund.failed"):
+            raise HTTPException(409, f"Webhook event {event_name or 'unknown'} cannot be replayed automatically; inspect manually.")
+
+        payment_svc = PaymentService(self.db)
+        payload_obj = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+        parsed = payment_svc._extract_and_validate_event_entities(webhook_event=event_name, data=data, payload_obj=payload_obj)
+        order_id = parsed.get("order_id")
+        provider_payment_id = parsed.get("provider_payment_id")
+
+        payment: Optional[Payment] = None
+        if order_id:
+            payment = (await self.db.execute(select(Payment).where(Payment.provider_order_id == order_id).with_for_update())).scalar_one_or_none()
+            if not payment:
+                att = (await self.db.execute(select(PaymentOrderAttempt).where(PaymentOrderAttempt.provider_order_id == order_id))).scalar_one_or_none()
+                if att:
+                    payment = (await self.db.execute(select(Payment).where(Payment.id == att.payment_id).with_for_update())).scalar_one_or_none()
+        if not payment and provider_payment_id:
+            payment = (await self.db.execute(select(Payment).where(Payment.provider_payment_id == provider_payment_id).with_for_update())).scalar_one_or_none()
+
         row.attempts += 1
         row.last_attempt_at = datetime.now(timezone.utc)
         if not payment:
             row.last_error = "No matching payment order exists yet."
             await self.db.commit()
             raise HTTPException(404, row.last_error)
-        provider_payment_id = entity.get("id") or data.get("payment_id") or payment.provider_payment_id
-        if entity.get("amount") is not None and entity.get("amount") != payment.amount_cents:
-            row.status = "RECONCILIATION_REQUIRED"
-            row.last_error = f"Replay amount mismatch: expected {payment.amount_cents}, got {entity.get('amount')}"
-            await self.db.commit()
-            raise HTTPException(400, row.last_error)
-        if payment.status not in {"CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "SETTLED", "SUCCESS"}:
-            await PaymentService(self.db).finalize_payment_capture(
-                payment=payment,
-                provider_payment_id=provider_payment_id,
-                auto_commit=False,
-            )
-            self.db.add(PaymentEvent(payment_id=payment.id, event_type="WEBHOOK_CAPTURED_REPLAY", payload_json=json.dumps({"inbox_id": row.id, "digest": row.event_digest})))
+
+        if event_name in ("payment.captured", "order.paid", "payment.authorized"):
+            if parsed.get("amount") is not None and parsed.get("amount") != payment.amount_cents:
+                row.status = "RECONCILIATION_REQUIRED"
+                row.last_error = f"Replay amount mismatch: expected {payment.amount_cents}, got {parsed.get('amount')}"
+                await self.db.commit()
+                raise HTTPException(400, row.last_error)
+            if event_name == "payment.authorized" and payment.status in ("CREATED", "PENDING"):
+                payment.status = "AUTHORIZED"
+                payment.provider_payment_id = provider_payment_id
+            elif event_name in ("payment.captured", "order.paid") and payment.status not in {"CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "SETTLED", "SUCCESS"}:
+                await payment_svc.finalize_payment_capture(
+                    payment=payment,
+                    provider_payment_id=provider_payment_id,
+                    auto_commit=False,
+                )
+                self.db.add(PaymentEvent(payment_id=payment.id, event_type="WEBHOOK_CAPTURED_REPLAY", payload_json=json.dumps({"inbox_id": row.id, "digest": row.event_digest})))
+        else:
+            refund_id = parsed["refund_id"]
+            existing_refund = (
+                await self.db.execute(
+                    select(PaymentRefund).where(or_(PaymentRefund.provider_refund_id == refund_id, PaymentRefund.arn_reference == refund_id)).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if event_name == "refund.processed":
+                await payment_svc.apply_confirmed_refund_settlement(
+                    payment=payment,
+                    refund_obj=existing_refund,
+                    refund_id=refund_id,
+                    raw_refund_amount=parsed["raw_refund_amount"],
+                    reason=f"Admin webhook replay ({event_name})",
+                    arn_reference=refund_id,
+                    settled_status="CREDITED",
+                    inbox=row,
+                    parsed=parsed,
+                )
+            elif event_name == "refund.failed":
+                await payment_svc.apply_failed_refund_reversal(
+                    payment=payment,
+                    refund_obj=existing_refund,
+                    refund_id=refund_id,
+                    raw_refund_amount=parsed["raw_refund_amount"],
+                    failure_reason=f"Admin webhook replay ({event_name})",
+                )
+
         row.status, row.last_error, row.processed_at = "PROCESSED", None, datetime.now(timezone.utc)
-        self.audit(admin_id, "PAYMENT_WEBHOOK_REPLAYED", "payment_webhook_inbox", row.id, {"attempt": row.attempts, "payment_id": payment.id})
+        self.audit(admin_id, "PAYMENT_WEBHOOK_REPLAYED", "payment_webhook_inbox", row.id, {"attempt": row.attempts, "payment_id": payment.id, "event": event_name})
         await self.db.commit()
-        return {"id": row.id, "status": row.status, "attempts": row.attempts, "payment_id": payment.id}
+        return {"id": row.id, "status": row.status, "attempts": row.attempts, "payment_id": payment.id, "event": event_name}
 
     async def payment_exceptions(self) -> Dict[str, Any]:
-        failed = (await self.db.execute(select(Payment).where(Payment.status.in_(["FAILED", "PENDING", "AUTHORIZED"])).order_by(desc(Payment.updated_at)).limit(200))).scalars().all()
+        failed = (await self.db.execute(select(Payment).where(Payment.status.in_(["FAILED", "PENDING", "AUTHORIZED", "REFUND_PENDING"])).order_by(desc(Payment.updated_at)).limit(200))).scalars().all()
         inbox = await self.webhook_inbox()
-        return {"payments": [{"id": p.id, "ride_id": p.ride_id, "amount_cents": p.amount_cents, "status": p.status,
+        anomalies = await self.list_reconciliation_anomalies(status_filter="OPEN")
+        configured = bool((settings.RAZORPAY_KEY_ID or "").strip() and (settings.RAZORPAY_KEY_SECRET or "").strip())
+        return {"payments": [{"id": p.id, "ride_id": p.ride_id, "purpose": getattr(p, "purpose", None), "amount_cents": p.amount_cents, "status": p.status,
                               "provider": p.provider_name, "provider_order_id": p.provider_order_id, "updated_at": p.updated_at.isoformat()} for p in failed],
-                "failed_verified_webhooks": [w for w in inbox if w["status"] == "FAILED"],
-                "provider_refund_configuration": "Refund execution is unavailable until the payment provider exposes a configured refund API."}
+                "failed_verified_webhooks": [w for w in inbox if w["status"] in ("FAILED", "RECONCILIATION_REQUIRED", "UNMATCHED_PAYMENT")],
+                "open_anomalies": anomalies,
+                "provider_refund_configuration": "configured" if configured else "missing_razorpay_credentials"}
+
+    async def search_payments(
+        self,
+        *,
+        query: Optional[str] = None,
+        status_filter: Optional[str] = None,
+        purpose_filter: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        stmt = select(Payment).order_by(desc(Payment.created_at)).limit(limit)
+        if status_filter:
+            stmt = stmt.where(Payment.status == status_filter.upper())
+        if purpose_filter:
+            stmt = stmt.where(Payment.purpose == purpose_filter.upper())
+        if query and query.strip():
+            term = f"%{query.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    Payment.id.ilike(term),
+                    Payment.ride_id.ilike(term),
+                    Payment.user_id.ilike(term),
+                    Payment.provider_order_id.ilike(term),
+                    Payment.provider_payment_id.ilike(term),
+                )
+            )
+        rows = (await self.db.execute(stmt)).scalars().all()
+        return [
+            {
+                "id": p.id,
+                "ride_id": p.ride_id,
+                "user_id": p.user_id,
+                "customer_id": p.customer_id,
+                "purpose": getattr(p, "purpose", "RIDE_FARE"),
+                "payment_method": p.payment_method,
+                "provider_name": p.provider_name,
+                "merchant_account_id": getattr(p, "merchant_account_id", None),
+                "amount_cents": p.amount_cents,
+                "refunded_amount_cents": int(p.refunded_amount_cents or 0),
+                "remaining_refundable_cents": max(0, int(p.amount_cents or 0) - int(p.refunded_amount_cents or 0)),
+                "currency": p.currency,
+                "status": p.status,
+                "provider_order_id": p.provider_order_id,
+                "provider_payment_id": p.provider_payment_id,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in rows
+        ]
+
+    async def list_reconciliation_anomalies(self, status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        stmt = select(PaymentReconciliationAnomaly).order_by(desc(PaymentReconciliationAnomaly.created_at)).limit(200)
+        if status_filter:
+            stmt = stmt.where(PaymentReconciliationAnomaly.status == status_filter.upper())
+        rows = (await self.db.execute(stmt)).scalars().all()
+        return [
+            {
+                "id": a.id,
+                "payment_id": a.payment_id,
+                "webhook_inbox_id": a.webhook_inbox_id,
+                "anomaly_type": a.anomaly_type,
+                "provider_payment_id": a.provider_payment_id,
+                "provider_order_id": a.provider_order_id,
+                "provider_refund_id": a.provider_refund_id,
+                "expected_amount_cents": a.expected_amount_cents,
+                "raw_gateway_amount_cents": a.raw_gateway_amount_cents,
+                "applied_amount_cents": a.applied_amount_cents,
+                "excess_amount_cents": a.excess_amount_cents,
+                "status": a.status,
+                "reason": a.reason,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "updated_at": a.updated_at.isoformat() if getattr(a, "updated_at", None) else None,
+            }
+            for a in rows
+        ]
+
+    async def resolve_reconciliation_anomaly(self, admin_id: str, anomaly_id: str, notes: str) -> Dict[str, Any]:
+        row = (
+            await self.db.execute(select(PaymentReconciliationAnomaly).where(PaymentReconciliationAnomaly.id == anomaly_id).with_for_update())
+        ).scalar_one_or_none()
+        if not row:
+            raise HTTPException(404, "Reconciliation anomaly not found.")
+        row.status = "RESOLVED"
+        row.updated_at = datetime.now(timezone.utc)
+        self.audit(admin_id, "RECONCILIATION_ANOMALY_RESOLVED", "payment_reconciliation_anomalies", row.id, {"notes": notes.strip()})
+        await self.db.commit()
+        return {"id": row.id, "status": row.status, "updated_at": row.updated_at.isoformat()}
 
     # Finance: wallet adjustment (two distinct approvers)
     async def create_wallet_adjustment(self, admin_id: str, user_id: str, amount: int, kind: str, reason: str) -> Dict[str, Any]:
@@ -582,8 +746,11 @@ class AdminFinanceSupportService:
                 "samples": samples, "emergency": emergency,
                 "delivery_boundary": "Preview shows intended in-app delivery. Push, SMS and email are not sent by this campaign API."}
 
-    async def create_broadcast(self, admin_id: str, title: str, message: str, role: str, lang: Optional[str], localized: Dict[str, Any], scheduled_at: Optional[datetime], emergency: bool) -> Dict[str, Any]:
+    async def create_broadcast(self, admin_id: str, title: str, message: str, role: str, lang: Optional[str], localized: Dict[str, Any], scheduled_at: Optional[datetime], emergency: bool, channel: str = "IN_APP") -> Dict[str, Any]:
         title, message = title.strip(), message.strip(); role = role.upper()
+        normalized_channel = (channel or "IN_APP").strip().upper()
+        if normalized_channel not in {"IN_APP", "PUSH", "BOTH"}:
+            raise HTTPException(422, "Broadcast channel must be IN_APP, PUSH, or BOTH.")
         if len(title) < 3 or len(title) > 128 or not message or len(message) > 5000: raise HTTPException(422, "Title must be 3 to 128 characters; message is required and limited to 5,000 characters.")
         if emergency and role.upper() != "ALL": raise HTTPException(422, "Emergency service-wide announcements must target all active accounts.")
         preview = await self.preview_broadcast(title, message, role, lang, localized, emergency)
@@ -593,15 +760,15 @@ class AdminFinanceSupportService:
         if scheduled_at and scheduled_at <= now: raise HTTPException(422, "Scheduled time must be in the future; use send now for immediate delivery.")
         row = BroadcastNotification(title=title, message=message, target_audience=role + (f":{lang}" if lang else ""),
             status="QUEUED" if scheduled_at else "SENDING", dispatched_count=0, scheduled_at=scheduled_at,
-            created_by=admin_id, channel="IN_APP", audience_filter_json=json.dumps({"role": role, "language": lang, "requires_opt_in": not emergency}),
+            created_by=admin_id, channel=normalized_channel, audience_filter_json=json.dumps({"role": role, "language": lang, "requires_opt_in": not emergency}),
             localized_content_json=json.dumps(localized), opt_out_count=preview["excluded_opt_out_count"], is_emergency=emergency,
             preview_json=json.dumps(preview))
         self.db.add(row); await self.db.flush()
         self.audit(admin_id, "EMERGENCY_ANNOUNCEMENT_QUEUED" if emergency else "BROADCAST_QUEUED", "broadcast_notifications", row.id,
-                   {"audience": role, "scheduled_at": scheduled_at.isoformat() if scheduled_at else None, "eligible": preview["eligible_count"], "excluded_opt_out": preview["excluded_opt_out_count"]})
+                   {"audience": role, "channel": normalized_channel, "scheduled_at": scheduled_at.isoformat() if scheduled_at else None, "eligible": preview["eligible_count"], "excluded_opt_out": preview["excluded_opt_out_count"]})
         await self.db.commit()
         if not scheduled_at: await self.dispatch_broadcast(row.id)
-        return {"id": row.id, "status": row.status, "scheduled_at": row.scheduled_at.isoformat() if row.scheduled_at else None,
+        return {"id": row.id, "status": row.status, "channel": row.channel, "scheduled_at": row.scheduled_at.isoformat() if row.scheduled_at else None,
                 "eligible_count": preview["eligible_count"], "excluded_opt_out_count": preview["excluded_opt_out_count"]}
 
     async def dispatch_broadcast(self, broadcast_id: str, batch_size: int = 500) -> Dict[str, Any]:
@@ -631,23 +798,29 @@ class AdminFinanceSupportService:
             if criteria.get("requires_opt_in"): stmt = stmt.where(UserPreferences.marketing_push_opt_in.is_(True))
             already = select(BroadcastDelivery.user_id).where(BroadcastDelivery.broadcast_id == campaign.id)
             candidates = (await self.db.execute(stmt.where(not_(User.id.in_(already))).order_by(User.id).limit(batch_size))).all()
+        broadcast_channel = (campaign.channel or "IN_APP").strip().upper()
+        requires_push_dispatch = bool(campaign.is_emergency or broadcast_channel in {"PUSH", "BOTH"})
         localized = json.loads(campaign.localized_content_json or "{}")
         for user, prefs in candidates:
             locale = (prefs.preferred_language if prefs else "en") or "en"
             title, body = self._content(campaign.title, campaign.message, localized, locale)
             notification = Notification(user_id=user.id, title=title, body=body,
-                data_json=json.dumps({"broadcast_id": campaign.id, "emergency": campaign.is_emergency}),
+                channel=broadcast_channel,
+                data_json=json.dumps({"broadcast_id": campaign.id, "emergency": campaign.is_emergency, "channel": broadcast_channel}),
                 event_type="EMERGENCY_ANNOUNCEMENT" if campaign.is_emergency else "ADMIN_BROADCAST",
-                delivery_status="QUEUED" if campaign.is_emergency else "DELIVERED",
+                delivery_status="QUEUED" if requires_push_dispatch else "DELIVERED",
                 critical=campaign.is_emergency,
-                sent_at=now if not campaign.is_emergency else None,
+                sent_at=None if requires_push_dispatch else now,
                 dedupe_key=f"broadcast:{campaign.id}:{user.id}")
             self.db.add(notification); await self.db.flush()
             self.db.add(BroadcastDelivery(broadcast_id=campaign.id, user_id=user.id, notification_id=notification.id,
-                                          status="DELIVERED_IN_APP", language_code=locale))
+                                          status="QUEUED_PUSH" if requires_push_dispatch else "DELIVERED_IN_APP", language_code=locale))
         campaign.dispatched_count += len(candidates)
         campaign.delivery_success_count = campaign.dispatched_count
         await self.db.flush()
+        if broadcast_channel in {"PUSH", "BOTH"} and candidates:
+            from backend.application.services.notification_service import NotificationService
+            await NotificationService(self.db).process_due(limit=batch_size)
         if getattr(UserPreferences, '__table__', None) is None:
             remaining = await self.db.scalar(select(func.count(User.id)).select_from(User)
                 .where(User.is_active.is_(True), *( [User.role == role.lower()] if role in {"CUSTOMER", "DRIVER"} else [User.role.in_(["customer", "driver"])] ),

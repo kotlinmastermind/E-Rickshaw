@@ -1,18 +1,21 @@
 """
 Wallet & Ledger API Routes - Production Financial Security Architecture
 Enforces cryptographic Razorpay order binding, server-side signature verification,
-pessimistic row locking, and strict separation between ride payments and wallet top-ups.
+pessimistic row locking, idempotent DB-backed order persistence, and strict separation
+between ride payments and wallet top-ups.
 """
+import hashlib
 from typing import Optional, List, Dict, Any
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_user, get_current_admin
-from backend.domain.models import User, Payment
+from backend.domain.models import User, Payment, PaymentEvent, PaymentOrderAttempt
 from backend.application.services.wallet_service import WalletService
 from backend.application.services.payment_service import PaymentService
 from backend.integrations.payments.provider import get_payment_provider
@@ -26,6 +29,7 @@ MAX_TOPUP_CENTS = 1000000   # ₹10,000.00
 class TopupCreateOrderRequest(BaseModel):
     amount_cents: int = Field(..., ge=MIN_TOPUP_CENTS, le=MAX_TOPUP_CENTS, description="Amount in paise (1 INR = 100 paise)")
     currency: str = Field("INR", pattern="^INR$")
+    idempotency_key: Optional[str] = Field(None, min_length=8, max_length=128)
 
 class TopupVerifyRequest(BaseModel):
     razorpay_order_id: str = Field(..., min_length=10)
@@ -56,47 +60,185 @@ async def create_wallet_topup_order(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Stage 1: Generates a cryptographically bound Razorpay Order for Wallet Top-up.
-    Persists a pending Payment entity with purpose=WALLET_TOPUP before client checkout.
+    Stage 1: Generates or idempotently reuses a cryptographically bound Razorpay Order
+    for Wallet Top-up. Persists a pending Payment intent before calling Razorpay and
+    recovers any lost gateway order response via deterministic receipt lookup.
     """
     provider = get_payment_provider()
-    receipt_id = f"wtop_{uuid.uuid4().hex[:20]}"
-    
+    clean_idem = (payload.idempotency_key or "").strip() or None
+    receipt_id = (
+        f"wtop_{hashlib.sha256(f'{user.id}:{clean_idem}'.encode()).hexdigest()[:24]}"
+        if clean_idem
+        else f"wtop_{uuid.uuid4().hex[:20]}"
+    )
+    scoped_idem = f"topup_{user.id}_{clean_idem}" if clean_idem else f"wtop_pending_{receipt_id}"
+
+    payment: Optional[Payment] = None
+    if clean_idem:
+        payment = (
+            await db.execute(select(Payment).where(Payment.idempotency_key == scoped_idem).with_for_update())
+        ).scalar_one_or_none()
+        if payment:
+            if payment.user_id != user.id or payment.purpose != "WALLET_TOPUP":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Idempotency key belongs to a different account or payment purpose.",
+                )
+            if payment.amount_cents != payload.amount_cents:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Idempotency key conflict: top-up amount differs from original request.",
+                )
+            if payment.status in ("CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Wallet top-up order for this idempotency key has already been settled.",
+                )
+            if payment.provider_order_id:
+                return {
+                    "order_id": payment.provider_order_id,
+                    "amount": payment.amount_cents,
+                    "amount_cents": payment.amount_cents,
+                    "amount_rupees": round(payment.amount_cents / 100.0, 2),
+                    "currency": payment.currency,
+                    "key_id": settings.RAZORPAY_KEY_ID or "",
+                    "receipt": receipt_id,
+                    "status": payment.status,
+                    "reused_existing_order": True,
+                }
+            # Crash recovery: DB intent exists without provider_order_id -> check gateway by receipt
+            existing_orders_resp = await provider.fetch_orders_by_receipt(receipt_id)
+            existing_orders = (
+                existing_orders_resp.get("items", [])
+                if isinstance(existing_orders_resp, dict)
+                else (existing_orders_resp or [])
+            )
+            recovered = next(
+                (
+                    o
+                    for o in existing_orders
+                    if o.get("id")
+                    and o.get("amount") == payload.amount_cents
+                    and str(o.get("currency") or "INR").upper() == payload.currency
+                    and str(o.get("status") or "").lower() != "attempted_failed"
+                ),
+                None,
+            )
+            if recovered:
+                payment.provider_order_id = recovered["id"]
+                db.add(
+                    PaymentOrderAttempt(
+                        payment_id=payment.id,
+                        provider_order_id=recovered["id"],
+                        receipt=receipt_id,
+                        idempotency_key=clean_idem,
+                        amount_cents=payload.amount_cents,
+                        currency=payload.currency,
+                        merchant_account_id=payment.merchant_account_id,
+                        status="CREATED",
+                    )
+                )
+                await db.commit()
+                return {
+                    "order_id": recovered["id"],
+                    "amount": payload.amount_cents,
+                    "amount_cents": payload.amount_cents,
+                    "amount_rupees": round(payload.amount_cents / 100.0, 2),
+                    "currency": payload.currency,
+                    "key_id": settings.RAZORPAY_KEY_ID or "",
+                    "receipt": receipt_id,
+                    "status": payment.status,
+                    "reused_existing_order": True,
+                }
+
+    if not payment:
+        payment = Payment(
+            ride_id=None,
+            user_id=user.id,
+            customer_id=None,
+            amount_cents=payload.amount_cents,
+            currency=payload.currency,
+            status="CREATED",
+            purpose="WALLET_TOPUP",
+            payment_method="RAZORPAY",
+            provider_name="RAZORPAY",
+            provider_order_id=None,
+            merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or None,
+            idempotency_key=scoped_idem,
+        )
+        db.add(payment)
+        try:
+            await db.commit()
+            await db.refresh(payment)
+        except IntegrityError:
+            await db.rollback()
+            payment = (
+                await db.execute(select(Payment).where(Payment.idempotency_key == scoped_idem))
+            ).scalar_one_or_none()
+            if payment and payment.provider_order_id:
+                return {
+                    "order_id": payment.provider_order_id,
+                    "amount": payment.amount_cents,
+                    "amount_cents": payment.amount_cents,
+                    "amount_rupees": round(payment.amount_cents / 100.0, 2),
+                    "currency": payment.currency,
+                    "key_id": settings.RAZORPAY_KEY_ID or "",
+                    "receipt": receipt_id,
+                    "status": payment.status,
+                    "reused_existing_order": True,
+                }
+            raise
+
     order = await provider.create_razorpay_order(
         amount_cents=payload.amount_cents,
         currency=payload.currency,
         receipt=receipt_id,
         notes={
             "user_id": user.id,
+            "payment_id": payment.id,
             "purpose": "WALLET_TOPUP",
-            "platform": "E-Rickshaw Mobility"
-        }
+            "platform": "E-Rickshaw Mobility",
+        },
     )
-    
-    # Persist pending Payment intent bound to this user
-    payment = Payment(
-        ride_id=None,
-        user_id=user.id,
-        customer_id=None,
-        amount_cents=payload.amount_cents,
-        currency=payload.currency,
-        status="CREATED",
-        purpose="WALLET_TOPUP",
-        payment_method="RAZORPAY",
-        provider_name="RAZORPAY",
-        provider_order_id=order["id"],
-        idempotency_key=f"topup_order_{order['id']}"
+
+    locked_payment = (
+        await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())
+    ).scalar_one()
+    locked_payment.provider_order_id = order["id"]
+    if not clean_idem:
+        locked_payment.idempotency_key = f"topup_order_{order['id']}"
+
+    db.add(
+        PaymentOrderAttempt(
+            payment_id=locked_payment.id,
+            provider_order_id=order["id"],
+            receipt=receipt_id,
+            idempotency_key=clean_idem,
+            amount_cents=payload.amount_cents,
+            currency=payload.currency,
+            merchant_account_id=locked_payment.merchant_account_id,
+            status="CREATED",
+        )
     )
-    db.add(payment)
+    db.add(
+        PaymentEvent(
+            payment_id=locked_payment.id,
+            event_type="WALLET_TOPUP_ORDER_CREATED",
+            payload_json=f'{{"order_id": "{order["id"]}", "amount_cents": {payload.amount_cents}}}',
+        )
+    )
     await db.commit()
 
     return {
         "order_id": order["id"],
+        "amount": payload.amount_cents,
         "amount_cents": payload.amount_cents,
         "amount_rupees": round(payload.amount_cents / 100.0, 2),
         "currency": payload.currency,
         "key_id": settings.RAZORPAY_KEY_ID or "",
-        "status": "CREATED"
+        "receipt": receipt_id,
+        "status": "CREATED",
+        "reused_existing_order": False,
     }
 
 
@@ -108,7 +250,7 @@ async def verify_wallet_topup(
 ):
     """
     Stage 2: Cryptographically verifies Razorpay payment signature, queries Razorpay API
-    for server-side capture status, and commits atomic credit to Wallet Ledger.
+    for server-side capture status & merchant account, and commits atomic credit to Wallet Ledger.
     """
     provider = get_payment_provider()
 
@@ -130,6 +272,20 @@ async def verify_wallet_topup(
         Payment.purpose == "WALLET_TOPUP",
     )
     pre_payment = (await db.execute(stmt_pre)).scalar_one_or_none()
+    if not pre_payment:
+        attempt = (
+            await db.execute(
+                select(PaymentOrderAttempt).where(
+                    PaymentOrderAttempt.provider_order_id == payload.razorpay_order_id
+                )
+            )
+        ).scalar_one_or_none()
+        if attempt:
+            pre_payment = (
+                await db.execute(
+                    select(Payment).where(Payment.id == attempt.payment_id, Payment.purpose == "WALLET_TOPUP")
+                )
+            ).scalar_one_or_none()
 
     if not pre_payment:
         raise HTTPException(
@@ -168,6 +324,9 @@ async def verify_wallet_topup(
             status_code=status.HTTP_409_CONFLICT,
             detail="Authoritative payment does not correspond to expected Razorpay order."
         )
+    acct_ok, acct_reason = provider.validate_merchant_account(gateway_data.get("account_id"))
+    if not acct_ok:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=acct_reason)
     if str(gateway_data.get("currency", "INR")).upper() != "INR":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -185,9 +344,15 @@ async def verify_wallet_topup(
         )
 
     # 4. Acquire pessimistic lock and atomically finalize credit via single-source capture engine
-    payment = (await db.execute(stmt_pre.with_for_update())).scalar_one_or_none()
+    payment = (
+        await db.execute(select(Payment).where(Payment.id == pre_payment.id).with_for_update())
+    ).scalar_one_or_none()
     if not payment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record disappeared.")
+    if gateway_data.get("account_id") and not payment.merchant_account_id:
+        payment.merchant_account_id = gateway_data.get("account_id")
+    if payment.provider_order_id != payload.razorpay_order_id:
+        payment.provider_order_id = payload.razorpay_order_id
 
     if payment.status in ("CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"):
         balance_info = await WalletService.get_balance(db, user.id)

@@ -48,7 +48,7 @@ class DriverTripOperationsService:
                 minimum_fare_cents=0,
                 maximum_pickup_distance_km=20.0,
                 vehicle_categories_json="[]",
-                navigation_provider="GOOGLE_MAPS",
+                navigation_provider="MAPBOX",
                 voice_guidance_enabled=True,
                 reroute_on_closure_enabled=True,
                 auto_accept_pool=True,
@@ -71,11 +71,14 @@ class DriverTripOperationsService:
             categories = json.loads(pref.vehicle_categories_json or "[]")
         except (TypeError, json.JSONDecodeError):
             categories = []
+        nav = (pref.navigation_provider or "MAPBOX").strip()
+        if nav.upper() == "GOOGLE_MAPS":
+            nav = "MAPBOX"
         return {
             "minimum_fare_cents": pref.minimum_fare_cents or 0,
             "maximum_pickup_distance_km": pref.maximum_pickup_distance_km or 20.0,
             "vehicle_categories": categories,
-            "navigation_provider": pref.navigation_provider or "GOOGLE_MAPS",
+            "navigation_provider": nav,
             "voice_guidance_enabled": True if pref.voice_guidance_enabled is None else pref.voice_guidance_enabled,
             "reroute_on_closure_enabled": True if pref.reroute_on_closure_enabled is None else pref.reroute_on_closure_enabled,
             "auto_accept_pool": True if pref.auto_accept_pool is None else pref.auto_accept_pool,

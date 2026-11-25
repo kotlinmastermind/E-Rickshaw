@@ -73,6 +73,7 @@ DRIVER_LIMIT = int(os.getenv("RATE_LIMIT_DRIVER", "60"))
 PAYMENT_LIMIT = int(os.getenv("RATE_LIMIT_PAYMENT", "30"))
 CHAT_LIMIT = int(os.getenv("RATE_LIMIT_CHAT", "100"))
 ADMIN_LIMIT = int(os.getenv("RATE_LIMIT_ADMIN", "100"))
+DEVICE_TOKEN_LIMIT = int(os.getenv("RATE_LIMIT_DEVICE_TOKEN", "30"))
 
 # Predefined rate limiters for key endpoints
 auth_rate_limiter = RateLimiter(max_requests=AUTH_LIMIT, window_seconds=60, scope="auth")
@@ -82,3 +83,4 @@ driver_accept_rate_limiter = RateLimiter(max_requests=DRIVER_LIMIT, window_secon
 payment_rate_limiter = RateLimiter(max_requests=PAYMENT_LIMIT, window_seconds=60, scope="payment", by_user=True)
 chat_rate_limiter = RateLimiter(max_requests=CHAT_LIMIT, window_seconds=60, scope="chat", by_user=True)
 admin_bulk_rate_limiter = RateLimiter(max_requests=ADMIN_LIMIT, window_seconds=60, scope="admin_bulk", by_user=True)
+device_token_rate_limiter = RateLimiter(max_requests=DEVICE_TOKEN_LIMIT, window_seconds=60, scope="device_token", by_user=True)

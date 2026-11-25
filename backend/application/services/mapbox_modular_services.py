@@ -112,7 +112,7 @@ class DriverLocationService:
         heading: Optional[float] = None,
         speed_kmh: Optional[float] = None,
         accuracy_meters: Optional[float] = None,
-        source: str = "FUSED_GPS"
+        source: str = "GPS"
     ) -> DriverLocation:
         # Check spoof risk (teleportation > 150 km/h)
         stmt = select(DriverLocation).where(DriverLocation.driver_id == driver_id).order_by(desc(DriverLocation.recorded_at)).limit(1)

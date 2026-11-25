@@ -38,7 +38,7 @@ class DriverLocationPing(BaseModel):
     speed_mps: Optional[float] = Field(None, ge=0.0, le=100.0)
     accuracy_m: Optional[float] = Field(None, ge=0.0, le=5000.0)
     is_mock_location: bool = False
-    location_source: str = Field("FUSED", pattern="^(FUSED|GPS|NETWORK)$")
+    location_source: str = Field("GPS", pattern="^(GPS|NETWORK|PASSIVE|MANUAL|GNSS|FUSED)$")
     active_ride_id: Optional[str] = None
 
 

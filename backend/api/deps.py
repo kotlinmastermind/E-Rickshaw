@@ -107,7 +107,7 @@ async def get_current_driver(
         )
 
     path = getattr(request.url, "path", "") if request else ""
-    allow_pending = any(p in path for p in ["/documents", "/onboarding", "/preferences", "/availability"])
+    allow_pending = any(p in path for p in ["/documents", "/onboarding", "/preferences", "/availability", "/device-token"])
     if not allow_pending and driver_prof.approval_status != "APPROVED":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -265,6 +265,15 @@ _ADMIN_PERMISSION_PATHS = {
     ("POST", "/admin/governance/retention-policies/{category}/purge"): "admin.governance.retention",
     ("GET", "/admin/privacy/dsar-requests"): "admin.privacy.manage",
     ("POST", "/admin/privacy/dsar-requests/{request_id}/review"): "admin.privacy.manage",
+    ("GET", "/admin/payments"): "admin.finance.refunds.read",
+    ("POST", "/admin/payments/{payment_id}/refund"): "admin.finance.refunds.approve",
+    ("GET", "/admin/refund-requests"): "admin.finance.refunds.read",
+    ("POST", "/admin/refunds/{refund_id}/review"): "admin.finance.refunds.approve",
+    ("GET", "/admin/webhooks"): "admin.finance.webhooks.replay",
+    ("POST", "/admin/webhooks/{inbox_id}/replay"): "admin.finance.webhooks.replay",
+    ("GET", "/admin/reconciliation/anomalies"): "admin.finance.refunds.read",
+    ("POST", "/admin/reconciliation/anomalies/{anomaly_id}/resolve"): "admin.finance.refunds.approve",
+    ("POST", "/admin/reconciliation/run"): "admin.finance.refunds.approve",
 }
 
 

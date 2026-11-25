@@ -21,3 +21,4 @@ aiofiles>=23.2.0
 razorpay>=2.0.1
 h3>=4.1.0
 gunicorn>=21.2.0
+google-auth>=2.29.0

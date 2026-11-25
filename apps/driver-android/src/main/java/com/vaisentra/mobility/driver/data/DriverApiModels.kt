@@ -187,7 +187,32 @@ data class DriverLocationPingRequest(
     @SerializedName("speed_mps") val speedMps: Double? = null,
     @SerializedName("accuracy_m") val accuracyM: Double? = null,
     @SerializedName("is_mock_location") val isMockLocation: Boolean = false,
-    @SerializedName("location_source") val locationSource: String = "FUSED"
+    @SerializedName("location_source") val locationSource: String = "GPS"
+)
+
+data class DriverReverseGeocodeRequest(
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double
+)
+
+data class DriverReverseGeocodeResponse(
+    @SerializedName("latitude") val latitude: Double = 0.0,
+    @SerializedName("longitude") val longitude: Double = 0.0,
+    @SerializedName("formatted_address") val formattedAddress: String = ""
+)
+
+data class DeviceTokenRegisterRequest(
+    @SerializedName("fcm_token") val fcmToken: String,
+    @SerializedName("device_os") val deviceOs: String = "ANDROID",
+    @SerializedName("device_label") val deviceLabel: String? = null
+)
+
+data class DeviceTokenDeactivateRequest(
+    @SerializedName("fcm_token") val fcmToken: String? = null
+)
+
+data class DriverLogoutRequest(
+    @SerializedName("fcm_token") val fcmToken: String? = null
 )
 
 data class StartShiftRequest(

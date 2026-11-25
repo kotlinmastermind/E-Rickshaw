@@ -1,5 +1,6 @@
 package com.vaisentra.mobility.rider
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +12,7 @@ import com.razorpay.PaymentData
 import com.razorpay.PaymentResultWithDataListener
 import com.vaisentra.mobility.rider.data.NetworkClient
 import com.vaisentra.mobility.rider.data.RiderRepository
+import com.vaisentra.mobility.rider.fcm.RiderFcmManager
 import com.vaisentra.mobility.rider.navigation.RiderAppNavigation
 import com.vaisentra.mobility.rider.theme.CanvasBlack
 import com.vaisentra.mobility.rider.theme.RiderGoTheme
@@ -20,6 +22,8 @@ class MainActivity : FragmentActivity(), PaymentResultWithDataListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         NetworkClient.init(applicationContext)
+        RiderFcmManager.init(applicationContext)
+        RiderFcmManager.handleNotificationIntent(intent)
         Checkout.preload(applicationContext)
 
         setContent {
@@ -32,6 +36,12 @@ class MainActivity : FragmentActivity(), PaymentResultWithDataListener {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        RiderFcmManager.handleNotificationIntent(intent)
     }
 
     override fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: PaymentData?) {

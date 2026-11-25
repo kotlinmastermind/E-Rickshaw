@@ -325,6 +325,29 @@ fun DriverNavigation() {
     }
 
     val scope = rememberCoroutineScope()
+    val pendingNotificationRoute by com.vaisentra.mobility.driver.fcm.DriverFcmManager.pendingNotificationRoute.collectAsState()
+
+    LaunchedEffect(pendingNotificationRoute) {
+        val requestedRoute = pendingNotificationRoute ?: return@LaunchedEffect
+        if (!DriverNetworkClient.isAuthenticated()) return@LaunchedEffect
+        val resolvedRoute = if (requestedRoute == "active_ride_or_offer") {
+            val active = DriverRepository.activeRide.value
+            if (active != null && !active.id.isNullOrBlank()) {
+                when (active.status.uppercase()) {
+                    "ASSIGNED" -> "pickup_nav"
+                    "ARRIVED" -> "arrived"
+                    else -> "in_trip_nav"
+                }
+            } else {
+                "incoming_offer"
+            }
+        } else {
+            requestedRoute
+        }
+        router.navigateRoute(resolvedRoute)
+        com.vaisentra.mobility.driver.fcm.DriverFcmManager.consumePendingRoute()
+    }
+
     DisposableEffect(Unit) {
         DriverNetworkClient.onAuthExpired = {
             scope.launch(Dispatchers.Main) {

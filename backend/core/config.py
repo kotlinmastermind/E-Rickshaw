@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: Optional[str] = os.getenv("RAZORPAY_KEY_ID", None)
     RAZORPAY_KEY_SECRET: Optional[str] = os.getenv("RAZORPAY_KEY_SECRET", None)
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = os.getenv("RAZORPAY_WEBHOOK_SECRET", None)
+    RAZORPAY_WEBHOOK_SECRET_PREVIOUS: Optional[str] = os.getenv("RAZORPAY_WEBHOOK_SECRET_PREVIOUS", None)
     RAZORPAY_MERCHANT_ACCOUNT_ID: Optional[str] = os.getenv("RAZORPAY_MERCHANT_ACCOUNT_ID", None)
 
     # Primary SMS Gateway (Twilio Verify Service)
@@ -82,9 +83,11 @@ class Settings(BaseSettings):
     TWILIO_PHONE_NUMBER: Optional[str] = os.getenv("TWILIO_PHONE_NUMBER", None)
     FCM_CREDENTIALS_PATH: Optional[str] = os.getenv("FCM_CREDENTIALS_PATH", None)
     FIREBASE_CREDENTIALS_PATH: Optional[str] = os.getenv("FIREBASE_CREDENTIALS_PATH", None)
+    FIREBASE_SERVICE_ACCOUNT_JSON: Optional[str] = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", None)
+    GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", None)
 
-    # Push Notifications & Real-Time Dispatch Governance (Phase 3.3)
-    PUSH_PROVIDER: str = os.getenv("PUSH_PROVIDER", "websocket")
+    # Push Notifications & Real-Time Dispatch Governance (FCM HTTP v1 + WebSocket)
+    PUSH_PROVIDER: str = os.getenv("PUSH_PROVIDER", "fcm")
     DISPATCH_WS_HEARTBEAT_SECONDS: int = int(os.getenv("DISPATCH_WS_HEARTBEAT_SECONDS", "30"))
     DISPATCH_AUTH_REVALIDATION_SECONDS: int = int(os.getenv("DISPATCH_AUTH_REVALIDATION_SECONDS", "30"))
     DISPATCH_OFFER_TIMEOUT_SECONDS: int = int(os.getenv("DISPATCH_OFFER_TIMEOUT_SECONDS", "20"))
@@ -194,10 +197,21 @@ class Settings(BaseSettings):
                     "CRITICAL CONFIGURATION ERROR: RAZORPAY_WEBHOOK_SECRET must be distinct from RAZORPAY_KEY_SECRET in production."
                 )
 
+            rzp_prev_wh_secret = (self.RAZORPAY_WEBHOOK_SECRET_PREVIOUS or "").strip()
+            if rzp_prev_wh_secret:
+                if len(rzp_prev_wh_secret) < 16 or _contains_placeholder(rzp_prev_wh_secret):
+                    raise ValueError(
+                        "CRITICAL CONFIGURATION ERROR: RAZORPAY_WEBHOOK_SECRET_PREVIOUS must be at least 16 characters when configured."
+                    )
+                if hmac.compare_digest(rzp_key_secret.encode("utf-8"), rzp_prev_wh_secret.encode("utf-8")):
+                    raise ValueError(
+                        "CRITICAL CONFIGURATION ERROR: RAZORPAY_WEBHOOK_SECRET_PREVIOUS must be distinct from RAZORPAY_KEY_SECRET."
+                    )
+
             merchant_acct = (self.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip()
-            if merchant_acct and (not merchant_acct.startswith("acc_") or len(merchant_acct) < 14):
+            if not merchant_acct or not merchant_acct.startswith("acc_") or len(merchant_acct) < 14 or _contains_placeholder(merchant_acct):
                 raise ValueError(
-                    "CRITICAL CONFIGURATION ERROR: RAZORPAY_MERCHANT_ACCOUNT_ID must be a valid Razorpay account ID (acc_*)."
+                    "CRITICAL CONFIGURATION ERROR: A valid RAZORPAY_MERCHANT_ACCOUNT_ID (acc_*) is required in production."
                 )
         else:
             # Safe development defaults when .env is absent

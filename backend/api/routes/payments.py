@@ -1,13 +1,16 @@
 from typing import Optional, List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Header, HTTPException, status
+import hashlib
 import logging
+import uuid
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_user, get_current_customer, get_current_driver
-from backend.domain.models import User, Payment, CustomerProfile, Ride
+from backend.domain.models import User, Payment, CustomerProfile, Ride, PaymentOrderAttempt, PaymentEvent, DriverProfile
 from backend.application.services.payment_service import PaymentService, transition_payment_status
 from backend.application.services.settlement_advanced_service import SettlementAdvancedService
 
@@ -19,6 +22,7 @@ class RazorpayOrderRequest(BaseModel):
     ride_id: Optional[str] = None
     receipt: Optional[str] = None
     notes: Optional[dict] = None
+    idempotency_key: Optional[str] = Field(None, min_length=8, max_length=128)
 
 class RazorpayVerifyRequest(BaseModel):
     razorpay_order_id: str
@@ -63,6 +67,7 @@ class PartialRefundRequest(BaseModel):
     amount_cents: int
     reason: str
     is_partial: bool = True
+    idempotency_key: Optional[str] = Field(None, min_length=8, max_length=128)
 
 @router.post("/intent")
 async def create_payment_intent(
@@ -138,7 +143,10 @@ async def get_razorpay_config():
         "currency": "INR",
         "company_name": "VAISENTRA MOBILITY",
         "theme_color": "#0D9488",
-        "is_live": (settings.RAZORPAY_KEY_ID or "").startswith("rzp_live_")
+        "is_live": (settings.RAZORPAY_KEY_ID or "").startswith("rzp_live_"),
+        "environment": settings.ENVIRONMENT,
+        "webhook_secret_configured": bool(settings.RAZORPAY_WEBHOOK_SECRET),
+        "merchant_account_configured": bool(settings.RAZORPAY_MERCHANT_ACCOUNT_ID),
     }
 
 @router.post("/razorpay/create-order")
@@ -148,117 +156,146 @@ async def create_razorpay_order(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    import time
     from backend.core.config import settings
     from backend.integrations.payments.provider import get_payment_provider
     from backend.domain.models import Ride, Payment, CustomerProfile
-    from sqlalchemy import select
 
     provider = get_payment_provider()
 
-    # Task 027: Resolve customer profile without hardcoded GUIDs
-    prof_stmt = select(CustomerProfile).where(CustomerProfile.user_id == user.id)
-    prof = (await db.execute(prof_stmt)).scalar_one_or_none()
-    if not prof:
-        prof = CustomerProfile(
-            user_id=user.id,
-            preferred_payment_method="RAZORPAY",
-            rating_average=5.0,
-            rating_count=0
-        )
-        db.add(prof)
-        await db.flush()
-    customer_profile_id = prof.id
-
-    # Task 028 & 029: Server-side fare calculation and ride ownership verification
     if payload.ride_id:
-        ride_res = await db.execute(select(Ride).where(Ride.id == payload.ride_id))
-        ride = ride_res.scalar_one_or_none()
+        ride = (await db.execute(select(Ride).where(Ride.id == payload.ride_id))).scalar_one_or_none()
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ride {payload.ride_id} not found.")
-
-        if ride.customer_id != customer_profile_id and user.role != "admin":
+        prof = (await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))).scalar_one_or_none()
+        if (not prof or ride.customer_id != prof.id) and user.role != "admin":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not own this ride.")
 
-        amount_paise = int(ride.final_fare_cents or ride.estimated_fare_cents or 0)
-        if amount_paise <= 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Journey fare calculation has not finalized.")
-    elif payload.amount_cents:
-        amount_paise = int(payload.amount_cents)
-    elif payload.amount_rupees:
-        amount_paise = int(round(payload.amount_rupees * 100))
-    else:
-        amount_paise = 10000  # Default ₹100 for topups
+        if user.role == "admin" and (not prof or ride.customer_id != prof.id):
+            cust_prof = (await db.execute(select(CustomerProfile).where(CustomerProfile.id == ride.customer_id))).scalar_one_or_none()
+            target_user_id = cust_prof.user_id if cust_prof else user.id
+        else:
+            target_user_id = user.id
 
-    receipt = payload.receipt or f"rcpt_{payload.ride_id or user.id[:8]}_{int(time.time())}"
-    notes = payload.notes or {}
-    notes["user_id"] = user.id
-    notes["customer_id"] = customer_profile_id
-    if payload.ride_id:
-        notes["ride_id"] = payload.ride_id
-
-    # Prevent overwriting an order or amount on an already settled/authorized payment
-    if payload.ride_id:
-        existing_pay = (
-            await db.execute(select(Payment).where(Payment.ride_id == payload.ride_id))
-        ).scalar_one_or_none()
-        if existing_pay and existing_pay.status in ("CAPTURED", "AUTHORIZED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED"):
+        idem = (payload.idempotency_key or payload.receipt or f"ride_ord_{payload.ride_id}").strip()
+        service = PaymentService(db)
+        intent_res = await service.create_payment_intent(
+            user_id=target_user_id,
+            ride_id=payload.ride_id,
+            idempotency_key=idem,
+        )
+        if intent_res.get("already_settled"):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Cannot create new order: ride payment is already in status {existing_pay.status}.",
+                detail=f"Cannot create new order: ride payment is already in status {intent_res.get('status')}.",
             )
+        amt = int(intent_res.get("amount_cents") or 0)
+        return {
+            "order_id": intent_res.get("order_id"),
+            "payment_id": intent_res.get("payment_id"),
+            "amount": amt,
+            "amount_cents": amt,
+            "amount_rupees": round(amt / 100.0, 2),
+            "currency": intent_res.get("currency", "INR"),
+            "key_id": settings.RAZORPAY_KEY_ID or "",
+            "receipt": payload.receipt or f"ride_{payload.ride_id.replace('-', '')[:24]}",
+            "status": "created",
+            "reused_existing_order": bool(intent_res.get("reused_existing_order")),
+        }
+
+    # Generic non-ride Razorpay order creation with DB persistence and idempotency
+    if payload.amount_cents is not None:
+        amount_paise = int(payload.amount_cents)
+    elif payload.amount_rupees is not None:
+        amount_paise = int(round(payload.amount_rupees * 100))
+    else:
+        amount_paise = 10000
+
+    if amount_paise <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order amount must be positive.")
+
+    clean_idem = (payload.idempotency_key or "").strip() or None
+    receipt = (
+        payload.receipt
+        or (f"rcpt_{hashlib.sha256(f'{user.id}:{clean_idem}'.encode()).hexdigest()[:24]}" if clean_idem else f"rcpt_{uuid.uuid4().hex[:20]}")
+    )
+    scoped_idem = f"gen_ord_{user.id}_{clean_idem}" if clean_idem else f"gen_pend_{receipt}"
+
+    if clean_idem:
+        existing_gen = (
+            await db.execute(select(Payment).where(Payment.idempotency_key == scoped_idem).with_for_update())
+        ).scalar_one_or_none()
+        if existing_gen:
+            if existing_gen.user_id != user.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Idempotency key belongs to another user.")
+            if existing_gen.amount_cents != amount_paise:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key reused with a different amount.")
+            if existing_gen.provider_order_id:
+                return {
+                    "order_id": existing_gen.provider_order_id,
+                    "payment_id": existing_gen.id,
+                    "amount": existing_gen.amount_cents,
+                    "amount_cents": existing_gen.amount_cents,
+                    "amount_rupees": round(existing_gen.amount_cents / 100.0, 2),
+                    "currency": existing_gen.currency,
+                    "key_id": settings.RAZORPAY_KEY_ID or "",
+                    "receipt": receipt,
+                    "status": "created",
+                    "reused_existing_order": True,
+                }
+
+    notes = dict(payload.notes or {})
+    notes["user_id"] = user.id
+    payment = Payment(
+        ride_id=None,
+        user_id=user.id,
+        customer_id=None,
+        amount_cents=amount_paise,
+        currency="INR",
+        status="CREATED",
+        purpose=str(notes.get("purpose") or "GENERAL_PAYMENT"),
+        payment_method="RAZORPAY",
+        provider_name="RAZORPAY",
+        merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or None,
+        idempotency_key=scoped_idem,
+    )
+    db.add(payment)
+    await db.commit()
+    await db.refresh(payment)
 
     order = await provider.create_razorpay_order(
         amount_cents=amount_paise,
         currency="INR",
         receipt=receipt,
-        notes=notes
+        notes=notes,
     )
-
-    # Task 026: Synchronize Payment in database with valid idempotency_key and customer_id
-    if payload.ride_id:
-        stmt = select(Payment).where(Payment.ride_id == payload.ride_id).with_for_update()
-        res = await db.execute(stmt)
-        payment = res.scalar_one_or_none()
-        if not payment:
-            payment = Payment(
-                ride_id=payload.ride_id,
-                customer_id=customer_profile_id,
+    locked_pay = (await db.execute(select(Payment).where(Payment.id == payment.id).with_for_update())).scalar_one()
+    locked_pay.provider_order_id = order.get("id")
+    if order.get("id"):
+        db.add(
+            PaymentOrderAttempt(
+                payment_id=locked_pay.id,
+                provider_order_id=order.get("id"),
+                receipt=receipt,
+                idempotency_key=clean_idem,
                 amount_cents=amount_paise,
                 currency="INR",
+                merchant_account_id=locked_pay.merchant_account_id,
                 status="CREATED",
-                payment_method="RAZORPAY",
-                provider_name="RAZORPAY",
-                provider_order_id=order.get("id"),
-                idempotency_key=f"pay_{payload.ride_id}_{order.get('id')}"
             )
-            db.add(payment)
-        else:
-            if payment.status in ("CAPTURED", "AUTHORIZED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED"):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Cannot create new order: ride payment is already in status {payment.status}.",
-                )
-            if payment.status == "FAILED":
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Cannot reuse failed payment record; initialize a fresh payment intent.",
-                )
-            payment.provider_order_id = order.get("id")
-            payment.amount_cents = amount_paise
-            payment.provider_name = "RAZORPAY"
-            if not payment.idempotency_key:
-                payment.idempotency_key = f"pay_{payload.ride_id}_{order.get('id')}"
-        await db.commit()
+        )
+    await db.commit()
 
     return {
         "order_id": order.get("id"),
+        "payment_id": locked_pay.id,
         "amount": order.get("amount", amount_paise),
+        "amount_cents": order.get("amount", amount_paise),
         "amount_rupees": round(amount_paise / 100.0, 2),
         "currency": order.get("currency", "INR"),
         "key_id": settings.RAZORPAY_KEY_ID or "",
         "receipt": order.get("receipt", receipt),
-        "status": order.get("status", "created")
+        "status": order.get("status", "created"),
+        "reused_existing_order": False,
     }
 
 @router.post("/razorpay/verify")
@@ -297,6 +334,19 @@ async def verify_razorpay_payment(
         if lock:
             q = q.with_for_update()
         found = (await db.execute(q)).scalar_one_or_none()
+        if not found:
+            att = (
+                await db.execute(
+                    select(PaymentOrderAttempt).where(
+                        PaymentOrderAttempt.provider_order_id == payload.razorpay_order_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if att:
+                q_att = select(Payment).where(Payment.id == att.payment_id)
+                if lock:
+                    q_att = q_att.with_for_update()
+                found = (await db.execute(q_att)).scalar_one_or_none()
         if not found and payload.ride_id:
             q_ride = select(Payment).where(Payment.ride_id == payload.ride_id)
             if lock:
@@ -317,11 +367,27 @@ async def verify_razorpay_payment(
             detail="Specified ride_id does not match the payment order association."
         )
 
+    matched_pre_attempt = None
     if pre_payment.provider_order_id and pre_payment.provider_order_id != payload.razorpay_order_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Payment is bound to a different Razorpay order ID."
-        )
+        matched_pre_attempt = (
+            await db.execute(
+                select(PaymentOrderAttempt).where(
+                    PaymentOrderAttempt.payment_id == pre_payment.id,
+                    PaymentOrderAttempt.provider_order_id == payload.razorpay_order_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not matched_pre_attempt:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Payment is bound to a different Razorpay order ID."
+            )
+        if pre_payment.status in ("CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED"):
+            if pre_payment.provider_payment_id and pre_payment.provider_payment_id != payload.razorpay_payment_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Payment is already settled on another order."
+                )
 
     # 3. Ownership Verification
     prof = (
@@ -349,11 +415,15 @@ async def verify_razorpay_payment(
             "status": pre_payment.status
         }
 
+    expected_verify_amount = (
+        matched_pre_attempt.amount_cents if matched_pre_attempt else pre_payment.amount_cents
+    )
+
     # 5. Authoritative Razorpay Server-Side Fetch (outside DB write lock)
     try:
         gateway_payment = await provider.fetch_payment(
             payment_id=payload.razorpay_payment_id,
-            expected_amount_cents=pre_payment.amount_cents,
+            expected_amount_cents=expected_verify_amount,
             expected_order_id=payload.razorpay_order_id,
         )
     except Exception as exc:
@@ -372,6 +442,7 @@ async def verify_razorpay_payment(
     gw_amount = gateway_payment.get("amount")
     gw_currency = str(gateway_payment.get("currency") or "").upper()
     gw_status = str(gateway_payment.get("status") or "").lower()
+    gw_account_id = gateway_payment.get("account_id")
 
     if gw_payment_id and gw_payment_id != payload.razorpay_payment_id:
         raise HTTPException(
@@ -389,6 +460,10 @@ async def verify_razorpay_payment(
             detail="Authoritative payment does not correspond to expected Razorpay order."
         )
 
+    acct_ok, acct_reason = provider.validate_merchant_account(gw_account_id)
+    if not acct_ok:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=acct_reason)
+
     if gw_currency != "INR":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -400,15 +475,25 @@ async def verify_razorpay_payment(
     if not payment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record no longer exists.")
 
-    if gw_amount != payment.amount_cents:
+    if gw_account_id and not payment.merchant_account_id:
+        payment.merchant_account_id = gw_account_id
+
+    expected_locked_amount = (
+        matched_pre_attempt.amount_cents if matched_pre_attempt else payment.amount_cents
+    )
+    if gw_amount != expected_locked_amount:
         logger.critical(
             "SECURITY ANOMALY: Payment amount mismatch! DB expects %d paise, gateway reports %d paise",
-            payment.amount_cents, gw_amount
+            expected_locked_amount, gw_amount
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Payment amount mismatch between client, order, and gateway."
         )
+
+    if matched_pre_attempt and payment.provider_order_id != payload.razorpay_order_id and gw_status == "captured":
+        payment.provider_order_id = payload.razorpay_order_id
+        payment.amount_cents = matched_pre_attempt.amount_cents
 
     if payment.status in ("CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED"):
         if payment.provider_payment_id and payment.provider_payment_id != payload.razorpay_payment_id:
@@ -631,8 +716,60 @@ async def process_partial_refund(
         payment_id=payload.payment_id,
         amount_cents=payload.amount_cents,
         reason=payload.reason,
-        is_partial=payload.is_partial
+        is_partial=payload.is_partial,
+        idempotency_key=payload.idempotency_key,
+        allow_debt_clawback=is_admin,
+        actor_admin_id=user.id if is_admin else None,
     )
+
+
+@router.get("/ride/{ride_id}/status")
+async def get_ride_payment_status(
+    ride_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Authoritative backend ride payment verification status for Customer, Assigned Driver, and Admin."""
+    ride = (await db.execute(select(Ride).where(Ride.id == ride_id))).scalar_one_or_none()
+    if not ride:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+    cust = (await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))).scalar_one_or_none()
+    drv = (await db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))).scalar_one_or_none()
+    is_admin = getattr(user, "role", None) in ("admin", "superadmin", "super administrator")
+    is_customer = bool(cust and ride.customer_id == cust.id)
+    is_driver = bool(drv and ride.assigned_driver_id == drv.id)
+    if not (is_admin or is_customer or is_driver):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized to view payment status for this ride.")
+
+    payment = (await db.execute(select(Payment).where(Payment.ride_id == ride_id))).scalar_one_or_none()
+    if not payment:
+        return {
+            "ride_id": ride_id,
+            "payment_id": None,
+            "status": "UNPAID",
+            "payment_method": ride.payment_method,
+            "provider_name": None,
+            "amount_cents": int(ride.final_fare_cents or ride.estimated_fare_cents or 0),
+            "refunded_amount_cents": 0,
+            "provider_order_id": None,
+            "provider_payment_id": None,
+            "gateway_verified": False,
+        }
+
+    settled_states = {"CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED", "SUCCESS"}
+    return {
+        "ride_id": ride_id,
+        "payment_id": payment.id,
+        "status": payment.status,
+        "payment_method": payment.payment_method,
+        "provider_name": payment.provider_name,
+        "amount_cents": payment.amount_cents,
+        "refunded_amount_cents": int(payment.refunded_amount_cents or 0),
+        "provider_order_id": payment.provider_order_id,
+        "provider_payment_id": payment.provider_payment_id,
+        "gateway_verified": payment.status in settled_states,
+    }
 
 @router.get("/refunds/{refund_id}/status")
 async def get_refund_status(

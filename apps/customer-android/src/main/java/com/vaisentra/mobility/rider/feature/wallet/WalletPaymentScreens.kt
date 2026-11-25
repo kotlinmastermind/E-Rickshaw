@@ -131,7 +131,17 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
                 Text("✓ Wallet successfully credited: ₹${state.balanceRupees}", color = EmeraldGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             is RiderRepository.TopupState.Error -> {
-                Text("⚠️ ${state.message}", color = CrimsonRed, fontSize = 12.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("⚠️ ${state.message}", color = CrimsonRed, fontSize = 12.sp)
+                    if (RiderRepository.hasPendingVerification()) {
+                        NeoButton(
+                            text = "Retry Verification",
+                            onClick = { RiderRepository.retryPendingVerification() },
+                            backgroundColor = AmberGold,
+                            textColor = CanvasBlack
+                        )
+                    }
+                }
             }
             else -> {}
         }
@@ -146,7 +156,11 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
                         .weight(1f)
                         .clip(RoundedCornerShape(14.dp))
                         .background(SurfaceElevated)
-                        .clickable(enabled = topupState !is RiderRepository.TopupState.CreatingOrder && topupState !is RiderRepository.TopupState.Verifying) {
+                        .clickable(
+                            enabled = topupState !is RiderRepository.TopupState.CreatingOrder &&
+                                topupState !is RiderRepository.TopupState.CheckoutOpen &&
+                                topupState !is RiderRepository.TopupState.Verifying
+                        ) {
                             if (activity != null) {
                                 RiderRepository.launchWalletTopupCheckout(activity, amt)
                             }

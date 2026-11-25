@@ -44,7 +44,7 @@ class LocationEligibilityPayload(BaseModel):
 class QualityFeedbackPayload(BaseModel):
     rating: int = Field(ge=1, le=5)
     issue_code: str
-    provider_mode: str = Field("GOOGLE_PLACES", max_length=32)
+    provider_mode: str = Field("MAPBOX_GEOCODING", max_length=32)
     coordinates_verified: bool = False
 
 
@@ -437,13 +437,13 @@ async def get_route(
 
 
 # =============================================================================
-# GOOGLE ISOCHRONES, ADDRESS VALIDATION & ROADS PATH SNAPPING
+# MAPBOX & OSRM ISOCHRONES, ADDRESS VALIDATION & ROADS PATH SNAPPING
 # =============================================================================
 @router.post("/isochrone")
 async def compute_isochrone(payload: IsochronePayload):
     """
     Computes reachable geographic polygon for E-Rickshaws within the specified travel time (minutes).
-    Uses Google Isochrones API / route contours with urban speed constraints.
+    Uses Mapbox / OSRM route contours with urban speed constraints.
     """
     provider = get_maps_provider()
     return await provider.get_isochrone(
@@ -456,7 +456,7 @@ async def compute_isochrone(payload: IsochronePayload):
 @router.post("/validate-address")
 async def validate_address_accuracy(payload: AddressValidationPayload):
     """
-    Validates delivery/pickup address using Google Address Validation API.
+    Validates delivery/pickup address using Mapbox / OpenStreetMap geocoding providers.
     Returns deliverability verdict, standardized postal address, and verified coordinates.
     """
     provider = get_maps_provider()
@@ -470,7 +470,7 @@ async def validate_address_accuracy(payload: AddressValidationPayload):
 @router.post("/snap-path")
 async def snap_gps_path(payload: SnapPathPayload):
     """
-    Snaps a sequence of GPS breadcrumb coordinates to the nearest road network using Roads API.
+    Snaps a sequence of GPS breadcrumb coordinates to the nearest road network via Mapbox / OSRM map matching.
     """
     provider = get_maps_provider()
     raw_pts = [{"latitude": p.latitude, "longitude": p.longitude} for p in payload.points]
@@ -478,7 +478,7 @@ async def snap_gps_path(payload: SnapPathPayload):
     return {
         "snapped_points": snapped,
         "count": len(snapped),
-        "provider_mode": "GOOGLE_ROADS_SNAPPED"
+        "provider_mode": "MAPBOX_OSRM_ROADS_SNAPPED"
     }
 
 
@@ -592,7 +592,7 @@ class DriverTelemetryPayload(BaseModel):
     speed_kmh: Optional[float] = None
     accuracy_meters: Optional[float] = None
     ride_id: Optional[str] = None
-    source: str = "FUSED_GPS"
+    source: str = "GPS"
 
 
 @router.post("/driver-telemetry")

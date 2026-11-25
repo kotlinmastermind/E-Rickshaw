@@ -759,11 +759,12 @@ fun AccountSettingsHubScreen(onNavigate: (String) -> Unit) {
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // 4. SIGN OUT BUTTON (Clears Token)
+        val context = LocalContext.current
+        // 4. SIGN OUT BUTTON (Deactivates FCM token & Clears Session)
         NeoButton(
             text = "Sign Out Session",
             onClick = {
-                NetworkClient.clearAuthToken()
+                com.vaisentra.mobility.rider.fcm.RiderFcmManager.deactivateAndLogoutAsync(context)
                 DialogController.showToast("Session safely terminated.")
                 onNavigate("splash")
             },

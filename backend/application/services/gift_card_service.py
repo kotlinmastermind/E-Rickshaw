@@ -204,6 +204,36 @@ class GiftCardService:
                         detail="Gift card issuance rejected: Invalid Razorpay cryptographic signature."
                     )
 
+                # Verify authoritative capture status, amount, currency, and merchant account via Razorpay API
+                gw_pay = await provider.fetch_payment(
+                    payment_id=rzp_payment_id,
+                    expected_amount_cents=amount_cents,
+                    expected_order_id=rzp_order_id,
+                )
+                if str(gw_pay.get("status") or "").lower() != "captured":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Gift card issuance rejected: Gateway payment status is '{gw_pay.get('status')}', expected 'captured'.",
+                    )
+                if gw_pay.get("order_id") and gw_pay.get("order_id") != rzp_order_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Gift card issuance rejected: Payment does not match specified order.",
+                    )
+                if str(gw_pay.get("currency") or "INR").upper() != "INR":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Gift card issuance rejected: Invalid payment currency.",
+                    )
+                if gw_pay.get("amount") is not None and int(gw_pay.get("amount")) != amount_cents:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Gift card issuance rejected: Gateway amount mismatch.",
+                    )
+                acct_ok, acct_reason = provider.validate_merchant_account(gw_pay.get("account_id"))
+                if not acct_ok:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=acct_reason)
+
                 # Replay attack prevention: Ensure this payment ID was not already consumed for a gift card
                 existing_gc = (await self.db.execute(select(GiftCard).where(GiftCard.payment_id == rzp_payment_id))).scalar_one_or_none()
                 if existing_gc:
@@ -234,6 +264,25 @@ class GiftCardService:
                     payment_rec.purpose = "GIFT_CARD_PURCHASE"
                     payment_rec.provider_payment_id = rzp_payment_id
                     payment_rec.provider_signature = rzp_sig
+                    if not payment_rec.merchant_account_id and gw_pay.get("account_id"):
+                        payment_rec.merchant_account_id = gw_pay.get("account_id")
+                else:
+                    self.db.add(
+                        Payment(
+                            user_id=buyer_user_id,
+                            amount_cents=amount_cents,
+                            currency="INR",
+                            status="CAPTURED",
+                            purpose="GIFT_CARD_PURCHASE",
+                            payment_method="RAZORPAY",
+                            provider_name="RAZORPAY",
+                            provider_order_id=rzp_order_id,
+                            provider_payment_id=rzp_payment_id,
+                            provider_signature=rzp_sig,
+                            merchant_account_id=gw_pay.get("account_id"),
+                            idempotency_key=f"gc_pay_{rzp_order_id}",
+                        )
+                    )
 
                 initial_status = "ACTIVE"
                 payment_status = "COMPLETED"

@@ -493,6 +493,7 @@ class PaymentWebhookInbox(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     provider_name: Mapped[str] = mapped_column(String(32), default="RAZORPAY", nullable=False)
+    merchant_account_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     event_digest: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     event_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     provider_event_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)

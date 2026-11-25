@@ -17,6 +17,7 @@ from backend.domain.models import (
     SupportCallbackRequest, ServiceIncidentAdvisory, FareRule, VehicleCategory
 )
 from backend.integrations.storage.provider import get_storage_provider
+from backend.application.services.wallet_service import WalletService
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -842,26 +843,16 @@ class SupportAdvancedService:
         await self.db.flush()
 
         if auto_approved:
-            # Credit customer wallet
-            wallet_res = await self.db.execute(select(Wallet).where(Wallet.user_id == user_id))
-            wallet = wallet_res.scalars().first()
-            if not wallet:
-                wallet = Wallet(user_id=user_id, balance_cents=0)
-                self.db.add(wallet)
-                await self.db.flush()
-
-            wallet.balance_cents += claim_cents
-            txn = WalletTransaction(
-                wallet_id=wallet.id,
-                transaction_type="CREDIT",
+            await WalletService.credit_wallet(
+                session=self.db,
+                user_id=user_id,
                 amount_cents=claim_cents,
-                balance_after_cents=wallet.balance_cents,
+                transaction_type="CREDIT",
                 source="REFUND",
                 reference_id=ticket.id,
+                description=f"Instant Goodwill Refund for Ride {ride_id[:8]}",
                 idempotency_key=f"ref-{ticket.id}",
-                description=f"Instant Goodwill Refund for Ride {ride_id[:8]}"
             )
-            self.db.add(txn)
             ticket.resolved_at = utc_now()
 
         msg = SupportMessage(

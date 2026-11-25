@@ -2,7 +2,7 @@ from typing import Optional
 from sqlalchemy import update
 from sqlalchemy import select, or_
 from backend.domain.models import User, CustomerProfile
-from fastapi import APIRouter, Depends, Request, HTTPException, status
+from fastapi import APIRouter, Body, Depends, Request, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.infrastructure.database.session import get_db
@@ -226,23 +226,7 @@ async def admin_mfa_enable(payload: AdminMfaEnablePayload, request: Request, db:
         user_agent=request.headers.get("user-agent"),
     )
 
-# 2 & 3. Sign in with Google / Apple
-@router.post("/oauth/google", dependencies=[Depends(auth_rate_limiter)])
-async def oauth_google(payload: OAuthPayload, request: Request, db: AsyncSession = Depends(get_db)):
-    service = UserGovernanceService(db)
-    ip = request.client.host if request.client else None
-    ua = request.headers.get("user-agent")
-    return await service.oauth_login_or_register(
-        provider="google",
-        identity_token=payload.token,
-        email=payload.email,
-        full_name=payload.full_name,
-        phone_number=payload.phone_number,
-        role=payload.role,
-        ip_address=ip,
-        user_agent=ua
-    )
-
+# Supported OAuth Sign-In (Apple SSO; Google Sign-In removed per FCM-only policy)
 @router.post("/oauth/apple", dependencies=[Depends(auth_rate_limiter)])
 async def oauth_apple(payload: OAuthPayload, request: Request, db: AsyncSession = Depends(get_db)):
     service = UserGovernanceService(db)
@@ -430,24 +414,32 @@ async def unified_login(payload: UnifiedLoginPayload, request: Request, db: Asyn
         user_agent=ua
     )
 
+class LogoutPayload(BaseModel):
+    fcm_token: Optional[str] = Field(None, max_length=512)
+
+
 @router.post("/logout")
 async def logout(
     request: Request,
+    payload: Optional[LogoutPayload] = Body(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Terminates active session and blacklists it across distributed instances."""
+    """Terminates active session, blacklists it across distributed instances, and deactivates optional device push token."""
     auth_header = request.headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header.split(" ")[1]
         try:
-            payload = decode_jwt_token(token)
-            session_id = payload.get("session_id")
+            decoded = decode_jwt_token(token)
+            session_id = decoded.get("session_id")
             if session_id:
                 service = AuthService(db)
                 await service.revoke_session(session_id)
         except Exception:
             pass
+    if payload and payload.fcm_token:
+        from backend.application.services.notification_service import NotificationService
+        await NotificationService(db).deactivate_token(current_user.id, payload.fcm_token)
     return {"message": "Session terminated successfully."}
 
 @router.post("/logout-all")
@@ -455,7 +447,9 @@ async def logout_all(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Terminates all active sessions across all devices for the current user."""
+    """Terminates all active sessions and deactivates push device tokens across all devices for the current user."""
     service = AuthService(db)
     await service.revoke_all_user_sessions(current_user.id)
+    from backend.application.services.notification_service import NotificationService
+    await NotificationService(db).deactivate_user_tokens(current_user.id)
     return {"message": "All active sessions revoked across all devices."}

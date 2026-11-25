@@ -359,7 +359,11 @@ fun UpiSettlementScreen(
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 CockpitButton(
-                    text = if (isLoading) "REFRESHING..." else "GENERATE / VERIFY UPI",
+                    text = when {
+                        isLoading -> "CHECKING..."
+                        upiIntentUrl == null -> "GENERATE UPI QR"
+                        else -> "VERIFY CAPTURED STATUS"
+                    },
                     enabled = !isLoading,
                     onClick = {
                         if (rideId.isBlank()) {
@@ -368,19 +372,52 @@ fun UpiSettlementScreen(
                         }
                         isLoading = true
                         scope.launch {
-                            val res = DriverRepository.generateDynamicUpi(rideId, totalBill.coerceAtLeast(1.0))
-                            isLoading = false
-                            if (res.isSuccess) {
-                                upiIntentUrl = res.getOrNull()
-                                onShowToast("UPI checkout ready!")
-                                onPaymentConfirmed()
+                            if (upiIntentUrl == null) {
+                                val res = DriverRepository.generateDynamicUpi(rideId, totalBill.coerceAtLeast(1.0))
+                                isLoading = false
+                                if (res.isSuccess) {
+                                    upiIntentUrl = res.getOrNull()
+                                    onShowToast("UPI QR ready. Ask rider to scan & pay, then verify capture.")
+                                } else {
+                                    onShowToast("UPI error: ${res.exceptionOrNull()?.message}")
+                                }
                             } else {
-                                onShowToast("UPI error: ${res.exceptionOrNull()?.message}")
+                                val statusRes = DriverRepository.verifyRideUpiPaymentStatus(rideId)
+                                isLoading = false
+                                if (statusRes.isSuccess && statusRes.getOrNull() == true) {
+                                    onShowToast("Backend confirmed CAPTURED payment!")
+                                    onPaymentConfirmed()
+                                } else if (statusRes.isSuccess) {
+                                    onShowToast("Payment not captured yet on gateway. Wait or collect cash.")
+                                } else {
+                                    onShowToast("Verification check failed: ${statusRes.exceptionOrNull()?.message}")
+                                }
                             }
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (upiIntentUrl != null) {
+                    CockpitButton(
+                        text = "Refresh UPI QR",
+                        enabled = !isLoading,
+                        onClick = {
+                            isLoading = true
+                            scope.launch {
+                                val res = DriverRepository.generateDynamicUpi(rideId, totalBill.coerceAtLeast(1.0))
+                                isLoading = false
+                                if (res.isSuccess) {
+                                    upiIntentUrl = res.getOrNull()
+                                    onShowToast("UPI QR refreshed.")
+                                } else {
+                                    onShowToast("UPI error: ${res.exceptionOrNull()?.message}")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        isOutlined = true
+                    )
+                }
                 CockpitButton(
                     text = "Switch to Cash Collection",
                     onClick = onNavigateBack,

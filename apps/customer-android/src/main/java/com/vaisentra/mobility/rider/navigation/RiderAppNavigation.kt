@@ -43,6 +43,19 @@ fun RiderAppNavigation() {
     val backStack = remember { mutableStateListOf(initialRoute) }
     // Yeh state PhoneAuthScreen se OtpVerifyScreen tak phone number le jayegi
     var authPhone by remember { mutableStateOf("") }
+    val pendingNotificationRoute by com.vaisentra.mobility.rider.fcm.RiderFcmManager.pendingNotificationRoute.collectAsState()
+
+    LaunchedEffect(pendingNotificationRoute, currentRoute) {
+        val target = pendingNotificationRoute ?: return@LaunchedEffect
+        val isAuthRoute = currentRoute in listOf(
+            "splash", "app_lock", "auth_phone", "auth_otp", "auth_reset", "auth_kyc", "auth_biometric"
+        )
+        if (!NetworkClient.authToken.isNullOrBlank() && !isAuthRoute) {
+            backStack.add(target)
+            currentRoute = target
+            com.vaisentra.mobility.rider.fcm.RiderFcmManager.consumePendingRoute()
+        }
+    }
 
     LaunchedEffect(Unit) {
         if (!NetworkClient.authToken.isNullOrBlank()) {
@@ -95,7 +108,7 @@ fun RiderAppNavigation() {
                     currentRoute = "map_home"
                 },
                 onForgotPinLogout = {
-                    NetworkClient.clearAuthToken()
+                    com.vaisentra.mobility.rider.fcm.RiderFcmManager.deactivateAndLogoutAsync()
                     backStack.clear()
                     backStack.add("auth_phone")
                     currentRoute = "auth_phone"

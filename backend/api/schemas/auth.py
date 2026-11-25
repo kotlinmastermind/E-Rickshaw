@@ -41,8 +41,8 @@ class AdminMfaEnablePayload(BaseModel):
     code: str = Field(..., min_length=6, max_length=6, pattern="^[0-9]{6}$")
 
 class OAuthPayload(BaseModel):
-    """Payload for Google/Apple Single Sign-On."""
-    provider: Optional[str] = "google"
+    """Payload for supported Single Sign-On providers (Apple)."""
+    provider: Optional[str] = "apple"
     identity_token: Optional[str] = None
     id_token: Optional[str] = None
     apple_user_id: Optional[str] = None

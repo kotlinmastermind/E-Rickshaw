@@ -269,12 +269,18 @@ class UserGovernanceService:
                 "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
                 "user": {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role, "mfa_enabled": True}}
 
-    # 2 & 3. Sign In with Google & Apple OAuth
+    # Supported OAuth SSO (Google Sign-In removed per security/provider policy)
     async def oauth_login_or_register(
         self, provider: str, identity_token: str, email: str, full_name: Optional[str] = None,
         phone_number: Optional[str] = None, role: str = "customer",
         ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
+        normalized_provider = (provider or "").strip().lower()
+        if normalized_provider == "google":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Google Sign-In is disabled. Use OTP or email/password authentication."
+            )
         normalized_role = (role or "customer").lower().strip()
         if normalized_role in ("admin", "superadmin", "super administrator"):
             raise HTTPException(
@@ -430,7 +436,7 @@ class UserGovernanceService:
         return {
             "mfa_secret": secret,
             "totp_uri": totp_uri,
-            "instructions": "Enter this secret into Google Authenticator or scan the TOTP QR."
+            "instructions": "Enter this secret into your TOTP authenticator app or scan the TOTP QR."
         }
 
     async def enable_mfa(self, user_id: str, code: str) -> Dict[str, Any]:

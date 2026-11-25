@@ -12,7 +12,7 @@ import retrofit2.http.*
 @JvmSuppressWildcards
 interface DriverApiService {
 
-    // --- Live Turn-by-Turn Navigation & Guidance ---
+    // --- Live Turn-by-Turn Navigation, Geocoding & Guidance ---
     @GET("api/v1/location/navigation-guidance")
     suspend fun getNavigationGuidance(
         @Query("origin_lat") originLat: Double,
@@ -21,11 +21,22 @@ interface DriverApiService {
         @Query("dest_lng") destLng: Double
     ): Response<NavigationGuidanceResponseDto>
 
+    @POST("api/v1/location/reverse-geocode")
+    suspend fun reverseGeocode(@Body request: DriverReverseGeocodeRequest): Response<DriverReverseGeocodeResponse>
+
     // --- Backend Health & Status ---
     @GET("health")
     suspend fun healthCheck(): Response<BackendHealthDto>
 
     // --- Pilot Authentication ---
+    @POST("api/v1/auth/logout")
+    suspend fun logoutSession(@Body request: DriverLogoutRequest = DriverLogoutRequest()): Response<Map<String, Any>>
+
+    @POST("api/v1/drivers/device-token")
+    suspend fun registerDeviceToken(@Body request: DeviceTokenRegisterRequest): Response<Map<String, Any>>
+
+    @HTTP(method = "DELETE", path = "api/v1/drivers/device-token", hasBody = true)
+    suspend fun deactivateDeviceToken(@Body request: DeviceTokenDeactivateRequest): Response<Map<String, Any>>
     @POST("api/v1/auth/token/refresh")
     suspend fun refreshToken(@Body request: TokenRefreshRequest): Response<DriverTokenResponse>
 
@@ -390,4 +401,10 @@ interface DriverApiService {
     suspend fun checkGiftCardBalance(
         @Body request: DriverGiftCardBalanceRequest
     ): Response<DriverGiftCardBalanceResponse>
+
+    // --- Authoritative Backend Payment Capture Verification ---
+    @GET("api/v1/payments/ride/{ride_id}/status")
+    suspend fun getRidePaymentStatus(
+        @Path("ride_id") rideId: String
+    ): Response<Map<String, Any>>
 }

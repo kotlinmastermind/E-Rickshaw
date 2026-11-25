@@ -50,10 +50,19 @@ class RazorpayPaymentProvider(PaymentProvider):
     Razorpay UPI / Card payment gateway boundary.
     Creates authoritative live orders and enforces cryptographically signed verification.
     """
-    def __init__(self, key_id: str, key_secret: str, webhook_secret: str):
+    def __init__(
+        self,
+        key_id: str,
+        key_secret: str,
+        webhook_secret: str,
+        previous_webhook_secret: str = "",
+        merchant_account_id: str = "",
+    ):
         self.key_id = key_id
         self.key_secret = key_secret
         self.webhook_secret = webhook_secret
+        self.previous_webhook_secret = previous_webhook_secret
+        self.merchant_account_id = merchant_account_id
         self._client = None
         try:
             import razorpay
@@ -73,14 +82,21 @@ class RazorpayPaymentProvider(PaymentProvider):
         Create a live Razorpay order directly with amount in paise (1 INR = 100 paise).
         """
         receipt_str = (receipt or f"rcpt_{uuid.uuid4().hex[:12]}")[:40]
+        merged_notes = dict(notes or {
+            "platform": "Vaisentra Mobility",
+            "app": "E-Rickshaw Ride Hailing"
+        })
+        expected_merchant = (
+            getattr(self, "merchant_account_id", None) or settings.RAZORPAY_MERCHANT_ACCOUNT_ID or ""
+        ).strip()
+        if expected_merchant:
+            merged_notes["merchant_account_id"] = expected_merchant
+
         order_payload = {
             "amount": int(amount_cents),
             "currency": currency or "INR",
             "receipt": receipt_str,
-            "notes": notes or {
-                "platform": "Luxury Chauffeur Mobility",
-                "app": "E-Rickshaw Ride Hailing"
-            }
+            "notes": merged_notes,
         }
 
         # Avoid outbound unauthenticated network calls when running synthetic tests without keys
@@ -133,8 +149,8 @@ class RazorpayPaymentProvider(PaymentProvider):
         except Exception as e:
             logger.error(f"Razorpay HTTP request exception: {e}")
 
-        # 3. Handle failure: do not fake production orders
-        if os.getenv("TESTING") == "1":
+        # 3. Handle failure: never fake production orders
+        if os.getenv("TESTING") == "1" and (settings.ENVIRONMENT or "").strip().lower() != "production":
             fallback_order_id = f"order_test_{uuid.uuid4().hex[:14]}"
             return {
                 "id": fallback_order_id,
@@ -146,7 +162,7 @@ class RazorpayPaymentProvider(PaymentProvider):
                 "receipt": receipt_str,
                 "status": "created",
                 "attempts": 0,
-                "notes": notes or {},
+                "notes": merged_notes,
                 "created_at": 1730440000
             }
 
@@ -188,16 +204,34 @@ class RazorpayPaymentProvider(PaymentProvider):
             logger.error(f"Signature calculation failure: {e}")
             return False
 
-    async def verify_webhook_payload(self, raw_body: bytes, signature_header: str) -> PaymentVerificationResult:
-        if not signature_header or not self.webhook_secret:
-            return PaymentVerificationResult(False, "FAILED", "", "Missing signature header or webhook secret unconfigured.")
+    async def verify_webhook_payload_detailed(
+        self, raw_body: bytes, signature_header: str
+    ) -> tuple[PaymentVerificationResult, Optional[str]]:
+        if not signature_header:
+            return PaymentVerificationResult(False, "FAILED", "", "Missing webhook signature header."), None
 
-        # STRICT ENFORCEMENT: Only verify against RAZORPAY_WEBHOOK_SECRET
-        is_valid = verify_hmac_signature(raw_body, signature_header, self.webhook_secret)
-        if not is_valid:
-            return PaymentVerificationResult(False, "FAILED", "", "Invalid HMAC-SHA256 signature.")
+        current_secret = (self.webhook_secret or "").strip()
+        prev_secret = (
+            getattr(self, "previous_webhook_secret", None)
+            or settings.RAZORPAY_WEBHOOK_SECRET_PREVIOUS
+            or ""
+        ).strip()
 
-        # Extract payment ID from verified entity
+        if not current_secret and not prev_secret:
+            return PaymentVerificationResult(False, "FAILED", "", "Webhook secret is not configured."), None
+
+        matched_slot: Optional[str] = None
+        if current_secret and verify_hmac_signature(raw_body, signature_header, current_secret):
+            matched_slot = "current"
+        elif prev_secret and verify_hmac_signature(raw_body, signature_header, prev_secret):
+            matched_slot = "previous"
+            logger.warning(
+                "Webhook verified via RAZORPAY_WEBHOOK_SECRET_PREVIOUS; retire previous secret once Razorpay retry window completes."
+            )
+
+        if not matched_slot:
+            return PaymentVerificationResult(False, "FAILED", "", "Invalid HMAC-SHA256 signature."), None
+
         payment_id = ""
         try:
             data = json.loads(raw_body.decode("utf-8"))
@@ -205,7 +239,11 @@ class RazorpayPaymentProvider(PaymentProvider):
         except Exception:
             pass
 
-        return PaymentVerificationResult(True, "CAPTURED", payment_id, "Webhook verified")
+        return PaymentVerificationResult(True, "CAPTURED", payment_id, f"Webhook verified ({matched_slot})"), matched_slot
+
+    async def verify_webhook_payload(self, raw_body: bytes, signature_header: str) -> PaymentVerificationResult:
+        result, _ = await self.verify_webhook_payload_detailed(raw_body, signature_header)
+        return result
 
     async def fetch_payment(
         self,
@@ -272,23 +310,73 @@ class RazorpayPaymentProvider(PaymentProvider):
             raise HTTPException(status_code=resp.status_code, detail=f"Razorpay Refund API error: {resp.text}")
 
     def validate_merchant_account(self, incoming_account_id: Optional[str]) -> tuple[bool, str]:
-        """Enforce single configured Production Razorpay merchant account isolation."""
+        """Fail-closed enforcement of configured Production Razorpay merchant account isolation."""
         expected = (getattr(self, "merchant_account_id", None) or settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip()
+        is_prod = (settings.ENVIRONMENT or "").strip().lower() == "production"
+
         if not expected:
+            if is_prod:
+                return False, "CRITICAL SECURITY ERROR: Production RAZORPAY_MERCHANT_ACCOUNT_ID is not configured."
             return True, ""
+
+        if not expected.startswith("acc_") or len(expected) < 14:
+            return False, "Configured RAZORPAY_MERCHANT_ACCOUNT_ID is malformed."
 
         candidate = (incoming_account_id or "").strip()
         if not candidate:
             return False, (
                 f"Webhook missing merchant account_id; expected configured production merchant account '{expected}'."
             )
+        if not candidate.startswith("acc_") or len(candidate) < 14:
+            return False, f"Webhook malformed merchant account_id '{candidate}'."
 
-        import hmac
         if not hmac.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8")):
             return False, (
                 f"Webhook merchant account '{candidate}' does not match configured production merchant '{expected}'."
             )
         return True, ""
+
+    async def fetch_order_payments(self, order_id: str) -> Dict[str, Any]:
+        """Query Razorpay Payments linked to an Order ID for server-side reconciliation."""
+        if not self.key_id or not self.key_secret:
+            raise HTTPException(status_code=503, detail="Razorpay API credentials not configured.")
+        import httpx
+        url = f"https://api.razorpay.com/v1/orders/{order_id}/payments"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, auth=(self.key_id, self.key_secret), timeout=10.0)
+            if resp.status_code == 200:
+                return resp.json()
+            raise HTTPException(status_code=resp.status_code, detail=f"Razorpay Order Payments API error: {resp.text}")
+
+    async def fetch_orders_by_receipt(self, receipt: str) -> Dict[str, Any]:
+        """Recover lost order creation responses by querying Razorpay orders matching our unique receipt."""
+        if not self.key_id or not self.key_secret:
+            return {"items": []}
+        import httpx
+        url = "https://api.razorpay.com/v1/orders"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, params={"receipt": receipt[:40]}, auth=(self.key_id, self.key_secret), timeout=10.0)
+            if resp.status_code == 200:
+                return resp.json()
+            return {"items": []}
+
+    async def fetch_refund(self, refund_id: str) -> Dict[str, Any]:
+        """Fetch authoritative gateway refund status from Razorpay Refund API."""
+        if (
+            os.getenv("TESTING") == "1"
+            and (settings.ENVIRONMENT or "").strip().lower() != "production"
+            and refund_id.startswith("rfd_test_")
+        ):
+            return {"id": refund_id, "entity": "refund", "status": "processed"}
+        if not self.key_id or not self.key_secret:
+            raise HTTPException(status_code=503, detail="Razorpay API credentials not configured.")
+        import httpx
+        url = f"https://api.razorpay.com/v1/refunds/{refund_id}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, auth=(self.key_id, self.key_secret), timeout=10.0)
+            if resp.status_code == 200:
+                return resp.json()
+            raise HTTPException(status_code=resp.status_code, detail=f"Razorpay Refund Fetch API error: {resp.text}")
 
 class CashPaymentProvider:
     """Cash on delivery / chauffeur direct collection handler."""
@@ -299,7 +387,7 @@ class CashPaymentProvider:
         return PaymentVerificationResult(False, "PENDING", "", "Awaiting chauffeur physical collection confirmation")
 
 _payment_provider_instance: Optional[RazorpayPaymentProvider] = None
-_last_provider_settings: Optional[tuple[str, str, str, str]] = None
+_last_provider_settings: Optional[tuple[str, str, str, str, str]] = None
 
 
 def _rebuild_razorpay_sdk_client(provider: RazorpayPaymentProvider) -> None:
@@ -318,6 +406,7 @@ def get_payment_provider() -> RazorpayPaymentProvider:
         settings.RAZORPAY_KEY_ID or "",
         settings.RAZORPAY_KEY_SECRET or "",
         settings.RAZORPAY_WEBHOOK_SECRET or "",
+        getattr(settings, "RAZORPAY_WEBHOOK_SECRET_PREVIOUS", None) or "",
         settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "",
     )
     if _payment_provider_instance is None:
@@ -325,14 +414,16 @@ def get_payment_provider() -> RazorpayPaymentProvider:
             key_id=current_creds[0],
             key_secret=current_creds[1],
             webhook_secret=current_creds[2],
+            previous_webhook_secret=current_creds[3],
+            merchant_account_id=current_creds[4],
         )
-        _payment_provider_instance.merchant_account_id = current_creds[3]
         _last_provider_settings = current_creds
     elif current_creds != _last_provider_settings:
         _payment_provider_instance.key_id = current_creds[0]
         _payment_provider_instance.key_secret = current_creds[1]
         _payment_provider_instance.webhook_secret = current_creds[2]
-        _payment_provider_instance.merchant_account_id = current_creds[3]
+        _payment_provider_instance.previous_webhook_secret = current_creds[3]
+        _payment_provider_instance.merchant_account_id = current_creds[4]
         _rebuild_razorpay_sdk_client(_payment_provider_instance)
         _last_provider_settings = current_creds
     return _payment_provider_instance

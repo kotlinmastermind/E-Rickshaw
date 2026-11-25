@@ -3,7 +3,10 @@ package com.vaisentra.mobility.rider.feature.booking
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
 import android.location.LocationManager
+import android.os.Build
+import android.os.CancellationSignal
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -56,13 +59,43 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
 
     var currentLat by remember { mutableDoubleStateOf(bookingDraft.pickupLat) }
     var currentLng by remember { mutableDoubleStateOf(bookingDraft.pickupLng) }
+    var lastAcceptedSample by remember { mutableStateOf<com.vaisentra.mobility.rider.data.RiderLocationSample?>(null) }
+    val activeCancelSignal = remember { mutableStateOf<CancellationSignal?>(null) }
 
     var fetchDeviceGpsAndSyncRef by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
+
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        com.vaisentra.mobility.rider.fcm.RiderFcmManager.syncTokenIfAuthenticated(context)
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         fetchDeviceGpsAndSyncRef?.invoke(false)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun Location.toRiderSample(fallbackProvider: String): com.vaisentra.mobility.rider.data.RiderLocationSample {
+        val mockFix = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) isMock else {
+            @Suppress("DEPRECATION")
+            isFromMockProvider
+        }
+        return com.vaisentra.mobility.rider.data.RiderLocationSample(
+            latitude = latitude,
+            longitude = longitude,
+            provider = provider ?: fallbackProvider,
+            accuracyMeters = if (hasAccuracy()) accuracy else 25f,
+            timestampMs = if (time > 0L) time else System.currentTimeMillis(),
+            isMock = mockFix
+        )
     }
 
     fun fetchDeviceGpsAndSync(showToast: Boolean = false) {
@@ -87,11 +120,25 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
             return
         }
 
-        val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val isGpsOn = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-                lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        if (lm == null) {
+            if (showToast) DialogController.showToast("Location service unavailable")
+            return
+        }
 
-        if (!isGpsOn) {
+        val enabledProviders = listOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
+            LocationManager.PASSIVE_PROVIDER
+        ).filter { p ->
+            try {
+                lm.allProviders.contains(p) && lm.isProviderEnabled(p)
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        if (enabledProviders.isEmpty()) {
             if (showToast) {
                 DialogController.showToast("Please turn ON device Location (GPS)")
             }
@@ -103,15 +150,17 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
         }
 
         try {
-            val gpsLoc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            val netLoc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-            val bestLast = when {
-                gpsLoc != null && netLoc != null -> if (gpsLoc.time > netLoc.time) gpsLoc else netLoc
-                gpsLoc != null -> gpsLoc
-                else -> netLoc
+            val cachedCandidates = enabledProviders.mapNotNull { prov ->
+                try {
+                    lm.getLastKnownLocation(prov)?.toRiderSample(prov)
+                } catch (_: SecurityException) {
+                    null
+                }
             }
+            val bestLast = com.vaisentra.mobility.rider.data.NativeLocationEvaluator.selectBestLastKnown(cachedCandidates)
 
             if (bestLast != null) {
+                lastAcceptedSample = bestLast
                 currentLat = bestLast.latitude
                 currentLng = bestLast.longitude
                 scope.launch {
@@ -119,21 +168,29 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
                 }
             }
 
-            val provider = if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                LocationManager.GPS_PROVIDER
-            } else {
-                LocationManager.NETWORK_PROVIDER
+            val provider = when {
+                enabledProviders.contains(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
+                enabledProviders.contains(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
+                else -> enabledProviders.first()
             }
 
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                activeCancelSignal.value?.cancel()
+                val signal = CancellationSignal()
+                activeCancelSignal.value = signal
                 lm.getCurrentLocation(
                     provider,
-                    null,
+                    signal,
                     ContextCompat.getMainExecutor(context)
                 ) { freshLoc ->
                     if (freshLoc != null) {
-                        currentLat = freshLoc.latitude
-                        currentLng = freshLoc.longitude
+                        val candidate = freshLoc.toRiderSample(provider)
+                        val selected = com.vaisentra.mobility.rider.data.NativeLocationEvaluator.selectBestLocation(
+                            lastAcceptedSample, candidate
+                        ) ?: candidate
+                        lastAcceptedSample = selected
+                        currentLat = selected.latitude
+                        currentLng = selected.longitude
                         scope.launch {
                             RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
                             if (showToast) {
@@ -145,8 +202,13 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
             } else {
                 @Suppress("DEPRECATION")
                 lm.requestSingleUpdate(provider, { freshLoc ->
-                    currentLat = freshLoc.latitude
-                    currentLng = freshLoc.longitude
+                    val candidate = freshLoc.toRiderSample(provider)
+                    val selected = com.vaisentra.mobility.rider.data.NativeLocationEvaluator.selectBestLocation(
+                        lastAcceptedSample, candidate
+                    ) ?: candidate
+                    lastAcceptedSample = selected
+                    currentLat = selected.latitude
+                    currentLng = selected.longitude
                     scope.launch {
                         RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
                         if (showToast) {
@@ -162,6 +224,13 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
         }
     }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            activeCancelSignal.value?.cancel()
+            activeCancelSignal.value = null
+        }
+    }
+
     LaunchedEffect(Unit) {
         fetchDeviceGpsAndSyncRef = { fetchDeviceGpsAndSync(it) }
         launch(Dispatchers.IO) {
@@ -170,6 +239,7 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
             launch { RiderRepository.fetchWalletBalance() }
             launch { RiderRepository.fetchSavedPlaces() }
         }
+        com.vaisentra.mobility.rider.fcm.RiderFcmManager.syncTokenIfAuthenticated(context)
 
         val hasFine = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_FINE_LOCATION
@@ -180,6 +250,13 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
 
         if (hasFine || hasCoarse) {
             fetchDeviceGpsAndSync(showToast = false)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                try {
+                    notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } catch (_: Exception) { }
+            }
         } else {
             try {
                 permissionLauncher.launch(

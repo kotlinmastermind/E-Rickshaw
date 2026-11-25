@@ -122,6 +122,9 @@ interface RiderApiService {
 
     @POST("api/v1/payments/razorpay/verify")
     suspend fun verifyRidePayment(@Body request: RidePaymentVerifyRequest): Response<RidePaymentVerifyResponse>
+
+    @GET("api/v1/payments/ride/{ride_id}/status")
+    suspend fun getRidePaymentStatus(@Path("ride_id") rideId: String): Response<RidePaymentStatusDto>
     // --- Safety & Emergency SOS ---
     @POST("api/v1/safety/sos")
     suspend fun triggerSos(@Body request: SosTriggerRequest): Response<Map<String, Any>>
@@ -147,6 +150,15 @@ interface RiderApiService {
 
     @GET("api/v1/notifications")
     suspend fun getNotifications(): Response<List<NotificationItemDto>>
+
+    @POST("api/v1/customers/device-token")
+    suspend fun registerDeviceToken(@Body request: DeviceTokenRegisterRequest): Response<Map<String, Any>>
+
+    @HTTP(method = "DELETE", path = "api/v1/customers/device-token", hasBody = true)
+    suspend fun deactivateDeviceToken(@Body request: DeviceTokenDeactivateRequest): Response<Map<String, Any>>
+
+    @POST("api/v1/auth/logout")
+    suspend fun logoutSession(@Body request: RiderLogoutRequest = RiderLogoutRequest()): Response<Map<String, Any>>
 
     // --- Mapbox Location & Routes Integration ---
     @GET("api/v1/location/config")

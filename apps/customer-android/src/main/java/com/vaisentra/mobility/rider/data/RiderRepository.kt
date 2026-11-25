@@ -196,6 +196,7 @@ object RiderRepository {
 
             // Store access and refresh tokens in NetworkClient memory and prefs.
             NetworkClient.setAuthToken(token, authResponse.refreshToken?.trim())
+            com.vaisentra.mobility.rider.fcm.RiderFcmManager.syncTokenIfAuthenticated()
 
             Result.success(authResponse)
 
@@ -1651,6 +1652,10 @@ object RiderRepository {
 
     private var activeCheckoutType: CheckoutType = CheckoutType.WALLET_TOPUP
     private var activeCheckoutRideId: String? = null
+    private var activeTopupIdempotencyKey: String? = null
+    private var activeRideIdempotencyKey: String? = null
+
+    fun hasPendingVerification(): Boolean = NetworkClient.getPendingVerification() != null
 
     // Sealed class for UI state management
     sealed class TopupState {
@@ -1678,7 +1683,19 @@ object RiderRepository {
     val ridePaymentState: StateFlow<RidePaymentState> = _ridePaymentState.asStateFlow()
 
     fun launchWalletTopupCheckout(activity: android.app.Activity, amountRupees: Double) {
-        val amountCents = (amountRupees * 100).toInt()
+        if (_topupState.value is TopupState.CreatingOrder ||
+            _topupState.value is TopupState.CheckoutOpen ||
+            _topupState.value is TopupState.Verifying
+        ) {
+            return
+        }
+        val amountCents = Math.round(amountRupees * 100.0).toInt()
+        if (amountCents < 10000) {
+            _topupState.value = TopupState.Error("Minimum wallet top-up is ₹100.00")
+            return
+        }
+        val idemKey = activeTopupIdempotencyKey ?: "topup_${java.util.UUID.randomUUID()}"
+        activeTopupIdempotencyKey = idemKey
         activeCheckoutType = CheckoutType.WALLET_TOPUP
         activeCheckoutRideId = null
         _topupState.value = TopupState.CreatingOrder
@@ -1686,29 +1703,46 @@ object RiderRepository {
         scope.launch {
             try {
                 val res = NetworkClient.apiService.createWalletTopupOrder(
-                    TopupCreateOrderRequest(amountCents = amountCents)
+                    TopupCreateOrderRequest(
+                        amountCents = amountCents,
+                        idempotencyKey = idemKey
+                    )
                 )
                 if (res.isSuccessful && res.body() != null) {
                     val body = res.body()!!
+                    val keyId = body.keyId?.trim().orEmpty()
+                    val orderId = body.orderId.trim()
+                    val serverAmountCents = body.amountCents
+                    if (keyId.isEmpty() || orderId.isEmpty() || serverAmountCents <= 0) {
+                        _topupState.value = TopupState.Error("Incomplete server order configuration received.")
+                        return@launch
+                    }
+
+                    NetworkClient.savePendingCheckout(
+                        orderId = orderId,
+                        checkoutType = CheckoutType.WALLET_TOPUP.name,
+                        rideId = null,
+                        amountCents = serverAmountCents,
+                        idempotencyKey = idemKey
+                    )
                     _topupState.value = TopupState.CheckoutOpen
 
                     withContext(Dispatchers.Main) {
                         val checkout = com.razorpay.Checkout()
-                        checkout.setKeyID(body.keyId)
+                        checkout.setKeyID(keyId)
 
                         val options = org.json.JSONObject().apply {
                             put("name", "Vaisentra Mobility")
-                            put("description", "Wallet Recharge ₹${amountRupees.toInt()}")
-                            put("currency", "INR")
-                            put("amount", amountCents)
-                            put("order_id", body.orderId)
+                            put("description", "Wallet Recharge ₹${String.format(java.util.Locale.US, "%.2f", serverAmountCents / 100.0)}")
+                            put("currency", body.currency.ifBlank { "INR" })
+                            put("amount", serverAmountCents)
+                            put("order_id", orderId)
                             put("theme.color", "#0D9488")
-                            put("prefill.contact", "")
-                            put("prefill.email", "")
                         }
                         checkout.open(activity, options)
                     }
                 } else {
+                    activeTopupIdempotencyKey = null
                     _topupState.value = TopupState.Error("Order creation failed: HTTP ${res.code()}")
                 }
             } catch (e: Exception) {
@@ -1717,25 +1751,49 @@ object RiderRepository {
         }
     }
 
-    fun launchRidePaymentCheckout(activity: android.app.Activity, rideId: String, amountRupees: Double) {
-        val amountCents = (amountRupees * 100).toInt()
+    fun launchRidePaymentCheckout(activity: android.app.Activity, rideId: String, @Suppress("UNUSED_PARAMETER") amountRupees: Double = 0.0) {
+        if (rideId.isBlank()) {
+            _ridePaymentState.value = RidePaymentState.Error("Invalid ride reference for payment.")
+            return
+        }
+        if (_ridePaymentState.value is RidePaymentState.CreatingOrder ||
+            _ridePaymentState.value is RidePaymentState.CheckoutOpen ||
+            _ridePaymentState.value is RidePaymentState.Verifying
+        ) {
+            return
+        }
+        val idemKey = activeRideIdempotencyKey ?: "ride_${rideId.take(16)}_${java.util.UUID.randomUUID()}"
+        activeRideIdempotencyKey = idemKey
         activeCheckoutType = CheckoutType.RIDE_FARE
         activeCheckoutRideId = rideId
         _ridePaymentState.value = RidePaymentState.CreatingOrder
 
         scope.launch {
             try {
+                // Server computes authoritative fare from Ride DB record; never send client-calculated totals
                 val res = NetworkClient.apiService.createRidePaymentOrder(
                     RidePaymentOrderRequest(
                         rideId = rideId,
-                        amountCents = amountCents,
-                        amountRupees = amountRupees
+                        idempotencyKey = idemKey
                     )
                 )
                 if (res.isSuccessful && res.body() != null) {
                     val body = res.body()!!
-                    val effectiveOrderId = body.effectiveOrderId
-                    val keyId = body.keyId ?: "rzp_test_placeholder"
+                    val effectiveOrderId = body.effectiveOrderId.trim()
+                    val keyId = body.keyId?.trim().orEmpty()
+                    val serverAmountCents = body.amountCents
+                    if (keyId.isEmpty() || effectiveOrderId.isEmpty() || serverAmountCents <= 0) {
+                        _ridePaymentState.value = RidePaymentState.Error("Invalid server order configuration for ride payment.")
+                        return@launch
+                    }
+
+                    NetworkClient.savePendingCheckout(
+                        orderId = effectiveOrderId,
+                        checkoutType = CheckoutType.RIDE_FARE.name,
+                        rideId = rideId,
+                        amountCents = serverAmountCents,
+                        idempotencyKey = idemKey
+                    )
                     _ridePaymentState.value = RidePaymentState.CheckoutOpen
 
                     withContext(Dispatchers.Main) {
@@ -1745,14 +1803,15 @@ object RiderRepository {
                         val options = org.json.JSONObject().apply {
                             put("name", "Vaisentra Mobility")
                             put("description", "Ride Payment #${rideId.take(8)}")
-                            put("currency", "INR")
-                            put("amount", if (body.amountCents > 0) body.amountCents else amountCents)
+                            put("currency", body.currency.ifBlank { "INR" })
+                            put("amount", serverAmountCents)
                             put("order_id", effectiveOrderId)
                             put("theme.color", "#0D9488")
                         }
                         checkout.open(activity, options)
                     }
                 } else {
+                    activeRideIdempotencyKey = null
                     _ridePaymentState.value = RidePaymentState.Error("Ride order creation failed: HTTP ${res.code()}")
                 }
             } catch (e: Exception) {
@@ -1762,8 +1821,55 @@ object RiderRepository {
     }
 
     fun handleRazorpaySuccess(orderId: String, paymentId: String, signature: String) {
-        if (activeCheckoutType == CheckoutType.RIDE_FARE) {
-            val targetRideId = activeCheckoutRideId
+        if (orderId.isBlank() || paymentId.isBlank() || signature.isBlank()) {
+            val msg = "Gateway returned incomplete verification parameters."
+            if (activeCheckoutType == CheckoutType.RIDE_FARE) _ridePaymentState.value = RidePaymentState.Error(msg)
+            else _topupState.value = TopupState.Error(msg)
+            return
+        }
+
+        // Recover persisted checkout context even across Activity/process recreation
+        val persisted = NetworkClient.getPendingCheckout(orderId) ?: NetworkClient.getPendingCheckout()
+        val resolvedType = when (persisted?.optString("checkout_type")) {
+            CheckoutType.RIDE_FARE.name -> CheckoutType.RIDE_FARE
+            CheckoutType.WALLET_TOPUP.name -> CheckoutType.WALLET_TOPUP
+            else -> activeCheckoutType
+        }
+        val targetRideId = persisted?.optString("ride_id")?.takeIf { it.isNotBlank() } ?: activeCheckoutRideId
+
+        NetworkClient.savePendingVerification(
+            orderId = orderId,
+            paymentId = paymentId,
+            signature = signature,
+            checkoutType = resolvedType.name,
+            rideId = targetRideId
+        )
+        executePendingVerification(orderId, paymentId, signature, resolvedType, targetRideId)
+    }
+
+    fun retryPendingVerification() {
+        val pending = NetworkClient.getPendingVerification() ?: return
+        val orderId = pending.optString("order_id")
+        val paymentId = pending.optString("payment_id")
+        val signature = pending.optString("signature")
+        val resolvedType = if (pending.optString("checkout_type") == CheckoutType.RIDE_FARE.name) {
+            CheckoutType.RIDE_FARE
+        } else {
+            CheckoutType.WALLET_TOPUP
+        }
+        val rideId = pending.optString("ride_id").takeIf { it.isNotBlank() }
+        if (orderId.isBlank() || paymentId.isBlank() || signature.isBlank()) return
+        executePendingVerification(orderId, paymentId, signature, resolvedType, rideId)
+    }
+
+    private fun executePendingVerification(
+        orderId: String,
+        paymentId: String,
+        signature: String,
+        resolvedType: CheckoutType,
+        targetRideId: String?
+    ) {
+        if (resolvedType == CheckoutType.RIDE_FARE) {
             _ridePaymentState.value = RidePaymentState.Verifying
             scope.launch {
                 try {
@@ -1776,13 +1882,21 @@ object RiderRepository {
                         )
                     )
                     if (res.isSuccessful && res.body() != null) {
+                        NetworkClient.clearPendingCheckout()
+                        NetworkClient.clearPendingVerification()
+                        activeRideIdempotencyKey = null
                         _ridePaymentState.value = RidePaymentState.Success("Ride payment verified successfully!", targetRideId)
                         fetchActiveRide()
                     } else {
-                        _ridePaymentState.value = RidePaymentState.Error("Backend signature verification rejected.")
+                        if (res.code() in 400..499) {
+                            NetworkClient.clearPendingCheckout()
+                            NetworkClient.clearPendingVerification()
+                            activeRideIdempotencyKey = null
+                        }
+                        _ridePaymentState.value = RidePaymentState.Error("Verification rejected (HTTP ${res.code()}).")
                     }
                 } catch (e: Exception) {
-                    _ridePaymentState.value = RidePaymentState.Error(e.message ?: "Verification failed.")
+                    _ridePaymentState.value = RidePaymentState.Error(e.message ?: "Verification network timeout; retry available.")
                 }
             }
         } else {
@@ -1797,24 +1911,37 @@ object RiderRepository {
                         )
                     )
                     if (res.isSuccessful && res.body() != null) {
+                        NetworkClient.clearPendingCheckout()
+                        NetworkClient.clearPendingVerification()
+                        activeTopupIdempotencyKey = null
                         val updated = res.body()!!
                         _topupState.value = TopupState.Success(updated.balanceRupees)
-                        fetchWalletBalance() // Refresh ledger balance
+                        fetchWalletBalance()
                     } else {
-                        _topupState.value = TopupState.Error("Backend signature verification rejected.")
+                        if (res.code() in 400..499) {
+                            NetworkClient.clearPendingCheckout()
+                            NetworkClient.clearPendingVerification()
+                            activeTopupIdempotencyKey = null
+                        }
+                        _topupState.value = TopupState.Error("Verification rejected (HTTP ${res.code()}).")
                     }
                 } catch (e: Exception) {
-                    _topupState.value = TopupState.Error(e.message ?: "Verification failed.")
+                    _topupState.value = TopupState.Error(e.message ?: "Verification network timeout; retry available.")
                 }
             }
         }
     }
 
     fun handleRazorpayFailure(code: Int, description: String) {
-        if (activeCheckoutType == CheckoutType.RIDE_FARE) {
-            _ridePaymentState.value = RidePaymentState.Error("Payment cancelled: $description")
+        val persisted = NetworkClient.getPendingCheckout()
+        val isRide = persisted?.optString("checkout_type") == CheckoutType.RIDE_FARE.name || activeCheckoutType == CheckoutType.RIDE_FARE
+        NetworkClient.clearPendingCheckout()
+        if (isRide) {
+            activeRideIdempotencyKey = null
+            _ridePaymentState.value = RidePaymentState.Error("Payment cancelled ($code): $description")
         } else {
-            _topupState.value = TopupState.Error("Payment cancelled: $description")
+            activeTopupIdempotencyKey = null
+            _topupState.value = TopupState.Error("Payment cancelled ($code): $description")
         }
     }
 }

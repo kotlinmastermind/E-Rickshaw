@@ -34,6 +34,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.DriverGo"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -41,6 +42,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="ride_notifications" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -55,6 +60,13 @@
             android:name=".service.DriverAudioSafetyRecordingService"
             android:foregroundServiceType="microphone"
             android:exported="false" />
+        <service
+            android:name=".fcm.DriverFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

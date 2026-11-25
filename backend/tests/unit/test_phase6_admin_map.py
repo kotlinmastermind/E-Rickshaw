@@ -252,7 +252,7 @@ async def test_active_ride_driver_location_auto_crumb_persistence(db_session):
         speed_mps=6.5,
         accuracy_m=4.2,
         is_mock_location=False,
-        location_source="FUSED"
+        location_source="GPS"
     )
     assert res1["status"] == "RECORDED"
 
@@ -265,7 +265,7 @@ async def test_active_ride_driver_location_auto_crumb_persistence(db_session):
             "speed_mps": 7.0,
             "accuracy_m": 3.8,
             "is_mock_location": False,
-            "location_source": "FUSED"
+            "location_source": "GPS"
         },
         {
             "latitude": 28.6300,
@@ -274,7 +274,7 @@ async def test_active_ride_driver_location_auto_crumb_persistence(db_session):
             "speed_mps": 5.5,
             "accuracy_m": 3.5,
             "is_mock_location": False,
-            "location_source": "FUSED"
+            "location_source": "GPS"
         }
     ]
     res2 = await service.update_location_batch(user_id=user.id, locations=batch_items)

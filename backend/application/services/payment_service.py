@@ -29,6 +29,7 @@ from backend.domain.models import (
     DriverWallet,
     Payment,
     PaymentEvent,
+    PaymentOrderAttempt,
     PaymentReconciliationAnomaly,
     PaymentRefund,
     PaymentWebhookInbox,
@@ -41,7 +42,7 @@ logger = logging.getLogger("payments.service")
 INBOX_TERMINAL_STATES = frozenset({"PROCESSED", "UNMATCHED_PAYMENT", "RECONCILIATION_REQUIRED"})
 INBOX_STALE_PROCESSING_SECONDS = 60
 
-SUPPORTED_WEBHOOK_EVENTS = frozenset({
+SUPPORTED_FINANCIAL_WEBHOOK_EVENTS = frozenset({
     "payment.authorized",
     "payment.captured",
     "payment.failed",
@@ -51,13 +52,38 @@ SUPPORTED_WEBHOOK_EVENTS = frozenset({
     "refund.failed",
 })
 
+SUPPORTED_DISPUTE_WEBHOOK_EVENTS = frozenset({
+    "payment.dispute.created",
+    "payment.dispute.won",
+    "payment.dispute.lost",
+    "payment.dispute.closed",
+    "payment.dispute.under_review",
+    "payment.dispute.action_required",
+})
+
+INFORMATIONAL_WEBHOOK_EVENTS = frozenset({
+    "settlement.processed",
+    "payment.downtime.started",
+    "payment.downtime.resolved",
+    "payment.downtime.updated",
+    "fund_account.validation.completed",
+    "fund_account.validation.failed",
+    "refund.speed_changed",
+})
+
+SUPPORTED_WEBHOOK_EVENTS = (
+    SUPPORTED_FINANCIAL_WEBHOOK_EVENTS
+    | SUPPORTED_DISPUTE_WEBHOOK_EVENTS
+    | INFORMATIONAL_WEBHOOK_EVENTS
+)
+
 VALID_PAYMENT_TRANSITIONS: Dict[str, set[str]] = {
     "CREATED": {"AUTHORIZED", "CAPTURED", "FAILED", "EXPIRED"},
     "PENDING": {"AUTHORIZED", "CAPTURED", "FAILED", "EXPIRED"},
     "AUTHORIZED": {"CAPTURED", "FAILED", "EXPIRED"},
     "CAPTURED": {"REFUND_PENDING", "PARTIALLY_REFUNDED", "REFUNDED"},
     "REFUND_PENDING": {"PARTIALLY_REFUNDED", "REFUNDED", "CAPTURED"},
-    "PARTIALLY_REFUNDED": {"PARTIALLY_REFUNDED", "REFUNDED"},
+    "PARTIALLY_REFUNDED": {"REFUND_PENDING", "PARTIALLY_REFUNDED", "REFUNDED"},
     "PAID": {"REFUND_PENDING", "PARTIALLY_REFUNDED", "REFUNDED"},
     "SETTLED": {"REFUND_PENDING", "PARTIALLY_REFUNDED", "REFUNDED"},
     "SUCCESS": {"REFUND_PENDING", "PARTIALLY_REFUNDED", "REFUNDED"},
@@ -76,12 +102,12 @@ VALID_REFUND_TRANSITIONS: Dict[str, set[str]] = {
         "ANOMALY_EXCESS",
         "PARTIALLY_APPLIED_EXCESS",
     },
-    "PENDING_APPROVAL": {"APPROVED_AWAITING_PROVIDER", "REJECTED"},
-    "APPROVED_AWAITING_PROVIDER": {"GATEWAY_PROCESSING", "CREDITED", "PROCESSED", "FAILED"},
+    "PENDING_APPROVAL": {"APPROVED_AWAITING_PROVIDER", "REJECTED", "INITIATED"},
+    "APPROVED_AWAITING_PROVIDER": {"INITIATED", "GATEWAY_PROCESSING", "CREDITED", "PROCESSED", "FAILED"},
     "PENDING": {"GATEWAY_PROCESSING", "CREDITED", "PROCESSED", "FAILED", "ANOMALY_EXCESS", "PARTIALLY_APPLIED_EXCESS"},
     "GATEWAY_PROCESSING": {"CREDITED", "PROCESSED", "FAILED", "ANOMALY_EXCESS", "PARTIALLY_APPLIED_EXCESS"},
     # Controlled recovery when gateway subsequently succeeds on the same refund ID
-    "FAILED": {"GATEWAY_PROCESSING", "CREDITED", "ANOMALY_EXCESS", "PARTIALLY_APPLIED_EXCESS"},
+    "FAILED": {"GATEWAY_PROCESSING", "CREDITED", "PROCESSED", "ANOMALY_EXCESS", "PARTIALLY_APPLIED_EXCESS"},
     "CREDITED": set(),
     "PROCESSED": set(),
     "REJECTED": set(),
@@ -182,6 +208,15 @@ class PaymentService:
         payment.provider_payment_id = provider_payment_id
         if provider_signature:
             payment.provider_signature = provider_signature
+        if not payment.merchant_account_id and (settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip():
+            payment.merchant_account_id = settings.RAZORPAY_MERCHANT_ACCOUNT_ID.strip()
+
+        if payment.provider_order_id:
+            await self.db.execute(
+                update(PaymentOrderAttempt)
+                .where(PaymentOrderAttempt.provider_order_id == payment.provider_order_id)
+                .values(status="CAPTURED")
+            )
 
         # Domain Action 1: Wallet Top-Up
         if payment.purpose == "WALLET_TOPUP":
@@ -293,10 +328,18 @@ class PaymentService:
             "amount_cents": payment.amount_cents,
         }
 
-    async def create_payment_intent(self, user_id: str, ride_id: str, idempotency_key: str) -> Dict[str, Any]:
+    async def create_payment_intent(
+        self,
+        user_id: str,
+        ride_id: str,
+        idempotency_key: str,
+        *,
+        force_new_order_if_amount_changed: bool = True,
+    ) -> Dict[str, Any]:
         """
-        Creates or retrieves an authentic payment intent for a ride.
-        Enforces customer ownership, server-side fare calculation, and idempotency.
+        Creates or idempotently reuses an authoritative Razorpay payment intent for a ride.
+        Enforces customer ownership, server-side fare calculation, active order reuse,
+        lost-response recovery via receipt, and attempt auditability.
         """
         prof_res = await self.db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user_id))
         prof = prof_res.scalar_one_or_none()
@@ -317,51 +360,616 @@ class PaymentService:
         if fare <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ride fare has not been calculated.")
 
+        # Idempotent match by explicit client idempotency_key first
+        idem_pay = (
+            await self.db.execute(select(Payment).where(Payment.idempotency_key == idempotency_key))
+        ).scalar_one_or_none()
+        if idem_pay:
+            if idem_pay.ride_id and idem_pay.ride_id != ride_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Idempotency key is already bound to a different ride.",
+                )
+            if idem_pay.provider_order_id and idem_pay.amount_cents == fare and idem_pay.status in ("CREATED", "PENDING"):
+                return {
+                    "payment_id": idem_pay.id,
+                    "order_id": idem_pay.provider_order_id,
+                    "amount": idem_pay.amount_cents,
+                    "amount_cents": idem_pay.amount_cents,
+                    "currency": idem_pay.currency,
+                    "client_token": idem_pay.provider_order_id,
+                    "provider": "RAZORPAY",
+                    "key_id": settings.RAZORPAY_KEY_ID,
+                    "reused_existing_order": True,
+                }
+
         stmt = select(Payment).where(Payment.ride_id == ride_id).with_for_update()
         res = await self.db.execute(stmt)
         payment = res.scalar_one_or_none()
 
         if not payment:
-            payment = Payment(
-                ride_id=ride_id,
-                customer_id=customer_profile_id,
-                amount_cents=fare,
-                currency="INR",
-                status="CREATED",
-                payment_method="RAZORPAY",
-                provider_name="RAZORPAY",
-                idempotency_key=idempotency_key,
-            )
-            self.db.add(payment)
-            await self.db.flush()
+            try:
+                async with self.db.begin_nested():
+                    payment = Payment(
+                        ride_id=ride_id,
+                        user_id=user_id,
+                        customer_id=customer_profile_id,
+                        amount_cents=fare,
+                        currency="INR",
+                        purpose="RIDE_FARE",
+                        status="CREATED",
+                        payment_method="RAZORPAY",
+                        provider_name="RAZORPAY",
+                        merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or None,
+                        idempotency_key=idempotency_key,
+                    )
+                    self.db.add(payment)
+                    await self.db.flush()
+            except IntegrityError:
+                payment = (await self.db.execute(stmt)).scalar_one()
 
-        if payment.status in ["CAPTURED", "AUTHORIZED", "PARTIALLY_REFUNDED", "REFUNDED"]:
+        if payment.status in ["CAPTURED", "AUTHORIZED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED"]:
             return {
                 "payment_id": payment.id,
+                "order_id": payment.provider_order_id,
                 "status": payment.status,
+                "amount": payment.amount_cents,
                 "amount_cents": payment.amount_cents,
                 "currency": payment.currency,
                 "already_settled": True,
             }
 
-        intent = await self.provider.create_payment_intent(
-            amount_cents=payment.amount_cents,
-            currency=payment.currency,
-            idempotency_key=idempotency_key,
-        )
+        # Reuse active unpaid Razorpay order if amount matches (prevents duplicate orders & overwrites)
+        if payment.provider_order_id and payment.status in ("CREATED", "PENDING"):
+            if payment.amount_cents == fare or not force_new_order_if_amount_changed:
+                return {
+                    "payment_id": payment.id,
+                    "order_id": payment.provider_order_id,
+                    "amount": payment.amount_cents,
+                    "amount_cents": payment.amount_cents,
+                    "currency": payment.currency,
+                    "client_token": payment.provider_order_id,
+                    "provider": "RAZORPAY",
+                    "key_id": settings.RAZORPAY_KEY_ID,
+                    "reused_existing_order": True,
+                }
+            # Before superseding an order on fare change, check if earlier order was already captured/paid at gateway
+            if (settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET) and not payment.provider_order_id.startswith("order_test_"):
+                try:
+                    existing_gw = await self.provider.fetch_order_payments(payment.provider_order_id)
+                    captured = next(
+                        (
+                            p for p in existing_gw.get("items", [])
+                            if str(p.get("status") or "").lower() == "captured"
+                        ),
+                        None,
+                    )
+                    if captured:
+                        await self.finalize_payment_capture(payment=payment, provider_payment_id=captured["id"])
+                        return {
+                            "payment_id": payment.id,
+                            "order_id": payment.provider_order_id,
+                            "status": payment.status,
+                            "amount": payment.amount_cents,
+                            "amount_cents": payment.amount_cents,
+                            "currency": payment.currency,
+                            "already_settled": True,
+                        }
+                except HTTPException:
+                    pass
+                except Exception as exc:
+                    logger.warning("Order pre-supersede check failed for %s: %s", payment.provider_order_id, exc)
 
-        payment.provider_order_id = intent.order_id
-        payment.idempotency_key = idempotency_key
+        # Deterministic receipt tied to internal payment & fare to enable lost-response recovery
+        deterministic_receipt = f"ride_{payment.id.replace('-', '')[:24]}_{fare}"[:40]
+        if payment.provider_order_id is None and settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET:
+            try:
+                found_orders = await self.provider.fetch_orders_by_receipt(deterministic_receipt)
+                matched = next(
+                    (
+                        o for o in found_orders.get("items", [])
+                        if o.get("amount") == fare and str(o.get("currency", "INR")).upper() == "INR"
+                    ),
+                    None,
+                )
+                if matched and matched.get("id"):
+                    payment.provider_order_id = matched["id"]
+                    await self.db.commit()
+                    return {
+                        "payment_id": payment.id,
+                        "order_id": matched["id"],
+                        "amount": payment.amount_cents,
+                        "amount_cents": payment.amount_cents,
+                        "currency": payment.currency,
+                        "client_token": matched["id"],
+                        "provider": "RAZORPAY",
+                        "key_id": settings.RAZORPAY_KEY_ID,
+                        "reused_existing_order": True,
+                    }
+            except Exception as rec_err:
+                logger.warning("Lost order receipt recovery skipped for %s: %s", deterministic_receipt, rec_err)
+
+        # Persist baseline intent before external HTTP (commit so lock is not held over HTTP)
+        previous_order_id = payment.provider_order_id
+        payment.amount_cents = fare
+        payment.user_id = payment.user_id or user_id
+        payment.merchant_account_id = (settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or payment.merchant_account_id
+        await self.db.commit()
+
+        intent_order = await self.provider.create_razorpay_order(
+            amount_cents=fare,
+            currency=payment.currency,
+            receipt=deterministic_receipt,
+            notes={
+                "internal_payment_id": payment.id,
+                "ride_id": ride_id,
+                "user_id": user_id,
+                "customer_id": customer_profile_id,
+                "purpose": "RIDE_FARE",
+            },
+        )
+        new_order_id = intent_order.get("id")
+        if not new_order_id:
+            raise HTTPException(status_code=502, detail="Gateway returned invalid Razorpay order identifier.")
+
+        # Re-lock payment and record attempt history cleanly
+        payment = (await self.db.execute(stmt)).scalar_one()
+        if payment.status in ["CAPTURED", "AUTHORIZED", "PARTIALLY_REFUNDED", "REFUNDED"]:
+            return {
+                "payment_id": payment.id,
+                "order_id": payment.provider_order_id,
+                "status": payment.status,
+                "amount": payment.amount_cents,
+                "amount_cents": payment.amount_cents,
+                "currency": payment.currency,
+                "already_settled": True,
+            }
+
+        if previous_order_id and previous_order_id != new_order_id:
+            prev_attempt = (
+                await self.db.execute(
+                    select(PaymentOrderAttempt).where(PaymentOrderAttempt.provider_order_id == previous_order_id)
+                )
+            ).scalar_one_or_none()
+            if prev_attempt and prev_attempt.status == "CREATED":
+                prev_attempt.status = "SUPERSEDED"
+
+        payment.provider_order_id = new_order_id
+        existing_attempt = (
+            await self.db.execute(
+                select(PaymentOrderAttempt).where(PaymentOrderAttempt.provider_order_id == new_order_id)
+            )
+        ).scalar_one_or_none()
+        if not existing_attempt:
+            self.db.add(
+                PaymentOrderAttempt(
+                    payment_id=payment.id,
+                    provider_order_id=new_order_id,
+                    receipt=deterministic_receipt,
+                    idempotency_key=idempotency_key,
+                    amount_cents=fare,
+                    currency=payment.currency,
+                    merchant_account_id=(settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip() or None,
+                    status="CREATED",
+                )
+            )
+        self.db.add(
+            PaymentEvent(
+                payment_id=payment.id,
+                event_type="ORDER_CREATED",
+                payload_json=json.dumps(
+                    {
+                        "order_id": new_order_id,
+                        "previous_order_id": previous_order_id,
+                        "amount_cents": fare,
+                        "receipt": deterministic_receipt,
+                    }
+                ),
+            )
+        )
         await self.db.commit()
 
         return {
             "payment_id": payment.id,
-            "order_id": intent.order_id,
+            "order_id": new_order_id,
+            "amount": payment.amount_cents,
             "amount_cents": payment.amount_cents,
             "currency": payment.currency,
-            "client_token": intent.client_token,
-            "provider": intent.provider,
+            "client_token": new_order_id,
+            "provider": "RAZORPAY",
             "key_id": settings.RAZORPAY_KEY_ID,
+            "reused_existing_order": False,
+        }
+
+    async def _resolve_customer_user_id(self, payment: Payment) -> Optional[str]:
+        """Resolve the customer's User.id from Payment.user_id or CustomerProfile.user_id."""
+        if getattr(payment, "user_id", None):
+            return payment.user_id
+        if getattr(payment, "customer_id", None):
+            cust_prof = (
+                await self.db.execute(
+                    select(CustomerProfile).where(CustomerProfile.id == payment.customer_id)
+                )
+            ).scalar_one_or_none()
+            if cust_prof:
+                return cust_prof.user_id
+        return None
+
+    async def apply_confirmed_refund_settlement(
+        self,
+        *,
+        payment: Payment,
+        refund_obj: Optional[PaymentRefund],
+        refund_id: str,
+        raw_refund_amount: int,
+        reason: str,
+        arn_reference: Optional[str] = None,
+        settled_status: str = "CREDITED",
+        inbox: Optional[PaymentWebhookInbox] = None,
+        parsed: Optional[Dict[str, Any]] = None,
+        now: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """
+        Single authoritative settlement handler for confirmed gateway refunds.
+        Called by synchronous refund API (when status=='processed'), webhook refund.processed,
+        and background reconciliation once Razorpay confirms settlement.
+        Enforces strict paise ceiling, prevents duplicate settlement/wallet debit,
+        and handles WALLET_TOPUP clawback / RefundLiability creation atomically.
+        """
+        now = now or datetime.now(timezone.utc)
+        terminal_settled_states = {"CREDITED", "PROCESSED", "ANOMALY_EXCESS", "PARTIALLY_APPLIED_EXCESS"}
+        if refund_obj and refund_obj.status in terminal_settled_states:
+            return {
+                "already_processed": True,
+                "applied_refund": int(refund_obj.amount_cents or 0),
+                "raw_refund_amount": int(refund_obj.raw_gateway_amount_cents or refund_obj.amount_cents or 0),
+                "excess_anomaly_cents": int(refund_obj.excess_amount_cents or 0),
+                "is_anomaly": refund_obj.status in {"ANOMALY_EXCESS", "PARTIALLY_APPLIED_EXCESS"},
+                "anomaly_reason": refund_obj.reason or reason,
+                "refund_status": refund_obj.status,
+                "refund_obj": refund_obj,
+            }
+
+        current_refunded = int(payment.refunded_amount_cents or 0)
+        remaining_refundable = max(0, int(payment.amount_cents) - current_refunded)
+        if raw_refund_amount > remaining_refundable:
+            applied_refund = remaining_refundable
+            excess_anomaly_cents = raw_refund_amount - remaining_refundable
+            is_anomaly = True
+            logger.critical(
+                "REFUND CEILING BREACH: Payment %s captured=%d, refunded=%d, remaining=%d, raw_refund=%d, excess=%d",
+                payment.id,
+                payment.amount_cents,
+                current_refunded,
+                remaining_refundable,
+                raw_refund_amount,
+                excess_anomaly_cents,
+            )
+        else:
+            applied_refund = raw_refund_amount
+            excess_anomaly_cents = 0
+            is_anomaly = False
+
+        if applied_refund > 0:
+            payment.refunded_amount_cents = current_refunded + applied_refund
+            target_pay_status = (
+                "REFUNDED" if payment.refunded_amount_cents >= payment.amount_cents else "PARTIALLY_REFUNDED"
+            )
+            transition_payment_status(payment, target_pay_status, context=f"refund settlement ({settled_status})")
+        elif payment.status == "REFUND_PENDING":
+            other_inflight = (
+                await self.db.execute(
+                    select(PaymentRefund.id).where(
+                        PaymentRefund.payment_id == payment.id,
+                        PaymentRefund.id != (refund_obj.id if refund_obj else ""),
+                        PaymentRefund.status.in_(("INITIATED", "PENDING", "GATEWAY_PROCESSING", "APPROVED_AWAITING_PROVIDER")),
+                    )
+                )
+            ).scalar_one_or_none()
+            if not other_inflight:
+                fallback_status = "PARTIALLY_REFUNDED" if current_refunded > 0 else "CAPTURED"
+                transition_payment_status(payment, fallback_status, context="refund settlement zero applied")
+
+        refund_status = (
+            "PARTIALLY_APPLIED_EXCESS"
+            if is_anomaly and applied_refund > 0
+            else ("ANOMALY_EXCESS" if applied_refund == 0 else settled_status)
+        )
+        anomaly_reason = (
+            f"GATEWAY_OVER_REFUND_ANOMALY: Gateway refund {refund_id} of {raw_refund_amount} paise "
+            f"exceeds remaining refundable ceiling of {remaining_refundable} paise "
+            f"(applied={applied_refund}, excess={excess_anomaly_cents})."
+            if is_anomaly
+            else reason
+        )
+
+        effective_arn = arn_reference or (refund_obj.arn_reference if refund_obj else None) or refund_id
+        is_partial_flag = bool(applied_refund > 0 and payment.status == "PARTIALLY_REFUNDED")
+        if refund_obj:
+            transition_refund_status(refund_obj, refund_status, context=f"refund settlement ({settled_status})")
+            refund_obj.amount_cents = applied_refund
+            refund_obj.raw_gateway_amount_cents = raw_refund_amount
+            refund_obj.excess_amount_cents = excess_anomaly_cents
+            refund_obj.provider_refund_id = refund_id
+            refund_obj.arn_reference = effective_arn
+            refund_obj.is_partial = is_partial_flag
+            refund_obj.settled_at = now
+            refund_obj.last_error = anomaly_reason[:500] if is_anomaly else None
+            if is_anomaly or not refund_obj.reason:
+                refund_obj.reason = anomaly_reason[:255]
+        else:
+            refund_obj = PaymentRefund(
+                payment_id=payment.id,
+                ride_id=payment.ride_id,
+                customer_id=payment.customer_id,
+                amount_cents=applied_refund,
+                raw_gateway_amount_cents=raw_refund_amount,
+                excess_amount_cents=excess_anomaly_cents,
+                is_partial=is_partial_flag,
+                reason=anomaly_reason[:255],
+                status=refund_status,
+                provider_refund_id=refund_id,
+                arn_reference=effective_arn,
+                settled_at=now,
+            )
+            self.db.add(refund_obj)
+
+        if is_anomaly and excess_anomaly_cents > 0:
+            await self._record_reconciliation_anomaly(
+                anomaly_type="EXCESS_REFUND",
+                payment=payment,
+                inbox=inbox,
+                parsed=parsed or {"provider_payment_id": payment.provider_payment_id, "order_id": payment.provider_order_id, "refund_id": refund_id, "currency": payment.currency or "INR"},
+                expected_amount_cents=remaining_refundable,
+                raw_gateway_amount_cents=raw_refund_amount,
+                applied_amount_cents=applied_refund,
+                excess_amount_cents=excess_anomaly_cents,
+                reason=anomaly_reason,
+            )
+
+        # Clawback ONLY on confirmed gateway settlement and ONLY on internally applied refund
+        if getattr(payment, "purpose", None) == "WALLET_TOPUP" and applied_refund > 0:
+            topup_user_id = await self._resolve_customer_user_id(payment)
+            if topup_user_id:
+                from backend.application.services.wallet_service import WalletService
+
+                await WalletService.process_refund_clawback(
+                    session=self.db,
+                    user_id=topup_user_id,
+                    refund_amount_cents=applied_refund,
+                    payment_id=payment.id,
+                    gateway_refund_id=refund_id,
+                    idempotency_key=f"refund_debit_{refund_id}",
+                )
+
+        self.db.add(
+            PaymentEvent(
+                payment_id=payment.id,
+                event_type="WEBHOOK_REFUND_PROCESSED" if inbox else "REFUND_PROCESSED",
+                payload_json=json.dumps(
+                    {
+                        "refund_id": refund_id,
+                        "raw_gateway_amount_cents": raw_refund_amount,
+                        "applied_amount_cents": applied_refund,
+                        "excess_amount_cents": excess_anomaly_cents,
+                        "status": refund_status,
+                    }
+                ),
+            )
+        )
+
+        return {
+            "already_processed": False,
+            "applied_refund": applied_refund,
+            "raw_refund_amount": raw_refund_amount,
+            "excess_anomaly_cents": excess_anomaly_cents,
+            "is_anomaly": is_anomaly,
+            "anomaly_reason": anomaly_reason,
+            "refund_status": refund_status,
+            "refund_obj": refund_obj,
+        }
+
+    async def apply_failed_refund_reversal(
+        self,
+        *,
+        payment: Payment,
+        refund_obj: Optional[PaymentRefund],
+        refund_id: str,
+        raw_refund_amount: int,
+        failure_reason: str,
+        now: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """
+        Handles failed gateway refund transitions cleanly: marks refund FAILED, reverses any
+        clawback/liability if one existed, and reverts payment.status out of REFUND_PENDING
+        when no other in-flight refunds remain.
+        """
+        now = now or datetime.now(timezone.utc)
+        terminal_settled_states = {"CREDITED", "PROCESSED", "ANOMALY_EXCESS", "PARTIALLY_APPLIED_EXCESS"}
+        if refund_obj and refund_obj.status in terminal_settled_states:
+            return {
+                "rejected_transition": True,
+                "reason": f"Cannot transition {refund_obj.status} refund to FAILED.",
+            }
+
+        if refund_obj:
+            transition_refund_status(refund_obj, "FAILED", context="apply_failed_refund_reversal")
+            refund_obj.provider_refund_id = refund_id
+            refund_obj.arn_reference = refund_obj.arn_reference or refund_id
+            refund_obj.raw_gateway_amount_cents = raw_refund_amount
+            refund_obj.last_error = failure_reason[:500]
+        else:
+            refund_obj = PaymentRefund(
+                payment_id=payment.id,
+                ride_id=payment.ride_id,
+                customer_id=payment.customer_id,
+                amount_cents=raw_refund_amount,
+                raw_gateway_amount_cents=raw_refund_amount,
+                excess_amount_cents=0,
+                is_partial=False,
+                reason=failure_reason[:255],
+                status="FAILED",
+                provider_refund_id=refund_id,
+                arn_reference=refund_id,
+                last_error=failure_reason[:500],
+            )
+            self.db.add(refund_obj)
+            await self.db.flush()
+
+        # Reverse any clawback / liability if a legacy path or race ever created one
+        reversal_summary: Dict[str, Any] = {"status": "NO_CLAWBACK_FOUND"}
+        if getattr(payment, "purpose", None) == "WALLET_TOPUP":
+            topup_user_id = await self._resolve_customer_user_id(payment)
+            if topup_user_id:
+                from backend.application.services.wallet_service import WalletService
+
+                reversal_summary = await WalletService.reverse_refund_clawback(
+                    session=self.db,
+                    user_id=topup_user_id,
+                    gateway_refund_id=refund_id,
+                    payment_id=payment.id,
+                    reason=failure_reason,
+                )
+
+        # Revert payment.status out of REFUND_PENDING if no other in-flight refunds remain
+        if payment.status == "REFUND_PENDING":
+            other_inflight = (
+                await self.db.execute(
+                    select(PaymentRefund.id).where(
+                        PaymentRefund.payment_id == payment.id,
+                        PaymentRefund.id != refund_obj.id,
+                        PaymentRefund.status.in_(("INITIATED", "PENDING", "GATEWAY_PROCESSING", "APPROVED_AWAITING_PROVIDER")),
+                    )
+                )
+            ).scalar_one_or_none()
+            if not other_inflight:
+                reverted_status = "PARTIALLY_REFUNDED" if int(payment.refunded_amount_cents or 0) > 0 else "CAPTURED"
+                transition_payment_status(payment, reverted_status, context="apply_failed_refund_reversal")
+
+        self.db.add(
+            PaymentEvent(
+                payment_id=payment.id,
+                event_type="REFUND_FAILED",
+                payload_json=json.dumps(
+                    {
+                        "refund_id": refund_id,
+                        "raw_gateway_amount_cents": raw_refund_amount,
+                        "reason": failure_reason[:255],
+                        "clawback_reversal": reversal_summary.get("status"),
+                    }
+                ),
+            )
+        )
+        return {
+            "rejected_transition": False,
+            "refund_obj": refund_obj,
+            "clawback_reversal": reversal_summary,
+        }
+
+    async def _handle_dispute_webhook(
+        self,
+        *,
+        webhook_event: str,
+        inbox: PaymentWebhookInbox,
+        payload_obj: Dict[str, Any],
+        now: datetime,
+        secret_slot: str,
+    ) -> Dict[str, Any]:
+        """Handle Razorpay chargeback/dispute webhooks cleanly with audit & reconciliation tracking."""
+        dispute_wrap = payload_obj.get("dispute")
+        dispute_entity = dispute_wrap.get("entity") if isinstance(dispute_wrap, dict) else {}
+        if not isinstance(dispute_entity, dict):
+            dispute_entity = {}
+        pay_wrap = payload_obj.get("payment")
+        payment_entity = pay_wrap.get("entity") if isinstance(pay_wrap, dict) else {}
+        if not isinstance(payment_entity, dict):
+            payment_entity = {}
+
+        dispute_id = dispute_entity.get("id")
+        provider_payment_id = dispute_entity.get("payment_id") or payment_entity.get("id")
+        raw_amount = dispute_entity.get("amount") or payment_entity.get("amount")
+
+        payment: Optional[Payment] = None
+        if provider_payment_id:
+            payment = (
+                await self.db.execute(
+                    select(Payment).where(Payment.provider_payment_id == str(provider_payment_id).strip()).with_for_update()
+                )
+            ).scalar_one_or_none()
+
+        is_resolved = webhook_event in {"payment.dispute.won", "payment.dispute.closed"}
+        reason = (
+            f"Razorpay dispute event {webhook_event}"
+            f" (dispute_id={dispute_id or 'unknown'}, phase={dispute_entity.get('phase') or 'n/a'},"
+            f" status={dispute_entity.get('status') or 'n/a'})"
+        )
+
+        # Update prior open dispute anomalies if won/closed, else record an OPEN dispute anomaly
+        if is_resolved and provider_payment_id:
+            await self.db.execute(
+                update(PaymentReconciliationAnomaly)
+                .where(
+                    PaymentReconciliationAnomaly.provider_payment_id == str(provider_payment_id).strip(),
+                    PaymentReconciliationAnomaly.anomaly_type == "PAYMENT_DISPUTE",
+                    PaymentReconciliationAnomaly.status == "OPEN",
+                )
+                .values(status="RESOLVED", updated_at=now)
+            )
+        else:
+            self.db.add(
+                PaymentReconciliationAnomaly(
+                    payment_id=payment.id if payment else None,
+                    webhook_inbox_id=inbox.id,
+                    provider_name="RAZORPAY",
+                    provider_payment_id=str(provider_payment_id).strip() if provider_payment_id else None,
+                    provider_order_id=payment.provider_order_id if payment else payment_entity.get("order_id"),
+                    provider_refund_id=str(dispute_id).strip() if dispute_id else None,
+                    anomaly_type="PAYMENT_DISPUTE",
+                    expected_amount_cents=payment.amount_cents if payment else None,
+                    raw_gateway_amount_cents=raw_amount if _is_int_paise(raw_amount) else None,
+                    applied_amount_cents=0,
+                    excess_amount_cents=0,
+                    currency=str(dispute_entity.get("currency") or "INR").upper(),
+                    status="OPEN",
+                    reason=reason[:500],
+                    details_json=json.dumps(
+                        {
+                            "digest": inbox.event_digest,
+                            "event": webhook_event,
+                            "dispute_id": dispute_id,
+                            "reason_code": dispute_entity.get("reason_code"),
+                        }
+                    ),
+                )
+            )
+
+        if payment:
+            self.db.add(
+                PaymentEvent(
+                    payment_id=payment.id,
+                    event_type=webhook_event.upper().replace(".", "_"),
+                    payload_json=json.dumps(
+                        {
+                            "inbox_id": inbox.id,
+                            "dispute_id": dispute_id,
+                            "amount": raw_amount,
+                            "status": dispute_entity.get("status"),
+                        }
+                    ),
+                )
+            )
+
+        inbox.status = "PROCESSED" if is_resolved else "RECONCILIATION_REQUIRED"
+        inbox.last_error = None if is_resolved else reason[:500]
+        inbox.processed_at = now
+        await self._commit_or_500(f"dispute webhook {webhook_event}")
+        return {
+            "status": "DISPUTE_RESOLVED" if is_resolved else "DISPUTE_RECORDED",
+            "event": webhook_event,
+            "payment_id": payment.id if payment else None,
+            "dispute_id": dispute_id,
+            "secret_slot": secret_slot,
+            "message": reason,
         }
 
     # ------------------------------------------------------------------
@@ -387,7 +995,7 @@ class PaymentService:
         digest = hashlib.sha256(raw_body).hexdigest()
 
         # 1. Verify raw-byte webhook signature before parsing or mutating state
-        verification = await self.provider.verify_webhook_payload(raw_body, signature_header)
+        verification, secret_slot = await self.provider.verify_webhook_payload_detailed(raw_body, signature_header)
         if not verification.is_valid:
             await self._record_invalid_signature_attempt(digest=digest, raw_body=raw_body, now=now)
             raise HTTPException(
@@ -439,6 +1047,9 @@ class PaymentService:
         if early_dup is not None:
             return early_dup
 
+        effective_account = header_acct or payload_acct
+        inbox.merchant_account_id = effective_account
+
         # Enforce strict single-merchant account isolation
         if header_acct and payload_acct and header_acct != payload_acct:
             reason = f"Merchant account header mismatch: header '{header_acct}' disagrees with payload '{payload_acct}'."
@@ -452,7 +1063,6 @@ class PaymentService:
             )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
 
-        effective_account = header_acct or payload_acct
         acct_ok, acct_reason = self.provider.validate_merchant_account(effective_account)
         if not acct_ok:
             await self._record_anomaly_and_require_reconciliation(
@@ -465,7 +1075,7 @@ class PaymentService:
             )
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=acct_reason)
 
-        # Reject unsupported event types cleanly without financial mutations
+        # Unsupported unknown events are persisted as FAILED and rejected with HTTP 400
         if webhook_event not in SUPPORTED_WEBHOOK_EVENTS:
             await self._fail_inbox(inbox, f"Unsupported webhook event type: {webhook_event}", now)
             raise HTTPException(
@@ -480,6 +1090,30 @@ class PaymentService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Malformed Razorpay webhook payload: missing payload object.",
             )
+
+        # Supported Dispute Events: persist audit anomaly + PaymentEvent without HTTP retry loops
+        if webhook_event in SUPPORTED_DISPUTE_WEBHOOK_EVENTS:
+            return await self._handle_dispute_webhook(
+                webhook_event=webhook_event,
+                inbox=inbox,
+                payload_obj=payload_obj,
+                now=now,
+                secret_slot=secret_slot,
+            )
+
+        # Supported Informational Events (downtime/settlement/fund_account): acknowledge idempotently
+        if webhook_event in INFORMATIONAL_WEBHOOK_EVENTS:
+            inbox.status = "PROCESSED"
+            inbox.processed_at = now
+            inbox.last_error = None
+            await self._commit_or_500(f"informational webhook {webhook_event}")
+            return {
+                "status": "ACKNOWLEDGED_INFORMATIONAL",
+                "event": webhook_event,
+                "secret_slot": secret_slot,
+                "merchant_account_id": effective_account,
+                "message": f"Informational Razorpay event {webhook_event} recorded cleanly.",
+            }
 
         try:
             parsed = self._extract_and_validate_event_entities(
@@ -501,6 +1135,23 @@ class PaymentService:
         )
         if early_unmatched is not None:
             return early_unmatched
+
+        if payment.merchant_account_id and effective_account and payment.merchant_account_id != effective_account:
+            reason = (
+                f"Payment {payment.id} merchant account '{payment.merchant_account_id}' "
+                f"conflicts with webhook account '{effective_account}'."
+            )
+            await self._record_anomaly_and_require_reconciliation(
+                inbox=inbox,
+                anomaly_type="MERCHANT_ACCOUNT_MISMATCH",
+                payment=payment,
+                parsed=parsed,
+                reason=reason,
+                now=now,
+            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
+        if effective_account and not payment.merchant_account_id:
+            payment.merchant_account_id = effective_account
 
         # Reject Razorpay gateway events targeting physical cash settlements
         if payment.provider_name == "CASH" or payment.payment_method == "CASH":
@@ -880,12 +1531,57 @@ class PaymentService:
         user_id_from_notes = notes.get("user_id")
 
         payment: Optional[Payment] = None
+        matched_attempt: Optional[PaymentOrderAttempt] = None
         if order_id:
             payment = (
                 await self.db.execute(
                     select(Payment).where(Payment.provider_order_id == order_id).with_for_update()
                 )
             ).scalar_one_or_none()
+            if not payment:
+                matched_attempt = (
+                    await self.db.execute(
+                        select(PaymentOrderAttempt).where(PaymentOrderAttempt.provider_order_id == order_id)
+                    )
+                ).scalar_one_or_none()
+                if matched_attempt:
+                    payment = (
+                        await self.db.execute(
+                            select(Payment).where(Payment.id == matched_attempt.payment_id).with_for_update()
+                        )
+                    ).scalar_one_or_none()
+
+        if (
+            payment
+            and matched_attempt is not None
+            and "refund" not in webhook_event
+            and payment.status in {"CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED", "SUCCESS"}
+            and payment.provider_payment_id
+            and provider_payment_id
+            and payment.provider_payment_id != provider_payment_id
+        ):
+            matched_attempt.status = "CAPTURED"
+            reason = (
+                f"Duplicate order capture detected: alternate/superseded order {order_id} "
+                f"(payment {provider_payment_id}) was paid while payment {payment.id} was already "
+                f"settled with {payment.provider_payment_id}."
+            )
+            await self._record_anomaly_and_require_reconciliation(
+                inbox=inbox,
+                anomaly_type="DOUBLE_ORDER_PAYMENT",
+                payment=payment,
+                parsed=parsed,
+                reason=reason,
+                now=now,
+            )
+            return None, {
+                "status": "DUPLICATE_ORDER_CAPTURE_ANOMALY",
+                "event": webhook_event,
+                "payment_id": payment.id,
+                "order_id": order_id,
+                "provider_payment_id": provider_payment_id,
+                "message": reason,
+            }
 
         if not payment and provider_payment_id:
             by_pid = (
@@ -895,19 +1591,29 @@ class PaymentService:
             ).scalar_one_or_none()
             if by_pid:
                 if order_id and by_pid.provider_order_id and by_pid.provider_order_id != order_id:
-                    reason = (
-                        f"Order conflict: payment {provider_payment_id} belongs to order "
-                        f"{by_pid.provider_order_id}, not {order_id}."
-                    )
-                    await self._record_anomaly_and_require_reconciliation(
-                        inbox=inbox,
-                        anomaly_type="ORDER_OWNERSHIP_CONFLICT",
-                        payment=by_pid,
-                        parsed=parsed,
-                        reason=reason,
-                        now=now,
-                    )
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=reason)
+                    attempt_for_pid = (
+                        await self.db.execute(
+                            select(PaymentOrderAttempt).where(
+                                PaymentOrderAttempt.payment_id == by_pid.id,
+                                PaymentOrderAttempt.provider_order_id == order_id,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if attempt_for_pid is None:
+                        reason = (
+                            f"Order conflict: payment {provider_payment_id} belongs to order "
+                            f"{by_pid.provider_order_id}, not {order_id}."
+                        )
+                        await self._record_anomaly_and_require_reconciliation(
+                            inbox=inbox,
+                            anomaly_type="ORDER_OWNERSHIP_CONFLICT",
+                            payment=by_pid,
+                            parsed=parsed,
+                            reason=reason,
+                            now=now,
+                        )
+                        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=reason)
+                    matched_attempt = attempt_for_pid
                 payment = by_pid
 
         # Safe notes.ride_id binding only for non-refund payment events and only when unbound or matching
@@ -999,13 +1705,46 @@ class PaymentService:
                 "message": "Payment event logged in inbox but not linked to any journey.",
             }
 
+        # Reconcile legitimate superseded PaymentOrderAttempt for this exact Payment before strict check
+        if matched_attempt is not None and order_id and payment.provider_order_id != order_id and "refund" not in webhook_event:
+            if payment.status in {"CREATED", "PENDING", "AUTHORIZED"}:
+                if (
+                    matched_attempt.amount_cents != payment.amount_cents
+                    and parsed.get("amount") == matched_attempt.amount_cents
+                ):
+                    await self._record_reconciliation_anomaly(
+                        anomaly_type="SUPERSEDED_ORDER_AMOUNT_DRIFT",
+                        payment=payment,
+                        inbox=inbox,
+                        parsed=parsed,
+                        expected_amount_cents=payment.amount_cents,
+                        raw_gateway_amount_cents=parsed.get("amount"),
+                        applied_amount_cents=matched_attempt.amount_cents,
+                        excess_amount_cents=0,
+                        reason=(
+                            f"Customer paid superseded order {order_id} ({matched_attempt.amount_cents} paise) "
+                            f"instead of current order {payment.provider_order_id} ({payment.amount_cents} paise)."
+                        ),
+                    )
+                    payment.amount_cents = matched_attempt.amount_cents
+                payment.provider_order_id = order_id
+
         # Validate consistent ownership/binding against matched Payment
         if order_id and payment.provider_order_id and payment.provider_order_id != order_id:
-            reason = f"Order mismatch: Payment {payment.id} expects {payment.provider_order_id}, got {order_id}."
-            await self._record_anomaly_and_require_reconciliation(
-                inbox=inbox, anomaly_type="ORDER_OWNERSHIP_CONFLICT", payment=payment, parsed=parsed, reason=reason, now=now
-            )
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=reason)
+            attempt_check = (
+                await self.db.execute(
+                    select(PaymentOrderAttempt).where(
+                        PaymentOrderAttempt.payment_id == payment.id,
+                        PaymentOrderAttempt.provider_order_id == order_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if attempt_check is None:
+                reason = f"Order mismatch: Payment {payment.id} expects {payment.provider_order_id}, got {order_id}."
+                await self._record_anomaly_and_require_reconciliation(
+                    inbox=inbox, anomaly_type="ORDER_OWNERSHIP_CONFLICT", payment=payment, parsed=parsed, reason=reason, now=now
+                )
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=reason)
 
         if ride_id_from_notes and payment.ride_id and payment.ride_id != ride_id_from_notes:
             reason = f"Ride mismatch: Payment {payment.id} is bound to {payment.ride_id}, not {ride_id_from_notes}."
@@ -1074,6 +1813,12 @@ class PaymentService:
             transition_payment_status(payment, "FAILED", context="webhook payment.failed")
             if not payment.provider_payment_id:
                 payment.provider_payment_id = provider_payment_id
+            if order_id:
+                await self.db.execute(
+                    update(PaymentOrderAttempt)
+                    .where(PaymentOrderAttempt.provider_order_id == order_id)
+                    .values(status="FAILED")
+                )
 
         elif webhook_event == "payment.authorized":
             if gw_amount is not None and gw_amount != payment.amount_cents:
@@ -1112,6 +1857,12 @@ class PaymentService:
             payment.provider_payment_id = provider_payment_id
             if order_id and not payment.provider_order_id:
                 payment.provider_order_id = order_id
+            if order_id:
+                await self.db.execute(
+                    update(PaymentOrderAttempt)
+                    .where(PaymentOrderAttempt.provider_order_id == order_id)
+                    .values(status="AUTHORIZED")
+                )
 
         elif webhook_event in ("payment.captured", "order.paid"):
             if gw_amount != payment.amount_cents:
@@ -1206,6 +1957,7 @@ class PaymentService:
         gateway_status = parsed["gateway_refund_status"]
         raw_refund_amount = parsed["raw_refund_amount"]
         provider_payment_id = parsed["provider_payment_id"]
+        refund_entity = parsed.get("refund_entity") or {}
 
         if payment.status not in {
             "CAPTURED",
@@ -1232,18 +1984,21 @@ class PaymentService:
             )
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=reason)
 
-        # Look up by authoritative provider_refund_id (with arn_reference fallback for legacy rows)
-        existing_refund_stmt = (
-            select(PaymentRefund)
-            .where(
-                or_(
-                    PaymentRefund.provider_refund_id == refund_id,
-                    PaymentRefund.arn_reference == refund_id,
-                    PaymentRefund.id == refund_id,
-                )
-            )
-            .with_for_update()
+        # Look up by authoritative provider_refund_id (with arn_reference / notes internal_refund_id fallback)
+        internal_refund_id_note = (
+            (refund_entity.get("notes") or {}).get("internal_refund_id")
+            if isinstance(refund_entity.get("notes"), dict)
+            else None
         )
+        lookup_clauses = [
+            PaymentRefund.provider_refund_id == refund_id,
+            PaymentRefund.arn_reference == refund_id,
+            PaymentRefund.id == refund_id,
+        ]
+        if internal_refund_id_note:
+            lookup_clauses.append(PaymentRefund.id == str(internal_refund_id_note))
+
+        existing_refund_stmt = select(PaymentRefund).where(or_(*lookup_clauses)).with_for_update()
         existing_refund = (await self.db.execute(existing_refund_stmt)).scalar_one_or_none()
         if existing_refund and existing_refund.payment_id != payment.id:
             reason = f"Gateway refund ID {refund_id} already belongs to payment {existing_refund.payment_id}."
@@ -1252,44 +2007,32 @@ class PaymentService:
             )
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=reason)
 
-        # 1. Handle refund.failed
+        # 1. Handle refund.failed via central reversal helper
         if webhook_event == "refund.failed" or (gateway_status == "failed" and webhook_event != "refund.processed"):
-            if existing_refund:
-                if existing_refund.status in {"CREDITED", "PROCESSED", "ANOMALY_EXCESS", "PARTIALLY_APPLIED_EXCESS"}:
-                    logger.warning(
-                        "Rejecting refund.failed transition for refund %s already in %s",
-                        existing_refund.id,
-                        existing_refund.status,
-                    )
-                    inbox.status = "PROCESSED"
-                    inbox.processed_at = now
-                    await self._commit_or_500("refund.failed regression rejection")
-                    return {
-                        "status": "REJECTED_STATE_TRANSITION",
-                        "event": webhook_event,
-                        "payment_id": payment.id,
-                        "refund_id": refund_id,
-                        "message": f"Cannot transition {existing_refund.status} refund to FAILED.",
-                    }
-                transition_refund_status(existing_refund, "FAILED", context="webhook refund.failed")
-                existing_refund.provider_refund_id = refund_id
-                existing_refund.raw_gateway_amount_cents = raw_refund_amount
-            else:
-                self.db.add(
-                    PaymentRefund(
-                        payment_id=payment.id,
-                        ride_id=payment.ride_id,
-                        customer_id=payment.customer_id,
-                        amount_cents=raw_refund_amount,
-                        raw_gateway_amount_cents=raw_refund_amount,
-                        excess_amount_cents=0,
-                        is_partial=False,
-                        reason=f"Gateway refund failure ({webhook_event})",
-                        status="FAILED",
-                        provider_refund_id=refund_id,
-                        arn_reference=refund_id,
-                    )
+            rev = await self.apply_failed_refund_reversal(
+                payment=payment,
+                refund_obj=existing_refund,
+                refund_id=refund_id,
+                raw_refund_amount=raw_refund_amount,
+                failure_reason=f"Gateway refund failure ({webhook_event})",
+                now=now,
+            )
+            if rev.get("rejected_transition"):
+                logger.warning(
+                    "Rejecting refund.failed transition for refund %s: %s",
+                    existing_refund.id if existing_refund else refund_id,
+                    rev.get("reason"),
                 )
+                inbox.status = "PROCESSED"
+                inbox.processed_at = now
+                await self._commit_or_500("refund.failed regression rejection")
+                return {
+                    "status": "REJECTED_STATE_TRANSITION",
+                    "event": webhook_event,
+                    "payment_id": payment.id,
+                    "refund_id": refund_id,
+                    "message": rev["reason"],
+                }
 
             inbox.status = "PROCESSED"
             inbox.processed_at = now
@@ -1299,7 +2042,7 @@ class PaymentService:
                 "event": webhook_event,
                 "payment_id": payment.id,
                 "refund_id": refund_id,
-                "message": "Gateway refund failed; no financial clawback applied.",
+                "message": "Gateway refund failed; payment state and any provisional clawback cleanly reversed.",
             }
 
         # 2. Handle refund.created / pending
@@ -1327,6 +2070,10 @@ class PaymentService:
                         "refund_id": refund_id,
                         "message": "Refund already FAILED; ignoring late refund.created.",
                     }
+                existing_refund.provider_refund_id = refund_id
+                existing_refund.raw_gateway_amount_cents = raw_refund_amount
+                if existing_refund.status == "INITIATED":
+                    transition_refund_status(existing_refund, "GATEWAY_PROCESSING", context="webhook refund.created")
             else:
                 self.db.add(
                     PaymentRefund(
@@ -1361,12 +2108,20 @@ class PaymentService:
             await self._fail_inbox(inbox, reason, now)
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
 
-        if existing_refund and existing_refund.status in {
-            "CREDITED",
-            "PROCESSED",
-            "ANOMALY_EXCESS",
-            "PARTIALLY_APPLIED_EXCESS",
-        }:
+        arn = (refund_entity.get("acquirer_data") or {}).get("arn") if isinstance(refund_entity.get("acquirer_data"), dict) else None
+        settled = await self.apply_confirmed_refund_settlement(
+            payment=payment,
+            refund_obj=existing_refund,
+            refund_id=refund_id,
+            raw_refund_amount=raw_refund_amount,
+            reason=f"Authoritative webhook refund ({webhook_event})",
+            arn_reference=arn or refund_id,
+            settled_status="CREDITED",
+            inbox=inbox,
+            parsed=parsed,
+            now=now,
+        )
+        if settled.get("already_processed"):
             inbox.status = "PROCESSED"
             inbox.processed_at = now
             await self._commit_or_500("refund.processed idempotent replay")
@@ -1378,124 +2133,10 @@ class PaymentService:
                 "message": "Refund event was previously processed idempotently.",
             }
 
-        # Enforce integer paise refundable ceiling: total credited refunds <= payment.amount_cents
-        current_refunded = int(payment.refunded_amount_cents or 0)
-        remaining_refundable = max(0, int(payment.amount_cents) - current_refunded)
-        if raw_refund_amount > remaining_refundable:
-            applied_refund = remaining_refundable
-            excess_anomaly_cents = raw_refund_amount - remaining_refundable
-            is_anomaly = True
-            logger.critical(
-                "REFUND CEILING BREACH: Payment %s captured=%d, refunded=%d, remaining=%d, raw_refund=%d, excess=%d",
-                payment.id,
-                payment.amount_cents,
-                current_refunded,
-                remaining_refundable,
-                raw_refund_amount,
-                excess_anomaly_cents,
-            )
-        else:
-            applied_refund = raw_refund_amount
-            excess_anomaly_cents = 0
-            is_anomaly = False
-
-        if applied_refund > 0:
-            payment.refunded_amount_cents = current_refunded + applied_refund
-            target_pay_status = (
-                "REFUNDED" if payment.refunded_amount_cents >= payment.amount_cents else "PARTIALLY_REFUNDED"
-            )
-            transition_payment_status(payment, target_pay_status, context="webhook refund.processed")
-
-        refund_status = (
-            "PARTIALLY_APPLIED_EXCESS"
-            if is_anomaly and applied_refund > 0
-            else ("ANOMALY_EXCESS" if applied_refund == 0 else "CREDITED")
-        )
-        anomaly_reason = (
-            f"GATEWAY_OVER_REFUND_ANOMALY: Gateway refund {refund_id} of {raw_refund_amount} paise "
-            f"exceeds remaining refundable ceiling of {remaining_refundable} paise "
-            f"(applied={applied_refund}, excess={excess_anomaly_cents})."
-            if is_anomaly
-            else f"Authoritative webhook refund ({webhook_event})"
-        )
-
-        if existing_refund:
-            transition_refund_status(existing_refund, refund_status, context="webhook refund.processed")
-            existing_refund.amount_cents = applied_refund
-            existing_refund.raw_gateway_amount_cents = raw_refund_amount
-            existing_refund.excess_amount_cents = excess_anomaly_cents
-            existing_refund.provider_refund_id = refund_id
-            existing_refund.arn_reference = existing_refund.arn_reference or refund_id
-            existing_refund.is_partial = bool(applied_refund > 0 and payment.status == "PARTIALLY_REFUNDED")
-            existing_refund.reason = anomaly_reason[:255]
-        else:
-            self.db.add(
-                PaymentRefund(
-                    payment_id=payment.id,
-                    ride_id=payment.ride_id,
-                    customer_id=payment.customer_id,
-                    amount_cents=applied_refund,
-                    raw_gateway_amount_cents=raw_refund_amount,
-                    excess_amount_cents=excess_anomaly_cents,
-                    is_partial=bool(applied_refund > 0 and payment.status == "PARTIALLY_REFUNDED"),
-                    reason=anomaly_reason[:255],
-                    status=refund_status,
-                    provider_refund_id=refund_id,
-                    arn_reference=refund_id,
-                )
-            )
-
-        if is_anomaly and excess_anomaly_cents > 0:
-            await self._record_reconciliation_anomaly(
-                anomaly_type="EXCESS_REFUND",
-                payment=payment,
-                inbox=inbox,
-                parsed=parsed,
-                expected_amount_cents=remaining_refundable,
-                raw_gateway_amount_cents=raw_refund_amount,
-                applied_amount_cents=applied_refund,
-                excess_amount_cents=excess_anomaly_cents,
-                reason=anomaly_reason,
-            )
-
-        # Clawback ONLY on valid internally applied refund (never on excess_anomaly_cents)
-        if getattr(payment, "purpose", None) == "WALLET_TOPUP" and applied_refund > 0:
-            topup_user_id = payment.user_id
-            if not topup_user_id and payment.customer_id:
-                cust_prof = (
-                    await self.db.execute(
-                        select(CustomerProfile).where(CustomerProfile.id == payment.customer_id)
-                    )
-                ).scalar_one_or_none()
-                if cust_prof:
-                    topup_user_id = cust_prof.user_id
-            if topup_user_id:
-                from backend.application.services.wallet_service import WalletService
-
-                await WalletService.process_refund_clawback(
-                    session=self.db,
-                    user_id=topup_user_id,
-                    refund_amount_cents=applied_refund,
-                    payment_id=payment.id,
-                    gateway_refund_id=refund_id,
-                    idempotency_key=f"refund_debit_{refund_id}",
-                )
-
-        self.db.add(
-            PaymentEvent(
-                payment_id=payment.id,
-                event_type="WEBHOOK_REFUND_PROCESSED",
-                payload_json=json.dumps(
-                    {
-                        "refund_id": refund_id,
-                        "raw_gateway_amount_cents": raw_refund_amount,
-                        "applied_amount_cents": applied_refund,
-                        "excess_amount_cents": excess_anomaly_cents,
-                        "status": refund_status,
-                    }
-                ),
-            )
-        )
+        is_anomaly = settled["is_anomaly"]
+        applied_refund = settled["applied_refund"]
+        excess_anomaly_cents = settled["excess_anomaly_cents"]
+        anomaly_reason = settled["anomaly_reason"]
 
         inbox.status = "RECONCILIATION_REQUIRED" if is_anomaly else "PROCESSED"
         inbox.last_error = anomaly_reason[:500] if is_anomaly else None
@@ -1530,7 +2171,7 @@ class PaymentService:
         *,
         anomaly_type: str,
         payment: Optional[Payment],
-        inbox: PaymentWebhookInbox,
+        inbox: Optional[PaymentWebhookInbox],
         parsed: Dict[str, Any],
         expected_amount_cents: Optional[int],
         raw_gateway_amount_cents: Optional[int],
@@ -1554,7 +2195,7 @@ class PaymentService:
         self.db.add(
             PaymentReconciliationAnomaly(
                 payment_id=payment.id if payment else None,
-                webhook_inbox_id=inbox.id,
+                webhook_inbox_id=inbox.id if inbox else None,
                 provider_name="RAZORPAY",
                 provider_payment_id=parsed.get("provider_payment_id"),
                 provider_order_id=parsed.get("order_id"),
@@ -1567,7 +2208,12 @@ class PaymentService:
                 currency=parsed.get("currency", "INR"),
                 status="OPEN",
                 reason=reason[:500],
-                details_json=json.dumps({"digest": inbox.event_digest, "event": inbox.event_type}),
+                details_json=json.dumps(
+                    {
+                        "digest": inbox.event_digest if inbox else None,
+                        "event": inbox.event_type if inbox else "INTERNAL",
+                    }
+                ),
             )
         )
 

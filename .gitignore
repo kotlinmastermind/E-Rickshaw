@@ -26,14 +26,19 @@ local.properties
 .env
 .env.*
 !.env.example
+!backend/.env.example
 # .env.production must never be unignored or committed
 *.env.local
 *.pem
 *.key
 *.jks
+key.txt
+**/key.txt
 keystore.properties
 *firebase-service-account*.json
 *credentials*.json
+**/google-services.json
+!**/google-services.json.example
 backups/
 database/backups/
 .temp_pg_test/

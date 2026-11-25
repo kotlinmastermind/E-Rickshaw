@@ -120,6 +120,12 @@ fun VasantraDriverHomeScreen(
     }
 
     val context = LocalContext.current
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated(context)
+    }
+
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
@@ -127,6 +133,13 @@ fun VasantraDriverHomeScreen(
                       (perms[Manifest.permission.ACCESS_COARSE_LOCATION] == true)
         if (granted) {
             DriverLocationManager.startTracking(context)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } catch (_: Exception) { }
         }
     }
 
@@ -148,6 +161,18 @@ fun VasantraDriverHomeScreen(
                 )
             )
         }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val hasNotifPerm = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasNotifPerm && (fineGranted || coarseGranted)) {
+                try {
+                    notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } catch (_: Exception) { }
+            }
+        }
+        com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated(context)
 
         DriverRepository.fetchDriverProfile()
         DriverRepository.fetchEarningsSummary()

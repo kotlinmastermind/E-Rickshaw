@@ -383,6 +383,7 @@ object DriverRepository {
             }
 
             DriverNetworkClient.setAuthToken(token, body.refreshToken)
+            com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated()
             scope.launch {
                 fetchDriverProfile()
                 fetchDriverVehicles()
@@ -445,6 +446,7 @@ object DriverRepository {
             val token = body?.accessToken
             if (res.isSuccessful && !token.isNullOrBlank()) {
                 DriverNetworkClient.setAuthToken(token, body.refreshToken)
+            com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated()
                 scope.launch {
                     launch { fetchDriverProfile() }
                     launch { fetchDriverVehicles() }
@@ -506,6 +508,7 @@ object DriverRepository {
             val token = body?.accessToken
             if (res.isSuccessful && !token.isNullOrBlank()) {
                 DriverNetworkClient.setAuthToken(token, body.refreshToken)
+            com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated()
                 scope.launch {
                     launch { fetchDriverProfile() }
                     launch { fetchDriverVehicles() }
@@ -534,8 +537,9 @@ object DriverRepository {
         _activeRide.value = null
         _activeOffer.value = null
         _unreadNotificationCount.value = 0
+        DriverLocationManager.stopTracking()
         DriverWebSocketClient.disconnectAll()
-        DriverNetworkClient.clearAuthToken()
+        com.vaisentra.mobility.driver.fcm.DriverFcmManager.deactivateAndLogoutAsync()
     }
 
     suspend fun fetchActiveRide(): Result<ActiveRideDto?> {
@@ -1164,7 +1168,32 @@ object DriverRepository {
         }
     }
 
-    fun pingLocation(lat: Double, lng: Double, heading: Double = 0.0, speedMps: Double = 0.0, accuracyM: Double? = null) {
+    suspend fun reverseGeocodeLocation(lat: Double, lng: Double): String? {
+        if (!DriverNetworkClient.isAuthenticated()) return null
+        return try {
+            val res = DriverNetworkClient.apiService.reverseGeocode(
+                DriverReverseGeocodeRequest(latitude = lat, longitude = lng)
+            )
+            if (res.isSuccessful) {
+                res.body()?.formattedAddress?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "reverseGeocodeLocation error: ${e.message}")
+            null
+        }
+    }
+
+    fun pingLocation(
+        lat: Double,
+        lng: Double,
+        heading: Double = 0.0,
+        speedMps: Double = 0.0,
+        accuracyM: Double? = null,
+        isMockLocation: Boolean = false,
+        locationSource: String = "GPS"
+    ) {
         if (!DriverNetworkClient.isAuthenticated()) return
         scope.launch {
             try {
@@ -1174,7 +1203,9 @@ object DriverRepository {
                         longitude = lng,
                         heading = heading,
                         speedMps = speedMps,
-                        accuracyM = accuracyM
+                        accuracyM = accuracyM,
+                        isMockLocation = isMockLocation,
+                        locationSource = locationSource
                     )
                 )
             } catch (e: Exception) {
@@ -1353,9 +1384,32 @@ object DriverRepository {
                 GenerateUpiRequest(rideId = rideId, amountCents = (amountRupees * 100).toInt())
             )
             val body = res.body()
-            val url = (body?.get("upi_intent_url") ?: body?.get("qr_code_payload")) as? String
+            val url = (
+                body?.get("upi_intent_uri")
+                    ?: body?.get("upi_intent_url")
+                    ?: body?.get("qr_payload")
+                    ?: body?.get("qr_code_payload")
+            ) as? String
             if (res.isSuccessful && !url.isNullOrBlank()) Result.success(url)
             else Result.failure(IllegalStateException("generateDynamicUpi failed: HTTP ${res.code()}"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun verifyRideUpiPaymentStatus(rideId: String): Result<Boolean> {
+        if (rideId.isBlank()) return Result.failure(IllegalStateException("No active ride"))
+        return try {
+            val res = DriverNetworkClient.apiService.getRidePaymentStatus(rideId)
+            val body = res.body()
+            if (res.isSuccessful && body != null) {
+                val gatewayVerified = body["gateway_verified"] as? Boolean ?: false
+                val statusStr = (body["status"] as? String ?: "UNPAID").uppercase()
+                val settled = gatewayVerified || statusStr in setOf("CAPTURED", "PAID", "SETTLED", "PARTIALLY_REFUNDED", "REFUNDED")
+                Result.success(settled)
+            } else {
+                Result.failure(IllegalStateException("Payment status check failed: HTTP ${res.code()}"))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }

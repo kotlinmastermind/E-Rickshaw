@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
-from backend.domain.models import Wallet, WalletTransaction, RefundLiability
+from backend.domain.models import Wallet, WalletTransaction, RefundLiability, PaymentReconciliationAnomaly
 
 class WalletService:
     @staticmethod
@@ -273,6 +273,73 @@ class WalletService:
         }
 
     @staticmethod
+    async def reverse_refund_clawback(
+        session: AsyncSession,
+        user_id: str,
+        gateway_refund_id: str,
+        payment_id: str,
+        reason: str = "Gateway refund failed",
+    ) -> Dict[str, Any]:
+        """
+        Safely reverses an earlier refund clawback and/or accrued refund debt when a
+        refund fails at the payment gateway, using immutable compensating ledger entries.
+        """
+        wallet = await WalletService.get_or_create_wallet(session, user_id, for_update=True)
+        liab_stmt = select(RefundLiability).where(RefundLiability.gateway_refund_id == gateway_refund_id)
+        if getattr(session.bind, "dialect", None) and session.bind.dialect.name != "sqlite":
+            liab_stmt = liab_stmt.with_for_update()
+        liab = (await session.execute(liab_stmt)).scalar_one_or_none()
+        if not liab:
+            return {"status": "NO_CLAWBACK_FOUND"}
+        if liab.status == "REVERSED_ON_FAILURE":
+            return {"status": "ALREADY_REVERSED", "liability_id": liab.id}
+
+        debt_to_reverse = min(int(liab.outstanding_recovery_cents or 0), int(getattr(wallet, "debt_cents", 0) or 0))
+        if debt_to_reverse > 0:
+            wallet.debt_cents -= debt_to_reverse
+            liab.outstanding_recovery_cents = max(0, int(liab.outstanding_recovery_cents or 0) - debt_to_reverse)
+            debt_rev_key = f"ref_debt_rev_{gateway_refund_id}"
+            existing_debt_rev = (
+                await session.execute(select(WalletTransaction).where(WalletTransaction.idempotency_key == debt_rev_key))
+            ).scalar_one_or_none()
+            if not existing_debt_rev:
+                session.add(
+                    WalletTransaction(
+                        wallet_id=wallet.id,
+                        transaction_type="REFUND_DEBT_REVERSAL",
+                        amount_cents=debt_to_reverse,
+                        balance_after_cents=wallet.balance_cents,
+                        source="TOPUP_REFUND_FAILURE_REVERSAL",
+                        reference_id=payment_id,
+                        idempotency_key=debt_rev_key,
+                        description=f"Reversed refund debt accrual on failed refund {gateway_refund_id}: {reason}",
+                    )
+                )
+
+        liab.status = "REVERSED_ON_FAILURE"
+        wallet_restore_cents = int(liab.debited_from_wallet_cents or 0)
+        if wallet_restore_cents > 0:
+            await WalletService.credit_wallet(
+                session=session,
+                user_id=user_id,
+                amount_cents=wallet_restore_cents,
+                transaction_type="COMPENSATION_CREDIT",
+                source="TOPUP_REFUND_FAILURE_REVERSAL",
+                reference_id=payment_id,
+                description=f"Restored wallet balance after failed refund {gateway_refund_id}: {reason}",
+                idempotency_key=f"ref_rev_{gateway_refund_id}",
+            )
+            liab.debited_from_wallet_cents = 0
+
+        await session.flush()
+        return {
+            "status": "REVERSED",
+            "liability_id": liab.id,
+            "restored_wallet_cents": wallet_restore_cents,
+            "reversed_debt_cents": debt_to_reverse,
+        }
+
+    @staticmethod
     async def reconcile_wallet_balance(
         session: AsyncSession,
         user_id: str,
@@ -280,7 +347,8 @@ class WalletService:
     ) -> Dict[str, Any]:
         """
         Task 039: Reconciles the cached wallet balance against the authoritative ledger.
-        Computes SUM(CREDIT) - SUM(DEBIT) from immutable WalletTransaction records.
+        Computes SUM(CREDIT) - SUM(DEBIT) from immutable WalletTransaction records
+        and logs an auditable anomaly before applying any correction.
         """
         wallet = await WalletService.get_or_create_wallet(session, user_id, for_update=True)
 
@@ -298,8 +366,25 @@ class WalletService:
         cached_balance = wallet.balance_cents
         discrepancy = cached_balance - ledger_balance
 
-        if discrepancy != 0 and auto_correct:
-            wallet.balance_cents = ledger_balance
+        if discrepancy != 0:
+            session.add(
+                PaymentReconciliationAnomaly(
+                    provider_name="INTERNAL_WALLET",
+                    anomaly_type="WALLET_BALANCE_DISCREPANCY",
+                    expected_amount_cents=ledger_balance,
+                    raw_gateway_amount_cents=cached_balance,
+                    applied_amount_cents=ledger_balance if auto_correct else cached_balance,
+                    excess_amount_cents=abs(discrepancy),
+                    currency=wallet.currency or "INR",
+                    status="AUTO_CORRECTED" if auto_correct else "OPEN",
+                    reason=(
+                        f"Cached balance ({cached_balance}) differed from ledger balance ({ledger_balance}) "
+                        f"for user {user_id} (auto_correct={auto_correct})."
+                    ),
+                )
+            )
+            if auto_correct:
+                wallet.balance_cents = ledger_balance
 
         # Reconcile outstanding refund liabilities
         liab_stmt = select(RefundLiability).where(
@@ -308,8 +393,25 @@ class WalletService:
         )
         liabs = (await session.execute(liab_stmt)).scalars().all()
         ledger_debt_cents = sum(l.outstanding_recovery_cents for l in liabs)
-        if hasattr(wallet, "debt_cents") and wallet.debt_cents != ledger_debt_cents and auto_correct:
-            wallet.debt_cents = ledger_debt_cents
+        if hasattr(wallet, "debt_cents") and wallet.debt_cents != ledger_debt_cents:
+            session.add(
+                PaymentReconciliationAnomaly(
+                    provider_name="INTERNAL_WALLET",
+                    anomaly_type="WALLET_DEBT_DISCREPANCY",
+                    expected_amount_cents=ledger_debt_cents,
+                    raw_gateway_amount_cents=wallet.debt_cents,
+                    applied_amount_cents=ledger_debt_cents if auto_correct else wallet.debt_cents,
+                    excess_amount_cents=abs(wallet.debt_cents - ledger_debt_cents),
+                    currency=wallet.currency or "INR",
+                    status="AUTO_CORRECTED" if auto_correct else "OPEN",
+                    reason=(
+                        f"Cached debt ({wallet.debt_cents}) differed from active liability sum ({ledger_debt_cents}) "
+                        f"for user {user_id} (auto_correct={auto_correct})."
+                    ),
+                )
+            )
+            if auto_correct:
+                wallet.debt_cents = ledger_debt_cents
 
         return {
             "wallet_id": wallet.id,

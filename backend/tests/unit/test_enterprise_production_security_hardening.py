@@ -519,10 +519,20 @@ async def test_self_registration_and_otp_oauth_cannot_create_or_login_admins(db_
         )
     assert exc2.value.status_code == 409
 
+    # Google OAuth is disabled (must reject with 403 even for non-admin roles)
+    with pytest.raises(Exception) as exc_google:
+        await gov.oauth_login_or_register(
+            provider="google",
+            identity_token="id_tok",
+            email=f"oauth_google_{uuid.uuid4().hex[:8]}@example.com",
+            role="customer",
+        )
+    assert exc_google.value.status_code == 403
+
     # OAuth cannot self-register admin
     with pytest.raises(Exception) as exc3:
         await gov.oauth_login_or_register(
-            provider="google",
+            provider="apple",
             identity_token="id_tok",
             email=f"oauth_admin_{uuid.uuid4().hex[:8]}@example.com",
             role="admin",

@@ -1012,7 +1012,7 @@ END:VCALENDAR"""
             lng = float(geo_match.group(2))
             return {"latitude": lat, "longitude": lng, "label": label, "source": "GEO_URI"}
 
-        # Match https://maps.google.com/?q=19.0760,72.8777
+        # Match shared URL query parameter ?q=19.0760,72.8777
         q_match = re.search(r"[?&]q=([-+]?\d*\.?\d+),([-+]?\d*\.?\d+)", text)
         if q_match:
             lat = float(q_match.group(1))

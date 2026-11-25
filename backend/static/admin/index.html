@@ -9,13 +9,7 @@
     <link rel="icon" type="image/svg+xml"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2310B981'><path d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/></svg>">
 
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
-        rel="stylesheet">
-
+    <!-- System UI Font Stack (no third-party Google Fonts requests) -->
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -24,8 +18,8 @@
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
-                        mono: ['"JetBrains Mono"', 'monospace'],
+                        sans: ['"Plus Jakarta Sans"', 'Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
                     },
                     colors: {
                         obsidian: '#07090E',
@@ -751,7 +745,7 @@
                         FCM PROTOCOL</span>
                 </h2>
                 <p class="text-xs text-slate-400">Dispatches real-time broadcast and push alerts to RiderGo commuters
-                    and DriverGo pilots without Firebase bloat</p>
+                    and DriverGo pilots via FCM HTTP v1 and live WebSocket channels</p>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1465,6 +1459,105 @@
                                         customer disputes...</td>
                                 </tr>
                             </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Razorpay Payments, Refunds, Webhook Replay & Reconciliation Operations -->
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <!-- Payments Search & Direct/Partial Refund Console -->
+                <div class="glass-card rounded-2xl overflow-hidden border border-border shadow-xl">
+                    <div class="p-4 border-b border-border flex flex-wrap gap-2 justify-between items-center">
+                        <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono">Razorpay Payments & Refund Controls</h3>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="fin-pay-search" placeholder="Search payment/order/ride ID"
+                                class="bg-card border border-border rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-glow/50 font-mono">
+                            <button onclick="loadAdminPayments()"
+                                class="px-2.5 py-1 rounded-lg bg-cyan-glow/20 border border-cyan-glow/40 text-cyan-glow text-xs font-bold">Search</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto max-h-72 overflow-y-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-surface/90 text-slate-400 uppercase font-mono text-[10px] border-b border-border">
+                                <tr>
+                                    <th class="py-2.5 px-3">Payment / Purpose</th>
+                                    <th class="py-2.5 px-3">Gateway IDs</th>
+                                    <th class="py-2.5 px-3">Captured / Refunded</th>
+                                    <th class="py-2.5 px-3">Status</th>
+                                    <th class="py-2.5 px-3 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-payments-table-body" class="divide-y divide-border text-slate-300"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Refund Requests & Execution History -->
+                <div class="glass-card rounded-2xl overflow-hidden border border-border shadow-xl">
+                    <div class="p-4 border-b border-border flex justify-between items-center">
+                        <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono">Refund Requests & Gateway ARN Status</h3>
+                        <button onclick="loadAdminRefunds()" class="px-2.5 py-1 rounded-lg bg-card border border-border text-xs text-slate-300">Refresh</button>
+                    </div>
+                    <div class="overflow-x-auto max-h-72 overflow-y-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-surface/90 text-slate-400 uppercase font-mono text-[10px] border-b border-border">
+                                <tr>
+                                    <th class="py-2.5 px-3">Refund</th>
+                                    <th class="py-2.5 px-3">Amount</th>
+                                    <th class="py-2.5 px-3">ARN / Gateway</th>
+                                    <th class="py-2.5 px-3">Status</th>
+                                    <th class="py-2.5 px-3 text-right">Review</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-refunds-table-body" class="divide-y divide-border text-slate-300"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <!-- Webhook Inbox & Safe Replay -->
+                <div class="glass-card rounded-2xl overflow-hidden border border-border shadow-xl">
+                    <div class="p-4 border-b border-border flex justify-between items-center">
+                        <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono">Razorpay Webhook Inbox & Replay</h3>
+                        <button onclick="loadAdminWebhooks()" class="px-2.5 py-1 rounded-lg bg-card border border-border text-xs text-slate-300">Refresh</button>
+                    </div>
+                    <div class="overflow-x-auto max-h-72 overflow-y-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-surface/90 text-slate-400 uppercase font-mono text-[10px] border-b border-border">
+                                <tr>
+                                    <th class="py-2.5 px-3">Event / Account</th>
+                                    <th class="py-2.5 px-3">Sig / Attempts</th>
+                                    <th class="py-2.5 px-3">Status</th>
+                                    <th class="py-2.5 px-3 text-right">Replay</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-webhooks-table-body" class="divide-y divide-border text-slate-300"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Reconciliation Anomalies & Manual Trigger -->
+                <div class="glass-card rounded-2xl overflow-hidden border border-border shadow-xl">
+                    <div class="p-4 border-b border-border flex justify-between items-center">
+                        <h3 class="text-xs font-bold text-white uppercase tracking-wider font-mono">Financial Reconciliation & Anomalies</h3>
+                        <div class="flex gap-2">
+                            <button onclick="triggerAdminReconciliation()" class="px-2.5 py-1 rounded-lg bg-emerald-glow/20 border border-emerald-glow/40 text-emerald-glow text-xs font-bold">Run Reconcile</button>
+                            <button onclick="loadAdminAnomalies()" class="px-2.5 py-1 rounded-lg bg-card border border-border text-xs text-slate-300">Refresh</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto max-h-72 overflow-y-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-surface/90 text-slate-400 uppercase font-mono text-[10px] border-b border-border">
+                                <tr>
+                                    <th class="py-2.5 px-3">Type</th>
+                                    <th class="py-2.5 px-3">Details</th>
+                                    <th class="py-2.5 px-3">Status</th>
+                                    <th class="py-2.5 px-3 text-right">Resolve</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-anomalies-table-body" class="divide-y divide-border text-slate-300"></tbody>
                         </table>
                     </div>
                 </div>
@@ -3194,7 +3287,7 @@
                 const res = await fetch('/api/v1/admin/broadcasts', {
                     method: 'POST',
                     headers: headers,
-                    body: JSON.stringify({ title, message, target_role: targetRole, channel: 'IN_APP' })
+                    body: JSON.stringify({ title, message, target_role: targetRole, channel })
                 });
                 if (res.ok) {
                     showToast(`Broadcast successfully delivered to ${targetRole} users!`);
@@ -3995,6 +4088,10 @@
         // =========================================================================
         // DOMAIN: CUSTOMER DISPUTES, REFUNDS & WALLET COMPENSATION
         // =========================================================================
+        function escHtml(v) {
+            return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
         async function loadDisputesData() {
             try {
                 const headers = {};
@@ -4007,6 +4104,202 @@
             } catch (err) {
                 console.error('Error loading disputes:', err);
             }
+            await loadAdminFinanceConsole();
+        }
+
+        async function loadAdminFinanceConsole() {
+            await Promise.all([
+                loadAdminPayments(),
+                loadAdminRefunds(),
+                loadAdminWebhooks(),
+                loadAdminAnomalies(),
+            ]);
+        }
+
+        function _adminHeaders(json = false) {
+            const h = {};
+            if (json) h['Content-Type'] = 'application/json';
+            if (STATE.adminToken) h['Authorization'] = `Bearer ${STATE.adminToken}`;
+            return h;
+        }
+
+        async function loadAdminPayments() {
+            const tbody = document.getElementById('admin-payments-table-body');
+            if (!tbody) return;
+            const q = document.getElementById('fin-pay-search')?.value?.trim() || '';
+            try {
+                const url = q ? `/api/v1/admin/payments?q=${encodeURIComponent(q)}` : '/api/v1/admin/payments?limit=50';
+                const res = await fetch(url, { headers: _adminHeaders() });
+                if (!res.ok) return;
+                const rows = await res.json();
+                tbody.innerHTML = rows.length ? '' : '<tr><td colspan="5" class="py-4 text-center text-slate-500 font-mono">No payments found.</td></tr>';
+                rows.forEach(p => {
+                    const tr = document.createElement('tr');
+                    const canRefund = ['CAPTURED', 'PARTIALLY_REFUNDED', 'REFUND_PENDING', 'PAID', 'SETTLED', 'SUCCESS'].includes(p.status) && p.remaining_refundable_cents > 0 && p.provider_name === 'RAZORPAY';
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-3"><div class="font-mono font-bold text-white">#${escHtml(p.id.slice(0, 8))}</div><div class="text-[10px] text-slate-400">${escHtml(p.purpose || 'RIDE_FARE')} • ${escHtml(p.payment_method)}</div></td>
+                        <td class="py-2.5 px-3 font-mono text-[10px]"><div>O: ${escHtml(p.provider_order_id || '—')}</div><div class="text-slate-400">P: ${escHtml(p.provider_payment_id || '—')}</div></td>
+                        <td class="py-2.5 px-3 font-mono"><div>₹${(p.amount_cents / 100).toFixed(2)}</div><div class="text-[10px] text-amber-glow">Ref: ₹${(p.refunded_amount_cents / 100).toFixed(2)}</div></td>
+                        <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-surface font-mono text-[10px]">${escHtml(p.status)}</span></td>
+                        <td class="py-2.5 px-3 text-right">${canRefund ? `<button onclick="initiateAdminRefund('${escHtml(p.id)}', ${p.remaining_refundable_cents})" class="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold">Refund</button>` : '<span class="text-[10px] text-slate-500">—</span>'}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) { console.error('loadAdminPayments error:', e); }
+        }
+
+        async function initiateAdminRefund(paymentId, maxCents) {
+            const amountStr = prompt(`Enter refund amount in rupees (Max ₹${(maxCents / 100).toFixed(2)}):`, (maxCents / 100).toFixed(2));
+            if (!amountStr) return;
+            const rupees = parseFloat(amountStr);
+            if (isNaN(rupees) || rupees <= 0) { showToast('Invalid refund amount', 'error'); return; }
+            const reason = prompt('Enter mandatory refund audit reason (min 5 chars):', 'Admin console authorized refund');
+            if (!reason || reason.trim().length < 5) { showToast('Refund reason is required', 'error'); return; }
+            const amountCents = Math.round(rupees * 100);
+            const idem = `adm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+            try {
+                const res = await fetch(`/api/v1/admin/payments/${encodeURIComponent(paymentId)}/refund`, {
+                    method: 'POST',
+                    headers: _adminHeaders(true),
+                    body: JSON.stringify({ amount_cents: amountCents, reason: reason.trim(), is_partial: amountCents < maxCents, idempotency_key: idem })
+                });
+                const body = await res.json();
+                if (res.ok) {
+                    showToast(`Refund ${body.status}: ${body.refund_id}`);
+                    await loadAdminFinanceConsole();
+                } else {
+                    showToast(body.detail || 'Refund execution failed', 'error');
+                }
+            } catch (e) { showToast('Network error initiating refund', 'error'); }
+        }
+
+        async function loadAdminRefunds() {
+            const tbody = document.getElementById('admin-refunds-table-body');
+            if (!tbody) return;
+            try {
+                const res = await fetch('/api/v1/admin/refund-requests', { headers: _adminHeaders() });
+                if (!res.ok) return;
+                const rows = await res.json();
+                tbody.innerHTML = rows.length ? '' : '<tr><td colspan="5" class="py-4 text-center text-slate-500 font-mono">No refunds recorded.</td></tr>';
+                rows.forEach(r => {
+                    const tr = document.createElement('tr');
+                    const canReview = r.approval_status === 'PENDING' && r.status === 'PENDING_APPROVAL';
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-3 font-mono">#${escHtml(r.id.slice(0, 8))}</td>
+                        <td class="py-2.5 px-3 font-mono text-emerald-glow">₹${((r.amount_cents || 0) / 100).toFixed(2)}</td>
+                        <td class="py-2.5 px-3 font-mono text-[10px]">${escHtml(r.arn_reference || r.provider_refund_id || 'Pending')}</td>
+                        <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-surface font-mono text-[10px]">${escHtml(r.status)}</span></td>
+                        <td class="py-2.5 px-3 text-right">${canReview ? `<button onclick="reviewAdminRefund('${escHtml(r.id)}', true)" class="px-2 py-1 rounded bg-emerald-glow text-black text-[10px] font-bold mr-1">Approve</button><button onclick="reviewAdminRefund('${escHtml(r.id)}', false)" class="px-2 py-1 rounded bg-crimson-dim text-crimson-glow text-[10px] font-bold">Reject</button>` : `<span class="text-[10px] text-slate-400">${escHtml(r.approval_status || '')}</span>`}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) { console.error('loadAdminRefunds error:', e); }
+        }
+
+        async function reviewAdminRefund(refundId, approve) {
+            const reason = prompt(`Enter review justification (min 10 chars) to ${approve ? 'APPROVE & EXECUTE' : 'REJECT'}:`, approve ? 'Verified ride cancellation / dispute evidence approved' : 'Insufficient dispute evidence for refund');
+            if (!reason || reason.trim().length < 10) { showToast('Review reason must be at least 10 characters', 'error'); return; }
+            try {
+                const res = await fetch(`/api/v1/admin/refunds/${encodeURIComponent(refundId)}/review`, {
+                    method: 'POST',
+                    headers: _adminHeaders(true),
+                    body: JSON.stringify({ approve, reason: reason.trim() })
+                });
+                const body = await res.json();
+                if (res.ok) {
+                    showToast(body.message || 'Refund review submitted');
+                    await loadAdminFinanceConsole();
+                } else {
+                    showToast(body.detail || 'Review failed', 'error');
+                }
+            } catch (e) { showToast('Network error reviewing refund', 'error'); }
+        }
+
+        async function loadAdminWebhooks() {
+            const tbody = document.getElementById('admin-webhooks-table-body');
+            if (!tbody) return;
+            try {
+                const res = await fetch('/api/v1/admin/webhooks', { headers: _adminHeaders() });
+                if (!res.ok) return;
+                const rows = await res.json();
+                tbody.innerHTML = rows.length ? '' : '<tr><td colspan="4" class="py-4 text-center text-slate-500 font-mono">No webhook deliveries logged.</td></tr>';
+                rows.slice(0, 50).forEach(w => {
+                    const tr = document.createElement('tr');
+                    const canReplay = w.signature_verified && ['FAILED', 'RECONCILIATION_REQUIRED', 'UNMATCHED_PAYMENT'].includes(w.status);
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-3"><div class="font-mono text-white">${escHtml(w.event_type || 'unknown')}</div><div class="text-[10px] text-slate-500 font-mono">${escHtml(w.merchant_account_id || '')}</div></td>
+                        <td class="py-2.5 px-3 font-mono text-[10px]">${w.signature_verified ? 'VERIFIED' : 'INVALID'} • ${w.attempts}x</td>
+                        <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-surface font-mono text-[10px]">${escHtml(w.status)}</span></td>
+                        <td class="py-2.5 px-3 text-right">${canReplay ? `<button onclick="replayAdminWebhook('${escHtml(w.id)}')" class="px-2.5 py-1 rounded bg-cyan-glow text-black text-[10px] font-bold">Replay</button>` : '<span class="text-[10px] text-slate-500">—</span>'}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) { console.error('loadAdminWebhooks error:', e); }
+        }
+
+        async function replayAdminWebhook(inboxId) {
+            try {
+                const res = await fetch(`/api/v1/admin/webhooks/${encodeURIComponent(inboxId)}/replay`, {
+                    method: 'POST',
+                    headers: _adminHeaders()
+                });
+                const body = await res.json();
+                if (res.ok) {
+                    showToast(`Webhook replayed cleanly (${body.status})`);
+                    await loadAdminFinanceConsole();
+                } else {
+                    showToast(body.detail || 'Replay failed', 'error');
+                }
+            } catch (e) { showToast('Network error replaying webhook', 'error'); }
+        }
+
+        async function loadAdminAnomalies() {
+            const tbody = document.getElementById('admin-anomalies-table-body');
+            if (!tbody) return;
+            try {
+                const res = await fetch('/api/v1/admin/reconciliation/anomalies', { headers: _adminHeaders() });
+                if (!res.ok) return;
+                const rows = await res.json();
+                tbody.innerHTML = rows.length ? '' : '<tr><td colspan="4" class="py-4 text-center text-slate-500 font-mono">No reconciliation anomalies recorded.</td></tr>';
+                rows.slice(0, 50).forEach(a => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="py-2.5 px-3 font-mono text-amber-glow text-[10px]">${escHtml(a.anomaly_type)}</td>
+                        <td class="py-2.5 px-3 text-[11px] text-slate-300">${escHtml((a.reason || '').slice(0, 90))}</td>
+                        <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded bg-surface font-mono text-[10px]">${escHtml(a.status)}</span></td>
+                        <td class="py-2.5 px-3 text-right">${a.status === 'OPEN' ? `<button onclick="resolveAdminAnomaly('${escHtml(a.id)}')" class="px-2.5 py-1 rounded bg-purple-600 text-white text-[10px] font-bold">Resolve</button>` : '<span class="text-[10px] text-slate-500">Resolved</span>'}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) { console.error('loadAdminAnomalies error:', e); }
+        }
+
+        async function resolveAdminAnomaly(anomalyId) {
+            const notes = prompt('Enter investigation resolution notes (min 5 chars):', 'Verified against Razorpay Dashboard settlement report');
+            if (!notes || notes.trim().length < 5) return;
+            try {
+                const res = await fetch(`/api/v1/admin/reconciliation/anomalies/${encodeURIComponent(anomalyId)}/resolve`, {
+                    method: 'POST',
+                    headers: _adminHeaders(true),
+                    body: JSON.stringify({ resolution_notes: notes.trim() })
+                });
+                if (res.ok) { showToast('Anomaly resolved'); await loadAdminAnomalies(); }
+                else { const b = await res.json(); showToast(b.detail || 'Resolve failed', 'error'); }
+            } catch (e) { showToast('Network error resolving anomaly', 'error'); }
+        }
+
+        async function triggerAdminReconciliation() {
+            showToast('Running payment & refund reconciliation batch...');
+            try {
+                const res = await fetch('/api/v1/admin/reconciliation/run', { method: 'POST', headers: _adminHeaders() });
+                const body = await res.json();
+                if (res.ok) {
+                    showToast(`Reconciled: lost_orders=${body.lost_orders?.recovered_orders || 0}, refunds=${body.refunds?.settled_refunds || 0}`);
+                    await loadAdminFinanceConsole();
+                } else {
+                    showToast(body.detail || 'Reconciliation failed', 'error');
+                }
+            } catch (e) { showToast('Network error triggering reconciliation', 'error'); }
         }
 
         function renderDisputesTable() {

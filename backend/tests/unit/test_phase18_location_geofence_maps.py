@@ -40,7 +40,7 @@ async def test_part18_map_provider_and_pin_snapping(db_session):
 
     feedback = await service.record_quality_feedback(
         user_id=customer.id,
-        values={"rating": 5, "issue_code": "ACCURATE", "provider_mode": "GOOGLE_PLACES", "coordinates_verified": True}
+        values={"rating": 5, "issue_code": "ACCURATE", "provider_mode": "MAPBOX_GEOCODING", "coordinates_verified": True}
     )
     assert feedback["recorded"] is True
     assert feedback["rating"] == 5

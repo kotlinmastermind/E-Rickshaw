@@ -238,15 +238,18 @@ data class WalletBalanceDto(
 
 data class TopupCreateOrderRequest(
     @SerializedName("amount_cents") val amountCents: Int,
-    @SerializedName("currency") val currency: String = "INR"
+    @SerializedName("currency") val currency: String = "INR",
+    @SerializedName("idempotency_key") val idempotencyKey: String? = null
 )
 
 data class TopupOrderResponse(
     @SerializedName("order_id") val orderId: String,
-    @SerializedName("amount_cents") val amountCents: Int,
-    @SerializedName("amount_rupees") val amountRupees: Double,
-    @SerializedName("currency") val currency: String,
-    @SerializedName("key_id") val keyId: String
+    @SerializedName(value = "amount_cents", alternate = ["amount"]) val amountCents: Int = 0,
+    @SerializedName("amount_rupees") val amountRupees: Double = 0.0,
+    @SerializedName("currency") val currency: String = "INR",
+    @SerializedName("key_id") val keyId: String? = null,
+    @SerializedName("receipt") val receipt: String? = null,
+    @SerializedName("reused_existing_order") val reusedExistingOrder: Boolean = false
 )
 
 data class TopupVerifyRequest(
@@ -263,6 +266,7 @@ data class TopupVerifyResponse(
 
 data class RidePaymentOrderRequest(
     @SerializedName("ride_id") val rideId: String,
+    @SerializedName("idempotency_key") val idempotencyKey: String? = null,
     @SerializedName("amount_cents") val amountCents: Int? = null,
     @SerializedName("amount_rupees") val amountRupees: Double? = null
 )
@@ -270,13 +274,27 @@ data class RidePaymentOrderRequest(
 data class RidePaymentOrderResponse(
     @SerializedName("id") val id: String? = null,
     @SerializedName("order_id") val orderId: String? = null,
-    @SerializedName("amount_cents") val amountCents: Int = 0,
+    @SerializedName("payment_id") val paymentId: String? = null,
+    @SerializedName(value = "amount_cents", alternate = ["amount"]) val amountCents: Int = 0,
     @SerializedName("currency") val currency: String = "INR",
-    @SerializedName("key_id") val keyId: String? = null
+    @SerializedName("key_id") val keyId: String? = null,
+    @SerializedName("status") val status: String? = null,
+    @SerializedName("reused_existing_order") val reusedExistingOrder: Boolean = false
 ) {
     val effectiveOrderId: String
         get() = orderId ?: id ?: ""
 }
+
+data class RidePaymentStatusDto(
+    @SerializedName("ride_id") val rideId: String = "",
+    @SerializedName("payment_id") val paymentId: String? = null,
+    @SerializedName("status") val status: String = "UNPAID",
+    @SerializedName("amount_cents") val amountCents: Int = 0,
+    @SerializedName("refunded_amount_cents") val refundedAmountCents: Int = 0,
+    @SerializedName("provider_order_id") val providerOrderId: String? = null,
+    @SerializedName("provider_payment_id") val providerPaymentId: String? = null,
+    @SerializedName("gateway_verified") val gatewayVerified: Boolean = false
+)
 
 data class RidePaymentVerifyRequest(
     @SerializedName("razorpay_order_id") val razorpayOrderId: String,
@@ -448,6 +466,20 @@ data class ReverseGeocodeResponse(
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
     @SerializedName("formatted_address") val formattedAddress: String
+)
+
+data class DeviceTokenRegisterRequest(
+    @SerializedName("fcm_token") val fcmToken: String,
+    @SerializedName("device_os") val deviceOs: String = "ANDROID",
+    @SerializedName("device_label") val deviceLabel: String? = null
+)
+
+data class DeviceTokenDeactivateRequest(
+    @SerializedName("fcm_token") val fcmToken: String? = null
+)
+
+data class RiderLogoutRequest(
+    @SerializedName("fcm_token") val fcmToken: String? = null
 )
 
 data class BookingDraftState(

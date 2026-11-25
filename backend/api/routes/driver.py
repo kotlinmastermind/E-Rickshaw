@@ -1,11 +1,14 @@
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status, UploadFile, File, Form, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_driver
+from backend.api.routes.notifications import DeviceTokenDeactivatePayload, DeviceTokenPayload
+from backend.application.services.notification_service import NotificationService
 from backend.domain.models import User
+from backend.infrastructure.security.rate_limiter import device_token_rate_limiter
 from backend.application.services.driver_service import DriverService
 from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
 from backend.application.services.cascading_dispatch_service import CascadingDispatchService
@@ -71,7 +74,7 @@ class LocationPingPayload(BaseModel):
     speed_mps: Optional[float] = Field(None, ge=0, le=100)
     accuracy_m: Optional[float] = Field(None, ge=0, le=5000)
     is_mock_location: bool = False
-    location_source: str = Field("FUSED", pattern="^(FUSED|GPS|NETWORK)$")
+    location_source: str = Field("GPS", pattern="^(GPS|NETWORK|PASSIVE|MANUAL|GNSS|FUSED)$")
 
 class DriverProfileUpdate(BaseModel):
     full_name: Optional[str] = None
@@ -423,6 +426,43 @@ async def get_payout_history(
         }
         for p in payouts
     ]
+
+@router.post("/device-token")
+async def register_driver_device_token(
+    request: Request,
+    payload: DeviceTokenPayload,
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db),
+):
+    request.state.user = user
+    await device_token_rate_limiter(request)
+    return await NotificationService(db).register_token(
+        user_id=user.id,
+        fcm_token=payload.fcm_token,
+        device_os=payload.platform or payload.device_os,
+        target_user_id=payload.user_id,
+        actor_role=user.role,
+        device_label=payload.device_label,
+    )
+
+
+@router.delete("/device-token")
+async def deactivate_driver_device_token(
+    request: Request,
+    fcm_token: Optional[str] = Query(None, max_length=512),
+    payload: Optional[DeviceTokenDeactivatePayload] = Body(default=None),
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db),
+):
+    request.state.user = user
+    await device_token_rate_limiter(request)
+    token = payload.fcm_token if payload and payload.fcm_token else fcm_token
+    return await NotificationService(db).deactivate_token(
+        user_id=user.id,
+        fcm_token=token,
+        actor_role=user.role,
+    )
+
 
 @router.delete("/account")
 async def delete_driver_account(

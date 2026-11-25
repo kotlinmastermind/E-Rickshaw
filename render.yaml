@@ -50,6 +50,8 @@ services:
         sync: false
       - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET_PREVIOUS
+        sync: false
       - key: RAZORPAY_MERCHANT_ACCOUNT_ID
         sync: false
       - key: SMS_PROVIDER
@@ -61,4 +63,10 @@ services:
       - key: TWILIO_VERIFY_SERVICE_SID
         sync: false
       - key: TWILIO_API_KEY
+        sync: false
+      - key: PUSH_PROVIDER
+        value: fcm
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: FIREBASE_CREDENTIALS_PATH
         sync: false

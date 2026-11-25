@@ -802,7 +802,7 @@ async def send_broadcast_notification(
 ):
     from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
     result = await AdminFinanceSupportService(db).create_broadcast(
-        admin.id, payload.title, payload.message, payload.target_role, None, {}, None, False)
+        admin.id, payload.title, payload.message, payload.target_role, None, {}, None, False, channel=payload.channel)
     return {**result, "broadcast_id": result["id"], "recipient_count": result["eligible_count"]}
 
 @router.get("/broadcasts")
@@ -1502,6 +1502,169 @@ async def admin_purge_expired_audio(
     from backend.application.services.audio_recording_service import AudioRecordingService
     service = AudioRecordingService(db)
     return await service.purge_expired_recordings()
+
+
+# --- Financial Operations: Payments Search, Refunds, Webhooks & Reconciliation ---
+
+class AdminInitiateRefundPayload(BaseModel):
+    amount_cents: int = Field(..., gt=0)
+    reason: str = Field(..., min_length=5, max_length=255)
+    is_partial: bool = True
+    idempotency_key: Optional[str] = Field(None, min_length=8, max_length=128)
+
+
+class AdminReviewRefundPayload(BaseModel):
+    approve: bool
+    reason: str = Field(..., min_length=10, max_length=500)
+
+
+class AdminResolveAnomalyPayload(BaseModel):
+    resolution_notes: str = Field(..., min_length=5, max_length=500)
+
+
+@router.get("/payments")
+async def admin_list_payments(
+    q: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    purpose: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=500),
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).search_payments(
+        query=q,
+        status_filter=status_filter,
+        purpose_filter=purpose,
+        limit=limit,
+    )
+
+
+@router.post("/payments/{payment_id}/refund")
+async def admin_initiate_refund(
+    payment_id: str,
+    payload: AdminInitiateRefundPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
+    result = await SettlementAdvancedService(db).create_refund(
+        payment_id=payment_id,
+        amount_cents=payload.amount_cents,
+        reason=payload.reason,
+        is_partial=payload.is_partial,
+        idempotency_key=payload.idempotency_key,
+        allow_debt_clawback=True,
+        actor_admin_id=admin.id,
+    )
+    db.add(
+        AdministrativeAuditLog(
+            admin_user_id=admin.id,
+            action="ADMIN_REFUND_INITIATED",
+            target_resource="payments",
+            target_id=payment_id,
+            changes_json=f'{{"amount_cents": {payload.amount_cents}, "status": "{result.get("status")}"}}',
+        )
+    )
+    await db.commit()
+    return result
+
+
+@router.get("/refund-requests")
+async def admin_list_refund_requests(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).refund_requests()
+
+
+@router.post("/refunds/{refund_id}/review")
+async def admin_review_refund(
+    refund_id: str,
+    payload: AdminReviewRefundPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).review_refund(
+        admin_id=admin.id,
+        refund_id=refund_id,
+        approve=payload.approve,
+        reason=payload.reason,
+    )
+
+
+@router.get("/webhooks")
+async def admin_list_webhooks(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).webhook_inbox()
+
+
+@router.post("/webhooks/{inbox_id}/replay")
+async def admin_replay_webhook(
+    inbox_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).replay_webhook(admin_id=admin.id, inbox_id=inbox_id)
+
+
+@router.get("/reconciliation/anomalies")
+async def admin_list_reconciliation_anomalies(
+    status_filter: Optional[str] = None,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).list_reconciliation_anomalies(status_filter=status_filter)
+
+
+@router.post("/reconciliation/anomalies/{anomaly_id}/resolve")
+async def admin_resolve_reconciliation_anomaly(
+    anomaly_id: str,
+    payload: AdminResolveAnomalyPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).resolve_reconciliation_anomaly(
+        admin_id=admin.id,
+        anomaly_id=anomaly_id,
+        notes=payload.resolution_notes,
+    )
+
+
+@router.post("/reconciliation/run")
+async def admin_run_reconciliation(
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payment_reconciliation_service import PaymentReconciliationService
+    lost = await PaymentReconciliationService.reconcile_lost_orders()
+    await PaymentReconciliationService.reconcile_pending_payments()
+    refunds = await PaymentReconciliationService.reconcile_pending_refunds()
+    liabilities = await PaymentReconciliationService.reconcile_refund_liabilities()
+    db.add(
+        AdministrativeAuditLog(
+            admin_user_id=admin.id,
+            action="RECONCILIATION_TRIGGERED",
+            target_resource="payments",
+            target_id="batch",
+            changes_json='{"source": "admin_console"}',
+        )
+    )
+    await db.commit()
+    return {
+        "status": "COMPLETED",
+        "lost_orders": lost,
+        "refunds": refunds,
+        "liabilities": liabilities,
+    }
 
 
 

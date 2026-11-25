@@ -22,6 +22,8 @@ class RiderApplication : Application() {
         
         // Dynamic backend base URL configuration (can point to local FastAPI or Cloud Render deployment)
         NetworkClient.baseUrl = "https://e-rickshaw-z32z.onrender.com/"
+        com.vaisentra.mobility.rider.fcm.RiderFcmManager.init(this)
+        com.vaisentra.mobility.rider.fcm.RiderFcmManager.syncTokenIfAuthenticated(this)
 
         // Non-blocking warmup ping to awaken sleeping Render container
         warmupAndKeepAliveBackend(NetworkClient.baseUrl)

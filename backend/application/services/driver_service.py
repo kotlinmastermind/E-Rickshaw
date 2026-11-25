@@ -552,7 +552,7 @@ class DriverService:
 
     async def update_location(self, user_id: str, lat: float, lng: float, heading: Optional[float] = None,
                               speed_mps: Optional[float] = None, accuracy_m: Optional[float] = None,
-                              is_mock_location: bool = False, location_source: str = "FUSED") -> Dict[str, Any]:
+                              is_mock_location: bool = False, location_source: str = "GPS") -> Dict[str, Any]:
         driver = await self.get_or_create_profile(user_id)
         now = datetime.now(timezone.utc)
         flags = []
@@ -669,7 +669,7 @@ class DriverService:
             speed = item.get("speed_mps") or item.get("speed")
             acc = item.get("accuracy_m") or item.get("accuracy")
             is_mock = item.get("is_mock_location", False)
-            source = item.get("location_source", "FUSED")
+            source = item.get("location_source", "GPS")
 
             rec_at = item.get("timestamp") or item.get("recorded_at")
             if isinstance(rec_at, (int, float)):

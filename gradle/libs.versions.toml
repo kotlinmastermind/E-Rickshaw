@@ -12,7 +12,8 @@ retrofit = "2.9.0"
 gson = "2.10.1"
 okhttp = "4.12.0"
 coroutines = "1.7.3"
-playServicesLocation = "21.2.0"
+firebaseBom = "33.5.1"
+googleServices = "4.4.2"
 mapbox = "11.10.0"
 biometric = "1.1.0"
 fragment = "1.8.5"
@@ -50,7 +51,8 @@ kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
-play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
+firebase-messaging-ktx = { group = "com.google.firebase", name = "firebase-messaging-ktx" }
 mapbox-maps = { group = "com.mapbox.maps", name = "android-ndk27", version.ref = "mapbox" }
 mapbox-compose = { group = "com.mapbox.extension", name = "maps-compose-ndk27", version.ref = "mapbox" }
 razorpay-checkout = { group = "com.razorpay", name = "checkout", version.ref = "razorpay" }
@@ -59,3 +61,4 @@ razorpay-checkout = { group = "com.razorpay", name = "checkout", version.ref = "
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }

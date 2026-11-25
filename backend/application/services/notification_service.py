@@ -1,11 +1,12 @@
-"""Persisted notification inbox, consent, delivery receipts and retry operations."""
+"""Persisted notification inbox, device-token lifecycle, consent, delivery receipts and retry operations."""
 import json
+import logging
 import re
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,10 +16,18 @@ from backend.domain.models import (
     NotificationDeliveryAttempt, NotificationTemplate, User, UserNotificationSettings,
     UserPreferences,
 )
-from backend.integrations.notifications.provider import get_notification_provider, get_notification_provider_health
+from backend.integrations.notifications.provider import (
+    _mask_device_token,
+    get_notification_provider,
+    get_notification_provider_health,
+)
+
+logger = logging.getLogger("notification_service")
 
 LANGUAGES = {"en", "hi", "mr", "gu"}
 CHANNELS = {"PUSH", "EMAIL", "SMS", "IN_APP"}
+DEVICE_PLATFORMS = {"ANDROID", "IOS", "WEB"}
+DEVICE_TOKEN_REGEX = re.compile(r"^[A-Za-z0-9:_\-=.]{8,512}$")
 CRITICAL_EVENTS = {"SAFETY_CASE_OUTCOME", "EMERGENCY_ALERT", "DRIVER_EMERGENCY", "RIDE_SECURITY_ALERT", "EMERGENCY_ANNOUNCEMENT"}
 ACTION_PREFIXES = ("/rides/", "/shared-rides/", "/support/", "/safety/", "/payments/")
 VARIABLE_PATTERN = re.compile(r"{{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*}}")
@@ -55,7 +64,7 @@ class NotificationService:
                 "quiet_hours_enabled": row.quiet_hours_enabled, "quiet_start": row.quiet_start,
                 "quiet_end": row.quiet_end, "timezone": row.timezone_name, "language": row.language_code,
                 "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                "provider_boundary": "In-app inbox and WebSocket alerts are retained. Push and SMS OTP providers are decommissioned."}
+                "provider_boundary": "Firebase Cloud Messaging (FCM HTTP v1) push delivery, in-app inbox, and WebSocket alerts are active. Twilio Verify handles SMS OTP."}
 
     async def update_settings(self, user_id: str, updates: Dict[str, Any], source: str = "MOBILE_APP") -> Dict[str, Any]:
         allowed = {"push_enabled", "email_enabled", "sms_enabled", "quiet_hours_enabled", "quiet_start", "quiet_end", "timezone", "language"}
@@ -131,12 +140,201 @@ class NotificationService:
                  "provider_message_id": r.provider_message_id, "error_code": r.error_code,
                  "attempted_at": r.attempted_at.isoformat(), "completed_at": r.completed_at.isoformat() if r.completed_at else None} for r in rows]
 
-    async def unregister_token(self, user_id: str, token: str) -> Dict[str, Any]:
-        row = (await self.db.execute(select(DeviceToken).where(DeviceToken.user_id == user_id, DeviceToken.fcm_token == token))).scalar_one_or_none()
-        if row:
-            await self.db.delete(row)
+    async def register_token(
+        self,
+        user_id: str,
+        fcm_token: str,
+        device_os: str = "ANDROID",
+        target_user_id: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        device_label: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Registers or refreshes an authenticated user's FCM token without duplicating rows or exposing raw tokens."""
+        if target_user_id and target_user_id.strip() != user_id:
+            logger.warning(
+                "[DEVICE_TOKEN_FORBIDDEN] actor=%s attempted registration for target=%s",
+                user_id, target_user_id.strip(),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot register a device token for another user.",
+            )
+
+        cleaned_token = (fcm_token or "").strip()
+        if not DEVICE_TOKEN_REGEX.fullmatch(cleaned_token):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid FCM device token format.",
+            )
+
+        platform = (device_os or "ANDROID").strip().upper()
+        if platform not in DEVICE_PLATFORMS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Unsupported device platform. Allowed values: ANDROID, IOS, WEB.",
+            )
+
+        now = datetime.now(timezone.utc)
+        existing = (
+            await self.db.execute(select(DeviceToken).where(DeviceToken.fcm_token == cleaned_token))
+        ).scalar_one_or_none()
+
+        if existing:
+            if existing.user_id != user_id and existing.is_active:
+                logger.warning(
+                    "[DEVICE_TOKEN_OWNERSHIP_CONFLICT] actor=%s token=%s currently bound to another active user",
+                    user_id, _mask_device_token(cleaned_token),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Device token is already bound to another active account.",
+                )
+            action = "TOKEN_REACTIVATED" if not existing.is_active or existing.user_id != user_id else "TOKEN_REFRESHED"
+            existing.user_id = user_id
+            existing.device_os = platform
+            existing.is_active = True
+            existing.last_error_at = None
+            existing.last_used_at = now
+            row = existing
+        else:
+            action = "TOKEN_REGISTERED"
+            row = DeviceToken(
+                user_id=user_id,
+                fcm_token=cleaned_token,
+                device_os=platform,
+                is_active=True,
+                last_used_at=now,
+                created_at=now,
+            )
+            self.db.add(row)
+            await self.db.flush()
+
+        audit_meta: Dict[str, Any] = {
+            "device_token_action": action,
+            "device_os": platform,
+            "token_preview": _mask_device_token(cleaned_token),
+        }
+        if actor_role:
+            audit_meta["actor_role"] = actor_role
+        if device_label:
+            audit_meta["device_label"] = device_label.strip()[:64]
+        self.db.add(NotificationConsentAudit(
+            user_id=user_id,
+            source="MOBILE_APP",
+            changes_json=json.dumps(audit_meta, ensure_ascii=False),
+        ))
+        await self.db.commit()
+        await self.db.refresh(row)
+
+        logger.info(
+            "[DEVICE_TOKEN_%s] user_id=%s role=%s os=%s token=%s token_id=%s",
+            action, user_id, actor_role or "unknown", platform, _mask_device_token(cleaned_token), row.id,
+        )
+        return {
+            "registered": True,
+            "action": action,
+            "token_id": row.id,
+            "device_os": row.device_os,
+            "is_active": row.is_active,
+            "token_preview": _mask_device_token(cleaned_token),
+            "last_used_at": row.last_used_at.isoformat() if row.last_used_at else None,
+        }
+
+    async def deactivate_token(
+        self,
+        user_id: str,
+        fcm_token: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Deactivates one device token (or all active tokens for the user if omitted) cleanly on logout."""
+        now = datetime.now(timezone.utc)
+        if fcm_token and fcm_token.strip():
+            cleaned = fcm_token.strip()
+            row = (
+                await self.db.execute(select(DeviceToken).where(DeviceToken.fcm_token == cleaned))
+            ).scalar_one_or_none()
+            if not row:
+                return {"deactivated": False, "deactivated_count": 0}
+            if row.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Cannot deactivate a device token owned by another user.",
+                )
+            was_active = bool(row.is_active)
+            row.is_active = False
+            row.last_used_at = now
+            self.db.add(NotificationConsentAudit(
+                user_id=user_id,
+                source="MOBILE_APP",
+                changes_json=json.dumps({
+                    "device_token_action": "TOKEN_DEACTIVATED",
+                    "token_preview": _mask_device_token(cleaned),
+                    "actor_role": actor_role or "unknown",
+                }),
+            ))
             await self.db.commit()
-        return {"removed": bool(row)}
+            logger.info(
+                "[DEVICE_TOKEN_DEACTIVATED] user_id=%s role=%s token=%s was_active=%s",
+                user_id, actor_role or "unknown", _mask_device_token(cleaned), was_active,
+            )
+            return {"deactivated": True, "deactivated_count": 1 if was_active else 0}
+
+        return await self.deactivate_user_tokens(user_id=user_id, actor_role=actor_role)
+
+    async def deactivate_user_tokens(
+        self,
+        user_id: str,
+        actor_role: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Deactivates all active FCM device tokens owned by the authenticated user."""
+        now = datetime.now(timezone.utc)
+        rows = (
+            await self.db.execute(
+                select(DeviceToken).where(DeviceToken.user_id == user_id, DeviceToken.is_active.is_(True))
+            )
+        ).scalars().all()
+        for row in rows:
+            row.is_active = False
+            row.last_used_at = now
+        if rows:
+            self.db.add(NotificationConsentAudit(
+                user_id=user_id,
+                source="MOBILE_APP",
+                changes_json=json.dumps({
+                    "device_token_action": "ALL_TOKENS_DEACTIVATED",
+                    "deactivated_count": len(rows),
+                    "actor_role": actor_role or "unknown",
+                }),
+            ))
+            await self.db.commit()
+            logger.info(
+                "[DEVICE_TOKEN_ALL_DEACTIVATED] user_id=%s role=%s count=%s",
+                user_id, actor_role or "unknown", len(rows),
+            )
+        return {"deactivated": len(rows) > 0, "deactivated_count": len(rows)}
+
+    async def list_device_registrations(self, user_id: str) -> list[Dict[str, Any]]:
+        """Lists sanitized device-token metadata without exposing raw FCM tokens."""
+        rows = (
+            await self.db.execute(
+                select(DeviceToken).where(DeviceToken.user_id == user_id).order_by(desc(DeviceToken.last_used_at))
+            )
+        ).scalars().all()
+        return [
+            {
+                "id": r.id,
+                "device_os": r.device_os,
+                "is_active": r.is_active,
+                "token_preview": _mask_device_token(r.fcm_token),
+                "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+
+    async def unregister_token(self, user_id: str, token: str) -> Dict[str, Any]:
+        res = await self.deactivate_token(user_id=user_id, fcm_token=token)
+        return {"removed": res["deactivated"]}
 
     async def create_notification(self, user_id: str, event_type: str, title: str, body: str,
                                   data: Optional[Dict[str, Any]] = None, critical: bool = False,

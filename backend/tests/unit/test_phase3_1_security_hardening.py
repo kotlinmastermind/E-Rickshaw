@@ -333,20 +333,20 @@ async def test_password_recovery_endpoints_fail_safely_and_honestly(db_session):
 
 
 @pytest.mark.asyncio
-async def test_obsolete_fcm_endpoints_are_unregistered(db_session):
+async def test_fcm_device_token_endpoints_require_authentication(db_session):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        # 1. Customer device-token
-        r1 = await ac.post("/api/v1/customers/device-token", json={"fcm_token": "token123"})
-        assert r1.status_code in (404, 405)
+        # 1. Customer device-token requires authentication
+        r1 = await ac.post("/api/v1/customers/device-token", json={"fcm_token": "valid_fcm_token_12345"})
+        assert r1.status_code in (401, 403)
 
-        # 2. Driver device-token
-        r2 = await ac.post("/api/v1/drivers/device-token", json={"fcm_token": "token123"})
-        assert r2.status_code in (404, 405)
+        # 2. Driver device-token requires authentication
+        r2 = await ac.post("/api/v1/drivers/device-token", json={"fcm_token": "valid_fcm_token_12345"})
+        assert r2.status_code in (401, 403)
 
-        # 3. Notification device-token DELETE
+        # 3. Notification device-token DELETE requires authentication
         r3 = await ac.delete("/api/v1/notifications/device-token")
-        assert r3.status_code in (404, 405)
+        assert r3.status_code in (401, 403)
 
 
 def test_ride_boarding_pin_and_totp_mfa_systems_remain_functional():

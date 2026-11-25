@@ -1,7 +1,7 @@
 """User notification preferences/inbox and privileged delivery operations."""
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,9 +9,22 @@ from backend.api.deps import get_current_admin, get_current_user
 from backend.application.services.notification_service import NotificationService
 from backend.domain.models import User
 from backend.infrastructure.database.session import get_db
+from backend.infrastructure.security.rate_limiter import device_token_rate_limiter
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 admin_router = APIRouter(prefix="/admin/notification-ops", tags=["Admin Notification Operations"])
+
+
+class DeviceTokenPayload(BaseModel):
+    fcm_token: str = Field(..., min_length=8, max_length=512)
+    device_os: str = Field("ANDROID", max_length=20)
+    platform: Optional[str] = Field(None, max_length=20)
+    user_id: Optional[str] = Field(None, max_length=64)
+    device_label: Optional[str] = Field(None, max_length=64)
+
+
+class DeviceTokenDeactivatePayload(BaseModel):
+    fcm_token: Optional[str] = Field(None, min_length=8, max_length=512)
 
 
 class PreferencesPayload(BaseModel):
@@ -85,6 +98,51 @@ async def mark_all_notifications_read(user: User = Depends(get_current_user), db
 @router.get("/inbox/{notification_id}/receipts")
 async def get_notification_receipts(notification_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     return await NotificationService(db).receipts(user.id, notification_id)
+
+
+@router.post("/device-token")
+async def register_device_token(
+    request: Request,
+    payload: DeviceTokenPayload,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    request.state.user = user
+    await device_token_rate_limiter(request)
+    return await NotificationService(db).register_token(
+        user_id=user.id,
+        fcm_token=payload.fcm_token,
+        device_os=payload.platform or payload.device_os,
+        target_user_id=payload.user_id,
+        actor_role=user.role,
+        device_label=payload.device_label,
+    )
+
+
+@router.get("/device-tokens")
+async def list_device_tokens(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await NotificationService(db).list_device_registrations(user.id)
+
+
+@router.delete("/device-token")
+async def deactivate_device_token(
+    request: Request,
+    fcm_token: Optional[str] = Query(None, max_length=512),
+    payload: Optional[DeviceTokenDeactivatePayload] = Body(default=None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    request.state.user = user
+    await device_token_rate_limiter(request)
+    token = (payload.fcm_token if payload and payload.fcm_token else fcm_token)
+    return await NotificationService(db).deactivate_token(
+        user_id=user.id,
+        fcm_token=token,
+        actor_role=user.role,
+    )
 
 
 @admin_router.get("/dashboard")

@@ -309,7 +309,7 @@ class DriverLocation(Base):
     accuracy: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     spoof_risk_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     quality_flags_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
-    source: Mapped[str] = mapped_column(String(24), default="FUSED", nullable=False)
+    source: Mapped[str] = mapped_column(String(24), default="GPS", nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
     driver: Mapped["DriverProfile"] = relationship(back_populates="locations")
@@ -992,6 +992,7 @@ class Payment(Base):
     status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True, nullable=False)
     
     provider_name: Mapped[str] = mapped_column(String(30), default="RAZORPAY", nullable=False)
+    merchant_account_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     provider_order_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
     provider_payment_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
     provider_signature: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
@@ -1352,9 +1353,12 @@ class PaymentRefund(Base):
     excess_amount_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_partial: Mapped[bool] = mapped_column(Boolean, default=False)
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), default="INITIATED")  # INITIATED, GATEWAY_PROCESSING, CREDITED, FAILED, ANOMALY_EXCESS
+    status: Mapped[str] = mapped_column(String(30), default="INITIATED")  # INITIATED, GATEWAY_PROCESSING, CREDITED, PROCESSED, FAILED, ANOMALY_EXCESS, PARTIALLY_APPLIED_EXCESS
     provider_refund_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(96), unique=True, index=True, nullable=True)
     arn_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # Bank ARN or legacy ref
+    last_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    settled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     estimated_settlement_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     approval_status: Mapped[str] = mapped_column(String(24), default="APPROVED", nullable=False)
     requested_by_admin_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
@@ -1385,6 +1389,26 @@ class RefundLiability(Base):
     debited_from_wallet_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     outstanding_recovery_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="ACTIVE", nullable=False)  # ACTIVE, RECOVERED, WRITTEN_OFF
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class PaymentOrderAttempt(Base):
+    """
+    Preserves every Razorpay order attempt associated with an internal Payment,
+    enabling safe recovery of late captures on superseded orders and lost order responses.
+    """
+    __tablename__ = "payment_order_attempts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    payment_id: Mapped[str] = mapped_column(String(36), ForeignKey("payments.id"), nullable=False, index=True)
+    provider_order_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
+    receipt: Mapped[Optional[str]] = mapped_column(String(64), index=True, nullable=True)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(96), index=True, nullable=True)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
+    merchant_account_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="CREATED", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
