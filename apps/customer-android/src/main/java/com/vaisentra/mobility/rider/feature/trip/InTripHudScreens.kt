@@ -707,15 +707,34 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
     // Domain H: Dynamic Mid-Trip Destination Change Modal
     if (showChangeDestSheet) {
         MidTripDestinationChangeModal(
-            currentDest = bookingDraft.destinationAddress.ifBlank { "Connaught Place Gate 4" },
+            currentDest = bookingDraft.destinationAddress.ifBlank { "Current Destination" },
             onDismiss = { showChangeDestSheet = false },
-            onConfirmNewDestination = { newDest, _, extraCostRupees ->
+            onConfirmNewDestination = { newDest, resolvedResult, extraCostRupees ->
                 val rideId = activeRide?.id ?: "ride-latest"
                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    RiderRepository.requestDestinationChange(rideId, newDest, 28.5562, 77.1000)
+                    val target = resolvedResult
+                        ?: RiderRepository.searchMapboxPlaces(newDest).firstOrNull()
+                    if (target == null || !com.vaisentra.mobility.rider.data.NativeLocationEvaluator.isValidCoordinate(target.latitude, target.longitude)) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            DialogController.showToast("Select a valid destination from search suggestions.")
+                        }
+                        return@launch
+                    }
+                    val res = RiderRepository.requestDestinationChange(
+                        rideId = rideId,
+                        newAddress = target.full_address.ifBlank { newDest },
+                        latitude = target.latitude,
+                        longitude = target.longitude
+                    )
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        showChangeDestSheet = false
+                        if (res.isSuccess) {
+                            DialogController.showToast("Destination updated! Pilot notified (+₹${extraCostRupees.toInt()}).")
+                        } else {
+                            DialogController.showToast("Could not update destination: ${res.exceptionOrNull()?.message}")
+                        }
+                    }
                 }
-                showChangeDestSheet = false
-                DialogController.showToast("Destination updated in Supabase! Pilot notified (+₹${extraCostRupees.toInt()}).")
             }
         )
     }
@@ -726,19 +745,30 @@ fun TelemetryHudScreen(onNavigate: (String) -> Unit) {
 private fun MidTripDestinationChangeModal(
     currentDest: String,
     onDismiss: () -> Unit,
-    onConfirmNewDestination: (String, Double, Double) -> Unit
+    onConfirmNewDestination: (String, com.vaisentra.mobility.rider.data.MapSearchResult?, Double) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedNewDest by remember { mutableStateOf("") }
+    var selectedPlace by remember { mutableStateOf<com.vaisentra.mobility.rider.data.MapSearchResult?>(null) }
+    var searchResults by remember { mutableStateOf<List<com.vaisentra.mobility.rider.data.MapSearchResult>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
     var extraDistance by remember { mutableStateOf(1.8) }
     var extraFare by remember { mutableStateOf(35.0) }
 
-    val quickDestinations = listOf(
-        Triple("Rajiv Chowk Metro", 1.2, 25.0),
-        Triple("Building 9A, DLF Cyber City", 4.5, 75.0),
-        Triple("Terminal 3, IGI Airport", 8.2, 140.0),
-        Triple("Noida Sector 62 Metro", 5.0, 85.0)
-    )
+    LaunchedEffect(searchQuery) {
+        val trimmed = searchQuery.trim()
+        if (trimmed.length >= 2) {
+            isSearching = true
+            delay(250L)
+            searchResults = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                RiderRepository.searchMapboxPlaces(trimmed)
+            }
+            isSearching = false
+        } else {
+            searchResults = emptyList()
+            isSearching = false
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -765,6 +795,7 @@ private fun MidTripDestinationChangeModal(
                     onValueChange = {
                         searchQuery = it
                         selectedNewDest = it
+                        selectedPlace = null
                     },
                     placeholder = "Search new place...",
                     label = "New Destination Address",
@@ -772,12 +803,12 @@ private fun MidTripDestinationChangeModal(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
-                Text(text = "QUICK PRESETS:", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text(text = if (isSearching) "SEARCHING LOCATIONS..." else "MATCHING DESTINATIONS:", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    quickDestinations.forEach { (place, dist, cost) ->
-                        val isChosen = selectedNewDest == place
+                    searchResults.take(4).forEach { result ->
+                        val isChosen = selectedPlace == result
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -785,19 +816,14 @@ private fun MidTripDestinationChangeModal(
                                 .background(if (isChosen) SapphireGlow else SurfaceCard)
                                 .border(1.dp, if (isChosen) BorderFocus else BorderSubtle, RoundedCornerShape(10.dp))
                                 .clickable {
-                                    selectedNewDest = place
-                                    extraDistance = dist
-                                    extraFare = cost
+                                    selectedPlace = result
+                                    selectedNewDest = result.full_address.ifBlank { result.name }
                                 }
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(text = place, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                Text(text = "+₹${cost.toInt()} (+${dist}km)", color = ElectricCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Column {
+                                Text(text = result.name, color = TextWhite, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                Text(text = result.full_address, color = TextMuted, fontSize = 10.sp, maxLines = 1)
                             }
                         }
                     }
@@ -832,7 +858,7 @@ private fun MidTripDestinationChangeModal(
                 text = "Confirm & Reroute →",
                 enabled = selectedNewDest.isNotBlank(),
                 onClick = {
-                    onConfirmNewDestination(selectedNewDest, extraDistance, extraFare)
+                    onConfirmNewDestination(selectedNewDest, selectedPlace, extraFare)
                 },
                 backgroundColor = SapphirePrimary,
                 modifier = Modifier.fillMaxWidth()

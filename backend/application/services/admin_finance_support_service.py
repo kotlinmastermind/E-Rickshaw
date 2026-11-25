@@ -210,25 +210,51 @@ class AdminFinanceSupportService:
                  "settled_at": r.settled_at.isoformat() if getattr(r, "settled_at", None) else None,
                  "review_reason": r.review_reason} for r, p in rows]
 
-    async def create_refund_request(self, admin_id: str, payment_id: str, amount: int, reason: str) -> Dict[str, Any]:
-        payment = await self.db.get(Payment, payment_id)
-        if not payment: raise HTTPException(404, "Payment not found.")
+    async def create_refund_request(self, admin_id: str, payment_id: str, amount: int, reason: str, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
+        clean_idem = idempotency_key.strip() if isinstance(idempotency_key, str) and idempotency_key.strip() else None
+        if clean_idem is not None and (len(clean_idem) < 8 or len(clean_idem) > 128):
+            raise HTTPException(422, "idempotency_key must be between 8 and 128 characters.")
+        if clean_idem:
+            existing_req = (
+                await self.db.execute(select(PaymentRefund).where(PaymentRefund.idempotency_key == clean_idem))
+            ).scalar_one_or_none()
+            if existing_req:
+                if existing_req.payment_id != payment_id or existing_req.amount_cents != amount:
+                    raise HTTPException(409, "Refund idempotency_key is already bound to a different payment or amount.")
+                return {"id": existing_req.id, "approval_status": existing_req.approval_status, "status": existing_req.status, "amount_cents": existing_req.amount_cents, "idempotent_replay": True}
+
+        payment = (
+            await self.db.execute(select(Payment).where(Payment.id == payment_id).with_for_update())
+        ).scalar_one_or_none()
+        if not payment:
+            raise HTTPException(404, "Payment not found.")
+        if payment.status not in {"CAPTURED", "SETTLED", "SUCCESS", "PARTIALLY_REFUNDED", "REFUND_PENDING"}:
+            raise HTTPException(409, "Only captured or settled payments can be submitted for refund review.")
         pending_or_approved = int(await self.db.scalar(select(func.coalesce(func.sum(PaymentRefund.amount_cents), 0)).where(
             PaymentRefund.payment_id == payment.id,
             PaymentRefund.status.in_(["INITIATED", "PENDING", "GATEWAY_PROCESSING", "PENDING_APPROVAL", "APPROVED_AWAITING_PROVIDER"])
         )) or 0)
-        remaining = payment.amount_cents - (payment.refunded_amount_cents or 0) - pending_or_approved
-        if amount <= 0 or amount > remaining: raise HTTPException(422, "Refund amount must be positive and no greater than the unrefunded captured amount.")
-        if payment.status not in {"CAPTURED", "SETTLED", "SUCCESS", "PARTIALLY_REFUNDED", "REFUND_PENDING"}:
-            raise HTTPException(409, "Only captured or settled payments can be submitted for refund review.")
-        row = PaymentRefund(payment_id=payment.id, ride_id=payment.ride_id, customer_id=payment.customer_id,
-                            amount_cents=amount, is_partial=amount < remaining, reason=reason.strip(),
-                            status="PENDING_APPROVAL", approval_status="PENDING", requested_by_admin_id=admin_id)
+        remaining = int(payment.amount_cents) - int(payment.refunded_amount_cents or 0) - pending_or_approved
+        if amount <= 0 or amount > remaining:
+            raise HTTPException(422, "Refund amount must be positive and no greater than the unrefunded captured amount.")
+        row = PaymentRefund(
+            payment_id=payment.id,
+            ride_id=payment.ride_id,
+            customer_id=payment.customer_id,
+            amount_cents=amount,
+            is_partial=amount < remaining,
+            reason=reason.strip()[:255],
+            status="PENDING_APPROVAL",
+            approval_status="PENDING",
+            idempotency_key=clean_idem,
+            requested_by_admin_id=admin_id,
+        )
         self.db.add(row)
         await self.db.flush()
-        self.audit(admin_id, "REFUND_REQUEST_CREATED", "payment_refunds", row.id, {"payment_id": payment.id, "amount_cents": amount, "reason": reason.strip()})
+        row_id = row.id
+        self.audit(admin_id, "REFUND_REQUEST_CREATED", "payment_refunds", row_id, {"payment_id": payment.id, "amount_cents": amount, "reason": reason.strip()})
         await self.db.commit()
-        return {"id": row.id, "approval_status": row.approval_status, "status": row.status, "amount_cents": row.amount_cents}
+        return {"id": row_id, "approval_status": "PENDING", "status": "PENDING_APPROVAL", "amount_cents": amount}
 
     async def review_refund(self, admin_id: str, refund_id: str, approve: bool, reason: str) -> Dict[str, Any]:
         row = (await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == refund_id).with_for_update())).scalar_one_or_none()

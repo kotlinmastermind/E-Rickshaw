@@ -2,6 +2,7 @@ package com.vaisentra.mobility.driver.data
 
 import com.google.gson.Gson
 import com.vaisentra.mobility.driver.fcm.DriverFcmDeepLinkResolver
+import com.vaisentra.mobility.driver.fcm.FcmTokenSyncPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -97,6 +98,82 @@ class NativeLocationAndFcmTest {
         assertEquals(
             "notifications",
             DriverFcmDeepLinkResolver.resolveRoute(mapOf("event_type" to "ADMIN_BROADCAST"))
+        )
+    }
+
+    @Test
+    fun driverDefaults_haveNoFabricatedDelhiCoordinatesAndUseMapbox() {
+        val initialLocation = DriverLiveLocation()
+        assertFalse(initialLocation.hasValidCoordinates())
+        assertEquals(0.0, initialLocation.latitude, 1e-6)
+        assertEquals(0.0, initialLocation.longitude, 1e-6)
+        assertFalse(initialLocation.isLiveGps)
+
+        val prefs = DriverPreferencesState()
+        assertEquals("MAPBOX", prefs.navigationProvider)
+    }
+
+    @Test
+    fun fcmTokenSyncPolicy_preventsDuplicateSyncAndTracksAccountChanges() {
+        val payload = """{"sub":"drv-user-42","role":"driver"}"""
+        val b64Payload = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(payload.toByteArray(Charsets.UTF_8))
+        val jwtDriverA = "eyJhbGciOiJIUzI1NiJ9.$b64Payload.sig"
+        val jwtDriverB = "eyJhbGciOiJIUzI1NiJ9." +
+            java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("""{"sub":"drv-user-99"}""".toByteArray(Charsets.UTF_8)) + ".sig"
+
+        assertEquals("drv-user-42", FcmTokenSyncPolicy.extractUserSubject(jwtDriverA))
+
+        // Unsynced -> should register
+        assertTrue(
+            FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                fcmToken = "fcm_token_driver_abc12345",
+                lastSyncedToken = null,
+                currentUserKey = "drv-user-42",
+                lastSyncedUserKey = null
+            )
+        )
+
+        // Same user & same token already synced -> skip duplicate POST
+        assertFalse(
+            FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                fcmToken = "fcm_token_driver_abc12345",
+                lastSyncedToken = "fcm_token_driver_abc12345",
+                currentUserKey = "drv-user-42",
+                lastSyncedUserKey = "drv-user-42"
+            )
+        )
+
+        // Token rotated -> must re-register
+        assertTrue(
+            FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                fcmToken = "fcm_token_driver_rotated_99",
+                lastSyncedToken = "fcm_token_driver_abc12345",
+                currentUserKey = "drv-user-42",
+                lastSyncedUserKey = "drv-user-42"
+            )
+        )
+
+        // Different authenticated driver on same device -> must re-register
+        assertTrue(
+            FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                fcmToken = "fcm_token_driver_abc12345",
+                lastSyncedToken = "fcm_token_driver_abc12345",
+                currentUserKey = FcmTokenSyncPolicy.extractUserSubject(jwtDriverB),
+                lastSyncedUserKey = "drv-user-42"
+            )
+        )
+
+        // Forced sync on explicit login -> always registers
+        assertTrue(
+            FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                fcmToken = "fcm_token_driver_abc12345",
+                lastSyncedToken = "fcm_token_driver_abc12345",
+                currentUserKey = "drv-user-42",
+                lastSyncedUserKey = "drv-user-42",
+                force = true
+            )
         )
     }
 }

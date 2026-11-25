@@ -36,6 +36,11 @@ object NetworkClient {
 
     fun init(context: android.content.Context) {
         sharedPrefs = context.applicationContext.getSharedPreferences(PREF_NAME, android.content.Context.MODE_PRIVATE)
+        mapboxPublicToken = try {
+            context.applicationContext.getString(com.vaisentra.mobility.rider.R.string.mapbox_access_token).trim()
+        } catch (_: Exception) {
+            ""
+        }
         authToken = sharedPrefs?.getString(KEY_TOKEN, null)
         refreshToken = sharedPrefs?.getString(KEY_REFRESH_TOKEN, null)
 
@@ -49,6 +54,9 @@ object NetworkClient {
     // Default to Android Emulator host or local LAN server (configurable at runtime)
     @Volatile
     var baseUrl: String = "https://e-rickshaw-z32z.onrender.com/"
+
+    @Volatile
+    var mapboxPublicToken: String = ""
 
     @Volatile
     var authToken: String? = null
@@ -91,6 +99,19 @@ object NetworkClient {
         } catch (e: Exception) {
             Log.w(TAG, "Error checking token expiration: ${e.message}")
             false
+        }
+    }
+
+    fun currentUserId(): String? {
+        val token = authToken ?: return null
+        return try {
+            val parts = token.split(".")
+            if (parts.size < 2) return null
+            val decodedBytes = Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+            val sub = JSONObject(String(decodedBytes)).optString("sub", "").trim()
+            sub.takeIf { it.isNotEmpty() }
+        } catch (_: Exception) {
+            null
         }
     }
 

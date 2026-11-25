@@ -155,135 +155,40 @@ async def verify_wallet_topup(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Stage 2: Cryptographically verifies Razorpay payment signature, queries Razorpay API
-    for server-side capture status & merchant account, and commits atomic credit to Wallet Ledger.
+    Stage 2: Cryptographically verifies Razorpay payment signature, validates authoritative
+    gateway payment fields fail-closed, and commits atomic credit to Wallet Ledger via
+    the unified backend verification and capture engine.
     """
-    provider = get_payment_provider()
-
-    # 1. Cryptographic HMAC-SHA256 signature verification
-    is_valid = provider.verify_payment_signature(
+    actor_user_id = user.id
+    actor_role = getattr(user, "role", None)
+    verify_res = await PaymentService(db).verify_checkout_and_finalize_capture(
+        actor_user_id=actor_user_id,
+        actor_role=actor_role,
         razorpay_order_id=payload.razorpay_order_id,
         razorpay_payment_id=payload.razorpay_payment_id,
-        razorpay_signature=payload.razorpay_signature
+        razorpay_signature=payload.razorpay_signature,
+        expected_purpose="WALLET_TOPUP",
     )
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cryptographic verification failed: Invalid Razorpay signature."
-        )
 
-    # 2. Pre-read persisted payment record and verify ownership without holding DB lock across external HTTP
-    stmt_pre = select(Payment).where(
-        Payment.provider_order_id == payload.razorpay_order_id,
-        Payment.purpose == "WALLET_TOPUP",
-    )
-    pre_payment = (await db.execute(stmt_pre)).scalar_one_or_none()
-    if not pre_payment:
-        attempt = (
-            await db.execute(
-                select(PaymentOrderAttempt).where(
-                    PaymentOrderAttempt.provider_order_id == payload.razorpay_order_id
-                )
-            )
-        ).scalar_one_or_none()
-        if attempt:
-            pre_payment = (
-                await db.execute(
-                    select(Payment).where(Payment.id == attempt.payment_id, Payment.purpose == "WALLET_TOPUP")
-                )
-            ).scalar_one_or_none()
-
-    if not pre_payment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No wallet top-up order matches {payload.razorpay_order_id}."
-        )
-
-    if pre_payment.user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: You do not own this payment order."
-        )
-
-    if pre_payment.status in ("CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"):
-        balance_info = await WalletService.get_balance(db, user.id)
+    balance_info = await WalletService.get_balance(db, actor_user_id)
+    if verify_res.get("already_processed"):
         return {
             "status": "ALREADY_PROCESSED",
             "message": "Payment was already verified and credited.",
-            "payment_id": pre_payment.provider_payment_id,
-            "balance_rupees": balance_info["balance_cents"] / 100.0
+            "payment_id": verify_res.get("payment_id"),
+            "order_id": verify_res.get("order_id"),
+            "balance_cents": balance_info["balance_cents"],
+            "balance_rupees": balance_info["balance_cents"] / 100.0,
         }
 
-    # 3. Server-side gateway verification via Razorpay REST API (outside DB write lock)
-    gateway_data = await provider.fetch_payment(
-        payload.razorpay_payment_id,
-        expected_amount_cents=pre_payment.amount_cents,
-        expected_order_id=payload.razorpay_order_id,
-    )
-    if gateway_data.get("id") and gateway_data.get("id") != payload.razorpay_payment_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Authoritative payment ID mismatch with gateway."
-        )
-    if gateway_data.get("order_id") and gateway_data.get("order_id") != payload.razorpay_order_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Authoritative payment does not correspond to expected Razorpay order."
-        )
-    acct_ok, acct_reason = provider.validate_merchant_account(gateway_data.get("account_id"))
-    if not acct_ok:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=acct_reason)
-    if str(gateway_data.get("currency", "INR")).upper() != "INR":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid transaction currency: {gateway_data.get('currency')}. Must be INR."
-        )
-    if gateway_data.get("status") != "captured":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Payment status is {gateway_data.get('status')}; expected captured."
-        )
-    if gateway_data.get("amount") != pre_payment.amount_cents:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Amount tampering detected: Captured gateway amount differs from order."
-        )
-
-    # 4. Acquire pessimistic lock and atomically finalize credit via single-source capture engine
-    payment = (
-        await db.execute(select(Payment).where(Payment.id == pre_payment.id).with_for_update())
-    ).scalar_one_or_none()
-    if not payment:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record disappeared.")
-    if gateway_data.get("account_id") and not payment.merchant_account_id:
-        payment.merchant_account_id = gateway_data.get("account_id")
-    if payment.provider_order_id != payload.razorpay_order_id:
-        payment.provider_order_id = payload.razorpay_order_id
-
-    if payment.status in ("CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"):
-        balance_info = await WalletService.get_balance(db, user.id)
-        return {
-            "status": "ALREADY_PROCESSED",
-            "message": "Payment was already verified and credited.",
-            "payment_id": payment.provider_payment_id,
-            "balance_rupees": balance_info["balance_cents"] / 100.0
-        }
-
-    payment_service = PaymentService(db)
-    await payment_service.finalize_payment_capture(
-        payment=payment,
-        provider_payment_id=payload.razorpay_payment_id,
-        provider_signature=payload.razorpay_signature
-    )
-
-    balance_info = await WalletService.get_balance(db, user.id)
     return {
         "status": "SUCCESS",
         "message": "Payment verified and credited to commuter wallet.",
-        "payment_id": payload.razorpay_payment_id,
-        "amount_rupees": round(payment.amount_cents / 100.0, 2),
+        "payment_id": verify_res.get("payment_id"),
+        "order_id": verify_res.get("order_id"),
+        "amount_rupees": round(int(verify_res.get("amount_cents") or 0) / 100.0, 2),
         "balance_cents": balance_info["balance_cents"],
-        "balance_rupees": balance_info["balance_cents"] / 100.0
+        "balance_rupees": balance_info["balance_cents"] / 100.0,
     }
 
 
@@ -349,6 +254,10 @@ async def create_compensating_transaction(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Administrative single compensation limit exceeded (maximum ₹5,000.00 / 500,000 paise)."
             )
+        comp_digest = hashlib.sha256(
+            f"{payload.user_id}:{payload.amount_cents}:{payload.reason.strip()}".encode("utf-8")
+        ).hexdigest()[:48]
+        scoped_comp_idem = (payload.idempotency_key or "").strip()[:64] or f"adm_comp_{comp_digest}"
         comp_tx = await WalletService.credit_wallet(
             session=db,
             user_id=payload.user_id,
@@ -357,7 +266,7 @@ async def create_compensating_transaction(
             source="ADMIN_CONCIERGE",
             reference_id=f"adm_{admin.id[:8]}",
             description=f"Admin compensation: {payload.reason}",
-            idempotency_key=payload.idempotency_key or f"adm_comp_{payload.user_id}_{payload.amount_cents}_{payload.reason[:16]}"
+            idempotency_key=scoped_comp_idem,
         )
 
     await db.commit()

@@ -806,10 +806,29 @@ class SupportAdvancedService:
         requested_cents: Optional[int] = None,
         explanation: str = ""
     ) -> Dict[str, Any]:
-        ride = await self.db.get(Ride, ride_id)
+        import hashlib
+
+        ride = (
+            await self.db.execute(select(Ride).where(Ride.id == ride_id).with_for_update())
+        ).scalar_one_or_none()
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found")
         await self._verify_ride_ownership(user_id, ride)
+
+        existing_claim = (
+            await self.db.execute(
+                select(SupportTicket).where(
+                    SupportTicket.user_id == user_id,
+                    SupportTicket.ride_id == ride_id,
+                    SupportTicket.category == "REFUND_REQUEST",
+                )
+            )
+        ).scalars().first()
+        if existing_claim:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A refund claim ({existing_claim.ticket_number}) already exists for this ride.",
+            )
 
         # Find payment for ride
         pay_res = await self.db.execute(select(Payment).where(Payment.ride_id == ride_id))
@@ -820,7 +839,7 @@ class SupportAdvancedService:
         claim_cents = requested_cents if requested_cents and requested_cents > 0 else max_refund_cents
         claim_cents = min(claim_cents, max_refund_cents)
 
-        # Goodwill auto-refund rule: claims <= ₹500 (50000 cents) for minor grievances auto-credit to wallet
+        # Goodwill auto-refund rule: claims <= ₹500 (50000 cents) once per ride auto-credit to wallet
         auto_approved = claim_cents <= 50000
 
         ticket_number = f"TCK-{utc_now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
@@ -843,6 +862,7 @@ class SupportAdvancedService:
         await self.db.flush()
 
         if auto_approved:
+            goodwill_idem = f"gw_{hashlib.sha256(f'{ride_id}:{user_id}'.encode('utf-8')).hexdigest()[:40]}"
             await WalletService.credit_wallet(
                 session=self.db,
                 user_id=user_id,
@@ -851,7 +871,7 @@ class SupportAdvancedService:
                 source="REFUND",
                 reference_id=ticket.id,
                 description=f"Instant Goodwill Refund for Ride {ride_id[:8]}",
-                idempotency_key=f"ref-{ticket.id}",
+                idempotency_key=goodwill_idem,
             )
             ticket.resolved_at = utc_now()
 

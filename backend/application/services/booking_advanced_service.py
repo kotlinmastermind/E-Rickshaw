@@ -1000,44 +1000,86 @@ END:VCALENDAR"""
     # 10. SHARED LOCATION LINK PARSER (Feature 49)
     # ---------------------------------------------------------
     @staticmethod
+    def _is_valid_lat_lng(lat: float, lng: float) -> bool:
+        if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+            return False
+        return not (lat == 0.0 and lng == 0.0)
+
+    @staticmethod
     def parse_shared_location_link(raw_link: str) -> Dict[str, Any]:
         """Parses shared Mapbox/Geo URIs, pin links, and Deep Links into coordinates and label."""
         text = raw_link.strip()
-        lat, lng, label = 19.0760, 72.8777, "Shared VIP Location"
+        default_label = "Shared Location"
 
-        # Match geo:19.0760,72.8777
+        # Match geo:lat,lng
         geo_match = re.search(r"geo:([-+]?\d*\.?\d+),([-+]?\d*\.?\d+)", text)
         if geo_match:
             lat = float(geo_match.group(1))
             lng = float(geo_match.group(2))
-            return {"latitude": lat, "longitude": lng, "label": label, "source": "GEO_URI"}
+            if BookingAdvancedService._is_valid_lat_lng(lat, lng):
+                return {
+                    "latitude": lat,
+                    "longitude": lng,
+                    "label": default_label,
+                    "source": "GEO_URI",
+                    "coordinates_found": True,
+                }
 
-        # Match shared URL query parameter ?q=19.0760,72.8777
+        # Match shared URL query parameter ?q=lat,lng
         q_match = re.search(r"[?&]q=([-+]?\d*\.?\d+),([-+]?\d*\.?\d+)", text)
         if q_match:
             lat = float(q_match.group(1))
             lng = float(q_match.group(2))
-            return {"latitude": lat, "longitude": lng, "label": label, "source": "SHARED_PIN"}
+            if BookingAdvancedService._is_valid_lat_lng(lat, lng):
+                return {
+                    "latitude": lat,
+                    "longitude": lng,
+                    "label": default_label,
+                    "source": "SHARED_PIN",
+                    "coordinates_found": True,
+                }
 
-        # Match custom deep link grandchauffeur://book?lat=19.0760&lng=72.8777&name=...
+        # Match custom deep link grandchauffeur://book?lat=...&lng=...&name=...
         if "grandchauffeur://" in text or "http" in text:
             parsed = urllib.parse.urlparse(text)
             params = urllib.parse.parse_qs(parsed.query)
             if "lat" in params and "lng" in params:
-                lat = float(params["lat"][0])
-                lng = float(params["lng"][0])
-                if "name" in params:
-                    label = params["name"][0]
-                return {"latitude": lat, "longitude": lng, "label": label, "source": "DEEP_LINK"}
+                try:
+                    lat = float(params["lat"][0])
+                    lng = float(params["lng"][0])
+                except (TypeError, ValueError):
+                    lat, lng = 0.0, 0.0
+                if BookingAdvancedService._is_valid_lat_lng(lat, lng):
+                    label = params["name"][0] if "name" in params else default_label
+                    return {
+                        "latitude": lat,
+                        "longitude": lng,
+                        "label": label,
+                        "source": "DEEP_LINK",
+                        "coordinates_found": True,
+                    }
 
-        # Match plain coordinate pair "19.0760, 72.8777"
+        # Match plain coordinate pair "lat, lng"
         plain_coords = re.search(r"([-+]?\d{1,2}\.\d+)[,\s]+([-+]?\d{1,3}\.\d+)", text)
         if plain_coords:
             lat = float(plain_coords.group(1))
             lng = float(plain_coords.group(2))
-            return {"latitude": lat, "longitude": lng, "label": label, "source": "COORDINATE_TEXT"}
+            if BookingAdvancedService._is_valid_lat_lng(lat, lng):
+                return {
+                    "latitude": lat,
+                    "longitude": lng,
+                    "label": default_label,
+                    "source": "COORDINATE_TEXT",
+                    "coordinates_found": True,
+                }
 
-        return {"latitude": lat, "longitude": lng, "label": text[:64], "source": "RAW_TEXT"}
+        return {
+            "latitude": None,
+            "longitude": None,
+            "label": text[:64],
+            "source": "RAW_TEXT",
+            "coordinates_found": False,
+        }
 
     # Helper
     async def _resolve_customer_profile(self, user_id: str) -> CustomerProfile:

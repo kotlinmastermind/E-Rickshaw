@@ -105,9 +105,21 @@ fun RouteDeviationScreen(
                         isSubmitting = true
                         scope.launch {
                             val liveLoc = DriverRepository.driverLocation.value
-                            val currentLat = if (liveLoc.latitude != 0.0) liveLoc.latitude else 28.6139
-                            val currentLng = if (liveLoc.longitude != 0.0) liveLoc.longitude else 77.2090
-                            val res = DriverRepository.reportRouteDeviation(rideId, currentLat, currentLng, reason = selectedReason)
+                            val ride = DriverRepository.activeRide.value
+                            val validCoords = when {
+                                com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(liveLoc.latitude, liveLoc.longitude) ->
+                                    liveLoc.latitude to liveLoc.longitude
+                                ride?.pickupLatitude != null && ride.pickupLongitude != null &&
+                                    com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(ride.pickupLatitude, ride.pickupLongitude) ->
+                                    ride.pickupLatitude to ride.pickupLongitude
+                                else -> null
+                            }
+                            if (validCoords == null) {
+                                isSubmitting = false
+                                onShowToast("Acquiring live GPS fix; please try again once GPS locks.")
+                                return@launch
+                            }
+                            val res = DriverRepository.reportRouteDeviation(rideId, validCoords.first, validCoords.second, reason = selectedReason)
                             isSubmitting = false
                             if (res.isSuccess) {
                                 onShowToast("Detour reason logged: $selectedReason")

@@ -409,19 +409,20 @@ async def test_notification_service_deactivates_unregistered_token_and_admin_pus
 
 
 @pytest.mark.asyncio
-async def test_google_fonts_preserved_and_navigation_defaults_non_google(db_session):
+async def test_google_fonts_removed_and_navigation_defaults_non_google(db_session):
     from pathlib import Path
     from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
 
     admin_html = Path("backend/static/admin/index.html").read_text(encoding="utf-8")
-    assert "https://fonts.googleapis.com" in admin_html
-    assert "https://fonts.gstatic.com" in admin_html
-    assert "Plus Jakarta Sans" in admin_html
-    assert "JetBrains Mono" in admin_html
+    assert "fonts.googleapis.com" not in admin_html
+    assert "fonts.gstatic.com" not in admin_html
+    assert "system-ui" in admin_html
 
     studio_html = Path("docs/interactive_design_studio.html").read_text(encoding="utf-8")
-    assert "https://fonts.googleapis.com" in studio_html
+    assert "fonts.googleapis.com" not in studio_html
+    assert "fonts.gstatic.com" not in studio_html
     assert "www.gstatic.com/antigravity" not in studio_html
+    assert "system-ui" in studio_html
 
     suffix = uuid.uuid4().hex[:6]
     drv_user = User(
@@ -447,4 +448,80 @@ async def test_google_fonts_preserved_and_navigation_defaults_non_google(db_sess
     # Legacy clients submitting GOOGLE_MAPS are transparently migrated to MAPBOX
     updated = await ops.update_preferences(drv_user.id, {"navigation_provider": "GOOGLE_MAPS"})
     assert updated["navigation_provider"] == "MAPBOX"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_preferences_endpoint_normalizes_google_maps_navigation(db_session):
+    suffix = uuid.uuid4().hex[:6]
+    drv_user = User(
+        email=f"pref_api_drv_{suffix}@vaisentra.luxury",
+        password_hash=hash_secret("pass"),
+        phone_number=f"+9194{suffix[:8]}",
+        full_name="Nav API Driver",
+        role="driver",
+        is_active=True,
+    )
+    db_session.add(drv_user)
+    await db_session.flush()
+    from datetime import datetime, timedelta, timezone
+    db_session.add(DriverProfile(
+        user_id=drv_user.id,
+        license_number=f"DL-API-{suffix}",
+        approval_status="APPROVED",
+    ))
+    drv_sess = Session(
+        id=str(uuid.uuid4()),
+        user_id=drv_user.id,
+        token_hash=hash_secret(f"nav_api_sess:{suffix}"),
+        is_revoked=False,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    db_session.add(drv_sess)
+    await db_session.commit()
+
+    token = create_jwt_token(drv_user.id, role="driver", session_id=drv_sess.id)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.put(
+            "/api/v1/drivers/dispatch/preferences",
+            json={"navigation_provider": "GOOGLE_MAPS", "preferred_corridor": "Bengaluru ORR"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["navigation_provider"] == "MAPBOX"
+        assert body["preferred_corridor"] == "Bengaluru ORR"
+
+
+@pytest.mark.asyncio
+async def test_no_fabricated_fallback_coordinates_in_place_details_or_shared_links(db_session):
+    from backend.application.services.booking_advanced_service import BookingAdvancedService
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        missing_coords = await client.post(
+            "/api/v1/location/place-details",
+            json={"place_id": "place_missing_coords"},
+        )
+        assert missing_coords.status_code == 422
+
+        explicit_coords = await client.post(
+            "/api/v1/location/place-details",
+            json={"place_id": "place_blr_mg_road", "latitude": 12.9716, "longitude": 77.5946},
+        )
+        assert explicit_coords.status_code == 200
+        verified = explicit_coords.json()
+        assert verified["latitude"] == pytest.approx(12.9716)
+        assert verified["longitude"] == pytest.approx(77.5946)
+
+    raw_text = BookingAdvancedService.parse_shared_location_link("Meet outside Central Railway Station")
+    assert raw_text["source"] == "RAW_TEXT"
+    assert raw_text["coordinates_found"] is False
+    assert raw_text["latitude"] is None
+    assert raw_text["longitude"] is None
+
+    geo_uri = BookingAdvancedService.parse_shared_location_link("geo:12.9716,77.5946")
+    assert geo_uri["source"] == "GEO_URI"
+    assert geo_uri["coordinates_found"] is True
+    assert geo_uri["latitude"] == pytest.approx(12.9716)
+    assert geo_uri["longitude"] == pytest.approx(77.5946)
+
 

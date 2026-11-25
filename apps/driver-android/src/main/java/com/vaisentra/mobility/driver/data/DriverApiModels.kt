@@ -669,7 +669,8 @@ data class DriverPreferencesRequest(
     @SerializedName("maximum_pickup_distance_km") val maximumPickupDistanceKm: Float? = null,
     @SerializedName("vehicle_categories") val vehicleCategories: List<String>? = null,
     @SerializedName("preferred_drop_zones") val preferredDropZones: List<String>? = null,
-    @SerializedName("reroute_on_closure_enabled") val rerouteOnClosureEnabled: Boolean? = null
+    @SerializedName("reroute_on_closure_enabled") val rerouteOnClosureEnabled: Boolean? = null,
+    @SerializedName("navigation_provider") val navigationProvider: String? = null
 )
 
 data class ClaimNoShowRequest(

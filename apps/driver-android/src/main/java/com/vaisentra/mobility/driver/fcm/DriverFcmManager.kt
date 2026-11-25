@@ -46,11 +46,71 @@ object DriverFcmDeepLinkResolver {
     }
 }
 
+object FcmTokenSyncPolicy {
+    private val B64_URL_LOOKUP = IntArray(256) { -1 }.apply {
+        for (c in 'A'..'Z') this[c.code] = c - 'A'
+        for (c in 'a'..'z') this[c.code] = 26 + (c - 'a')
+        for (c in '0'..'9') this[c.code] = 52 + (c - '0')
+        this['-'.code] = 62
+        this['_'.code] = 63
+        this['+'.code] = 62
+        this['/'.code] = 63
+    }
+
+    internal fun decodeBase64UrlToUtf8(input: String): String? {
+        val clean = input.trimEnd('=')
+        if (clean.isEmpty()) return null
+        val out = ArrayList<Byte>((clean.length * 3) / 4)
+        var buffer = 0
+        var bitsCollected = 0
+        for (ch in clean) {
+            val code = ch.code
+            val val6 = if (code in 0..255) B64_URL_LOOKUP[code] else -1
+            if (val6 < 0) return null
+            buffer = (buffer shl 6) or val6
+            bitsCollected += 6
+            if (bitsCollected >= 8) {
+                bitsCollected -= 8
+                out.add(((buffer shr bitsCollected) and 0xFF).toByte())
+            }
+        }
+        return String(out.toByteArray(), Charsets.UTF_8)
+    }
+
+    fun extractUserSubject(jwtToken: String?): String? {
+        if (jwtToken.isNullOrBlank()) return null
+        val parts = jwtToken.split(".")
+        if (parts.size < 2) return null
+        val payload = decodeBase64UrlToUtf8(parts[1]) ?: return null
+        return Regex("\"sub\"\\s*:\\s*\"([^\"]+)\"")
+            .find(payload)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    fun shouldRegisterWithBackend(
+        fcmToken: String?,
+        lastSyncedToken: String?,
+        currentUserKey: String?,
+        lastSyncedUserKey: String?,
+        force: Boolean = false
+    ): Boolean {
+        val clean = fcmToken?.trim().orEmpty()
+        if (clean.length < 8) return false
+        if (force) return true
+        if (clean != lastSyncedToken) return true
+        if (!currentUserKey.isNullOrBlank() && currentUserKey != lastSyncedUserKey) return true
+        return false
+    }
+}
+
 object DriverFcmManager {
     private const val TAG = "DriverFcmManager"
     private const val PREFS_NAME = "driver_fcm_prefs"
     private const val KEY_FCM_TOKEN = "fcm_token"
     private const val KEY_SYNCED_TOKEN = "synced_fcm_token"
+    private const val KEY_SYNCED_USER_KEY = "synced_user_key"
 
     const val CHANNEL_RIDE_NOTIFICATIONS = "ride_notifications"
     const val CHANNEL_DISPATCH_ALERTS = "dispatch_alerts"
@@ -58,6 +118,9 @@ object DriverFcmManager {
 
     @Volatile
     private var appContext: Context? = null
+    @Volatile
+    private var inFlightSyncKey: String? = null
+    private val syncLock = Any()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val logoutHttpClient by lazy {
         OkHttpClient.Builder()
@@ -124,7 +187,7 @@ object DriverFcmManager {
         }
     }
 
-    fun syncTokenIfAuthenticated(context: Context? = null) {
+    fun syncTokenIfAuthenticated(context: Context? = null, force: Boolean = false) {
         val appCtx = (context ?: appContext)?.applicationContext ?: return
         appContext = appCtx
         ensureNotificationChannels(appCtx)
@@ -132,7 +195,7 @@ object DriverFcmManager {
 
         val stored = getSavedToken(appCtx)
         if (!stored.isNullOrBlank()) {
-            registerTokenWithBackend(appCtx, stored)
+            registerTokenWithBackend(appCtx, stored, force = force)
         }
 
         if (!isFirebaseConfigured(appCtx)) {
@@ -166,12 +229,34 @@ object DriverFcmManager {
             .apply()
 
         if (DriverNetworkClient.isAuthenticated()) {
-            registerTokenWithBackend(appCtx, clean)
+            registerTokenWithBackend(appCtx, clean, force = false)
         }
     }
 
-    private fun registerTokenWithBackend(context: Context, token: String) {
+    private fun registerTokenWithBackend(context: Context, token: String, force: Boolean = false) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val userKey = FcmTokenSyncPolicy.extractUserSubject(DriverNetworkClient.authToken)
+        val attemptKey: String
+        synchronized(syncLock) {
+            val lastSyncedToken = prefs.getString(KEY_SYNCED_TOKEN, null)
+            val lastSyncedUserKey = prefs.getString(KEY_SYNCED_USER_KEY, null)
+            if (!FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                    fcmToken = token,
+                    lastSyncedToken = lastSyncedToken,
+                    currentUserKey = userKey,
+                    lastSyncedUserKey = lastSyncedUserKey,
+                    force = force
+                )
+            ) {
+                return
+            }
+            attemptKey = "${userKey.orEmpty()}|$token"
+            if (!force && inFlightSyncKey == attemptKey) {
+                return
+            }
+            inFlightSyncKey = attemptKey
+        }
+
         val deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".take(64)
         scope.launch {
             try {
@@ -183,13 +268,24 @@ object DriverFcmManager {
                     )
                 )
                 if (res.isSuccessful) {
-                    prefs.edit().putString(KEY_SYNCED_TOKEN, token).apply()
+                    prefs.edit()
+                        .putString(KEY_SYNCED_TOKEN, token)
+                        .apply {
+                            if (!userKey.isNullOrBlank()) putString(KEY_SYNCED_USER_KEY, userKey)
+                        }
+                        .apply()
                     Log.d(TAG, "FCM device token synced for driver.")
                 } else {
                     Log.w(TAG, "FCM device token sync rejected: HTTP ${res.code()}")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "FCM device token sync error: ${e.message}")
+            } finally {
+                synchronized(syncLock) {
+                    if (inFlightSyncKey == attemptKey) {
+                        inFlightSyncKey = null
+                    }
+                }
             }
         }
     }
@@ -203,7 +299,13 @@ object DriverFcmManager {
         val prefs = appCtx?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val fcmToken = prefs?.getString(KEY_SYNCED_TOKEN, null)
             ?: prefs?.getString(KEY_FCM_TOKEN, null)
-        prefs?.edit()?.remove(KEY_SYNCED_TOKEN)?.apply()
+        synchronized(syncLock) {
+            inFlightSyncKey = null
+        }
+        prefs?.edit()
+            ?.remove(KEY_SYNCED_TOKEN)
+            ?.remove(KEY_SYNCED_USER_KEY)
+            ?.apply()
 
         val bearerSnapshot = DriverNetworkClient.authToken
         val baseUrl = DriverNetworkClient.baseUrl.trimEnd('/')

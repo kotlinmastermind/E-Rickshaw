@@ -262,16 +262,27 @@ fun VasantraDriverHomeScreen(
                         isOnline = isOnline,
                         onRecenterClick = {
                             DriverLocationManager.refreshCurrentLocation(context) { loc ->
-                                DriverRepository.pingLocation(
-                                    loc.latitude,
-                                    loc.longitude,
-                                    loc.heading,
-                                    loc.speedKmh / 3.6,
-                                    loc.accuracyMeters.toDouble()
-                                )
-                                DriverDialogController.showToast(
-                                    "📍 Live GPS synced: ${String.format(java.util.Locale.US, "%.4f, %.4f", loc.latitude, loc.longitude)}"
-                                )
+                                if (loc.isLiveGps && com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(loc.latitude, loc.longitude)) {
+                                    DriverRepository.pingLocation(
+                                        loc.latitude,
+                                        loc.longitude,
+                                        loc.heading,
+                                        loc.speedKmh / 3.6,
+                                        loc.accuracyMeters.toDouble()
+                                    )
+                                    DriverDialogController.showToast(
+                                        "📍 Live GPS synced: ${String.format(java.util.Locale.US, "%.4f, %.4f", loc.latitude, loc.longitude)}"
+                                    )
+                                } else {
+                                    val msg = when (DriverLocationManager.providerStatus.value) {
+                                        com.vaisentra.mobility.driver.data.LocationProviderStatus.PERMISSION_REQUIRED ->
+                                            "Location permission required for live GPS"
+                                        com.vaisentra.mobility.driver.data.LocationProviderStatus.PROVIDERS_DISABLED ->
+                                            "Turn ON device Location (GPS)"
+                                        else -> "Acquiring live GPS fix..."
+                                    }
+                                    DriverDialogController.showToast(msg)
+                                }
                             }
                         }
                     )

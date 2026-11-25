@@ -485,11 +485,11 @@ data class RiderLogoutRequest(
 
 data class BookingDraftState(
     val pickupAddress: String = "Fetching current location...",
-    val pickupLat: Double = 28.6139,
-    val pickupLng: Double = 77.2090,
+    val pickupLat: Double = 0.0,
+    val pickupLng: Double = 0.0,
     val destinationAddress: String = "",
-    val destinationLat: Double = 28.6289,
-    val destinationLng: Double = 77.3712,
+    val destinationLat: Double = 0.0,
+    val destinationLng: Double = 0.0,
     val selectedCategoryCode: String = "E_RICKSHAW_STANDARD",
     val paymentMethod: String = "UPI"
 )

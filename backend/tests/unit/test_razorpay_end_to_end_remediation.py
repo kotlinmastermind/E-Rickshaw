@@ -1112,3 +1112,326 @@ async def test_notification_webhooks_diagnostic_sync_concurrent_refunds_and_dup_
         provider.webhook_secret = orig_wh
 
 
+@pytest.mark.asyncio
+async def test_strict_wallet_and_ride_verify_fail_closed_missing_gateway_fields(db_session):
+    """
+    Phase 2 & 12: Verify /wallets/topup/verify and /payments/razorpay/verify reject missing/null/empty
+    gateway id, order_id, currency, wrong purpose, wrong amount, wrong user, and prevent duplicate credits.
+    """
+    import hmac
+    from backend.api.deps import get_current_user
+
+    provider = get_payment_provider()
+    orig_secret = provider.key_secret
+    orig_id = provider.key_id
+    test_secret = "strict_verify_key_secret_123456"
+    provider.key_secret = test_secret
+    provider.key_id = "rzp_test_strict1234"
+
+    try:
+        owner, _ = await _make_user_and_token(db_session, role="customer")
+        other_user, _ = await _make_user_and_token(db_session, role="customer")
+
+        order_w = f"order_strict_w_{uuid.uuid4().hex[:8]}"
+        pay_w = Payment(
+            user_id=owner.id,
+            amount_cents=30000,
+            currency="INR",
+            purpose="WALLET_TOPUP",
+            status="CREATED",
+            payment_method="RAZORPAY",
+            provider_name="RAZORPAY",
+            provider_order_id=order_w,
+            idempotency_key=f"idem_sw_{uuid.uuid4().hex[:8]}",
+        )
+        cat_id, rule_id = await _get_category_and_rule(db_session)
+        cust = CustomerProfile(user_id=owner.id, preferred_payment_method="RAZORPAY", rating_average=5.0, rating_count=0)
+        db_session.add(cust)
+        await db_session.flush()
+        ride = Ride(
+            customer_id=cust.id,
+            vehicle_category_id=cat_id,
+            fare_rule_id=rule_id,
+            pickup_latitude=28.61,
+            pickup_longitude=77.20,
+            destination_latitude=28.63,
+            destination_longitude=77.22,
+            pickup_address="Verify A",
+            destination_address="Verify B",
+            start_otp="4444",
+            estimated_distance_km=3.0,
+            estimated_duration_minutes=10.0,
+            estimated_fare_cents=15000,
+            final_fare_cents=15000,
+            payment_method="RAZORPAY",
+            status="COMPLETED",
+        )
+        db_session.add(ride)
+        await db_session.flush()
+        order_r = f"order_strict_r_{uuid.uuid4().hex[:8]}"
+        pay_r = Payment(
+            ride_id=ride.id,
+            user_id=owner.id,
+            customer_id=cust.id,
+            amount_cents=15000,
+            currency="INR",
+            purpose="RIDE_FARE",
+            status="CREATED",
+            payment_method="RAZORPAY",
+            provider_name="RAZORPAY",
+            provider_order_id=order_r,
+            idempotency_key=f"idem_sr_{uuid.uuid4().hex[:8]}",
+        )
+        db_session.add_all([pay_w, pay_r])
+        await db_session.commit()
+
+        gw_pid_w = f"pay_gw_w_{uuid.uuid4().hex[:8]}"
+        sig_w = hmac.new(test_secret.encode("utf-8"), f"{order_w}|{gw_pid_w}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            app.dependency_overrides[get_current_user] = lambda: owner
+
+            # 1. Fail-closed on missing gateway id
+            with patch.object(provider, "fetch_payment", new=AsyncMock(return_value={"order_id": order_w, "amount": 30000, "currency": "INR", "status": "captured"})):
+                r_no_id = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+                assert r_no_id.status_code == 400
+
+            # 2. Fail-closed on missing gateway order_id
+            with patch.object(provider, "fetch_payment", new=AsyncMock(return_value={"id": gw_pid_w, "amount": 30000, "currency": "INR", "status": "captured"})):
+                r_no_ord = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+                assert r_no_ord.status_code == 400
+
+            # 3. Fail-closed on missing gateway currency (previously defaulted to INR!)
+            with patch.object(provider, "fetch_payment", new=AsyncMock(return_value={"id": gw_pid_w, "order_id": order_w, "amount": 30000, "status": "captured"})):
+                r_no_cur = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+                assert r_no_cur.status_code == 400
+
+            # 4. Non-INR currency & wrong amount rejected
+            with patch.object(provider, "fetch_payment", new=AsyncMock(return_value={"id": gw_pid_w, "order_id": order_w, "amount": 30000, "currency": "USD", "status": "captured"})):
+                r_usd = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+                assert r_usd.status_code == 400
+
+            with patch.object(provider, "fetch_payment", new=AsyncMock(return_value={"id": gw_pid_w, "order_id": order_w, "amount": 10000, "currency": "INR", "status": "captured"})):
+                r_amt = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+                assert r_amt.status_code == 400
+
+            # 5. Mismatched gateway id or order_id -> 409
+            with patch.object(provider, "fetch_payment", new=AsyncMock(return_value={"id": "pay_other_gw", "order_id": order_w, "amount": 30000, "currency": "INR", "status": "captured"})):
+                r_mid = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+                assert r_mid.status_code == 409
+
+            with patch.object(provider, "fetch_payment", new=AsyncMock(return_value={"id": gw_pid_w, "order_id": "order_other_gw", "amount": 30000, "currency": "INR", "status": "captured"})):
+                r_mord = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+                assert r_mord.status_code == 409
+
+            # 6. Wrong purpose: submitting RIDE_FARE order to /wallets/topup/verify rejected -> 400
+            gw_pid_r = f"pay_gw_r_{uuid.uuid4().hex[:8]}"
+            sig_r = hmac.new(test_secret.encode("utf-8"), f"{order_r}|{gw_pid_r}".encode("utf-8"), hashlib.sha256).hexdigest()
+            r_purpose = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_r, "razorpay_payment_id": gw_pid_r, "razorpay_signature": sig_r})
+            assert r_purpose.status_code == 400
+
+            # 7. Wrong user -> 403
+            app.dependency_overrides[get_current_user] = lambda: other_user
+            r_owner = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+            assert r_owner.status_code == 403
+
+            # 8. Valid capture + duplicate verification credits wallet strictly ONCE
+            app.dependency_overrides[get_current_user] = lambda: owner
+            with patch.object(provider, "fetch_payment", new=AsyncMock(return_value={"id": gw_pid_w, "order_id": order_w, "amount": 30000, "currency": "INR", "status": "captured"})):
+                ok1 = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+                ok2 = await ac.post("/api/v1/wallets/topup/verify", json={"razorpay_order_id": order_w, "razorpay_payment_id": gw_pid_w, "razorpay_signature": sig_w})
+            assert ok1.status_code == 200 and ok1.json()["status"] == "SUCCESS"
+            assert ok2.status_code == 200 and ok2.json()["status"] == "ALREADY_PROCESSED"
+            assert ok2.json()["balance_cents"] == 30000
+
+            # 9. Ride verify also fails closed when gateway omits id
+            with patch.object(provider, "fetch_payment", new=AsyncMock(return_value={"order_id": order_r, "amount": 15000, "currency": "INR", "status": "captured"})):
+                r_ride_noid = await ac.post("/api/v1/payments/razorpay/verify", json={"razorpay_order_id": order_r, "razorpay_payment_id": gw_pid_r, "razorpay_signature": sig_r, "ride_id": ride.id})
+                assert r_ride_noid.status_code == 400
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        provider.key_secret = orig_secret
+        provider.key_id = orig_id
+
+
+@pytest.mark.asyncio
+async def test_128_char_refund_idempotency_concurrent_identical_dispute_and_goodwill_guards(db_session):
+    """
+    Phase 4, 9 & 12:
+    - 128-char refund idempotency_key stored without truncation & identical concurrent refund calls single gateway call
+    - Conflicting amount/payment for same idempotency_key returns HTTP 409
+    - Unauthorized non-owner refund attempt rejected HTTP 403
+    - Duplicate goodwill submit_refund_request blocked HTTP 409
+    - Double admin_resolve_dispute blocked HTTP 409
+    """
+    import asyncio
+    from backend.api.deps import get_current_user
+    from backend.application.services.settlement_advanced_service import SettlementAdvancedService
+    from backend.application.services.support_advanced_service import SupportAdvancedService
+    from backend.domain.models import FareDispute
+    from backend.infrastructure.database.session import async_session_maker
+
+    owner, _ = await _make_user_and_token(db_session, role="customer")
+    attacker, _ = await _make_user_and_token(db_session, role="customer")
+    admin_user, _ = await _make_user_and_token(db_session, role="admin")
+
+    cat_id, rule_id = await _get_category_and_rule(db_session)
+    cust = CustomerProfile(user_id=owner.id, preferred_payment_method="RAZORPAY", rating_average=5.0, rating_count=0)
+    db_session.add(cust)
+    await db_session.flush()
+    ride = Ride(
+        customer_id=cust.id,
+        vehicle_category_id=cat_id,
+        fare_rule_id=rule_id,
+        pickup_latitude=28.61,
+        pickup_longitude=77.20,
+        destination_latitude=28.63,
+        destination_longitude=77.22,
+        pickup_address="Ref A",
+        destination_address="Ref B",
+        start_otp="5555",
+        estimated_distance_km=4.0,
+        estimated_duration_minutes=12.0,
+        estimated_fare_cents=25000,
+        final_fare_cents=25000,
+        payment_method="RAZORPAY",
+        status="COMPLETED",
+    )
+    db_session.add(ride)
+    await db_session.flush()
+
+    pay = Payment(
+        ride_id=ride.id,
+        user_id=owner.id,
+        customer_id=cust.id,
+        amount_cents=25000,
+        currency="INR",
+        purpose="RIDE_FARE",
+        status="CAPTURED",
+        payment_method="RAZORPAY",
+        provider_name="RAZORPAY",
+        provider_order_id=f"order_ref128_{uuid.uuid4().hex[:8]}",
+        provider_payment_id=f"pay_ref128_{uuid.uuid4().hex[:8]}",
+        idempotency_key=f"idem_r128_{uuid.uuid4().hex[:8]}",
+    )
+    db_session.add(pay)
+    await db_session.flush()
+    dispute = FareDispute(
+        ride_id=ride.id,
+        customer_id=cust.id,
+        dispute_reason="OVERCHARGE",
+        claimed_amount_cents=5000,
+        customer_comment="Route fare discrepancy",
+        status="SUBMITTED",
+    )
+    db_session.add(dispute)
+    await db_session.commit()
+
+    # 1. Duplicate goodwill self-service claim blocked after 1st credit
+    sup_svc = SupportAdvancedService(db_session)
+    g1 = await sup_svc.submit_refund_request(owner.id, ride.id, "LATE_ARRIVAL", 2000, "Late arrival goodwill")
+    assert g1["auto_approved"] is True
+    with pytest.raises(HTTPException) as dup_gw_exc:
+        await sup_svc.submit_refund_request(owner.id, ride.id, "LATE_ARRIVAL", 2000, "Duplicate attempt")
+    assert dup_gw_exc.value.status_code == 409
+
+    # 2. Unauthorized user attempting partial refund -> 403
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        app.dependency_overrides[get_current_user] = lambda: attacker
+        try:
+            r_unauth = await ac.post(
+                "/api/v1/payments/refunds/partial",
+                json={"payment_id": pay.id, "amount_cents": 5000, "reason": "Unauthorized probe", "is_partial": True},
+            )
+            assert r_unauth.status_code == 403
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    # 3. Concurrent identical refund requests with exact 128-char key -> single gateway call
+    provider = get_payment_provider()
+    exact_128_key = "idem_128_" + ("x" * (128 - 9))
+    assert len(exact_128_key) == 128
+
+    gw_calls = 0
+
+    async def _slow_idem_ref(**kwargs):
+        nonlocal gw_calls
+        gw_calls += 1
+        await asyncio.sleep(0.08)
+        return {"id": f"rfnd_128_{gw_calls}", "amount": kwargs["amount_cents"], "status": "processed", "acquirer_data": {}}
+
+    async def _worker():
+        async with async_session_maker() as s:
+            return await SettlementAdvancedService(s).create_refund(
+                payment_id=pay.id,
+                amount_cents=10000,
+                reason="128-char idempotent test",
+                is_partial=True,
+                idempotency_key=exact_128_key,
+            )
+
+    with patch.object(provider, "create_refund", side_effect=_slow_idem_ref):
+        r1, r2 = await asyncio.gather(_worker(), _worker())
+
+    assert gw_calls == 1
+    assert r1["internal_refund_id"] == r2["internal_refund_id"]
+
+    # Same 128-char key with different amount -> 409 Conflict
+    with pytest.raises(HTTPException) as conflict_exc:
+        await SettlementAdvancedService(db_session).create_refund(
+            payment_id=pay.id,
+            amount_cents=12000,
+            reason="Amount mismatch on reused key",
+            is_partial=True,
+            idempotency_key=exact_128_key,
+        )
+    assert conflict_exc.value.status_code == 409
+
+    # 4. Double admin dispute resolution blocked -> 409
+    with patch.object(
+        provider,
+        "create_refund",
+        new=AsyncMock(return_value={"id": f"rfnd_disp_{uuid.uuid4().hex[:8]}", "amount": 5000, "status": "processed", "acquirer_data": {}}),
+    ):
+        d_ok = await SettlementAdvancedService(db_session).admin_resolve_dispute(
+            dispute_id=dispute.id,
+            admin_id=admin_user.id,
+            resolution="APPROVE_REFUND",
+            resolution_notes="Verified GPS deviation evidence",
+        )
+    assert d_ok["status"] == "RESOLVED_REFUNDED"
+    with pytest.raises(HTTPException) as d_dup:
+        await SettlementAdvancedService(db_session).admin_resolve_dispute(
+            dispute_id=dispute.id,
+            admin_id=admin_user.id,
+            resolution="APPROVE_REFUND",
+            resolution_notes="Duplicate resolve click",
+        )
+    assert d_dup.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_webhook_malformed_json_and_non_object_payload_rejected(db_session):
+    """Phase 6 & 12: Malformed JSON / non-object payloads rejected 400 cleanly after raw HMAC check."""
+    provider = get_payment_provider()
+    orig_wh = provider.webhook_secret
+    wh_sec = "whsec_malformed_test_2026"
+    provider.webhook_secret = wh_sec
+    try:
+        bad_json = b"{invalid-json"
+        svc = PaymentService(db_session)
+        with pytest.raises(HTTPException) as exc1:
+            await svc.process_webhook(bad_json, _sign(bad_json, wh_sec))
+        assert exc1.value.status_code == 400
+
+        array_payload = b"[1, 2, 3]"
+        with pytest.raises(HTTPException) as exc2:
+            await svc.process_webhook(array_payload, _sign(array_payload, wh_sec))
+        assert exc2.value.status_code == 400
+    finally:
+        provider.webhook_secret = orig_wh
+
+
+

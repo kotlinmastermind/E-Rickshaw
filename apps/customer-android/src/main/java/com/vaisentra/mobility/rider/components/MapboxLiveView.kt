@@ -36,6 +36,7 @@ import com.mapbox.maps.extension.compose.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.extension.compose.style.MapStyle
 import com.mapbox.maps.viewannotation.geometry
 import com.mapbox.maps.viewannotation.viewAnnotationOptions
+import com.vaisentra.mobility.rider.data.NativeLocationEvaluator
 import com.vaisentra.mobility.rider.data.NearbyVehicleDto
 import com.vaisentra.mobility.rider.theme.*
 
@@ -47,10 +48,10 @@ import com.vaisentra.mobility.rider.theme.*
 @Composable
 fun MapboxLiveView(
     modifier: Modifier = Modifier,
-    pickupLat: Double = 28.6139,
-    pickupLng: Double = 77.2090,
-    dropLat: Double = 28.6289,
-    dropLng: Double = 77.3712,
+    pickupLat: Double = 0.0,
+    pickupLng: Double = 0.0,
+    dropLat: Double = 0.0,
+    dropLng: Double = 0.0,
     showRoute: Boolean = true,
     pickupLabel: String = "Current Location",
     dropLabel: String = "Destination",
@@ -69,12 +70,16 @@ fun MapboxLiveView(
         return
     }
 
-    val pickupPoint = remember(pickupLat, pickupLng) {
-        Point.fromLngLat(pickupLng, pickupLat)
+    val hasPickup = NativeLocationEvaluator.isValidCoordinate(pickupLat, pickupLng)
+    val hasDrop = NativeLocationEvaluator.isValidCoordinate(dropLat, dropLng)
+
+    val pickupPoint = remember(pickupLat, pickupLng, hasPickup) {
+        if (hasPickup) Point.fromLngLat(pickupLng, pickupLat) else null
     }
-    val dropPoint = remember(dropLat, dropLng) {
-        Point.fromLngLat(dropLng, dropLat)
+    val dropPoint = remember(dropLat, dropLng, hasDrop) {
+        if (hasDrop) Point.fromLngLat(dropLng, dropLat) else null
     }
+    val indiaOverviewPoint = remember { Point.fromLngLat(78.9629, 20.5937) }
 
     // Default to modern Dark theme for urban night/EV mobility aesthetic
     var selectedStyleUri by remember { mutableStateOf(Style.DARK) }
@@ -82,16 +87,16 @@ fun MapboxLiveView(
 
     val mapViewportState = rememberMapViewportState {
         setCameraOptions {
-            center(pickupPoint)
-            zoom(14.2)
-            pitch(35.0)
+            center(pickupPoint ?: dropPoint ?: indiaOverviewPoint)
+            zoom(if (pickupPoint != null || dropPoint != null) 14.2 else 4.2)
+            pitch(if (pickupPoint != null) 35.0 else 0.0)
             bearing(0.0)
         }
     }
 
     // Camera adjustment when pickup or route changes
-    LaunchedEffect(pickupLat, pickupLng, dropLat, dropLng, showRoute) {
-        if (showRoute) {
+    LaunchedEffect(pickupLat, pickupLng, dropLat, dropLng, showRoute, hasPickup, hasDrop) {
+        if (showRoute && pickupPoint != null && dropPoint != null) {
             val midLat = (pickupLat + dropLat) / 2.0
             val midLng = (pickupLng + dropLng) / 2.0
             mapViewportState.flyTo(
@@ -101,12 +106,20 @@ fun MapboxLiveView(
                     .pitch(40.0)
                     .build()
             )
-        } else {
+        } else if (pickupPoint != null) {
             mapViewportState.flyTo(
                 CameraOptions.Builder()
                     .center(pickupPoint)
                     .zoom(14.5)
                     .pitch(30.0)
+                    .build()
+            )
+        } else if (dropPoint != null) {
+            mapViewportState.flyTo(
+                CameraOptions.Builder()
+                    .center(dropPoint)
+                    .zoom(14.0)
+                    .pitch(25.0)
                     .build()
             )
         }
@@ -125,18 +138,20 @@ fun MapboxLiveView(
                 MapStyle(style = selectedStyleUri)
             }
         ) {
-            // A. Pickup Marker (Native Compose ViewAnnotation)
-            ViewAnnotation(
-                options = viewAnnotationOptions {
-                    geometry(pickupPoint)
-                    allowOverlap(true)
+            // A. Pickup Marker (Native Compose ViewAnnotation) — only when valid GPS/pickup exists
+            if (pickupPoint != null) {
+                ViewAnnotation(
+                    options = viewAnnotationOptions {
+                        geometry(pickupPoint)
+                        allowOverlap(true)
+                    }
+                ) {
+                    PickupMarkerNode(label = pickupLabel)
                 }
-            ) {
-                PickupMarkerNode(label = pickupLabel)
             }
 
             // B. Drop Marker & Polyline Route
-            if (showRoute) {
+            if (showRoute && dropPoint != null) {
                 ViewAnnotation(
                     options = viewAnnotationOptions {
                         geometry(dropPoint)
@@ -146,18 +161,19 @@ fun MapboxLiveView(
                     DropMarkerNode(label = dropLabel)
                 }
 
-                // Render High-visibility Glowing Polyline Route
-                val routeCoordinates = remember(pickupPoint, dropPoint) {
-                    listOf(pickupPoint, dropPoint)
-                }
+                if (pickupPoint != null) {
+                    val routeCoordinates = remember(pickupPoint, dropPoint) {
+                        listOf(pickupPoint, dropPoint)
+                    }
 
-                // Cyan Electric Route Core
-                PolylineAnnotation(
-                    points = routeCoordinates
-                ) {
-                    lineColor = Color(0xFF00F2FE)
-                    lineWidth = 5.0
-                    lineOpacity = 0.95
+                    // Cyan Electric Route Core
+                    PolylineAnnotation(
+                        points = routeCoordinates
+                    ) {
+                        lineColor = Color(0xFF00F2FE)
+                        lineWidth = 5.0
+                        lineOpacity = 0.95
+                    }
                 }
             }
 
@@ -217,13 +233,15 @@ fun MapboxLiveView(
                     .background(SurfaceElevated.copy(alpha = 0.88f))
                     .border(1.dp, BorderSubtle, CircleShape)
                     .clickable {
-                        mapViewportState.flyTo(
-                            CameraOptions.Builder()
-                                .center(pickupPoint)
-                                .zoom(15.0)
-                                .pitch(35.0)
-                                .build()
-                        )
+                        pickupPoint?.let { pt ->
+                            mapViewportState.flyTo(
+                                CameraOptions.Builder()
+                                    .center(pt)
+                                    .zoom(15.0)
+                                    .pitch(35.0)
+                                    .build()
+                            )
+                        }
                         onRecenterClicked?.invoke()
                     },
                 contentAlignment = Alignment.Center

@@ -51,53 +51,150 @@ class RazorpayContractTest {
                 backendPaymentId = "pay_backend_ride_100",
                 checkoutType = CheckoutFlowType.RIDE_FARE,
                 rideId = "ride_uuid_100",
+                userId = "user_alpha",
                 amountCents = 14500,
                 currency = "INR",
-                idempotencyKey = "idem_ride_100"
+                idempotencyKey = "idem_ride_100",
+                state = CheckoutSessionState.ORDER_CREATED
             )
         )
+        storeBeforeRecreation.markCheckoutOpen("order_ride_100")
+
         storeBeforeRecreation.saveSession(
             CheckoutSession(
                 orderId = "order_topup_200",
                 backendPaymentId = "pay_backend_topup_200",
                 checkoutType = CheckoutFlowType.WALLET_TOPUP,
                 rideId = null,
+                userId = "user_alpha",
                 amountCents = 50000,
                 currency = "INR",
-                idempotencyKey = "idem_topup_200"
+                idempotencyKey = "idem_topup_200",
+                state = CheckoutSessionState.ORDER_CREATED
             )
         )
+        storeBeforeRecreation.markCheckoutOpen("order_topup_200")
 
-        // Simulate Activity / process recreation by instantiating a brand new store reading shared backing storage
+        // Simulate Activity / process death recreation
         val restoredStore = CheckoutSessionStore(backingStorage)
-        val unknown = restoredStore.tryBeginVerification("order_unknown_999", "pay_gw_1", "sig_1")
-        assertNull(unknown)
+        assertTrue(restoredStore.resolveSuccessCallback("order_unknown_999", "pay_gw_1", "sig_1", "user_alpha") is CallbackResolutionResult.UnknownOrder)
+        assertTrue(restoredStore.resolveSuccessCallback("", "pay_gw_1", "sig_1", "user_alpha") is CallbackResolutionResult.MissingIdentity)
 
-        // Ride callback resolves to exact RIDE_FARE + rideId despite WALLET_TOPUP having been saved later!
-        val rideBegin = restoredStore.tryBeginVerification("order_ride_100", "pay_gw_ride_1", "sig_ride_1")
+        // Ride callback resolves strictly by orderId to RIDE_FARE + user_alpha
+        val rideBegin = restoredStore.tryBeginVerification("order_ride_100", "pay_gw_ride_1", "sig_ride_1", "user_alpha")
         assertNotNull(rideBegin)
-        assertEquals(CheckoutFlowType.RIDE_FARE, rideBegin!!.checkoutType)
+        assertEquals(CheckoutSessionState.VERIFICATION_PENDING, rideBegin!!.state)
+        assertEquals(CheckoutFlowType.RIDE_FARE, rideBegin.checkoutType)
         assertEquals("ride_uuid_100", rideBegin.rideId)
-        assertEquals("pay_backend_ride_100", rideBegin.backendPaymentId)
 
-        // Duplicate callback for same order_id while VERIFYING is dropped idempotently
-        val dupRideBegin = restoredStore.tryBeginVerification("order_ride_100", "pay_gw_ride_1", "sig_ride_1")
-        assertNull(dupRideBegin)
+        // Duplicate callback while VERIFICATION_PENDING is suppressed
+        assertNull(restoredStore.tryBeginVerification("order_ride_100", "pay_gw_ride_1", "sig_ride_1", "user_alpha"))
 
-        restoredStore.markVerifiedAndClearIntentKey("order_ride_100", "RIDE_FARE_ride_uuid_100")
+        restoredStore.markVerifiedAndClearIntentKey("order_ride_100", "RIDE_FARE_user_alpha_ride_uuid_100")
+        assertEquals(CheckoutSessionState.VERIFIED, restoredStore.getSessionByOrderId("order_ride_100")?.state)
 
-        // Wallet Top-up session remained isolated and uncorrupted
-        val walletBegin = restoredStore.tryBeginVerification("order_topup_200", "pay_gw_topup_1", "sig_topup_1")
+        // Wallet Top-up session remains isolated and transitions across retryable -> verified
+        val walletBegin = restoredStore.tryBeginVerification("order_topup_200", "pay_gw_topup_1", "sig_topup_1", "user_alpha")
         assertNotNull(walletBegin)
-        assertEquals(CheckoutFlowType.WALLET_TOPUP, walletBegin!!.checkoutType)
-        assertNull(walletBegin.rideId)
-
-        // Simulated transient failure -> retryable verification still recoverable
-        restoredStore.markRetryableFailure("order_topup_200")
-        val retryable = restoredStore.getRetryableSession(CheckoutFlowType.WALLET_TOPUP)
+        restoredStore.markRetryableFailure("order_topup_200", "Temporary network timeout")
+        val retryable = restoredStore.getRetryableSession(CheckoutFlowType.WALLET_TOPUP, "user_alpha")
         assertNotNull(retryable)
-        assertEquals("order_topup_200", retryable!!.orderId)
-        assertEquals("pay_gw_topup_1", retryable.paymentId)
+        assertEquals(CheckoutSessionState.VERIFICATION_RETRYABLE, retryable!!.state)
+        assertNull(restoredStore.getRetryableSession(CheckoutFlowType.RIDE_FARE, "user_alpha"))
+    }
+
+    @Test
+    fun terminal4xxFailuresNeverAppearInRetryAndOldSupersededOrdersAreRejected() {
+        val storage = InMemoryCheckoutStorage()
+        val store = CheckoutSessionStore(storage)
+
+        store.saveSession(
+            CheckoutSession(
+                orderId = "order_ride_old",
+                backendPaymentId = "pay_1",
+                checkoutType = CheckoutFlowType.RIDE_FARE,
+                rideId = "ride_77",
+                userId = "user_alpha",
+                amountCents = 12000,
+                currency = "INR",
+                idempotencyKey = "idem_old",
+                state = CheckoutSessionState.ORDER_CREATED
+            ),
+            nowMs = 1000L
+        )
+        // New checkout order for the same ride supersedes the older open order
+        store.saveSession(
+            CheckoutSession(
+                orderId = "order_ride_new",
+                backendPaymentId = "pay_1",
+                checkoutType = CheckoutFlowType.RIDE_FARE,
+                rideId = "ride_77",
+                userId = "user_alpha",
+                amountCents = 12000,
+                currency = "INR",
+                idempotencyKey = "idem_new",
+                state = CheckoutSessionState.ORDER_CREATED
+            ),
+            nowMs = 2000L
+        )
+
+        assertEquals(CheckoutSessionState.EXPIRED, store.getSessionByOrderId("order_ride_old")?.state)
+        assertTrue(store.resolveSuccessCallback("order_ride_old", "pay_gw", "sig", "user_alpha") is CallbackResolutionResult.OldOrderSuperseded)
+
+        // Start verification on new order and fail it terminally (e.g., HTTP 400 invalid signature)
+        val started = store.tryBeginVerification("order_ride_new", "pay_gw_2", "bad_sig", "user_alpha", nowMs = 2500L)
+        assertNotNull(started)
+        store.markTerminalAndClearIntentKey("order_ride_new", "RIDE_FARE_user_alpha_ride_77", CheckoutSessionState.TERMINAL_FAILURE, "Invalid signature")
+        assertNull(store.getRetryableSession(CheckoutFlowType.RIDE_FARE, "user_alpha"))
+        assertTrue(store.resolveSuccessCallback("order_ride_new", "pay_gw_2", "bad_sig", "user_alpha") is CallbackResolutionResult.TerminalState)
+    }
+
+    @Test
+    fun missingOrderIdAndWrongUserCallbacksEnterSafeNonContaminatingStates() {
+        val storage = InMemoryCheckoutStorage()
+        val store = CheckoutSessionStore(storage)
+
+        store.saveSession(
+            CheckoutSession(
+                orderId = "order_wallet_open",
+                backendPaymentId = "pay_w1",
+                checkoutType = CheckoutFlowType.WALLET_TOPUP,
+                rideId = null,
+                userId = "user_owner",
+                amountCents = 25000,
+                currency = "INR",
+                idempotencyKey = "idem_w1",
+                state = CheckoutSessionState.ORDER_CREATED
+            )
+        )
+        store.saveSession(
+            CheckoutSession(
+                orderId = "order_ride_waiting",
+                backendPaymentId = "pay_r1",
+                checkoutType = CheckoutFlowType.RIDE_FARE,
+                rideId = "ride_99",
+                userId = "user_owner",
+                amountCents = 18000,
+                currency = "INR",
+                idempotencyKey = "idem_r1",
+                state = CheckoutSessionState.ORDER_CREATED
+            )
+        )
+        // Only wallet checkout was actually opened
+        store.markCheckoutOpen("order_wallet_open")
+
+        // Callback without orderId affects ONLY CHECKOUT_OPEN session -> RECONCILIATION_REQUIRED, leaving RIDE_FARE untouched
+        val affected = store.markOpenCheckoutReconciliationRequired("Missing order_id", "user_owner")
+        assertEquals(1, affected.size)
+        assertEquals("order_wallet_open", affected.first().orderId)
+        assertEquals(CheckoutSessionState.RECONCILIATION_REQUIRED, store.getSessionByOrderId("order_wallet_open")?.state)
+        assertEquals(CheckoutSessionState.ORDER_CREATED, store.getSessionByOrderId("order_ride_waiting")?.state)
+
+        // Wrong user attempting callback on user_owner's ride order becomes TERMINAL_FAILURE
+        val wrongUserRes = store.resolveSuccessCallback("order_ride_waiting", "pay_gw_9", "sig_9", "attacker_user")
+        assertTrue(wrongUserRes is CallbackResolutionResult.OwnershipMismatch)
+        assertEquals(CheckoutSessionState.TERMINAL_FAILURE, store.getSessionByOrderId("order_ride_waiting")?.state)
+        assertNull(store.getRetryableSession(CheckoutFlowType.RIDE_FARE, "user_owner"))
     }
 
     @Test

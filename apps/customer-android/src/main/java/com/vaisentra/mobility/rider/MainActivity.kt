@@ -22,6 +22,7 @@ class MainActivity : FragmentActivity(), PaymentResultWithDataListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         NetworkClient.init(applicationContext)
+        RiderRepository.restoreCheckoutStates()
         RiderFcmManager.init(applicationContext)
         RiderFcmManager.handleNotificationIntent(intent)
         Checkout.preload(applicationContext)
@@ -45,13 +46,11 @@ class MainActivity : FragmentActivity(), PaymentResultWithDataListener {
     }
 
     override fun onPaymentSuccess(razorpayPaymentId: String?, paymentData: PaymentData?) {
-        paymentData?.let {
-            RiderRepository.handleRazorpaySuccess(
-                orderId = it.orderId ?: "",
-                paymentId = it.paymentId ?: razorpayPaymentId ?: "",
-                signature = it.signature ?: ""
-            )
-        }
+        RiderRepository.handleRazorpaySuccess(
+            orderId = paymentData?.orderId ?: "",
+            paymentId = paymentData?.paymentId ?: razorpayPaymentId ?: "",
+            signature = paymentData?.signature ?: ""
+        )
     }
 
     override fun onPaymentError(errorCode: Int, errorDescription: String?, paymentData: PaymentData?) {

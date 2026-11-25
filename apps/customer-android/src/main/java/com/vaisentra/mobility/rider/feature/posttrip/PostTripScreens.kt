@@ -30,10 +30,11 @@ import kotlinx.coroutines.launch
 fun RideReceiptScreen(onNavigate: (String) -> Unit) {
     val receipt by RiderRepository.rideReceipt.collectAsState()
     val context = LocalContext.current
-    val activeRide = RiderRepository.activeRide.value
+    val activeRide by RiderRepository.activeRide.collectAsState()
 
     LaunchedEffect(Unit) {
-        val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
+        RiderRepository.restoreCheckoutStates()
+        val rideId = activeRide?.id ?: "ride-latest"
         RiderRepository.fetchRideReceipt(rideId)
     }
 
@@ -102,6 +103,12 @@ fun RideReceiptScreen(onNavigate: (String) -> Unit) {
                 }
                 is RiderRepository.RidePaymentState.Verifying -> {
                     Text("Verifying payment with backend...", color = ElectricCyan, fontSize = 12.sp)
+                }
+                is RiderRepository.RidePaymentState.AuthorizedPending -> {
+                    Text("⏳ ${rState.message}", color = AmberGold, fontSize = 12.sp)
+                }
+                is RiderRepository.RidePaymentState.ReconciliationRequired -> {
+                    Text("⚠️ ${rState.message}", color = AmberGold, fontSize = 12.sp)
                 }
                 is RiderRepository.RidePaymentState.Success -> {
                     Text("✓ ${rState.message}", color = EmeraldGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)

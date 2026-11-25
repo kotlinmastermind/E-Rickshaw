@@ -107,6 +107,9 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (!hasFine && !hasCoarse) {
+            if (!com.vaisentra.mobility.rider.data.NativeLocationEvaluator.isValidCoordinate(currentLat, currentLng)) {
+                RiderRepository.updatePickupLocation(0.0, 0.0, "Allow Location permission for GPS pickup")
+            }
             try {
                 permissionLauncher.launch(
                     arrayOf(
@@ -122,6 +125,9 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
 
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
         if (lm == null) {
+            if (!com.vaisentra.mobility.rider.data.NativeLocationEvaluator.isValidCoordinate(currentLat, currentLng)) {
+                RiderRepository.updatePickupLocation(0.0, 0.0, "Location service unavailable")
+            }
             if (showToast) DialogController.showToast("Location service unavailable")
             return
         }
@@ -139,6 +145,9 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
         }
 
         if (enabledProviders.isEmpty()) {
+            if (!com.vaisentra.mobility.rider.data.NativeLocationEvaluator.isValidCoordinate(currentLat, currentLng)) {
+                RiderRepository.updatePickupLocation(0.0, 0.0, "Turn ON GPS Location & tap recenter")
+            }
             if (showToast) {
                 DialogController.showToast("Please turn ON device Location (GPS)")
             }
@@ -274,7 +283,9 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(10_000L)
-            RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
+            if (com.vaisentra.mobility.rider.data.NativeLocationEvaluator.isValidCoordinate(currentLat, currentLng)) {
+                RiderRepository.syncLiveLocationAndVehicles(currentLat, currentLng)
+            }
         }
     }
 
@@ -1363,14 +1374,23 @@ fun ScheduleRideScreen(onNavigate: (String) -> Unit) {
                 }.format(Date(System.currentTimeMillis() + 86_400_000L))
 
                 CoroutineScope(Dispatchers.IO).launch {
-                    RiderRepository.scheduleRideBooking(
+                    val res = RiderRepository.scheduleRideBooking(
                         pickup = bookingDraft.pickupAddress,
-                        dest = bookingDraft.destinationAddress.ifBlank { "Airport / Station" },
+                        dest = bookingDraft.destinationAddress,
                         pickupTimeIso = tomorrowIso
                     )
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        if (res.isSuccess) {
+                            DialogController.showToast("Ride scheduled for $pickupDate!")
+                            onNavigate("map_home")
+                        } else {
+                            DialogController.showToast(
+                                res.exceptionOrNull()?.message
+                                    ?: "Select valid pickup & destination before scheduling."
+                            )
+                        }
+                    }
                 }
-                DialogController.showToast("Ride scheduled for $pickupDate!")
-                onNavigate("map_home")
             })
         }
     }

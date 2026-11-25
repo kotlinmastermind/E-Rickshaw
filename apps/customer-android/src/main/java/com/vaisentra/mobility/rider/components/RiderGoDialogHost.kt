@@ -267,7 +267,7 @@ private fun PromoAppliedPopup() {
 // 4. Pilot Arrived Buzzer
 @Composable
 private fun PilotArrivedPopup() {
-    val activeRide = RiderRepository.activeRide.value
+    val activeRide by RiderRepository.activeRide.collectAsState()
     val driverName = activeRide?.driverName ?: activeRide?.driver?.name ?: "Pilot"
     val vehiclePlate = activeRide?.vehiclePlate ?: activeRide?.driver?.licenseNumber ?: "Vehicle"
 
@@ -313,7 +313,7 @@ private fun LowWalletPopup() {
 @Composable
 private fun SplitFarePopup() {
     val scope = rememberCoroutineScope()
-    val activeRide = RiderRepository.activeRide.value
+    val activeRide by RiderRepository.activeRide.collectAsState()
     val rideId = activeRide?.id ?: "ride-active"
     val totalFare = activeRide?.fare ?: 129.0
 
@@ -540,7 +540,7 @@ private fun TierUpgradePopup() {
 // 10. Rating & Tip
 @Composable
 private fun RatingTipPopup() {
-    val activeRide = RiderRepository.activeRide.value
+    val activeRide by RiderRepository.activeRide.collectAsState()
     val driverName = activeRide?.driverName ?: activeRide?.driver?.name ?: "Pilot"
     var rating by remember { mutableStateOf(5) }
     var tipAmount by remember { mutableStateOf(20) }
@@ -652,7 +652,7 @@ private fun BiometricPasskeyPopup() {
 @Composable
 private fun AirportDelayPopup() {
     val scope = rememberCoroutineScope()
-    val activeRide = RiderRepository.activeRide.value
+    val activeRide by RiderRepository.activeRide.collectAsState()
     var flightCode by remember { mutableStateOf(activeRide?.flightNumber ?: "6E-204") }
     var isRescheduling by remember { mutableStateOf(false) }
 
@@ -680,8 +680,11 @@ private fun AirportDelayPopup() {
             onClick = {
                 isRescheduling = true
                 scope.launch {
-                    val now = java.time.Instant.now()
-                    val newPickupTimeIso = now.plusSeconds(45 * 60).toString()
+                    val futureMs = System.currentTimeMillis() + (45L * 60L * 1000L)
+                    val isoFmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+                        timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    }
+                    val newPickupTimeIso = isoFmt.format(java.util.Date(futureMs))
 
                     if (activeRide != null) {
                         val res = RiderRepository.syncFlightDelay(activeRide.id, flightCode.trim())
@@ -698,11 +701,14 @@ private fun AirportDelayPopup() {
                             }
                         }
                     } else {
-                        val dest = RiderRepository.bookingDraft.value.destinationAddress.ifBlank { "Connaught Place, New Delhi" }
+                        val draft = RiderRepository.bookingDraft.value
+                        val dest = draft.destinationAddress
                         val res = RiderRepository.scheduleRideBooking(
                             pickup = "IGI Airport Terminal 3 VIP Hub",
                             dest = dest,
-                            pickupTimeIso = newPickupTimeIso
+                            pickupTimeIso = newPickupTimeIso,
+                            pickupLat = 28.5562,
+                            pickupLng = 77.1000
                         )
                         isRescheduling = false
                         DialogController.dismiss()

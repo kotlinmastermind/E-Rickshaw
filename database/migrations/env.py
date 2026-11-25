@@ -2,7 +2,7 @@ import os
 import sys
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text, inspect
 from alembic import context
 
 # Add project root to sys.path
@@ -71,6 +71,25 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        if connection.dialect.name == "postgresql":
+            insp = inspect(connection)
+            if "alembic_version" not in set(insp.get_table_names()):
+                connection.execute(
+                    text(
+                        "CREATE TABLE alembic_version ("
+                        "version_num VARCHAR(128) NOT NULL, "
+                        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)"
+                        ")"
+                    )
+                )
+            else:
+                cols = {c["name"]: c for c in insp.get_columns("alembic_version")}
+                vcol = cols.get("version_num")
+                vlen = getattr(vcol["type"], "length", None) if vcol else None
+                if vlen is not None and vlen < 128:
+                    connection.execute(text("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)"))
+            connection.commit()
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata

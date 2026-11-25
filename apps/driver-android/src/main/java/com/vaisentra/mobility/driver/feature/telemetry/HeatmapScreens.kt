@@ -27,6 +27,8 @@ fun GpsPingScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val liveLoc by DriverRepository.driverLocation.collectAsState()
     var isPinging by remember { mutableStateOf(true) }
     var currentSpeedKmh by remember { mutableFloatStateOf(0f) }
     var currentHeadingDeg by remember { mutableIntStateOf(0) }
@@ -100,9 +102,34 @@ fun GpsPingScreen(
                     text = "Force Sync Telemetry Ping",
                     enabled = isPinging,
                     onClick = {
-                        DriverRepository.pingLocation(28.6139, 77.2090, currentHeadingDeg.toDouble(), (currentSpeedKmh / 3.6))
-                        lastSyncStatus = "Ping dispatched to /api/v1/drivers/location"
-                        onShowToast(lastSyncStatus)
+                        if (liveLoc.isLiveGps && com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(liveLoc.latitude, liveLoc.longitude)) {
+                            DriverRepository.pingLocation(
+                                liveLoc.latitude,
+                                liveLoc.longitude,
+                                liveLoc.heading,
+                                liveLoc.speedKmh / 3.6,
+                                liveLoc.accuracyMeters.toDouble()
+                            )
+                            lastSyncStatus = "Ping dispatched (${String.format(java.util.Locale.US, "%.4f, %.4f", liveLoc.latitude, liveLoc.longitude)})"
+                            onShowToast(lastSyncStatus)
+                        } else {
+                            com.vaisentra.mobility.driver.data.DriverLocationManager.refreshCurrentLocation(context) { refreshed ->
+                                if (refreshed.isLiveGps && com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(refreshed.latitude, refreshed.longitude)) {
+                                    DriverRepository.pingLocation(
+                                        refreshed.latitude,
+                                        refreshed.longitude,
+                                        refreshed.heading,
+                                        refreshed.speedKmh / 3.6,
+                                        refreshed.accuracyMeters.toDouble()
+                                    )
+                                    lastSyncStatus = "Ping dispatched (${String.format(java.util.Locale.US, "%.4f, %.4f", refreshed.latitude, refreshed.longitude)})"
+                                    onShowToast(lastSyncStatus)
+                                } else {
+                                    lastSyncStatus = "GPS fix unavailable"
+                                    onShowToast("Enable GPS & Location permission to sync live location")
+                                }
+                            }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )

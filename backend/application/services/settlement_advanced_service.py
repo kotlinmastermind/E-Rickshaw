@@ -3,11 +3,11 @@ import csv
 import io
 import json
 import uuid
-from contextlib import nullcontext
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Union
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, desc
+from sqlalchemy import select, update, desc, or_
+from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 
 from backend.domain.models import (
@@ -25,19 +25,8 @@ from backend.application.services.payment_service import (
 )
 from backend.integrations.payments.provider import get_payment_provider
 
-_SQLITE_REFUND_STEP1_LOCKS: Dict[str, asyncio.Lock] = {}
-
-
-def _refund_reservation_guard(db: AsyncSession, payment_id: str):
-    """Serialize in-process SQLite Step-1 refund reservations where SELECT FOR UPDATE is a no-op."""
-    bind = getattr(db, "bind", None)
-    if bind is not None and getattr(getattr(bind, "dialect", None), "name", "") == "sqlite":
-        lock = _SQLITE_REFUND_STEP1_LOCKS.get(payment_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            _SQLITE_REFUND_STEP1_LOCKS[payment_id] = lock
-        return lock
-    return nullcontext()
+REFUND_IDEMPOTENCY_MIN_LEN = 8
+REFUND_IDEMPOTENCY_MAX_LEN = 128
 
 
 class SettlementAdvancedService:
@@ -686,37 +675,118 @@ class SettlementAdvancedService:
         if not reason or not reason.strip():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Refund reason is required.")
 
-        clean_idem = idempotency_key.strip() if isinstance(idempotency_key, str) and idempotency_key.strip() else None
-        if clean_idem and not existing_refund_id:
-            existing_by_idem = (
-                await self.db.execute(select(PaymentRefund).where(PaymentRefund.idempotency_key == clean_idem))
-            ).scalar_one_or_none()
-            if existing_by_idem:
-                if existing_by_idem.payment_id != payment_id or existing_by_idem.amount_cents != amount_cents:
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Refund idempotency_key is already bound to a different payment or amount.",
-                    )
-                return {
-                    "refund_id": existing_by_idem.provider_refund_id or existing_by_idem.id,
-                    "internal_refund_id": existing_by_idem.id,
-                    "payment_id": existing_by_idem.payment_id,
-                    "amount_rupees": round(existing_by_idem.amount_cents / 100.0, 2),
-                    "status": existing_by_idem.status,
-                    "arn_reference": existing_by_idem.arn_reference,
-                    "gateway_status": existing_by_idem.status.lower(),
-                    "idempotent_replay": True,
-                }
+        if idempotency_key is not None:
+            if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Refund idempotency_key cannot be empty when supplied.",
+                )
+            clean_idem: Optional[str] = idempotency_key.strip()
+            if len(clean_idem) < REFUND_IDEMPOTENCY_MIN_LEN or len(clean_idem) > REFUND_IDEMPOTENCY_MAX_LEN:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Refund idempotency_key must be between {REFUND_IDEMPOTENCY_MIN_LEN} and {REFUND_IDEMPOTENCY_MAX_LEN} characters.",
+                )
+        else:
+            clean_idem = None
 
-        # Step 1: Lock Payment & reserve refundable capacity before outbound gateway call
+        def _build_replay_response(ref_obj: PaymentRefund) -> Dict[str, Any]:
+            return {
+                "refund_id": ref_obj.provider_refund_id or ref_obj.id,
+                "internal_refund_id": ref_obj.id,
+                "payment_id": ref_obj.payment_id,
+                "amount_rupees": round(ref_obj.amount_cents / 100.0, 2),
+                "status": ref_obj.status,
+                "arn_reference": ref_obj.arn_reference,
+                "gateway_status": ref_obj.status.lower(),
+                "idempotent_replay": True,
+            }
+
+        # Step 1: Acquire DB-backed payment reservation lease + FOR UPDATE row lock (zero in-memory locks)
         stmt = select(Payment).where(Payment.id == payment_id).with_for_update()
         payment_svc = PaymentService(self.db)
         in_flight_statuses = ("INITIATED", "PENDING", "GATEWAY_PROCESSING", "APPROVED_AWAITING_PROVIDER")
 
-        async with _refund_reservation_guard(self.db, payment_id):
+        lease_owner = f"reflease_{uuid.uuid4().hex[:24]}"
+        lease_acquired = False
+        for _lease_wait in range(40):
+            now_lease = datetime.now(timezone.utc)
+            lease_exp = now_lease + timedelta(seconds=20)
+            lease_res = await self.db.execute(
+                update(Payment)
+                .where(
+                    Payment.id == payment_id,
+                    or_(
+                        Payment.refund_lease_owner.is_(None),
+                        Payment.refund_lease_expires_at < now_lease,
+                    ),
+                )
+                .values(
+                    refund_lease_owner=lease_owner,
+                    refund_lease_expires_at=lease_exp,
+                )
+            )
+            if lease_res.rowcount == 1:
+                await self.db.commit()
+                lease_acquired = True
+                break
+
+            await self.db.rollback()
+            if clean_idem and not existing_refund_id:
+                existing_wait = (
+                    await self.db.execute(select(PaymentRefund).where(PaymentRefund.idempotency_key == clean_idem))
+                ).scalar_one_or_none()
+                if existing_wait:
+                    if existing_wait.payment_id != payment_id or existing_wait.amount_cents != amount_cents:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="Refund idempotency_key is already bound to a different payment or amount.",
+                        )
+                    return _build_replay_response(existing_wait)
+
+            exists_pay = (await self.db.execute(select(Payment.id).where(Payment.id == payment_id))).scalar_one_or_none()
+            if not exists_pay:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record not found.")
+            await asyncio.sleep(0.05)
+
+        if not lease_acquired:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Concurrent refund reservation already in progress for this payment; please retry.",
+            )
+
+        async def _release_own_lease(*, rollback_first: bool = False) -> None:
+            if rollback_first:
+                await self.db.rollback()
+            await self.db.execute(
+                update(Payment)
+                .where(Payment.id == payment_id, Payment.refund_lease_owner == lease_owner)
+                .values(refund_lease_owner=None, refund_lease_expires_at=None)
+            )
+            await self.db.commit()
+
+        mutated_orm = False
+        try:
             payment = (await self.db.execute(stmt)).scalar_one_or_none()
             if not payment:
+                await _release_own_lease()
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record not found.")
+
+            # Authoritative post-lock idempotency lookup (Phase 4A: recheck after acquiring payment lock)
+            if clean_idem and not existing_refund_id:
+                existing_by_idem = (
+                    await self.db.execute(select(PaymentRefund).where(PaymentRefund.idempotency_key == clean_idem))
+                ).scalar_one_or_none()
+                if existing_by_idem:
+                    if existing_by_idem.payment_id != payment_id or existing_by_idem.amount_cents != amount_cents:
+                        await _release_own_lease()
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="Refund idempotency_key is already bound to a different payment or amount.",
+                        )
+                    replay_payload = _build_replay_response(existing_by_idem)
+                    await _release_own_lease()
+                    return replay_payload
 
             if payment.provider_name == "CASH" or payment.payment_method == "CASH":
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Physical CASH payments cannot be refunded via Razorpay.")
@@ -768,24 +838,18 @@ class SettlementAdvancedService:
                 if not provisional_refund or provisional_refund.payment_id != target_payment_id:
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approved refund record not found for payment.")
                 if provisional_refund.status not in {"APPROVED_AWAITING_PROVIDER", "INITIATED", "FAILED"}:
-                    return {
-                        "refund_id": provisional_refund.provider_refund_id or provisional_refund.id,
-                        "internal_refund_id": provisional_refund.id,
-                        "payment_id": provisional_refund.payment_id,
-                        "amount_rupees": round(provisional_refund.amount_cents / 100.0, 2),
-                        "status": provisional_refund.status,
-                        "arn_reference": provisional_refund.arn_reference,
-                        "gateway_status": provisional_refund.status.lower(),
-                        "idempotent_replay": True,
-                    }
+                    replay_existing = _build_replay_response(provisional_refund)
+                    await _release_own_lease()
+                    return replay_existing
+                mutated_orm = True
                 internal_refund_id = provisional_refund.id
                 transition_refund_status(provisional_refund, "INITIATED", context="create_refund from approved")
                 provisional_refund.idempotency_key = provisional_refund.idempotency_key or clean_idem or f"ref_req_{internal_refund_id}"
                 provisional_refund.estimated_settlement_date = provisional_refund.estimated_settlement_date or (
                     datetime.now(timezone.utc) + timedelta(days=3)
                 )
-                await self.db.commit()
             else:
+                mutated_orm = True
                 internal_refund_id = str(uuid.uuid4())
                 provisional_refund = PaymentRefund(
                     id=internal_refund_id,
@@ -804,7 +868,34 @@ class SettlementAdvancedService:
                     estimated_settlement_date=datetime.now(timezone.utc) + timedelta(days=3),
                 )
                 self.db.add(provisional_refund)
+
+            payment.refund_lease_owner = None
+            payment.refund_lease_expires_at = None
+            try:
                 await self.db.commit()
+            except IntegrityError:
+                await _release_own_lease(rollback_first=True)
+                if clean_idem:
+                    dup_ref = (
+                        await self.db.execute(select(PaymentRefund).where(PaymentRefund.idempotency_key == clean_idem))
+                    ).scalar_one_or_none()
+                    if dup_ref:
+                        if dup_ref.payment_id != payment_id or dup_ref.amount_cents != amount_cents:
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail="Refund idempotency_key is already bound to a different payment or amount.",
+                            )
+                        return _build_replay_response(dup_ref)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Duplicate refund constraint violation; retry safely.",
+                )
+        except HTTPException:
+            await _release_own_lease(rollback_first=mutated_orm)
+            raise
+        except Exception:
+            await _release_own_lease(rollback_first=True)
+            raise
 
         # Step 2: Execute Razorpay gateway refund API outside long DB row lock
         provider = get_payment_provider()
@@ -1177,40 +1268,66 @@ class SettlementAdvancedService:
         resolution_notes: str,
         refund_amount_cents: Optional[int] = None
     ) -> Dict[str, Any]:
-        stmt = select(FareDispute).where(FareDispute.id == dispute_id)
+        stmt = select(FareDispute).where(FareDispute.id == dispute_id).with_for_update()
         res = await self.db.execute(stmt)
         dispute = res.scalar_one_or_none()
         if not dispute:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dispute not found.")
+        if dispute.status in ("RESOLVED_REFUNDED", "REJECTED"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Dispute is already finalized in status {dispute.status}.",
+            )
 
+        target_dispute_id = dispute.id
+        target_ride_id = dispute.ride_id
+        claimed_cents = dispute.claimed_amount_cents
         now = datetime.now(timezone.utc)
-        dispute.resolved_by_admin_id = admin_id
-        dispute.resolved_at = now
-        dispute.admin_resolution_notes = resolution_notes
 
         refund_data = None
         if resolution.upper() == "APPROVE_REFUND":
-            dispute.status = "RESOLVED_REFUNDED"
-            # Execute refund
-            amt = refund_amount_cents or dispute.claimed_amount_cents
-            pay_stmt = select(Payment).where(Payment.ride_id == dispute.ride_id)
+            amt = refund_amount_cents or claimed_cents
+            pay_stmt = select(Payment).where(Payment.ride_id == target_ride_id)
             pay_res = await self.db.execute(pay_stmt)
             payment = pay_res.scalar_one_or_none()
-            if payment:
-                refund_data = await self.create_refund(
-                    payment_id=payment.id,
-                    amount_cents=amt,
-                    reason=f"Dispute resolution: {resolution_notes}",
-                    is_partial=(amt < payment.amount_cents)
+            if not payment:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No payment record exists for this disputed ride.",
                 )
-                dispute.refund_id = refund_data["refund_id"]
-        else:
-            dispute.status = "REJECTED"
+            refund_data = await self.create_refund(
+                payment_id=payment.id,
+                amount_cents=amt,
+                reason=f"Dispute resolution: {resolution_notes}",
+                is_partial=(amt < payment.amount_cents),
+                idempotency_key=f"disp_ref_{target_dispute_id}",
+                allow_debt_clawback=True,
+                actor_admin_id=admin_id,
+            )
+            locked_dispute = (
+                await self.db.execute(select(FareDispute).where(FareDispute.id == target_dispute_id).with_for_update())
+            ).scalar_one()
+            locked_dispute.status = "RESOLVED_REFUNDED"
+            locked_dispute.refund_id = refund_data["refund_id"]
+            locked_dispute.resolved_by_admin_id = admin_id
+            locked_dispute.resolved_at = now
+            locked_dispute.admin_resolution_notes = resolution_notes
+            await self.db.commit()
+            return {
+                "dispute_id": target_dispute_id,
+                "status": "RESOLVED_REFUNDED",
+                "resolution_notes": resolution_notes,
+                "refund": refund_data,
+            }
 
+        dispute.status = "REJECTED"
+        dispute.resolved_by_admin_id = admin_id
+        dispute.resolved_at = now
+        dispute.admin_resolution_notes = resolution_notes
         await self.db.commit()
         return {
-            "dispute_id": dispute.id,
-            "status": dispute.status,
-            "resolution_notes": dispute.admin_resolution_notes,
-            "refund": refund_data
+            "dispute_id": target_dispute_id,
+            "status": "REJECTED",
+            "resolution_notes": resolution_notes,
+            "refund": None,
         }

@@ -2694,3 +2694,442 @@ class PaymentService:
             "cash_collected": True,
             "amount_cents": payment.amount_cents,
         }
+
+    # ------------------------------------------------------------------
+    # Authoritative Strict Checkout Payment Verification & Capture
+    # ------------------------------------------------------------------
+    async def verify_checkout_and_finalize_capture(
+        self,
+        *,
+        actor_user_id: str,
+        actor_role: Optional[str],
+        razorpay_order_id: str,
+        razorpay_payment_id: str,
+        razorpay_signature: str,
+        expected_purpose: Optional[str] = None,
+        ride_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Single authoritative checkout payment verification and capture engine shared by
+        Wallet Top-up verification and Ride Fare / Generic checkout verification.
+        Performs fail-closed gateway response validation (no optional/defaulted fields)
+        and deterministic row locking: Payment -> Wallet / Ride -> DriverWallet.
+        """
+        clean_order_id = (razorpay_order_id or "").strip()
+        clean_payment_id = (razorpay_payment_id or "").strip()
+        clean_signature = (razorpay_signature or "").strip()
+        clean_ride_id = (ride_id or "").strip() or None
+        is_admin = (actor_role or "").strip().lower() in ("admin", "superadmin", "super administrator")
+
+        if not clean_order_id or not clean_payment_id or not clean_signature:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="razorpay_order_id, razorpay_payment_id, and razorpay_signature are all required.",
+            )
+
+        # 1. Cryptographic HMAC-SHA256 signature verification
+        if not self.provider.verify_payment_signature(
+            razorpay_order_id=clean_order_id,
+            razorpay_payment_id=clean_payment_id,
+            razorpay_signature=clean_signature,
+        ):
+            logger.error(
+                "Razorpay signature mismatch: order_id=%s, payment_id=%s, user_id=%s",
+                clean_order_id,
+                clean_payment_id,
+                actor_user_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cryptographic verification failed: Invalid Razorpay signature.",
+            )
+
+        async def _load_payment_by_order(*, lock: bool) -> tuple[Optional[Payment], Optional[PaymentOrderAttempt]]:
+            q = select(Payment).where(Payment.provider_order_id == clean_order_id)
+            if lock:
+                q = q.with_for_update()
+            found = (await self.db.execute(q)).scalar_one_or_none()
+            att_match: Optional[PaymentOrderAttempt] = None
+            if not found:
+                att_match = (
+                    await self.db.execute(
+                        select(PaymentOrderAttempt).where(
+                            PaymentOrderAttempt.provider_order_id == clean_order_id
+                        )
+                    )
+                ).scalar_one_or_none()
+                if att_match:
+                    q_att = select(Payment).where(Payment.id == att_match.payment_id)
+                    if lock:
+                        q_att = q_att.with_for_update()
+                    found = (await self.db.execute(q_att)).scalar_one_or_none()
+            if not found and clean_ride_id and expected_purpose != "WALLET_TOPUP":
+                q_ride = select(Payment).where(Payment.ride_id == clean_ride_id)
+                if lock:
+                    q_ride = q_ride.with_for_update()
+                found = (await self.db.execute(q_ride)).scalar_one_or_none()
+            elif found and found.provider_order_id != clean_order_id:
+                att_match = (
+                    await self.db.execute(
+                        select(PaymentOrderAttempt).where(
+                            PaymentOrderAttempt.payment_id == found.id,
+                            PaymentOrderAttempt.provider_order_id == clean_order_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+            return found, att_match
+
+        async def _assert_ownership_and_binding(
+            pay_obj: Payment, att_obj: Optional[PaymentOrderAttempt]
+        ) -> Optional[PaymentOrderAttempt]:
+            if pay_obj.provider_name == "CASH" or pay_obj.payment_method == "CASH":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Physical CASH payments cannot be verified via Razorpay.",
+                )
+            if clean_ride_id and pay_obj.ride_id and pay_obj.ride_id != clean_ride_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Specified ride_id does not match the payment order association.",
+                )
+            if expected_purpose and pay_obj.purpose != expected_purpose:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Payment purpose mismatch: expected {expected_purpose}, found {pay_obj.purpose}.",
+                )
+            if pay_obj.currency.upper() != "INR":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid internal payment currency: {pay_obj.currency}. Expected INR.",
+                )
+
+            if pay_obj.purpose == "WALLET_TOPUP":
+                if not pay_obj.user_id or (pay_obj.user_id != actor_user_id and not is_admin):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Access denied: You do not own this payment order.",
+                    )
+            else:
+                if not is_admin:
+                    if pay_obj.user_id and pay_obj.user_id != actor_user_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="You do not have permission to verify this payment.",
+                        )
+                    if pay_obj.customer_id:
+                        prof = (
+                            await self.db.execute(
+                                select(CustomerProfile).where(CustomerProfile.user_id == actor_user_id)
+                            )
+                        ).scalar_one_or_none()
+                        if not prof or pay_obj.customer_id != prof.id:
+                            raise HTTPException(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                detail="You do not have permission to verify payment for this journey.",
+                            )
+                    elif not pay_obj.user_id:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Payment ownership cannot be established.",
+                        )
+
+            effective_att = att_obj
+            if pay_obj.provider_order_id and pay_obj.provider_order_id != clean_order_id:
+                if effective_att is None:
+                    effective_att = (
+                        await self.db.execute(
+                            select(PaymentOrderAttempt).where(
+                                PaymentOrderAttempt.payment_id == pay_obj.id,
+                                PaymentOrderAttempt.provider_order_id == clean_order_id,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                if effective_att is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Payment is bound to a different Razorpay order ID.",
+                    )
+            elif not pay_obj.provider_order_id and effective_att is None:
+                effective_att = (
+                    await self.db.execute(
+                        select(PaymentOrderAttempt).where(
+                            PaymentOrderAttempt.payment_id == pay_obj.id,
+                            PaymentOrderAttempt.provider_order_id == clean_order_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if effective_att is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Order is not associated with the target internal payment record.",
+                    )
+            return effective_att
+
+        # 2. Pre-read internal Payment without holding row locks across outbound HTTP
+        pre_payment, pre_attempt = await _load_payment_by_order(lock=False)
+        if not pre_payment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No payment record matches order {clean_order_id}.",
+            )
+        pre_attempt = await _assert_ownership_and_binding(pre_payment, pre_attempt)
+
+        settled_states = ("CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED", "SUCCESS")
+        if pre_payment.status in settled_states:
+            if pre_payment.provider_payment_id and pre_payment.provider_payment_id != clean_payment_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Payment is already settled with a different gateway payment ID.",
+                )
+            return {
+                "already_processed": True,
+                "status": "ALREADY_PROCESSED",
+                "payment_status": pre_payment.status,
+                "payment_id": pre_payment.provider_payment_id or clean_payment_id,
+                "internal_payment_id": pre_payment.id,
+                "order_id": pre_payment.provider_order_id or clean_order_id,
+                "ride_id": pre_payment.ride_id or clean_ride_id,
+                "amount_cents": pre_payment.amount_cents,
+                "purpose": pre_payment.purpose,
+            }
+
+        expected_verify_amount = int(
+            pre_attempt.amount_cents if pre_attempt is not None else pre_payment.amount_cents
+        )
+        target_payment_id = pre_payment.id
+
+        # 3. Authoritative Server-Side Fetch from Razorpay API (outside DB write lock)
+        try:
+            gateway_payment = await self.provider.fetch_payment(
+                payment_id=clean_payment_id,
+                expected_amount_cents=expected_verify_amount,
+                expected_order_id=clean_order_id,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Failed fetching payment %s from Razorpay gateway: %s", clean_payment_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to verify payment status with gateway provider.",
+            )
+
+        # 4. Strict Fail-Closed Gateway Payload Validation (no empty/None/default bypasses)
+        if not isinstance(gateway_payment, dict):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Malformed response received from payment gateway.",
+            )
+
+        gw_payment_id = gateway_payment.get("id")
+        if not isinstance(gw_payment_id, str) or not gw_payment_id.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Authoritative gateway response is missing required payment identifier.",
+            )
+        if gw_payment_id.strip() != clean_payment_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Authoritative payment ID mismatch with gateway.",
+            )
+
+        gw_order_id = gateway_payment.get("order_id")
+        if not isinstance(gw_order_id, str) or not gw_order_id.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Authoritative gateway response is missing required order identifier.",
+            )
+        if gw_order_id.strip() != clean_order_id:
+            logger.critical(
+                "SECURITY ANOMALY: Gateway order mismatch! Expected %s, got %s",
+                clean_order_id,
+                gw_order_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Authoritative payment does not correspond to expected Razorpay order.",
+            )
+
+        gw_account_id = gateway_payment.get("account_id")
+        acct_ok, acct_reason = self.provider.validate_merchant_account(gw_account_id)
+        if not acct_ok:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=acct_reason)
+
+        raw_gw_currency = gateway_payment.get("currency")
+        if not isinstance(raw_gw_currency, str) or not raw_gw_currency.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Authoritative gateway response is missing currency.",
+            )
+        gw_currency = raw_gw_currency.strip().upper()
+        if gw_currency != "INR":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid transaction currency: {gw_currency}. Must be INR.",
+            )
+
+        gw_status_raw = gateway_payment.get("status")
+        if not isinstance(gw_status_raw, str) or not gw_status_raw.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Authoritative gateway response is missing payment status.",
+            )
+        gw_status = gw_status_raw.strip().lower()
+
+        gw_amount = gateway_payment.get("amount")
+        if not _is_int_paise(gw_amount) or gw_amount <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Authoritative gateway response contains invalid amount.",
+            )
+        if gw_amount != expected_verify_amount:
+            logger.critical(
+                "SECURITY ANOMALY: Payment amount mismatch! Expected %d paise, gateway reports %d paise",
+                expected_verify_amount,
+                gw_amount,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment amount mismatch between client, order, and gateway.",
+            )
+
+        if expected_purpose == "WALLET_TOPUP" and gw_status != "captured":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payment status is {gw_status}; expected captured.",
+            )
+
+        # 5. Acquire Pessimistic Row Locks in Consistent Order: Payment -> Wallet / Ride -> DriverWallet
+        payment = (
+            await self.db.execute(select(Payment).where(Payment.id == target_payment_id).with_for_update())
+        ).scalar_one_or_none()
+        if not payment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record disappeared.")
+
+        locked_attempt = await _assert_ownership_and_binding(payment, pre_attempt)
+
+        if gw_account_id and not payment.merchant_account_id:
+            payment.merchant_account_id = gw_account_id.strip() if isinstance(gw_account_id, str) else None
+
+        expected_locked_amount = int(
+            locked_attempt.amount_cents if locked_attempt is not None else payment.amount_cents
+        )
+        if gw_amount != expected_locked_amount:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Payment amount mismatch between client, order, and locked payment record.",
+            )
+
+        if payment.status in settled_states:
+            if payment.provider_payment_id and payment.provider_payment_id != clean_payment_id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Payment is already settled with a different gateway payment ID.",
+                )
+            return {
+                "already_processed": True,
+                "status": "ALREADY_PROCESSED",
+                "payment_status": payment.status,
+                "payment_id": payment.provider_payment_id or clean_payment_id,
+                "internal_payment_id": target_payment_id,
+                "order_id": payment.provider_order_id or clean_order_id,
+                "ride_id": payment.ride_id or clean_ride_id,
+                "amount_cents": payment.amount_cents,
+                "purpose": payment.purpose,
+            }
+
+        reused = (
+            await self.db.execute(
+                select(Payment).where(
+                    Payment.provider_payment_id == clean_payment_id,
+                    Payment.id != target_payment_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if reused:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Gateway payment ID is already bound to another transaction.",
+            )
+
+        if gw_status == "authorized":
+            try:
+                transition_payment_status(payment, "AUTHORIZED", context="verify_checkout_and_finalize_capture")
+            except ValueError as err:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
+            payment.provider_payment_id = clean_payment_id
+            await self._commit_or_500("payment authorization persistence")
+            return {
+                "already_processed": False,
+                "status": "AUTHORIZED",
+                "payment_status": "AUTHORIZED",
+                "payment_id": clean_payment_id,
+                "internal_payment_id": target_payment_id,
+                "order_id": clean_order_id,
+                "ride_id": payment.ride_id or clean_ride_id,
+                "amount_cents": payment.amount_cents,
+                "purpose": payment.purpose,
+            }
+
+        if gw_status != "captured":
+            if gw_status == "failed":
+                try:
+                    transition_payment_status(payment, "FAILED", context="verify_checkout_and_finalize_capture")
+                except ValueError as err:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
+                payment.provider_payment_id = clean_payment_id
+                await self._commit_or_500("payment failed persistence")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Authoritative gateway payment is not captured. Current status: {gw_status}",
+            )
+
+        if locked_attempt is not None and payment.provider_order_id != clean_order_id:
+            payment.provider_order_id = clean_order_id
+            payment.amount_cents = locked_attempt.amount_cents
+        elif not payment.provider_order_id:
+            payment.provider_order_id = clean_order_id
+
+        final_amount_cents = payment.amount_cents
+        final_purpose = payment.purpose
+        final_ride_id = payment.ride_id or clean_ride_id
+
+        await self.finalize_payment_capture(
+            payment=payment,
+            provider_payment_id=clean_payment_id,
+            provider_signature=clean_signature,
+            auto_commit=False,
+        )
+
+        if final_ride_id and final_purpose == "RIDE_FARE":
+            r_res = await self.db.execute(select(Ride).where(Ride.id == final_ride_id).with_for_update())
+            ride = r_res.scalar_one_or_none()
+            if ride and ride.status in ["IN_PROGRESS", "ACCEPTED", "ARRIVED", "STARTED"]:
+                now_comp = datetime.now(timezone.utc)
+                ride.status = "COMPLETED"
+                ride.completed_at = ride.completed_at or now_comp
+                if ride.final_fare_cents is None:
+                    ride.final_fare_cents = final_amount_cents or ride.estimated_fare_cents or 0
+                if not ride.assigned_driver_id and payment.driver_id:
+                    ride.assigned_driver_id = payment.driver_id
+
+        self.db.add(
+            PaymentEvent(
+                payment_id=target_payment_id,
+                event_type="VERIFY_CAPTURED",
+                payload_json=json.dumps({"order_id": clean_order_id, "payment_id": clean_payment_id, "purpose": final_purpose}),
+            )
+        )
+        await self._commit_or_500("payment verification and capture")
+
+        return {
+            "already_processed": False,
+            "status": "CAPTURED",
+            "payment_status": "CAPTURED",
+            "payment_id": clean_payment_id,
+            "internal_payment_id": target_payment_id,
+            "order_id": clean_order_id,
+            "ride_id": final_ride_id,
+            "amount_cents": final_amount_cents,
+            "purpose": final_purpose,
+        }

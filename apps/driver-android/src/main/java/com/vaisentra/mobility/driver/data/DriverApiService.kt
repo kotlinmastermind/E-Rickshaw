@@ -287,8 +287,8 @@ interface DriverApiService {
 
     @GET("api/v1/location/road-restrictions")
     suspend fun getRoadRestrictions(
-        @Query("latitude") latitude: Double = 28.6139,
-        @Query("longitude") longitude: Double = 77.2090,
+        @Query("latitude") latitude: Double? = null,
+        @Query("longitude") longitude: Double? = null,
         @Query("radius_km") radiusKm: Double = 25.0
     ): Response<List<RoadRestrictionDto>>
 

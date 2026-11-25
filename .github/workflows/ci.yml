@@ -1,0 +1,107 @@
+name: CI Checks (Backend, PostgreSQL, Android, Static)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-and-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erickshaw_test
+          POSTGRES_PASSWORD: erickshaw_test_password
+          POSTGRES_DB: erickshaw_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U erickshaw_test -d erickshaw_test_db"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Static security and Google FCM-only checks
+        run: |
+          python -m compileall -q backend database
+          python -c "
+          import pathlib, re, sys
+          bad = []
+          for p in [pathlib.Path('backend/static/admin/index.html'), pathlib.Path('docs/interactive_design_studio.html')]:
+              txt = p.read_text(encoding='utf-8')
+              if 'fonts.googleapis.com' in txt or 'fonts.gstatic.com' in txt:
+                  bad.append(f'Google Fonts reference found in {p}')
+          for p in pathlib.Path('apps').rglob('*.kt'):
+              txt = p.read_text(encoding='utf-8', errors='ignore')
+              if 'rzp_test_placeholder' in txt and not str(p).endswith('Test.kt'):
+                  bad.append(f'Placeholder Razorpay key in {p}')
+          if bad:
+              print('\n'.join(bad))
+              sys.exit(1)
+          print('Static policy checks passed.')
+          "
+
+      - name: Validate Alembic migrations against PostgreSQL
+        env:
+          TESTING: "0"
+          ENVIRONMENT: "test"
+          DATABASE_URL: "postgresql+asyncpg://erickshaw_test:erickshaw_test_password@127.0.0.1:5432/erickshaw_test_db"
+          DATABASE_URL_SYNC: "postgresql+psycopg2://erickshaw_test:erickshaw_test_password@127.0.0.1:5432/erickshaw_test_db"
+        run: |
+          alembic heads
+          alembic upgrade head
+          alembic downgrade -1
+          alembic upgrade head
+
+      - name: Run full backend pytest suite + PostgreSQL concurrency integration tests
+        env:
+          TESTING: "1"
+          ENVIRONMENT: "test"
+          POSTGRES_TEST_DATABASE_URL: "postgresql+asyncpg://erickshaw_test:erickshaw_test_password@127.0.0.1:5432/erickshaw_test_db"
+          TEST_POSTGRES_URL: "postgresql+asyncpg://erickshaw_test:erickshaw_test_password@127.0.0.1:5432/erickshaw_test_db"
+        run: |
+          pytest backend/tests -rs -v --tb=short
+
+  android-build-and-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant Gradle wrapper execute permission
+        run: chmod +x gradlew
+
+      - name: Compile and run Customer and Driver Android unit tests
+        run: |
+          ./gradlew :apps:customer-android:compileDebugKotlin :apps:driver-android:compileDebugKotlin :apps:customer-android:testDebugUnitTest :apps:driver-android:testDebugUnitTest :apps:customer-android:lintDebug :apps:driver-android:lintDebug --no-daemon
+
+      - name: Verify Android ProGuard and FCM release config
+        run: |
+          test -f apps/customer-android/proguard-rules.pro
+          test -f apps/driver-android/proguard-rules.pro
+          grep -q "com.razorpay" apps/customer-android/proguard-rules.pro

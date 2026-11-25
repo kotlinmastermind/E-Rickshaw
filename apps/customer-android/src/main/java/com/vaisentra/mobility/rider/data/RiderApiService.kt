@@ -420,8 +420,8 @@ interface RiderApiService {
 
 data class MapSearchRequest(
     val query: String,
-    val proximity_lat: Double? = 28.6139,
-    val proximity_lng: Double? = 77.2090
+    val proximity_lat: Double? = null,
+    val proximity_lng: Double? = null
 )
 
 data class MapSearchResult(

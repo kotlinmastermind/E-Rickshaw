@@ -252,10 +252,11 @@ fun PickupNavScreen(
         DriverRepository.fetchActiveRide()
     }
 
-    val driverLat = if (liveLocation.latitude != 0.0) liveLocation.latitude else 28.6139
-    val driverLng = if (liveLocation.longitude != 0.0) liveLocation.longitude else 77.2090
-    val targetLat = activeRide?.pickupLatitude ?: 28.6289
-    val targetLng = activeRide?.pickupLongitude ?: 77.3712
+    val hasDriverFix = com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(liveLocation.latitude, liveLocation.longitude)
+    val driverLat = if (hasDriverFix) liveLocation.latitude else 0.0
+    val driverLng = if (hasDriverFix) liveLocation.longitude else 0.0
+    val targetLat = activeRide?.pickupLatitude
+    val targetLng = activeRide?.pickupLongitude
     val currentSpeed = liveLocation.speedKmh.toInt().coerceAtLeast(0)
 
     Column(
@@ -744,29 +745,41 @@ fun InTripNavScreen(
     val distanceToManeuver by DriverVoiceNavigationEngine.distanceToNextManeuverMeters.collectAsState()
     val isVoiceMuted by DriverVoiceNavigationEngine.isVoiceMuted.collectAsState()
 
-    val driverLat = if (liveLocation.latitude != 0.0) liveLocation.latitude else 28.6139
-    val driverLng = if (liveLocation.longitude != 0.0) liveLocation.longitude else 77.2090
-    val targetLat = activeRide?.destinationLatitude ?: 28.5355
-    val targetLng = activeRide?.destinationLongitude ?: 77.3910
+    val hasDriverFix = com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(liveLocation.latitude, liveLocation.longitude)
+    val driverLat = if (hasDriverFix) liveLocation.latitude else 0.0
+    val driverLng = if (hasDriverFix) liveLocation.longitude else 0.0
+    val targetLat = activeRide?.destinationLatitude
+    val targetLng = activeRide?.destinationLongitude
+    val hasDestFix = targetLat != null && targetLng != null &&
+        com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(targetLat, targetLng)
     val currentSpeed = liveLocation.speedKmh.toInt().coerceAtLeast(0)
     val speedLimit = 35
+    var navStarted by remember(activeRide?.id, targetLat, targetLng) { mutableStateOf(false) }
 
-    // Start Live Turn-by-Turn Voice Engine on Screen Launch
-    LaunchedEffect(activeRide?.id, targetLat, targetLng) {
+    LaunchedEffect(activeRide?.id) {
         DriverRepository.fetchActiveRide()
-        DriverVoiceNavigationEngine.startNavigation(
-            context = context,
-            originLat = driverLat,
-            originLng = driverLng,
-            destLat = targetLat,
-            destLng = targetLng,
-            destinationTitle = activeRide?.destinationAddress ?: "Passenger Destination"
-        )
     }
 
-    // Pass every live GPS ping to Voice Engine
-    LaunchedEffect(liveLocation.latitude, liveLocation.longitude) {
-        DriverVoiceNavigationEngine.onLocationUpdate(driverLat, driverLng)
+    // Start Live Turn-by-Turn Voice Engine once real GPS & destination coordinates exist
+    LaunchedEffect(activeRide?.id, hasDriverFix, driverLat, driverLng, hasDestFix, targetLat, targetLng) {
+        if (!navStarted && hasDriverFix && hasDestFix) {
+            navStarted = true
+            DriverVoiceNavigationEngine.startNavigation(
+                context = context,
+                originLat = driverLat,
+                originLng = driverLng,
+                destLat = targetLat!!,
+                destLng = targetLng!!,
+                destinationTitle = activeRide?.destinationAddress ?: "Passenger Destination"
+            )
+        }
+    }
+
+    // Pass every valid live GPS ping to Voice Engine
+    LaunchedEffect(hasDriverFix, driverLat, driverLng) {
+        if (hasDriverFix) {
+            DriverVoiceNavigationEngine.onLocationUpdate(driverLat, driverLng)
+        }
     }
 
     // Stop Voice Engine when leaving screen

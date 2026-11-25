@@ -24,16 +24,19 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 data class DriverLiveLocation(
-    val latitude: Double = 28.6139,
-    val longitude: Double = 77.2090,
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
     val heading: Double = 0.0,
     val speedKmh: Double = 0.0,
-    val accuracyMeters: Float = 5.0f,
-    val address: String = "Connaught Place, New Delhi",
+    val accuracyMeters: Float = 0.0f,
+    val address: String = "Acquiring GPS signal...",
     val isLiveGps: Boolean = false,
     val providerSource: String = "GPS",
-    val lastUpdatedTimestamp: Long = System.currentTimeMillis()
-)
+    val lastUpdatedTimestamp: Long = 0L
+) {
+    fun hasValidCoordinates(): Boolean =
+        NativeLocationEvaluator.isValidCoordinate(latitude, longitude)
+}
 
 enum class LocationProviderStatus {
     IDLE,
@@ -52,6 +55,11 @@ object DriverLocationManager {
 
     private val _providerStatus = MutableStateFlow(LocationProviderStatus.IDLE)
     val providerStatus: StateFlow<LocationProviderStatus> = _providerStatus.asStateFlow()
+
+    fun hasValidLiveFix(): Boolean {
+        val loc = _currentLocation.value
+        return loc.isLiveGps && NativeLocationEvaluator.isValidCoordinate(loc.latitude, loc.longitude)
+    }
 
     private var appContext: Context? = null
     private var locationManager: LocationManager? = null

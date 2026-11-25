@@ -1000,6 +1000,8 @@ class Payment(Base):
     order_creation_lease_owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     order_creation_lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     order_creation_receipt: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    refund_lease_owner: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    refund_lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     cash_collected_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     cash_confirmed_by_driver_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1358,7 +1360,7 @@ class PaymentRefund(Base):
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="INITIATED")  # INITIATED, GATEWAY_PROCESSING, CREDITED, PROCESSED, FAILED, ANOMALY_EXCESS, PARTIALLY_APPLIED_EXCESS
     provider_refund_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
-    idempotency_key: Mapped[Optional[str]] = mapped_column(String(96), unique=True, index=True, nullable=True)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
     arn_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # Bank ARN or legacy ref
     last_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     settled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1374,6 +1376,7 @@ class PaymentRefund(Base):
     __table_args__ = (
         CheckConstraint("amount_cents >= 0", name="ck_payment_refunds_non_negative_amount"),
         CheckConstraint("excess_amount_cents >= 0", name="ck_payment_refunds_non_negative_excess"),
+        Index("ix_payment_refunds_payment_status", "payment_id", "status"),
     )
 
 

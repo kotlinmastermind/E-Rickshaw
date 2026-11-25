@@ -265,6 +265,9 @@ class RazorpayPaymentProvider(PaymentProvider):
             }
             if expected_order_id is not None:
                 result["order_id"] = expected_order_id
+            configured_acct = (getattr(self, "merchant_account_id", None) or settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip()
+            if configured_acct:
+                result["account_id"] = configured_acct
             return result
 
         if self._client:

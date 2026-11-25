@@ -205,7 +205,7 @@ private fun CashCollectModal() {
     val scope = rememberCoroutineScope()
     val offer by DriverRepository.activeOffer.collectAsState()
     val breakdown by DriverRepository.rideBreakdown.collectAsState()
-    val currentRide = DriverRepository.currentRideId.value
+    val currentRide by DriverRepository.currentRideId.collectAsState()
 
     val validFare: Double? = breakdown?.fareBreakdown?.grossFareRupees?.takeIf { it > 0.0 }
         ?: offer?.estimatedFareRupees?.takeIf { it > 0.0 }
@@ -234,9 +234,10 @@ private fun CashCollectModal() {
                     CockpitButton(
                         text = "Refresh Fare Breakdown",
                         onClick = {
-                            if (!currentRide.isNullOrBlank()) {
+                            val rideId = currentRide
+                            if (!rideId.isNullOrBlank()) {
                                 scope.launch {
-                                    DriverRepository.fetchRideBreakdown(currentRide)
+                                    DriverRepository.fetchRideBreakdown(rideId)
                                 }
                             }
                         },
@@ -256,11 +257,12 @@ private fun CashCollectModal() {
                 enabled = tenderVal >= validFare,
                 onClick = {
                     val cb = DriverDialogController.onConfirmAction
-                    if (currentRide.isNullOrBlank()) {
+                    val rideId = currentRide
+                    if (rideId.isNullOrBlank()) {
                         DriverDialogController.showToast("No active ride found.")
                         return@CockpitButton
                     }
-                    DriverRepository.collectCash(currentRide) { ok ->
+                    DriverRepository.collectCash(rideId) { ok ->
                         DriverDialogController.dismiss()
                         if (ok) {
                             DriverDialogController.showToast("Cash payment reconciled!")
@@ -334,9 +336,21 @@ private fun RouteDeviationModal() {
                 isSubmitting = true
                 scope.launch {
                     val liveLoc = DriverRepository.driverLocation.value
-                    val lat = if (liveLoc.latitude != 0.0) liveLoc.latitude else 28.6139
-                    val lng = if (liveLoc.longitude != 0.0) liveLoc.longitude else 77.2090
-                    val res = DriverRepository.reportRouteDeviation(currentRide, lat, lng, reason = selectedReason)
+                    val ride = DriverRepository.activeRide.value
+                    val validCoords = when {
+                        com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(liveLoc.latitude, liveLoc.longitude) ->
+                            liveLoc.latitude to liveLoc.longitude
+                        ride?.pickupLatitude != null && ride.pickupLongitude != null &&
+                            com.vaisentra.mobility.driver.data.NativeLocationEvaluator.isValidCoordinate(ride.pickupLatitude, ride.pickupLongitude) ->
+                            ride.pickupLatitude to ride.pickupLongitude
+                        else -> null
+                    }
+                    if (validCoords == null) {
+                        isSubmitting = false
+                        DriverDialogController.showToast("Acquiring live GPS fix; retry once GPS is ready.")
+                        return@launch
+                    }
+                    val res = DriverRepository.reportRouteDeviation(currentRide, validCoords.first, validCoords.second, reason = selectedReason)
                     isSubmitting = false
                     DriverDialogController.dismiss()
                     if (res.isSuccess) {

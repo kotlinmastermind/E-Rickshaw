@@ -114,9 +114,9 @@ async def autocomplete(q: str = Query(..., min_length=1, description="Search lan
 
 @router.post("/place-details")
 async def verify_place_details(payload: PlaceDetailsPayload, db: AsyncSession = Depends(get_db)):
-    lat = payload.latitude if payload.latitude is not None else 28.6139
-    lng = payload.longitude if payload.longitude is not None else 77.2090
-    return await LocationOpsService(db).verify_place_coordinates(payload.place_id, lat, lng)
+    if payload.latitude is None or payload.longitude is None:
+        raise HTTPException(status_code=422, detail="Explicit latitude and longitude are required for place verification.")
+    return await LocationOpsService(db).verify_place_coordinates(payload.place_id, payload.latitude, payload.longitude)
 
 
 # =============================================================================

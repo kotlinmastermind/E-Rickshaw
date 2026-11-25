@@ -1,7 +1,9 @@
 package com.vaisentra.mobility.rider.data
 
+import com.vaisentra.mobility.rider.fcm.FcmTokenSyncPolicy
 import com.vaisentra.mobility.rider.fcm.RiderFcmDeepLinkResolver
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -71,6 +73,61 @@ class RiderLocationAndFcmTest {
         assertEquals(
             "notifications",
             RiderFcmDeepLinkResolver.resolveRoute(mapOf("event_type" to "ADMIN_BROADCAST"))
+        )
+    }
+
+    @Test
+    fun bookingDraftAndMapSearch_haveNoFabricatedDelhiCoordinates() {
+        val draft = BookingDraftState()
+        assertFalse(NativeLocationEvaluator.isValidCoordinate(draft.pickupLat, draft.pickupLng))
+        assertFalse(NativeLocationEvaluator.isValidCoordinate(draft.destinationLat, draft.destinationLng))
+        assertEquals(0.0, draft.pickupLat, 1e-6)
+        assertEquals(0.0, draft.pickupLng, 1e-6)
+
+        val searchReq = MapSearchRequest(query = "Kempegowda International Airport")
+        assertEquals(null, searchReq.proximity_lat)
+        assertEquals(null, searchReq.proximity_lng)
+    }
+
+    @Test
+    fun riderFcmTokenSyncPolicy_preventsDuplicateSyncAndTracksAccountChanges() {
+        val b64User1 = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("""{"sub":"cust-101"}""".toByteArray(Charsets.UTF_8))
+        val jwtUser1 = "eyJhbGciOiJIUzI1NiJ9.$b64User1.sig"
+        assertEquals("cust-101", FcmTokenSyncPolicy.extractUserSubject(jwtUser1))
+
+        assertTrue(
+            FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                fcmToken = "fcm_token_rider_xyz12345",
+                lastSyncedToken = null,
+                currentUserKey = "cust-101",
+                lastSyncedUserKey = null
+            )
+        )
+        assertFalse(
+            FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                fcmToken = "fcm_token_rider_xyz12345",
+                lastSyncedToken = "fcm_token_rider_xyz12345",
+                currentUserKey = "cust-101",
+                lastSyncedUserKey = "cust-101"
+            )
+        )
+        assertTrue(
+            FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                fcmToken = "fcm_token_rider_xyz12345",
+                lastSyncedToken = "fcm_token_rider_xyz12345",
+                currentUserKey = "cust-202",
+                lastSyncedUserKey = "cust-101"
+            )
+        )
+        assertTrue(
+            FcmTokenSyncPolicy.shouldRegisterWithBackend(
+                fcmToken = "fcm_token_rider_xyz12345",
+                lastSyncedToken = "fcm_token_rider_xyz12345",
+                currentUserKey = "cust-101",
+                lastSyncedUserKey = "cust-101",
+                force = true
+            )
         )
     }
 }

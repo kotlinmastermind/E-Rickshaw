@@ -383,7 +383,7 @@ object DriverRepository {
             }
 
             DriverNetworkClient.setAuthToken(token, body.refreshToken)
-            com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated()
+            com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated(force = true)
             scope.launch {
                 fetchDriverProfile()
                 fetchDriverVehicles()
@@ -446,7 +446,7 @@ object DriverRepository {
             val token = body?.accessToken
             if (res.isSuccessful && !token.isNullOrBlank()) {
                 DriverNetworkClient.setAuthToken(token, body.refreshToken)
-            com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated()
+            com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated(force = true)
                 scope.launch {
                     launch { fetchDriverProfile() }
                     launch { fetchDriverVehicles() }
@@ -508,7 +508,7 @@ object DriverRepository {
             val token = body?.accessToken
             if (res.isSuccessful && !token.isNullOrBlank()) {
                 DriverNetworkClient.setAuthToken(token, body.refreshToken)
-            com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated()
+            com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated(force = true)
                 scope.launch {
                     launch { fetchDriverProfile() }
                     launch { fetchDriverVehicles() }
@@ -1229,9 +1229,15 @@ object DriverRepository {
         }
     }
 
-    suspend fun fetchRoadRestrictions(lat: Double = 28.6139, lng: Double = 77.2090): Result<List<RoadRestrictionDto>> {
+    suspend fun fetchRoadRestrictions(lat: Double? = null, lng: Double? = null): Result<List<RoadRestrictionDto>> {
         return try {
-            val res = DriverNetworkClient.apiService.getRoadRestrictions(lat, lng)
+            val liveLoc = _driverLocation.value
+            val hasValidLive = NativeLocationEvaluator.isValidCoordinate(liveLoc.latitude, liveLoc.longitude)
+            val resolvedLat = lat?.takeIf { lng != null && NativeLocationEvaluator.isValidCoordinate(it, lng) }
+                ?: if (hasValidLive) liveLoc.latitude else null
+            val resolvedLng = lng?.takeIf { lat != null && NativeLocationEvaluator.isValidCoordinate(lat, it) }
+                ?: if (hasValidLive) liveLoc.longitude else null
+            val res = DriverNetworkClient.apiService.getRoadRestrictions(resolvedLat, resolvedLng)
             val body = res.body()
             if (res.isSuccessful && body != null) {
                 _roadRestrictions.value = body
@@ -1594,8 +1600,21 @@ object DriverRepository {
                     return Result.success(msg)
                 }
             }
+            val liveLoc = _driverLocation.value
+            val ride = _activeRide.value
+            val pingCoords = when {
+                NativeLocationEvaluator.isValidCoordinate(liveLoc.latitude, liveLoc.longitude) ->
+                    liveLoc.latitude to liveLoc.longitude
+                ride?.pickupLatitude != null && ride.pickupLongitude != null &&
+                    NativeLocationEvaluator.isValidCoordinate(ride.pickupLatitude, ride.pickupLongitude) ->
+                    ride.pickupLatitude to ride.pickupLongitude
+                else -> null
+            }
+            if (pingCoords == null) {
+                return Result.failure(IllegalStateException("Live GPS location unavailable; cannot dispatch coordinate SOS ping"))
+            }
             val pingRes = DriverNetworkClient.apiService.sendEmergencyPing(
-                EmergencyPingRequest(latitude = 28.6139, longitude = 77.2090, note = notes)
+                EmergencyPingRequest(latitude = pingCoords.first, longitude = pingCoords.second, note = notes)
             )
             if (pingRes.isSuccessful) Result.success("Emergency SOS ping dispatched!")
             else Result.failure(IllegalStateException("SOS failed: HTTP ${pingRes.code()}"))
@@ -1964,12 +1983,18 @@ object DriverRepository {
             val res = DriverNetworkClient.apiService.getDriverPreferences()
             val body = res.body()
             if (res.isSuccessful && body != null) {
+                val rawNav = (body["navigation_provider"] as? String)?.trim().orEmpty()
+                val safeNav = when {
+                    rawNav.isBlank() || rawNav.equals("GOOGLE_MAPS", ignoreCase = true) -> "MAPBOX"
+                    else -> rawNav.uppercase()
+                }
                 val prefs = DriverPreferencesState(
                     autoAcceptPool = (body["auto_accept_pool"] as? Boolean) ?: true,
                     highSurgeAlerts = (body["high_surge_alerts"] as? Boolean) ?: true,
                     voiceNavigation = (body["voice_guidance_enabled"] as? Boolean)
                         ?: (body["voice_navigation"] as? Boolean) ?: true,
-                    preferredCorridor = (body["preferred_corridor"] as? String) ?: "Anand Vihar / CP"
+                    preferredCorridor = (body["preferred_corridor"] as? String) ?: "Anand Vihar / CP",
+                    navigationProvider = safeNav
                 )
                 _driverPreferences.value = prefs
                 Result.success(prefs)
@@ -1985,15 +2010,21 @@ object DriverRepository {
         autoAcceptPool: Boolean? = null,
         highSurgeAlerts: Boolean? = null,
         voiceNavigation: Boolean? = null,
-        preferredCorridor: String? = null
+        preferredCorridor: String? = null,
+        navigationProvider: String? = null
     ): Result<Boolean> {
         return try {
             val current = _driverPreferences.value
+            val sanitizedNav = navigationProvider?.trim()?.let { requested ->
+                if (requested.isBlank() || requested.equals("GOOGLE_MAPS", ignoreCase = true)) "MAPBOX"
+                else requested.uppercase()
+            }
             val updated = current.copy(
                 autoAcceptPool = autoAcceptPool ?: current.autoAcceptPool,
                 highSurgeAlerts = highSurgeAlerts ?: current.highSurgeAlerts,
                 voiceNavigation = voiceNavigation ?: current.voiceNavigation,
-                preferredCorridor = preferredCorridor ?: current.preferredCorridor
+                preferredCorridor = preferredCorridor ?: current.preferredCorridor,
+                navigationProvider = sanitizedNav ?: current.navigationProvider
             )
             _driverPreferences.value = updated
 
@@ -2004,7 +2035,8 @@ object DriverRepository {
                 highSurgeAlerts = highSurgeAlerts,
                 voiceGuidanceEnabled = voiceNavigation,
                 voiceNavigation = voiceNavigation,
-                preferredCorridor = preferredCorridor
+                preferredCorridor = preferredCorridor,
+                navigationProvider = sanitizedNav
             )
 
             val res = DriverNetworkClient.apiService.updateDriverPreferences(req)
@@ -2202,5 +2234,6 @@ data class DriverPreferencesState(
     val autoAcceptPool: Boolean = true,
     val highSurgeAlerts: Boolean = true,
     val voiceNavigation: Boolean = true,
-    val preferredCorridor: String = "Anand Vihar / CP"
+    val preferredCorridor: String = "Anand Vihar / CP",
+    val navigationProvider: String = "MAPBOX"
 )

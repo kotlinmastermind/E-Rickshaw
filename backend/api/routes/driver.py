@@ -26,6 +26,7 @@ class DispatchPreferencesPayload(BaseModel):
     auto_accept_pool: Optional[bool] = None
     high_surge_alerts: Optional[bool] = None
     preferred_corridor: Optional[str] = None
+    navigation_provider: Optional[str] = Field(None, max_length=24)
 
 class RejectOfferPayload(BaseModel):
     reason: str = Field(..., pattern="^(TOO_FAR|FARE_TOO_LOW|WRONG_CATEGORY|UNAVAILABLE|OTHER|DISPATCH_TIMEOUT|PILOT_DECLINED|PASSENGER_MISMATCH|LOW_BATTERY)$")

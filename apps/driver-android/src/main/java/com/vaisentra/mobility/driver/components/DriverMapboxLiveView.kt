@@ -34,6 +34,7 @@ import com.mapbox.maps.extension.compose.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.extension.compose.style.MapStyle
 import com.mapbox.maps.viewannotation.geometry
 import com.mapbox.maps.viewannotation.viewAnnotationOptions
+import com.vaisentra.mobility.driver.data.NativeLocationEvaluator
 import com.vaisentra.mobility.driver.theme.*
 
 /**
@@ -43,8 +44,8 @@ import com.vaisentra.mobility.driver.theme.*
 @Composable
 fun DriverMapboxLiveView(
     modifier: Modifier = Modifier,
-    driverLat: Double = 28.6139,
-    driverLng: Double = 77.2090,
+    driverLat: Double = 0.0,
+    driverLng: Double = 0.0,
     targetLat: Double? = null,
     targetLng: Double? = null,
     targetLabel: String = "Passenger Pickup",
@@ -65,35 +66,37 @@ fun DriverMapboxLiveView(
         return
     }
 
-    val driverPoint = remember(driverLat, driverLng) {
-        Point.fromLngLat(driverLng, driverLat)
+    val hasDriverFix = NativeLocationEvaluator.isValidCoordinate(driverLat, driverLng)
+    val hasTargetFix = targetLat != null && targetLng != null &&
+        NativeLocationEvaluator.isValidCoordinate(targetLat, targetLng)
+
+    val driverPoint = remember(driverLat, driverLng, hasDriverFix) {
+        if (hasDriverFix) Point.fromLngLat(driverLng, driverLat) else null
     }
 
-    val targetPoint = remember(targetLat, targetLng) {
-        if (targetLat != null && targetLng != null) {
-            Point.fromLngLat(targetLng, targetLat)
-        } else null
+    val targetPoint = remember(targetLat, targetLng, hasTargetFix) {
+        if (hasTargetFix) Point.fromLngLat(targetLng!!, targetLat!!) else null
     }
+
+    val indiaOverviewPoint = remember { Point.fromLngLat(78.9629, 20.5937) }
 
     var selectedStyleUri by remember { mutableStateOf(Style.DARK) }
     var showStyleSwitcher by remember { mutableStateOf(false) }
 
     val mapViewportState = rememberMapViewportState {
         setCameraOptions {
-            center(driverPoint)
-            zoom(15.0)
-            pitch(if (isNavigating) 45.0 else 30.0)
-            bearing(headingDegrees)
+            center(driverPoint ?: targetPoint ?: indiaOverviewPoint)
+            zoom(if (driverPoint != null || targetPoint != null) 15.0 else 4.2)
+            pitch(if (isNavigating && driverPoint != null) 45.0 else if (driverPoint != null) 30.0 else 0.0)
+            bearing(if (driverPoint != null) headingDegrees else 0.0)
         }
     }
 
     // Dynamic camera adjustment for driver navigation
-    LaunchedEffect(driverLat, driverLng, targetLat, targetLng, isNavigating, headingDegrees) {
-        val nonNullTargetLat = targetLat
-        val nonNullTargetLng = targetLng
-        if (isNavigating && nonNullTargetLat != null && nonNullTargetLng != null) {
-            val midLat = (driverLat + nonNullTargetLat) / 2.0
-            val midLng = (driverLng + nonNullTargetLng) / 2.0
+    LaunchedEffect(driverLat, driverLng, targetLat, targetLng, isNavigating, headingDegrees, hasDriverFix, hasTargetFix) {
+        if (isNavigating && driverPoint != null && targetPoint != null) {
+            val midLat = (driverLat + targetLat!!) / 2.0
+            val midLng = (driverLng + targetLng!!) / 2.0
             mapViewportState.flyTo(
                 CameraOptions.Builder()
                     .center(Point.fromLngLat(midLng, midLat))
@@ -102,13 +105,22 @@ fun DriverMapboxLiveView(
                     .bearing(headingDegrees)
                     .build()
             )
-        } else {
+        } else if (driverPoint != null) {
             mapViewportState.flyTo(
                 CameraOptions.Builder()
                     .center(driverPoint)
                     .zoom(15.2)
                     .pitch(35.0)
                     .bearing(headingDegrees)
+                    .build()
+            )
+        } else if (targetPoint != null) {
+            mapViewportState.flyTo(
+                CameraOptions.Builder()
+                    .center(targetPoint)
+                    .zoom(14.0)
+                    .pitch(20.0)
+                    .bearing(0.0)
                     .build()
             )
         }
@@ -127,14 +139,16 @@ fun DriverMapboxLiveView(
                 MapStyle(style = selectedStyleUri)
             }
         ) {
-            // A. Driver EV Marker (Heading Indicator)
-            ViewAnnotation(
-                options = viewAnnotationOptions {
-                    geometry(driverPoint)
-                    allowOverlap(true)
+            // A. Driver EV Marker (Heading Indicator) — only when valid live GPS fix exists
+            if (driverPoint != null) {
+                ViewAnnotation(
+                    options = viewAnnotationOptions {
+                        geometry(driverPoint)
+                        allowOverlap(true)
+                    }
+                ) {
+                    DriverPuckNode()
                 }
-            ) {
-                DriverPuckNode()
             }
 
             // B. Passenger Pickup / Drop Target Marker & Navigation Polyline
@@ -149,20 +163,21 @@ fun DriverMapboxLiveView(
                 }
 
                 // Glowing Navigation Polyline Corridors
-                 // Render real road polyline points from navigation engine
                 val displayPoints = remember(driverPoint, targetPoint, routePoints) {
-                    if (routePoints.size >= 2) {
-                        routePoints
-                    }  else {
-                        listOf(driverPoint, targetPoint)
+                    when {
+                        routePoints.size >= 2 -> routePoints
+                        driverPoint != null -> listOf(driverPoint, targetPoint)
+                        else -> emptyList()
                     }
                 }
-                PolylineAnnotation(
-                    points = displayPoints
-                ) {
-                    lineColor = Color(0xFF10B981) // Emerald Green glowing route line
-                    lineWidth = 7.0
-                    lineOpacity = 0.95
+                if (displayPoints.size >= 2) {
+                    PolylineAnnotation(
+                        points = displayPoints
+                    ) {
+                        lineColor = Color(0xFF10B981) // Emerald Green glowing route line
+                        lineWidth = 7.0
+                        lineOpacity = 0.95
+                    }
                 }
             }
         }
@@ -198,14 +213,16 @@ fun DriverMapboxLiveView(
                     .background(PilotSurfaceElevated.copy(alpha = 0.9f))
                     .border(1.dp, PilotBorder, CircleShape)
                     .clickable {
-                        mapViewportState.flyTo(
-                            CameraOptions.Builder()
-                                .center(driverPoint)
-                                .zoom(15.5)
-                                .pitch(40.0)
-                                .bearing(headingDegrees)
-                                .build()
-                        )
+                        driverPoint?.let { pt ->
+                            mapViewportState.flyTo(
+                                CameraOptions.Builder()
+                                    .center(pt)
+                                    .zoom(15.5)
+                                    .pitch(40.0)
+                                    .bearing(headingDegrees)
+                                    .build()
+                            )
+                        }
                         onRecenterClicked?.invoke()
                     },
                 contentAlignment = Alignment.Center

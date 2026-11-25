@@ -1312,6 +1312,8 @@ async def test_wallet_topup_unique_receipt_and_captured_status_enforcement(db_se
             with patch.object(provider, "fetch_payment", new_callable=AsyncMock) as mock_fetch:
                 mock_fetch.return_value = {
                     "id": "pay_mock_auth_123",
+                    "order_id": order1_id,
+                    "currency": "INR",
                     "status": "authorized",  # NOT captured!
                     "amount": 10000
                 }

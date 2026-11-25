@@ -88,6 +88,7 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
     val activity = context as? android.app.Activity
 
     LaunchedEffect(Unit) {
+        RiderRepository.restoreCheckoutStates()
         RiderRepository.fetchWalletBalance()
     }
 
@@ -127,16 +128,22 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
             is RiderRepository.TopupState.Verifying -> {
                 Text("Cryptographically verifying payment with backend...", color = ElectricCyan, fontSize = 12.sp)
             }
+            is RiderRepository.TopupState.AuthorizedPending -> {
+                Text("⏳ ${state.message}", color = AmberGold, fontSize = 12.sp)
+            }
+            is RiderRepository.TopupState.ReconciliationRequired -> {
+                Text("⚠️ ${state.message}", color = AmberGold, fontSize = 12.sp)
+            }
             is RiderRepository.TopupState.Success -> {
                 Text("✓ Wallet successfully credited: ₹${state.balanceRupees}", color = EmeraldGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             is RiderRepository.TopupState.Error -> {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("⚠️ ${state.message}", color = CrimsonRed, fontSize = 12.sp)
-                    if (RiderRepository.hasPendingVerification()) {
+                    if (RiderRepository.hasPendingVerification(com.vaisentra.mobility.rider.data.CheckoutFlowType.WALLET_TOPUP)) {
                         NeoButton(
                             text = "Retry Verification",
-                            onClick = { RiderRepository.retryPendingVerification() },
+                            onClick = { RiderRepository.retryPendingVerification(com.vaisentra.mobility.rider.data.CheckoutFlowType.WALLET_TOPUP) },
                             backgroundColor = AmberGold,
                             textColor = CanvasBlack
                         )
