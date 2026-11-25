@@ -703,15 +703,15 @@ class SettlementAdvancedService:
             }
 
         # Step 1: Acquire DB-backed payment reservation lease + FOR UPDATE row lock (zero in-memory locks)
-        stmt = select(Payment).where(Payment.id == payment_id).with_for_update()
+        stmt = select(Payment).where(Payment.id == payment_id).with_for_update().execution_options(populate_existing=True)
         payment_svc = PaymentService(self.db)
         in_flight_statuses = ("INITIATED", "PENDING", "GATEWAY_PROCESSING", "APPROVED_AWAITING_PROVIDER")
 
         lease_owner = f"reflease_{uuid.uuid4().hex[:24]}"
         lease_acquired = False
-        for _lease_wait in range(40):
+        for _lease_wait in range(100):
             now_lease = datetime.now(timezone.utc)
-            lease_exp = now_lease + timedelta(seconds=20)
+            lease_exp = now_lease + timedelta(seconds=30)
             lease_res = await self.db.execute(
                 update(Payment)
                 .where(
@@ -734,17 +734,26 @@ class SettlementAdvancedService:
             await self.db.rollback()
             if clean_idem and not existing_refund_id:
                 existing_wait = (
-                    await self.db.execute(select(PaymentRefund).where(PaymentRefund.idempotency_key == clean_idem))
+                    await self.db.execute(
+                        select(PaymentRefund)
+                        .where(PaymentRefund.idempotency_key == clean_idem)
+                        .execution_options(populate_existing=True)
+                    )
                 ).scalar_one_or_none()
                 if existing_wait:
                     if existing_wait.payment_id != payment_id or existing_wait.amount_cents != amount_cents:
+                        await self.db.rollback()
                         raise HTTPException(
                             status_code=status.HTTP_409_CONFLICT,
                             detail="Refund idempotency_key is already bound to a different payment or amount.",
                         )
-                    return _build_replay_response(existing_wait)
+                    if existing_wait.status != "INITIATED":
+                        replay = _build_replay_response(existing_wait)
+                        await self.db.rollback()
+                        return replay
 
             exists_pay = (await self.db.execute(select(Payment.id).where(Payment.id == payment_id))).scalar_one_or_none()
+            await self.db.rollback()
             if not exists_pay:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record not found.")
             await asyncio.sleep(0.05)
@@ -775,7 +784,11 @@ class SettlementAdvancedService:
             # Authoritative post-lock idempotency lookup (Phase 4A: recheck after acquiring payment lock)
             if clean_idem and not existing_refund_id:
                 existing_by_idem = (
-                    await self.db.execute(select(PaymentRefund).where(PaymentRefund.idempotency_key == clean_idem))
+                    await self.db.execute(
+                        select(PaymentRefund)
+                        .where(PaymentRefund.idempotency_key == clean_idem)
+                        .execution_options(populate_existing=True)
+                    )
                 ).scalar_one_or_none()
                 if existing_by_idem:
                     if existing_by_idem.payment_id != payment_id or existing_by_idem.amount_cents != amount_cents:
@@ -783,6 +796,12 @@ class SettlementAdvancedService:
                         raise HTTPException(
                             status_code=status.HTTP_409_CONFLICT,
                             detail="Refund idempotency_key is already bound to a different payment or amount.",
+                        )
+                    if existing_by_idem.status == "INITIATED":
+                        await _release_own_lease()
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="Previous refund attempt with this idempotency_key is awaiting reconciliation; please check status.",
                         )
                     replay_payload = _build_replay_response(existing_by_idem)
                     await _release_own_lease()
@@ -869,15 +888,19 @@ class SettlementAdvancedService:
                 )
                 self.db.add(provisional_refund)
 
-            payment.refund_lease_owner = None
-            payment.refund_lease_expires_at = None
+            # Release DB row lock via commit while intentionally keeping Payment.refund_lease_owner
+            # held through Step 3 so concurrent duplicate/partial refund requests await settlement.
             try:
                 await self.db.commit()
             except IntegrityError:
                 await _release_own_lease(rollback_first=True)
                 if clean_idem:
                     dup_ref = (
-                        await self.db.execute(select(PaymentRefund).where(PaymentRefund.idempotency_key == clean_idem))
+                        await self.db.execute(
+                            select(PaymentRefund)
+                            .where(PaymentRefund.idempotency_key == clean_idem)
+                            .execution_options(populate_existing=True)
+                        )
                     ).scalar_one_or_none()
                     if dup_ref:
                         if dup_ref.payment_id != payment_id or dup_ref.amount_cents != amount_cents:
@@ -899,101 +922,127 @@ class SettlementAdvancedService:
 
         # Step 2: Execute Razorpay gateway refund API outside long DB row lock
         provider = get_payment_provider()
+        lease_released = False
         try:
-            gateway_refund = await provider.create_refund(
-                payment_id=provider_payment_id,
-                amount_cents=amount_cents,
-                notes={
-                    "reason": reason.strip()[:120],
-                    "payment_id": target_payment_id,
-                    "internal_refund_id": internal_refund_id,
-                },
-            )
-        except HTTPException as gw_err:
-            locked_refund = (
-                await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
-            ).scalar_one_or_none()
-            if locked_refund and gw_err.status_code < 500:
-                transition_refund_status(locked_refund, "FAILED", context="create_refund gateway 4xx")
-                locked_refund.last_error = str(gw_err.detail)[:500]
-            elif locked_refund:
-                transition_refund_status(locked_refund, "PENDING", context="create_refund uncertain gateway outcome")
-                locked_refund.last_error = str(gw_err.detail)[:500]
-            await self.db.commit()
-            raise
-        except Exception as net_err:
-            locked_refund = (
-                await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
-            ).scalar_one_or_none()
-            if locked_refund:
-                transition_refund_status(locked_refund, "PENDING", context="create_refund network error")
-                locked_refund.last_error = str(net_err)[:500]
-                await self.db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Payment gateway timeout/network error during refund; refund queued for reconciliation.",
-            )
-
-        real_refund_id = gateway_refund.get("id")
-        if not real_refund_id:
-            locked_refund = (
-                await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
-            ).scalar_one_or_none()
-            if locked_refund:
-                transition_refund_status(locked_refund, "FAILED", context="create_refund missing gateway refund id")
-                locked_refund.last_error = "Gateway did not return a valid refund identifier."
-                await self.db.commit()
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Gateway did not return a valid refund identifier.")
-
-        # Step 3: Re-lock Payment & PaymentRefund and apply gateway outcome atomically
-        payment = (await self.db.execute(stmt)).scalar_one()
-        refund = (
-            await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
-        ).scalar_one()
-
-        gw_status = str(gateway_refund.get("status") or "").lower()
-        real_arn = (gateway_refund.get("acquirer_data") or {}).get("arn") or real_refund_id
-        gw_amount = gateway_refund.get("amount") or amount_cents
-
-        refund.provider_refund_id = real_refund_id
-        refund.arn_reference = real_arn
-        refund.raw_gateway_amount_cents = gw_amount
-
-        if gw_status == "processed":
-            await payment_svc.apply_confirmed_refund_settlement(
-                payment=payment,
-                refund_obj=refund,
-                refund_id=real_refund_id,
-                raw_refund_amount=int(gw_amount),
-                reason=reason.strip(),
-                arn_reference=real_arn,
-                settled_status="PROCESSED",
-                now=datetime.now(timezone.utc),
-            )
-            await self.db.commit()
-        elif gw_status == "failed":
-            await payment_svc.apply_failed_refund_reversal(
-                payment=payment,
-                refund_obj=refund,
-                refund_id=real_refund_id,
-                raw_refund_amount=int(gw_amount),
-                failure_reason="Gateway returned failed synchronously.",
-                now=datetime.now(timezone.utc),
-            )
-            await self.db.commit()
-        else:
-            # Gateway accepted refund asynchronously ('created' / 'pending'): do NOT bump refunded_amount_cents or debit wallet yet
-            transition_refund_status(refund, "GATEWAY_PROCESSING", context="create_refund gateway processing")
-            if payment.status == "CAPTURED":
-                transition_payment_status(payment, "REFUND_PENDING", context="create_refund gateway processing")
-            self.db.add(
-                PaymentEvent(
-                    payment_id=target_payment_id,
-                    event_type="REFUND_GATEWAY_PROCESSING",
-                    payload_json=json.dumps({"refund_id": real_refund_id, "amount_cents": amount_cents, "gateway_status": gw_status}),
+            try:
+                gateway_refund = await provider.create_refund(
+                    payment_id=provider_payment_id,
+                    amount_cents=amount_cents,
+                    notes={
+                        "reason": reason.strip()[:120],
+                        "payment_id": target_payment_id,
+                        "internal_refund_id": internal_refund_id,
+                    },
                 )
-            )
-            await self.db.commit()
+            except HTTPException as gw_err:
+                locked_payment = (await self.db.execute(stmt)).scalar_one_or_none()
+                if locked_payment and locked_payment.refund_lease_owner == lease_owner:
+                    locked_payment.refund_lease_owner = None
+                    locked_payment.refund_lease_expires_at = None
+                locked_refund = (
+                    await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
+                ).scalar_one_or_none()
+                if locked_refund and gw_err.status_code < 500:
+                    transition_refund_status(locked_refund, "FAILED", context="create_refund gateway 4xx")
+                    locked_refund.last_error = str(gw_err.detail)[:500]
+                elif locked_refund:
+                    transition_refund_status(locked_refund, "PENDING", context="create_refund uncertain gateway outcome")
+                    locked_refund.last_error = str(gw_err.detail)[:500]
+                await self.db.commit()
+                lease_released = True
+                raise
+            except Exception as net_err:
+                locked_payment = (await self.db.execute(stmt)).scalar_one_or_none()
+                if locked_payment and locked_payment.refund_lease_owner == lease_owner:
+                    locked_payment.refund_lease_owner = None
+                    locked_payment.refund_lease_expires_at = None
+                locked_refund = (
+                    await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
+                ).scalar_one_or_none()
+                if locked_refund:
+                    transition_refund_status(locked_refund, "PENDING", context="create_refund network error")
+                    locked_refund.last_error = str(net_err)[:500]
+                await self.db.commit()
+                lease_released = True
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Payment gateway timeout/network error during refund; refund queued for reconciliation.",
+                )
+
+            real_refund_id = gateway_refund.get("id")
+            if not real_refund_id:
+                locked_payment = (await self.db.execute(stmt)).scalar_one_or_none()
+                if locked_payment and locked_payment.refund_lease_owner == lease_owner:
+                    locked_payment.refund_lease_owner = None
+                    locked_payment.refund_lease_expires_at = None
+                locked_refund = (
+                    await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
+                ).scalar_one_or_none()
+                if locked_refund:
+                    transition_refund_status(locked_refund, "FAILED", context="create_refund missing gateway refund id")
+                    locked_refund.last_error = "Gateway did not return a valid refund identifier."
+                await self.db.commit()
+                lease_released = True
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Gateway did not return a valid refund identifier.")
+
+            # Step 3: Re-lock Payment & PaymentRefund and apply gateway outcome atomically
+            payment = (await self.db.execute(stmt)).scalar_one()
+            refund = (
+                await self.db.execute(select(PaymentRefund).where(PaymentRefund.id == internal_refund_id).with_for_update())
+            ).scalar_one()
+
+            gw_status = str(gateway_refund.get("status") or "").lower()
+            real_arn = (gateway_refund.get("acquirer_data") or {}).get("arn") or real_refund_id
+            gw_amount = gateway_refund.get("amount") or amount_cents
+
+            refund.provider_refund_id = real_refund_id
+            refund.arn_reference = real_arn
+            refund.raw_gateway_amount_cents = gw_amount
+            if payment.refund_lease_owner == lease_owner:
+                payment.refund_lease_owner = None
+                payment.refund_lease_expires_at = None
+
+            if gw_status == "processed":
+                await payment_svc.apply_confirmed_refund_settlement(
+                    payment=payment,
+                    refund_obj=refund,
+                    refund_id=real_refund_id,
+                    raw_refund_amount=int(gw_amount),
+                    reason=reason.strip(),
+                    arn_reference=real_arn,
+                    settled_status="PROCESSED",
+                    now=datetime.now(timezone.utc),
+                )
+                await self.db.commit()
+                lease_released = True
+            elif gw_status == "failed":
+                await payment_svc.apply_failed_refund_reversal(
+                    payment=payment,
+                    refund_obj=refund,
+                    refund_id=real_refund_id,
+                    raw_refund_amount=int(gw_amount),
+                    failure_reason="Gateway returned failed synchronously.",
+                    now=datetime.now(timezone.utc),
+                )
+                await self.db.commit()
+                lease_released = True
+            else:
+                # Gateway accepted refund asynchronously ('created' / 'pending'): do NOT bump refunded_amount_cents or debit wallet yet
+                transition_refund_status(refund, "GATEWAY_PROCESSING", context="create_refund gateway processing")
+                if payment.status == "CAPTURED":
+                    transition_payment_status(payment, "REFUND_PENDING", context="create_refund gateway processing")
+                self.db.add(
+                    PaymentEvent(
+                        payment_id=target_payment_id,
+                        event_type="REFUND_GATEWAY_PROCESSING",
+                        payload_json=json.dumps({"refund_id": real_refund_id, "amount_cents": amount_cents, "gateway_status": gw_status}),
+                    )
+                )
+                await self.db.commit()
+                lease_released = True
+        finally:
+            if not lease_released:
+                await _release_own_lease(rollback_first=True)
 
         await self.db.refresh(refund)
         return {

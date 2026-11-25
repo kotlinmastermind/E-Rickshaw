@@ -178,7 +178,7 @@ async def test_postgres_concurrent_identical_and_partial_refunds_enforce_invaria
         await db.commit()
 
     provider = get_payment_provider()
-    long_idem_120 = "pg_long_refund_key_" + ("a" * 101)
+    long_idem_120 = f"pg_long_refund_key_{uuid.uuid4().hex[:10]}_" + ("a" * 90)
     assert len(long_idem_120) == 120
 
     gw_idem_calls = 0
@@ -187,7 +187,7 @@ async def test_postgres_concurrent_identical_and_partial_refunds_enforce_invaria
         nonlocal gw_idem_calls
         gw_idem_calls += 1
         await asyncio.sleep(0.08)
-        return {"id": f"rfnd_pg_idem_{gw_idem_calls}", "amount": kwargs["amount_cents"], "status": "processed", "acquirer_data": {}}
+        return {"id": f"rfnd_pg_idem_{gw_idem_calls}_{uuid.uuid4().hex[:6]}", "amount": kwargs["amount_cents"], "status": "processed", "acquirer_data": {}}
 
     async def _worker_idem():
         async with session_factory() as s:
@@ -262,10 +262,10 @@ async def test_postgres_concurrent_order_creation_leases_multi_instance():
         cust = CustomerProfile(user_id=uid, preferred_payment_method="RAZORPAY", rating_average=5.0, rating_count=0)
         db.add(cust)
         await db.flush()
-        cat = VehicleCategory(code=f"PG_{uuid.uuid4().hex[:6]}", name="PG EV", description="PG", base_fare_cents=2500, per_km_cents=900, per_minute_cents=200, capacity=3, is_active=True)
+        cat = VehicleCategory(code=f"PG_{uuid.uuid4().hex[:6]}", name="PG EV", description="PG", capacity=3, is_active=True)
         db.add(cat)
         await db.flush()
-        fr = FareRule(vehicle_category_id=cat.id, city="Delhi", base_fare_cents=2500, per_km_cents=900, per_minute_cents=200, minimum_fare_cents=4000, currency="INR", is_active=True)
+        fr = FareRule(category_id=cat.id, city_code="DELHI_NCR", base_fare_cents=2500, per_km_cents=900, per_minute_cents=200, minimum_fare_cents=4000, is_active=True)
         db.add(fr)
         await db.flush()
         ride = Ride(

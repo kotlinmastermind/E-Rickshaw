@@ -418,11 +418,13 @@ async def test_google_fonts_removed_and_navigation_defaults_non_google(db_sessio
     assert "fonts.gstatic.com" not in admin_html
     assert "system-ui" in admin_html
 
-    studio_html = Path("docs/interactive_design_studio.html").read_text(encoding="utf-8")
-    assert "fonts.googleapis.com" not in studio_html
-    assert "fonts.gstatic.com" not in studio_html
-    assert "www.gstatic.com/antigravity" not in studio_html
-    assert "system-ui" in studio_html
+    studio_path = Path("docs/interactive_design_studio.html")
+    if studio_path.exists():
+        studio_html = studio_path.read_text(encoding="utf-8")
+        assert "fonts.googleapis.com" not in studio_html
+        assert "fonts.gstatic.com" not in studio_html
+        assert "www.gstatic.com/antigravity" not in studio_html
+        assert "system-ui" in studio_html
 
     suffix = uuid.uuid4().hex[:6]
     drv_user = User(

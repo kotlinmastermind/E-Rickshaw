@@ -1377,6 +1377,8 @@ async def test_128_char_refund_idempotency_concurrent_identical_dispute_and_good
 
     assert gw_calls == 1
     assert r1["internal_refund_id"] == r2["internal_refund_id"]
+    assert r1["refund_id"] == r2["refund_id"]
+    assert r1["status"] == r2["status"] == "PROCESSED"
 
     # Same 128-char key with different amount -> 409 Conflict
     with pytest.raises(HTTPException) as conflict_exc:
