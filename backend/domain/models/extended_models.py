@@ -39,6 +39,7 @@ class AdminCalendarEvent(Base):
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
 
 
+
 class AdminRecordNote(Base):
     __tablename__ = "admin_record_notes"
 
@@ -59,6 +60,26 @@ class AdminReviewTemplate(Base):
     is_active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+
+
+class RideCommissionSnapshot(Base):
+    __tablename__ = "ride_commission_snapshots"
+    __table_args__ = {"extend_existing": True}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    commission_rule_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("commission_rules.id", ondelete="SET NULL"), nullable=True)
+    commission_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    commission_percentage: Mapped[float] = mapped_column(Float, nullable=False)
+    category_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    gross_fare_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    commission_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    driver_gross_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    commission_classification: Mapped[str] = mapped_column(String(20), nullable=False, default="PAYABLE")
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="INR")
+    calculation_basis: Mapped[str] = mapped_column(String(32), nullable=False, default="RIDE_COMPLETION")
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
 class AdminWalletAdjustmentRequest(Base):
@@ -106,6 +127,7 @@ class CommissionRule(Base):
     approval_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+
 
 
 class CorporateAccount(Base):
@@ -580,6 +602,7 @@ class SupportResponseTemplate(Base):
     is_active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=True)
+
 
 
 class UserNotificationSettings(Base):

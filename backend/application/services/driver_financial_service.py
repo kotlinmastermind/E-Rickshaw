@@ -131,16 +131,37 @@ class DriverFinancialService:
         res = await self.db.execute(stmt)
         rides = res.scalars().all()
 
-        total_gross_cents = sum(r.final_fare_cents or 0 for r in rides)
         from backend.application.services.commission_service import CommissionService
-        active_rule = await CommissionService.resolve_rule(self.db)
-        commission_pct = (
-            float(active_rule.platform_commission_percentage)
-            if active_rule and active_rule.platform_commission_percentage is not None
-            else 15.0
-        )
-        commission_rate = commission_pct / 100.0
-        total_commission_cents = CommissionService.compute_commission_cents(total_gross_cents, commission_pct)
+        from backend.domain.models.extended_models import RideCommissionSnapshot
+
+        ride_ids = [r.id for r in rides]
+        snapshots_by_ride: dict[str, RideCommissionSnapshot] = {}
+        if ride_ids:
+            snap_res = await self.db.execute(
+                select(RideCommissionSnapshot).where(RideCommissionSnapshot.ride_id.in_(ride_ids))
+            )
+            snapshots_by_ride = {s.ride_id: s for s in snap_res.scalars().all()}
+
+        ride_comm_map: dict[str, int] = {}
+        ride_pct_map: dict[str, float] = {}
+        for r in rides:
+            snap_row = snapshots_by_ride.get(r.id)
+            if snap_row is not None:
+                ride_comm_map[r.id] = snap_row.commission_cents
+                ride_pct_map[r.id] = snap_row.commission_percentage
+            else:
+                hist_snap = await CommissionService.calculate_for_ride(
+                    self.db,
+                    gross_cents=r.final_fare_cents or 0,
+                    category_id=getattr(r, "vehicle_category_id", None),
+                    effective_at=getattr(r, "completed_at", None) or getattr(r, "requested_at", None),
+                    calculation_basis="HISTORICAL_LOOKUP",
+                )
+                ride_comm_map[r.id] = hist_snap.commission_cents
+                ride_pct_map[r.id] = hist_snap.percentage
+
+        total_gross_cents = sum(r.final_fare_cents or 0 for r in rides)
+        total_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in rides)
         total_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in rides)
         total_net_cents = (total_gross_cents - total_commission_cents) + total_tips_cents
 
@@ -151,9 +172,18 @@ class DriverFinancialService:
             if r.completed_at and (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) >= today_start
         ]
         today_gross_cents = sum(r.final_fare_cents or 0 for r in today_rides)
-        today_commission_cents = round(today_gross_cents * commission_rate)
+        today_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in today_rides)
         today_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in today_rides)
         today_net_cents = (today_gross_cents - today_commission_cents) + today_tips_cents
+        today_effective_pct = (
+            round((today_commission_cents / today_gross_cents) * 100.0, 2)
+            if today_gross_cents > 0
+            else (
+                round(sum(ride_pct_map.values()) / len(ride_pct_map), 2)
+                if ride_pct_map
+                else 0.0
+            )
+        )
 
         # Calculate this week's figures (Monday to Sunday)
         monday_start = today_start - timedelta(days=now.weekday())
@@ -162,7 +192,7 @@ class DriverFinancialService:
             if r.completed_at and (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) >= monday_start
         ]
         week_gross_cents = sum(r.final_fare_cents or 0 for r in week_rides)
-        week_commission_cents = round(week_gross_cents * commission_rate)
+        week_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in week_rides)
         week_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in week_rides)
         week_net_cents = (week_gross_cents - week_commission_cents) + week_tips_cents
 
@@ -176,7 +206,7 @@ class DriverFinancialService:
                 if r.completed_at and day_dt <= (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) < next_day_dt
             ]
             d_gross = sum(r.final_fare_cents or 0 for r in matching)
-            d_comm = round(d_gross * commission_rate)
+            d_comm = sum(ride_comm_map.get(r.id, 0) for r in matching)
             d_tips = sum(getattr(r, "tip_cents", 0) or 0 for r in matching)
             d_net = (d_gross - d_comm) + d_tips
             daily_breakdown.append({
@@ -202,7 +232,7 @@ class DriverFinancialService:
                 if r.completed_at and w_start <= (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) < w_end
             ]
             wg = sum(r.final_fare_cents or 0 for r in w_matching)
-            wc = round(wg * commission_rate)
+            wc = sum(ride_comm_map.get(r.id, 0) for r in w_matching)
             wt = sum(getattr(r, "tip_cents", 0) or 0 for r in w_matching)
             wn = (wg - wc) + wt
             weekly_breakdown.append({
@@ -233,7 +263,7 @@ class DriverFinancialService:
                 "tips_cents": today_tips_cents,
                 "net_earnings_cents": today_net_cents,
                 "net_earnings_rupees": round(today_net_cents / 100, 2),
-                "commission_rate_percentage": 20.0
+                "commission_rate_percentage": today_effective_pct
             },
             "this_week": {
                 "trips_count": len(week_rides),

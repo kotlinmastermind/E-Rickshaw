@@ -634,6 +634,14 @@ class RideService:
             calculation_basis="RIDE_COMPLETION",
         )
         commission_cents = snap.commission_cents
+        await CommissionService.record_ride_snapshot(
+            self.db,
+            ride_id=ride.id,
+            snapshot=snap,
+            category_id=getattr(ride, "vehicle_category_id", None) or getattr(ride, "category_id", None),
+            commission_classification="RECEIVABLE" if ride.payment_method == "CASH" else "PAYABLE",
+            currency="INR",
+        )
 
         stmt_w = select(DriverWallet).where(DriverWallet.driver_id == driver.id).with_for_update()
         d_wallet = (await self.db.execute(stmt_w)).scalar_one_or_none()

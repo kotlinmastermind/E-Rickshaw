@@ -394,13 +394,17 @@ class AdminService:
         )
         collected_cents = collected_res.scalar_one() or 0
 
-        # Platform commission (20% standard or calculated from bookings)
+        from backend.application.services.commission_service import CommissionService
         commission_res = await self.db.execute(
             select(func.sum(PooledBooking.platform_commission_cents))
         )
         pooled_commission = commission_res.scalar_one() or 0
-        solo_commission = round((gross_booking_cents - pooled_commission) * 0.20)
-        total_platform_commission_cents = max(pooled_commission, round(gross_booking_cents * 0.20))
+        agg_snap = await CommissionService.calculate_for_ride(
+            self.db,
+            gross_cents=gross_booking_cents,
+            calculation_basis="ADMIN_ANALYTICS",
+        )
+        total_platform_commission_cents = max(pooled_commission, agg_snap.commission_cents)
         total_driver_earnings_cents = gross_booking_cents - total_platform_commission_cents
 
         # 3. Shared ride & pool metrics

@@ -20,7 +20,11 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.domain.models.extended_models import AdministrativeAuditLog, CommissionRule
+from backend.domain.models.extended_models import (
+    AdministrativeAuditLog,
+    CommissionRule,
+    RideCommissionSnapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +157,44 @@ class CommissionService:
             calculation_basis=calculation_basis,
             effective_at=ts,
         )
+
+    @classmethod
+    async def record_ride_snapshot(
+        cls,
+        session: AsyncSession,
+        *,
+        ride_id: str,
+        snapshot: CommissionSnapshot,
+        category_id: Optional[str] = None,
+        commission_classification: str = "PAYABLE",
+        currency: str = "INR",
+    ) -> RideCommissionSnapshot:
+        """Persist an immutable per-ride commission snapshot idempotently."""
+        existing = (
+            await session.execute(
+                select(RideCommissionSnapshot).where(RideCommissionSnapshot.ride_id == ride_id)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing
+
+        row = RideCommissionSnapshot(
+            ride_id=ride_id,
+            commission_rule_id=snapshot.rule_id,
+            commission_version=snapshot.version,
+            commission_percentage=snapshot.percentage,
+            category_id=category_id,
+            gross_fare_cents=snapshot.gross_cents,
+            commission_cents=snapshot.commission_cents,
+            driver_gross_cents=snapshot.gross_cents,
+            commission_classification=commission_classification,
+            currency=currency,
+            calculation_basis=snapshot.calculation_basis,
+            effective_at=snapshot.effective_at,
+        )
+        session.add(row)
+        await session.flush()
+        return row
 
     @classmethod
     async def create_and_activate_rule(

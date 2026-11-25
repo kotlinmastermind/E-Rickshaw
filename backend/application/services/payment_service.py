@@ -279,6 +279,14 @@ class PaymentService:
                         calculation_basis="RIDE_COMPLETION",
                     )
                     commission_cents = snap.commission_cents
+                    await CommissionService.record_ride_snapshot(
+                        self.db,
+                        ride_id=ride.id,
+                        snapshot=snap,
+                        category_id=getattr(ride, "vehicle_category_id", None) or getattr(ride, "category_id", None),
+                        commission_classification="PAYABLE",
+                        currency=payment.currency or "INR",
+                    )
 
                     d_w_res = await self.db.execute(
                         select(DriverWallet)
@@ -2680,6 +2688,14 @@ class PaymentService:
             calculation_basis="RIDE_COMPLETION",
         )
         commission_cents = snap.commission_cents
+        await CommissionService.record_ride_snapshot(
+            self.db,
+            ride_id=ride.id,
+            snapshot=snap,
+            category_id=getattr(ride, "vehicle_category_id", None) or getattr(ride, "category_id", None),
+            commission_classification="RECEIVABLE",
+            currency=payment.currency or "INR",
+        )
 
         existing_comm = (
             await self.db.execute(
