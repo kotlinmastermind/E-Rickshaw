@@ -58,11 +58,13 @@ async def db_session():
     except Exception:
         pass
 
-    if not _db_initialized:
-        await init_db()
-        async with async_session_maker() as session:
-            await _seed_test_data(session)
-        _db_initialized = True
+    from backend.infrastructure.database.session import Base
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await init_db()
+    async with async_session_maker() as session:
+        await _seed_test_data(session)
+    _db_initialized = True
     async with async_session_maker() as session:
         yield session
 
