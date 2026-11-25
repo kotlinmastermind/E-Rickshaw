@@ -294,6 +294,7 @@ class PayoutRequestPayload(BaseModel):
     amount_cents: int = Field(..., gt=0, json_schema_extra={"example": 1000000})
     account_number_mask: str = Field("**** 9988", json_schema_extra={"example": "**** 9988"})
     ifsc: str = Field("HDFC0001234", json_schema_extra={"example": "HDFC0001234"})
+    idempotency_key: str = Field(..., min_length=16, max_length=64, json_schema_extra={"example": "payout_req_12345678abcdef"})
 
 @router.get("/heat-map")
 async def get_heat_map(
@@ -380,7 +381,8 @@ async def request_payout(
         session=db,
         driver_id=user.id,
         amount_cents=payload.amount_cents,
-        bank_details={"account_number_mask": payload.account_number_mask, "ifsc": payload.ifsc}
+        bank_details={"account_number_mask": payload.account_number_mask, "ifsc": payload.ifsc},
+        idempotency_key=payload.idempotency_key
     )
     await db.commit()
     return {

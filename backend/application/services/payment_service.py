@@ -221,7 +221,7 @@ class PaymentService:
             "key_id": settings.RAZORPAY_KEY_ID
         }
 
-    async def process_webhook(self, raw_body: bytes, signature_header: str) -> Dict[str, Any]:
+   
         """
         Cryptographically verifies and processes inbound provider webhooks.
         Persists all events into payment_webhook_inbox for audit and idempotency.
@@ -538,73 +538,71 @@ class PaymentService:
                     "message": "Refund event was previously processed idempotently."
                 }
 
-            # Enforce non-exceedance of captured payment amount (Critical-1)
+            # Enforce non-exceedance of captured payment amount with Excess Anomaly Tracking
             current_refunded = payment.refunded_amount_cents or 0
             remaining_refundable = max(0, payment.amount_cents - current_refunded)
-            applied_refund = min(raw_refund_amount, remaining_refundable) if remaining_refundable > 0 else 0
+            raw_refund_amount = int(refund_entity.get("amount") or payment_entity.get("amount_refunded") or 0)
 
-            if applied_refund <= 0:
-                logger.warning(
-                    f"Excess refund or non-positive refund amount detected for payment {payment.id}. "
-                    f"raw_refund_amount={raw_refund_amount}, remaining_refundable={remaining_refundable}, "
-                    f"payment.amount_cents={payment.amount_cents}, current_refunded={current_refunded}"
+            if raw_refund_amount <= 0:
+                logger.error("Non-positive refund amount received: %d", raw_refund_amount)
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Refund amount must be positive.")
+
+            if raw_refund_amount > remaining_refundable:
+                applied_refund = remaining_refundable
+                excess_anomaly_cents = raw_refund_amount - remaining_refundable
+                is_anomaly = True
+                logger.critical(
+                    "REFUND CEILING BREACH: Payment %s captured=%d, refunded=%d, remaining=%d, raw_refund=%d, excess=%d",
+                    payment.id, payment.amount_cents, current_refunded, remaining_refundable, raw_refund_amount, excess_anomaly_cents
                 )
-                if not existing_refund:
-                    anomaly_refund = PaymentRefund(
-                        payment_id=payment.id,
-                        ride_id=payment.ride_id,
-                        customer_id=payment.customer_id,
-                        amount_cents=0,
-                        is_partial=False,
-                        reason=f"ANOMALY: Refund amount {raw_refund_amount} exceeds remaining refundable ceiling {remaining_refundable}",
-                        status="ANOMALY_EXCESS",
-                        arn_reference=refund_id
-                    )
-                    self.db.add(anomaly_refund)
-                if existing_inbox and hasattr(existing_inbox, "event_digest"):
-                    existing_inbox.status = "PROCESSED"
-                try:
-                    await self.db.commit()
-                except Exception as e:
-                    await self.db.rollback()
-                    logger.error(f"Database commit failed during anomaly refund webhook: {e}")
-                    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database commit failure during refund webhook persistence.")
+            else:
+                applied_refund = raw_refund_amount
+                excess_anomaly_cents = 0
+                is_anomaly = False
 
-                return {
-                    "status": "ANOMALY_EXCESS_REFUND",
-                    "event": webhook_event,
-                    "payment_id": payment.id,
-                    "refund_id": refund_id,
-                    "raw_refund_amount": raw_refund_amount,
-                    "remaining_refundable": remaining_refundable,
-                    "message": "Refund ignored because it exceeds the remaining captured payment amount."
-                }
-
+            # Update Payment Balance
             payment.refunded_amount_cents = current_refunded + applied_refund
             if payment.refunded_amount_cents >= payment.amount_cents:
                 payment.status = "REFUNDED"
             else:
                 payment.status = "PARTIALLY_REFUNDED"
 
-            # Update or persist explicit PaymentRefund audit record
-            if existing_refund:
-                existing_refund.status = "CREDITED"
-                existing_refund.amount_cents = applied_refund
-                existing_refund.is_partial = (payment.status == "PARTIALLY_REFUNDED")
-            else:
-                new_refund = PaymentRefund(
+            # Create or update PaymentRefund audit records
+            refund_status = "PARTIALLY_REFUNDED_WITH_ANOMALY" if is_anomaly and applied_refund > 0 else (
+                "ANOMALY_EXCESS" if applied_refund == 0 else "CREDITED"
+            )
+
+            new_refund = PaymentRefund(
+                payment_id=payment.id,
+                ride_id=payment.ride_id,
+                customer_id=payment.customer_id,
+                amount_cents=applied_refund,
+                is_partial=(payment.status == "PARTIALLY_REFUNDED"),
+                reason=(
+                    f"Authoritative webhook refund ({webhook_event}). "
+                    f"Excess anomaly detected: {excess_anomaly_cents} paise"
+                    if is_anomaly else f"Authoritative webhook refund ({webhook_event})"
+                ),
+                status=refund_status,
+                arn_reference=refund_id
+            )
+            self.db.add(new_refund)
+
+            # If excess anomaly exists, create a dedicated Reconciliation Anomaly Log
+            if is_anomaly and excess_anomaly_cents > 0:
+                anomaly_entry = PaymentRefund(
                     payment_id=payment.id,
                     ride_id=payment.ride_id,
                     customer_id=payment.customer_id,
-                    amount_cents=applied_refund,
-                    is_partial=(payment.status == "PARTIALLY_REFUNDED"),
-                    reason=f"Authoritative webhook refund ({webhook_event})",
-                    status="CREDITED",
-                    arn_reference=refund_id
+                    amount_cents=excess_anomaly_cents,
+                    is_partial=False,
+                    reason=f"GATEWAY_OVER_REFUND_ANOMALY: Gateway attempted {raw_refund_amount} paise refund on {remaining_refundable} paise remaining.",
+                    status="EXCESS_ANOMALY_REQUIRES_INVESTIGATION",
+                    arn_reference=f"anomaly_{refund_id}"
                 )
-                self.db.add(new_refund)
+                self.db.add(anomaly_entry)
 
-            # If this is a wallet topup refund, execute durable clawback/liability tracking
+            # Clawback from commuter wallet: ONLY debit applied_refund, NEVER debit excess_anomaly_cents!
             if getattr(payment, "purpose", None) == "WALLET_TOPUP" and applied_refund > 0:
                 topup_user_id = payment.user_id
                 if not topup_user_id and payment.customer_id:
@@ -614,7 +612,7 @@ class PaymentService:
                 if topup_user_id:
                     from backend.application.services.wallet_service import WalletService
                     refund_idem_key = f"refund_debit_{refund_id}"
-                    clawback_res = await WalletService.process_refund_clawback(
+                    await WalletService.process_refund_clawback(
                         session=self.db,
                         user_id=topup_user_id,
                         refund_amount_cents=applied_refund,
@@ -622,8 +620,6 @@ class PaymentService:
                         gateway_refund_id=refund_id,
                         idempotency_key=refund_idem_key
                     )
-                    logger.info(f"Processed refund clawback for user {topup_user_id}: {clawback_res}")
-
         if existing_inbox and hasattr(existing_inbox, "event_digest"):
             existing_inbox.status = "PROCESSED"
         try:
@@ -641,6 +637,111 @@ class PaymentService:
             "order_id": order_id,
             "amount_cents": payment.amount_cents
         }
+
+    # File: backend/application/services/payment_service.py (process_webhook snippet)
+
+    async def process_webhook(self, raw_body: bytes, signature_header: str) -> Dict[str, Any]:
+        digest = hashlib.sha256(raw_body).hexdigest()
+
+        # 1. Webhook Inbox Idempotency Guard
+        inbox_stmt = select(PaymentWebhookInbox).where(
+            PaymentWebhookInbox.event_digest == digest
+        ).with_for_update()
+        existing_inbox = (await self.db.execute(inbox_stmt)).scalar_one_or_none()
+
+        if existing_inbox and existing_inbox.status in ["PROCESSED", "UNMATCHED_PAYMENT"]:
+            return {
+                "status": "ALREADY_PROCESSED",
+                "digest": digest,
+                "message": "Webhook event was previously processed idempotently."
+            }
+
+        # 2. Cryptographic Webhook Signature Check
+        verification = await self.provider.verify_webhook_payload(raw_body, signature_header)
+        if not verification.is_valid:
+            if not existing_inbox:
+                failed_inbox = PaymentWebhookInbox(
+                    provider_name="RAZORPAY",
+                    event_digest=digest,
+                    payload_json=raw_body.decode("utf-8", errors="replace"),
+                    signature_verified=False,
+                    status="FAILED",
+                    attempts=1,
+                    last_error="Invalid webhook signature."
+                )
+                self.db.add(failed_inbox)
+                try:
+                    await self.db.commit()
+                except Exception as err:
+                    await self.db.rollback()
+                    logger.error("Failed to persist invalid signature webhook: %s", err)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature.")
+
+        try:
+            data = json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verified webhook body is not valid JSON.")
+
+        # 3. Durable Inbox State: RECEIVED -> PROCESSING
+        if not existing_inbox:
+            existing_inbox = PaymentWebhookInbox(
+                provider_name="RAZORPAY",
+                event_digest=digest,
+                payload_json=raw_body.decode("utf-8", errors="replace"),
+                signature_verified=True,
+                status="PROCESSING",
+                attempts=1
+            )
+            self.db.add(existing_inbox)
+            try:
+                await self.db.flush()
+            except Exception as e:
+                await self.db.rollback()
+                logger.error("Durable inbox insertion failed: %s", e)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Database error during webhook inbox initialization."
+                )
+        else:
+            existing_inbox.attempts += 1
+            existing_inbox.status = "PROCESSING"
+
+        order_id = data.get("order_id") or data.get("payload", {}).get("payment", {}).get("entity", {}).get("order_id")
+        payment_entity = data.get("payload", {}).get("payment", {}).get("entity", {})
+        payment_id_from_entity = payment_entity.get("id") or verification.payment_id
+        webhook_event = str(data.get("event") or "payment.captured")
+
+        # 4. Strict Entity Resolution with Pessimistic Locking
+        payment = None
+        if order_id:
+            payment = (await self.db.execute(select(Payment).where(Payment.provider_order_id == order_id).with_for_update())).scalar_one_or_none()
+
+        ride_id_from_notes = payment_entity.get("notes", {}).get("ride_id")
+        if not payment and ride_id_from_notes:
+            payment = (await self.db.execute(select(Payment).where(Payment.ride_id == ride_id_from_notes).with_for_update())).scalar_one_or_none()
+
+        if not payment and payment_id_from_entity:
+            payment = (await self.db.execute(select(Payment).where(Payment.provider_payment_id == payment_id_from_entity).with_for_update())).scalar_one_or_none()
+
+        if not payment:
+            # Unmatched payment: Log for human reconciliation without creating orphan records
+            existing_inbox.status = "UNMATCHED_PAYMENT"
+            existing_inbox.last_error = f"No ride or payment record matches order_id={order_id}"
+            try:
+                await self.db.commit()
+            except Exception as e:
+                await self.db.rollback()
+                logger.error("Failed to commit UNMATCHED_PAYMENT inbox status: %s", e)
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database failure on unmatched payment recording.")
+            return {
+                "status": "UNMATCHED_PAYMENT",
+                "event": webhook_event,
+                "order_id": order_id,
+                "message": "Payment event logged in inbox but not linked to any journey."
+            }
+
+        # 5. Execute Event Handlers (Capture / Authorized / Refund)
+        # All state mutations and existing_inbox.status = "PROCESSED" commit together at the end.
 
     async def confirm_cash_collection(self, driver_user_id: str, ride_id: str) -> Dict[str, Any]:
         """

@@ -493,7 +493,8 @@ class DispatchAdvancedService:
         session: AsyncSession,
         driver_id_or_user_id: str,
         amount_cents: int,
-        bank_details: Dict[str, str]
+        bank_details: Dict[str, str],
+        idempotency_key: str
     ) -> DriverPayoutRequest:
         if amount_cents < 10000:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Minimum payout request is ₹100 (10000 cents)")
@@ -502,6 +503,20 @@ class DispatchAdvancedService:
         if not driver_prof:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found")
 
+        # Idempotency Check: Query existing payout by unique idempotency_key
+        existing_payout_stmt = select(DriverPayoutRequest).where(
+            DriverPayoutRequest.idempotency_key == idempotency_key
+        ).with_for_update()
+        existing_payout = (await session.execute(existing_payout_stmt)).scalar_one_or_none()
+
+        if existing_payout:
+            if existing_payout.driver_id != driver_prof.id:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key owned by another driver.")
+            if existing_payout.amount_cents != amount_cents:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key reused with different amount.")
+            return existing_payout
+
+        # Pessimistic Row Lock on Driver Wallet
         stmt = select(DriverWallet).where(DriverWallet.driver_id == driver_prof.id).with_for_update()
         d_wallet = (await session.execute(stmt)).scalar_one_or_none()
         if not d_wallet:
@@ -515,18 +530,21 @@ class DispatchAdvancedService:
                 detail=f"Insufficient driver wallet balance. Available: ₹{d_wallet.balance_cents / 100:.2f}"
             )
 
+        # Create Payout Record
         payout = DriverPayoutRequest(
             driver_id=driver_prof.id,
             amount_cents=amount_cents,
             status="REQUESTED",
             bank_account_masked=bank_details.get("account_number_mask", "HDFC *******9988"),
-            idempotency_key=f"payout_req_{uuid.uuid4().hex}"
+            idempotency_key=idempotency_key
         )
         session.add(payout)
         await session.flush()
 
+        # Deduct Balance and Record Immutable PAYOUT_HOLD Ledger Entry
         d_wallet.balance_cents -= amount_cents
         d_wallet.updated_at = datetime.now(timezone.utc)
+
         hold_entry = DriverLedgerEntry(
             id=str(uuid.uuid4()),
             driver_id=driver_prof.id,

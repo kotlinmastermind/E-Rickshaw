@@ -233,8 +233,188 @@ async def create_razorpay_order(
         "status": order.get("status", "created")
     }
 
+# File: backend/api/routes/payments.py
+
 @router.post("/razorpay/verify")
 @router.post("/verify")
+async def verify_razorpay_payment(
+    payload: RazorpayVerifyRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.integrations.payments.provider import get_payment_provider
+    from backend.domain.models import Payment, Ride, CustomerProfile
+    from sqlalchemy import select
+
+    provider = get_payment_provider()
+
+    # 1. Cryptographic HMAC-SHA256 signature verification
+    is_valid = provider.verify_payment_signature(
+        razorpay_order_id=payload.razorpay_order_id,
+        razorpay_payment_id=payload.razorpay_payment_id,
+        razorpay_signature=payload.razorpay_signature
+    )
+    if not is_valid:
+        logger.error(
+            "Razorpay signature mismatch: order_id=%s, payment_id=%s, user_id=%s",
+            payload.razorpay_order_id, payload.razorpay_payment_id, user.id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Razorpay payment verification failed: Invalid HMAC-SHA256 signature."
+        )
+
+    # 2. Pessimistic lock on internal Payment record
+    stmt = (
+        select(Payment)
+        .where(Payment.provider_order_id == payload.razorpay_order_id)
+        .with_for_update()
+    )
+    payment = (await db.execute(stmt)).scalar_one_or_none()
+
+    if not payment and payload.ride_id:
+        payment = (
+            await db.execute(
+                select(Payment).where(Payment.ride_id == payload.ride_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No payment record matches order {payload.razorpay_order_id}."
+        )
+
+    if payload.ride_id and payment.ride_id and payment.ride_id != payload.ride_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Specified ride_id does not match the payment order association."
+        )
+
+    # 3. Ownership Verification
+    prof = (
+        await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
+    ).scalar_one_or_none()
+    if prof and payment.customer_id != prof.id and user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to verify payment for this journey."
+        )
+
+    # 4. Idempotency Check: Already captured
+    if payment.status == "CAPTURED":
+        return {
+            "success": True,
+            "message": "Payment was already verified and captured.",
+            "payment_id": payment.provider_payment_id or payload.razorpay_payment_id,
+            "order_id": payment.provider_order_id or payload.razorpay_order_id,
+            "ride_id": payment.ride_id or payload.ride_id,
+            "status": "CAPTURED"
+        }
+
+    # 5. Authoritative Razorpay Server-Side Fetch
+    try:
+        gateway_payment = await provider.fetch_payment(
+            payment_id=payload.razorpay_payment_id,
+            expected_amount_cents=payment.amount_cents
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed fetching payment %s from Razorpay gateway: %s",
+            payload.razorpay_payment_id, exc
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to verify payment status with gateway provider."
+        )
+
+    # 6. Strict Attribute & Security Validation
+    gw_order_id = gateway_payment.get("order_id")
+    gw_amount = gateway_payment.get("amount")
+    gw_currency = gateway_payment.get("currency", "").upper()
+    gw_status = gateway_payment.get("status", "").lower()
+
+    if gw_order_id != payload.razorpay_order_id:
+        logger.critical(
+            "SECURITY ANOMALY: Gateway order mismatch! Expected %s, got %s",
+            payload.razorpay_order_id, gw_order_id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Authoritative payment does not correspond to expected Razorpay order."
+        )
+
+    if gw_currency != "INR":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid transaction currency: {gw_currency}. Must be INR."
+        )
+
+    if gw_amount != payment.amount_cents:
+        logger.critical(
+            "SECURITY ANOMALY: Payment amount mismatch! DB expects %d paise, gateway reports %d paise",
+            payment.amount_cents, gw_amount
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment amount mismatch between client, order, and gateway."
+        )
+
+    # 7. Gateway State Transition Handling
+    if gw_status == "authorized":
+        payment.status = "AUTHORIZED"
+        payment.provider_payment_id = payload.razorpay_payment_id
+        await db.commit()
+        return {
+            "success": True,
+            "message": "Payment authorized by gateway; capture pending.",
+            "payment_id": payload.razorpay_payment_id,
+            "order_id": payload.razorpay_order_id,
+            "ride_id": payment.ride_id or payload.ride_id,
+            "status": "AUTHORIZED"
+        }
+
+    if gw_status != "captured":
+        if gw_status == "failed":
+            payment.status = "FAILED"
+            payment.provider_payment_id = payload.razorpay_payment_id
+            await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Authoritative gateway payment is not captured. Current status: {gw_status}"
+        )
+
+    # 8. Single-Source Capture Finalization
+    payment_service = PaymentService(db)
+    finalized = await payment_service.finalize_payment_capture(
+        payment=payment,
+        provider_payment_id=payload.razorpay_payment_id,
+        provider_signature=payload.razorpay_signature
+    )
+
+    target_ride_id = payment.ride_id or payload.ride_id
+    if target_ride_id:
+        r_res = await db.execute(select(Ride).where(Ride.id == target_ride_id).with_for_update())
+        ride = r_res.scalar_one_or_none()
+        if ride and ride.status in ["IN_PROGRESS", "ACCEPTED", "ARRIVED", "STARTED"]:
+            now_comp = datetime.now(timezone.utc)
+            ride.status = "COMPLETED"
+            ride.completed_at = ride.completed_at or now_comp
+            if ride.final_fare_cents is None:
+                ride.final_fare_cents = payment.amount_cents or ride.estimated_fare_cents or 0
+            if not ride.assigned_driver_id and payment.driver_id:
+                ride.assigned_driver_id = payment.driver_id
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": "Payment verified and recorded successfully.",
+        "payment_id": payload.razorpay_payment_id,
+        "order_id": payload.razorpay_order_id,
+        "ride_id": target_ride_id,
+        "status": "CAPTURED"
+    }
 async def verify_razorpay_payment(
     payload: RazorpayVerifyRequest,
     user: User = Depends(get_current_user),

@@ -1139,11 +1139,13 @@ object DriverRepository {
         }
         scope.launch {
             try {
+                val idempotencyKey = "payout_${java.util.UUID.randomUUID()}"
                 val res = DriverNetworkClient.apiService.requestInstantPayout(
                     PayoutRequestDto(
                         amountCents = amountCents,
                         accountNumberMask = accountNumberMask,
-                        ifsc = ifsc
+                        ifsc = ifsc,
+                        idempotencyKey = idempotencyKey
                     )
                 )
                 if (res.isSuccessful) {
