@@ -406,3 +406,45 @@ async def test_notification_service_deactivates_unregistered_token_and_admin_pus
     tok = (await db_session.execute(select(DeviceToken).where(DeviceToken.fcm_token == f"unreg_tok_{suffix}_12345"))).scalar_one()
     assert tok.is_active is False
     assert tok.last_error_at is not None
+
+
+@pytest.mark.asyncio
+async def test_google_fonts_preserved_and_navigation_defaults_non_google(db_session):
+    from pathlib import Path
+    from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
+
+    admin_html = Path("backend/static/admin/index.html").read_text(encoding="utf-8")
+    assert "https://fonts.googleapis.com" in admin_html
+    assert "https://fonts.gstatic.com" in admin_html
+    assert "Plus Jakarta Sans" in admin_html
+    assert "JetBrains Mono" in admin_html
+
+    studio_html = Path("docs/interactive_design_studio.html").read_text(encoding="utf-8")
+    assert "https://fonts.googleapis.com" in studio_html
+    assert "www.gstatic.com/antigravity" not in studio_html
+
+    suffix = uuid.uuid4().hex[:6]
+    drv_user = User(
+        phone_number=f"+9191{int(suffix, 16) % 100000000:08d}",
+        email=f"nav_{suffix}@erickshaw.in",
+        full_name="Nav Driver",
+        role="driver",
+        is_active=True,
+    )
+    db_session.add(drv_user)
+    await db_session.flush()
+    db_session.add(DriverProfile(
+        user_id=drv_user.id,
+        license_number=f"DL-NAV-{suffix}",
+        approval_status="APPROVED",
+    ))
+    await db_session.commit()
+
+    ops = DriverTripOperationsService(db_session)
+    prefs = await ops.get_preferences(drv_user.id)
+    assert prefs["navigation_provider"] == "MAPBOX"
+
+    # Legacy clients submitting GOOGLE_MAPS are transparently migrated to MAPBOX
+    updated = await ops.update_preferences(drv_user.id, {"navigation_provider": "GOOGLE_MAPS"})
+    assert updated["navigation_provider"] == "MAPBOX"
+

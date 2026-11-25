@@ -96,7 +96,8 @@ class DriverTripOperationsService:
         if "vehicle_categories" in payload and payload["vehicle_categories"] is not None:
             pref.vehicle_categories_json = json.dumps(payload["vehicle_categories"])
         if "navigation_provider" in payload and payload["navigation_provider"] is not None:
-            pref.navigation_provider = payload["navigation_provider"]
+            requested_nav = str(payload["navigation_provider"]).strip()
+            pref.navigation_provider = "MAPBOX" if requested_nav.upper() == "GOOGLE_MAPS" else requested_nav
         if "voice_guidance_enabled" in payload and payload["voice_guidance_enabled"] is not None:
             pref.voice_guidance_enabled = payload["voice_guidance_enabled"]
         if "voice_navigation" in payload and payload["voice_navigation"] is not None:
