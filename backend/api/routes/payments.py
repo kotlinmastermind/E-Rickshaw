@@ -1,6 +1,7 @@
 from typing import Optional, List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Header, HTTPException, status
+import logging
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +12,7 @@ from backend.application.services.payment_service import PaymentService
 from backend.application.services.settlement_advanced_service import SettlementAdvancedService
 
 router = APIRouter(prefix="/payments", tags=["Payments & Settlements"])
-
+logger = logging.getLogger("payments.api")
 class RazorpayOrderRequest(BaseModel):
     amount_rupees: Optional[float] = None
     amount_cents: Optional[int] = None

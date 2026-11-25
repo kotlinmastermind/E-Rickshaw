@@ -379,7 +379,7 @@ async def request_payout(
 ):
     payout = await DispatchAdvancedService.request_payout(
         session=db,
-        driver_id=user.id,
+        driver_id_or_user_id=user.id,
         amount_cents=payload.amount_cents,
         bank_details={"account_number_mask": payload.account_number_mask, "ifsc": payload.ifsc},
         idempotency_key=payload.idempotency_key
