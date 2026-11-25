@@ -629,12 +629,11 @@ class RideService:
         snap = await CommissionService.calculate_for_ride(
             self.db,
             gross_cents=fare_cents,
-            category_id=getattr(ride, "category_id", None),
+            category_id=getattr(ride, "vehicle_category_id", None) or getattr(ride, "category_id", None),
             effective_at=getattr(ride, "completed_at", None) or getattr(ride, "requested_at", None) or now,
             calculation_basis="RIDE_COMPLETION",
         )
         commission_cents = snap.commission_cents
-        driver_earnings = snap.net_cents
 
         stmt_w = select(DriverWallet).where(DriverWallet.driver_id == driver.id).with_for_update()
         d_wallet = (await self.db.execute(stmt_w)).scalar_one_or_none()
@@ -644,53 +643,77 @@ class RideService:
             await self.db.flush()
 
         if ride.payment_method == "CASH":
-            # For CASH rides: Driver physically collects 100% of the fare from the commuter.
-            # Driver already holds their earnings + platform commission in cash!
-            # Driver therefore owes the platform the 15% commission.
-            # Check if commission was already debited to prevent duplicate debits
+            # For CASH rides: Record gross cash earning and commission receivable separately.
+            # Do NOT immediately deduct commission from the driver's wallet.
             existing_comm = (await self.db.execute(select(DriverLedgerEntry).where(
                 DriverLedgerEntry.driver_id == driver.id,
                 DriverLedgerEntry.reference_id == ride.id,
-                DriverLedgerEntry.category == "COMMISSION"
+                DriverLedgerEntry.category.in_(["COMMISSION_RECEIVABLE", "COMMISSION"])
             ))).scalar_one_or_none()
             if not existing_comm:
-                d_wallet.balance_cents -= commission_cents
-                d_wallet.updated_at = now
-                comm_entry = DriverLedgerEntry(
+                self.db.add(DriverLedgerEntry(
                     id=str(uuid.uuid4()),
                     driver_id=driver.id,
-                    entry_type="DEBIT",
-                    category="COMMISSION",
-                    amount_cents=-commission_cents,
+                    entry_type="CREDIT",
+                    category="CASH_TRIP_EARNING",
+                    amount_cents=fare_cents,
                     balance_after_cents=d_wallet.balance_cents,
                     reference_id=ride.id,
-                    description=f"Platform commission (15%) for cash ride #{ride.id[:8]}",
+                    description=f"Gross cash earning for ride #{ride.id[:8]}",
                     created_at=now
-                )
-                self.db.add(comm_entry)
+                ))
+                if commission_cents > 0:
+                    self.db.add(DriverLedgerEntry(
+                        id=str(uuid.uuid4()),
+                        driver_id=driver.id,
+                        entry_type="DEBIT",
+                        category="COMMISSION_RECEIVABLE",
+                        amount_cents=-commission_cents,
+                        balance_after_cents=d_wallet.balance_cents,
+                        reference_id=ride.id,
+                        description=f"Platform commission receivable ({snap.percentage}% v{snap.version}) for cash ride #{ride.id[:8]}",
+                        created_at=now
+                    ))
         elif ride.payment_method == "WALLET":
-            # For WALLET rides: Passenger pays through pre-funded digital commuter wallet.
-            # Platform credits driver net earnings (85%) to driver_wallets.
+            # For WALLET rides: Credit gross earning and record commission payable separately.
             existing_earn = (await self.db.execute(select(DriverLedgerEntry).where(
                 DriverLedgerEntry.driver_id == driver.id,
                 DriverLedgerEntry.reference_id == ride.id,
                 DriverLedgerEntry.category == "TRIP_EARNING"
             ))).scalar_one_or_none()
             if not existing_earn:
-                d_wallet.balance_cents += driver_earnings
+                d_wallet.balance_cents += fare_cents
                 d_wallet.updated_at = now
-                earn_entry = DriverLedgerEntry(
+                self.db.add(DriverLedgerEntry(
                     id=str(uuid.uuid4()),
                     driver_id=driver.id,
                     entry_type="CREDIT",
                     category="TRIP_EARNING",
-                    amount_cents=driver_earnings,
+                    amount_cents=fare_cents,
                     balance_after_cents=d_wallet.balance_cents,
                     reference_id=ride.id,
-                    description=f"Net earnings (85%) for wallet-paid ride #{ride.id[:8]}",
+                    description=f"Gross earnings for wallet-paid ride #{ride.id[:8]}",
                     created_at=now
-                )
-                self.db.add(earn_entry)
+                ))
+                existing_comm = (await self.db.execute(select(DriverLedgerEntry).where(
+                    DriverLedgerEntry.driver_id == driver.id,
+                    DriverLedgerEntry.reference_id == ride.id,
+                    DriverLedgerEntry.category.in_(["COMMISSION_PAYABLE", "COMMISSION"])
+                ))).scalar_one_or_none()
+                if not existing_comm and commission_cents > 0:
+                    d_wallet.balance_cents -= commission_cents
+                    d_wallet.updated_at = now
+                    self.db.add(DriverLedgerEntry(
+                        id=str(uuid.uuid4()),
+                        driver_id=driver.id,
+                        entry_type="DEBIT",
+                        category="COMMISSION_PAYABLE",
+                        amount_cents=-commission_cents,
+                        balance_after_cents=d_wallet.balance_cents,
+                        reference_id=ride.id,
+                        description=f"Platform commission ({snap.percentage}% v{snap.version}) for wallet-paid ride #{ride.id[:8]}",
+                        created_at=now
+                    ))
 
         # Debit commuter wallet if paid via WALLET
         cust_stmt = select(CustomerProfile).where(CustomerProfile.id == ride.customer_id)

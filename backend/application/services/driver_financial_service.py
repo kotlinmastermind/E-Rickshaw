@@ -269,7 +269,15 @@ class DriverFinancialService:
         dist_fare_cents = round(fare_cents * 0.50)
         time_fare_cents = round(fare_cents * 0.15)
         amenities_cents = fare_cents - (base_fare_cents + dist_fare_cents + time_fare_cents)
-        commission_cents = round(fare_cents * 0.20)
+        from backend.application.services.commission_service import CommissionService
+        snap = await CommissionService.calculate_for_ride(
+            self.db,
+            gross_cents=fare_cents,
+            category_id=getattr(ride, "vehicle_category_id", None),
+            effective_at=getattr(ride, "completed_at", None) or getattr(ride, "requested_at", None),
+            calculation_basis="RIDE_BREAKDOWN",
+        )
+        commission_cents = snap.commission_cents
         tip_cents = getattr(ride, "tip_cents", 0) or 0
         recorded_toll_cents = getattr(ride, "toll_cents", 0) or 0
         toll_cents = recorded_toll_cents if recorded_toll_cents > 0 else (15000 if "Airport" in (ride.destination_address or "") or "Airport" in (ride.pickup_address or "") else 0)
@@ -1262,13 +1270,22 @@ class DriverFinancialService:
         rides = res.scalars().all()
 
         output = io.StringIO()
+        from backend.application.services.commission_service import CommissionService
         writer = csv.writer(output)
-        writer.writerow(["Ride ID", "Date", "Pickup Address", "Destination Address", "Gross Fare (INR)", "Commission 20% (INR)", "Net Fare (INR)", "Tip (INR)", "Status"])
+        writer.writerow(["Ride ID", "Date", "Pickup Address", "Destination Address", "Gross Fare (INR)", "Commission (INR)", "Net Fare (INR)", "Tip (INR)", "Status"])
 
         for r in rides:
-            gross = round((r.final_fare_cents or 0) / 100, 2)
-            comm = round(gross * 0.20, 2)
-            net = round(gross * 0.80, 2)
+            gross_cents = r.final_fare_cents or 0
+            snap = await CommissionService.calculate_for_ride(
+                self.db,
+                gross_cents=gross_cents,
+                category_id=getattr(r, "vehicle_category_id", None),
+                effective_at=getattr(r, "completed_at", None) or getattr(r, "requested_at", None),
+                calculation_basis="CSV_EXPORT",
+            )
+            gross = round(gross_cents / 100, 2)
+            comm = round(snap.commission_cents / 100, 2)
+            net = round(snap.net_cents / 100, 2)
             tip = round((getattr(r, "tip_cents", 0) or 0) / 100, 2)
             date_str = r.completed_at.strftime("%Y-%m-%d %H:%M") if r.completed_at else "N/A"
             writer.writerow([r.id, date_str, r.pickup_address, r.destination_address, gross, comm, net, tip, r.status])

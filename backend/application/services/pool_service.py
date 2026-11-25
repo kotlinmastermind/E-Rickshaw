@@ -327,10 +327,15 @@ class PoolService:
         base_split_cents = round(fare_rule.base_fare_cents * discount_factor)
         distance_time_cents = max(0, total_fare_cents - base_split_cents)
 
-        # Platform commission: 20%, driver earnings: 80% (Conservation of monetary totals: exact cents)
-        commission_rate = 0.20
-        platform_commission_cents = round(total_fare_cents * commission_rate)
-        driver_earnings_cents = total_fare_cents - platform_commission_cents
+        from backend.application.services.commission_service import CommissionService
+        snap = await CommissionService.calculate_for_ride(
+            self.db,
+            gross_cents=total_fare_cents,
+            category_id=getattr(fare_rule, "category_id", None),
+            calculation_basis="POOL_BOOKING",
+        )
+        platform_commission_cents = snap.commission_cents
+        driver_earnings_cents = snap.net_cents
 
         # Generate OTP
         start_otp = "".join([str(secrets.randbelow(10)) for _ in range(6)])

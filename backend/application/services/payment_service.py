@@ -274,7 +274,7 @@ class PaymentService:
                     snap = await CommissionService.calculate_for_ride(
                         self.db,
                         gross_cents=fare_cents,
-                        category_id=getattr(ride, "category_id", None),
+                        category_id=getattr(ride, "vehicle_category_id", None) or getattr(ride, "category_id", None),
                         effective_at=getattr(ride, "completed_at", None) or getattr(ride, "requested_at", None),
                         calculation_basis="RIDE_COMPLETION",
                     )
@@ -2675,7 +2675,7 @@ class PaymentService:
         snap = await CommissionService.calculate_for_ride(
             self.db,
             gross_cents=fare_cents,
-            category_id=getattr(ride, "category_id", None),
+            category_id=getattr(ride, "vehicle_category_id", None) or getattr(ride, "category_id", None),
             effective_at=getattr(ride, "completed_at", None) or getattr(ride, "requested_at", None) or now,
             calculation_basis="RIDE_COMPLETION",
         )
