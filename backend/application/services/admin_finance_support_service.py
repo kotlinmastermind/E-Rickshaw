@@ -102,12 +102,6 @@ class AdminFinanceSupportService:
     # Finance: commissions and impact preview
     async def commission_impact(self, category_id: Optional[str], percent: float, start: Optional[datetime], end: Optional[datetime]) -> Dict[str, Any]:
         if not 0 <= percent <= 100 or (start and end and end <= start): raise HTTPException(422, "Commission must be 0–100 percent and the date range must be ordered.")
-        stmt = select(Ride).where(Ride.status == "COMPLETED")
-        if category_id: stmt = stmt.where(Ride.vehicle_category_id == category_id)
-        if start: stmt = stmt.where(Ride.completed_at >= start)
-        if end: stmt = stmt.where(Ride.completed_at < end)
-        rides = (await self.db.execute(stmt.limit(10000))).scalars().all()
-        gross = sum(max(0, r.final_fare_cents or r.estimated_fare_cents or 0) for r in rides)
         from backend.application.services.commission_service import CommissionService, DEFAULT_FALLBACK_COMMISSION_PERCENT
         from backend.domain.models.extended_models import RideCommissionSnapshot
         active_rule = await CommissionService.resolve_rule(self.db, category_id=category_id)
@@ -116,22 +110,64 @@ class AdminFinanceSupportService:
             if active_rule and active_rule.platform_commission_percentage is not None
             else float(DEFAULT_FALLBACK_COMMISSION_PERCENT)
         )
-        ride_ids = [r.id for r in rides]
-        snap_map: dict[str, int] = {}
-        if ride_ids:
-            snap_rows = (await self.db.execute(select(RideCommissionSnapshot).where(RideCommissionSnapshot.ride_id.in_(ride_ids)))).scalars().all()
+
+        # Keyset pagination over all matching completed rides (no 10,000 truncation)
+        base_stmt = select(Ride).where(Ride.status == "COMPLETED")
+        if category_id:
+            base_stmt = base_stmt.where(Ride.vehicle_category_id == category_id)
+        if start:
+            base_stmt = base_stmt.where(Ride.completed_at >= start)
+        if end:
+            base_stmt = base_stmt.where(Ride.completed_at < end)
+
+        last_id: Optional[str] = None
+        batch_size = 1000
+        total_rides = 0
+        gross = 0
+        current_comm_cents = 0
+        proposed_comm_cents = 0
+        missing_snapshot_count = 0
+
+        while True:
+            page_stmt = base_stmt.order_by(Ride.id.asc()).limit(batch_size)
+            if last_id is not None:
+                page_stmt = page_stmt.where(Ride.id > last_id)
+            batch = (await self.db.execute(page_stmt)).scalars().all()
+            if not batch:
+                break
+            last_id = batch[-1].id
+            ride_ids = [r.id for r in batch]
+            snap_rows = (
+                await self.db.execute(
+                    select(RideCommissionSnapshot).where(RideCommissionSnapshot.ride_id.in_(ride_ids))
+                )
+            ).scalars().all()
             snap_map = {s.ride_id: s.commission_cents for s in snap_rows}
-        current_comm_cents = sum(
-            snap_map[r.id] if r.id in snap_map else CommissionService.compute_commission_cents(max(0, r.final_fare_cents or r.estimated_fare_cents or 0), previous_pct)
-            for r in rides
-        )
-        proposed_comm_cents = CommissionService.compute_commission_cents(gross, percent)
-        return {"completed_rides": len(rides), "gross_fare_cents": gross, "current_commission_percent": previous_pct,
-                "proposed_commission_percent": percent, "current_commission_cents": current_comm_cents,
-                "proposed_commission_cents": proposed_comm_cents,
-                "estimated_change_cents": proposed_comm_cents - current_comm_cents,
-                "window_start": start.isoformat() if start else None, "window_end": end.isoformat() if end else None,
-                "notice": "Historical completed rides only. This preview is an estimate and does not recalculate settled payouts."}
+
+            for r in batch:
+                total_rides += 1
+                fare_c = max(0, r.final_fare_cents or r.estimated_fare_cents or 0)
+                gross += fare_c
+                if r.id in snap_map:
+                    current_comm_cents += snap_map[r.id]
+                else:
+                    missing_snapshot_count += 1
+                proposed_comm_cents += CommissionService.compute_commission_cents(fare_c, percent)
+
+        return {
+            "completed_rides": total_rides,
+            "gross_fare_cents": gross,
+            "current_commission_percent": previous_pct,
+            "proposed_commission_percent": percent,
+            "current_commission_cents": current_comm_cents,
+            "proposed_commission_cents": proposed_comm_cents,
+            "estimated_change_cents": proposed_comm_cents - current_comm_cents,
+            "missing_snapshot_count": missing_snapshot_count,
+            "is_complete": missing_snapshot_count == 0,
+            "window_start": start.isoformat() if start else None,
+            "window_end": end.isoformat() if end else None,
+            "notice": "Historical completed rides only. This preview is an estimate and does not recalculate settled payouts.",
+        }
 
     async def commission_rules(self) -> List[Dict[str, Any]]:
         if getattr(CommissionRule, '__table__', None) is None:

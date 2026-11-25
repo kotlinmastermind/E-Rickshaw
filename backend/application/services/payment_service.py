@@ -330,29 +330,30 @@ class PaymentService:
                                 created_at=now_ts,
                             )
                         )
-                        existing_comm = (
-                            await self.db.execute(
-                                select(DriverLedgerEntry).where(
-                                    DriverLedgerEntry.driver_id == ride.assigned_driver_id,
-                                    DriverLedgerEntry.reference_id == ride.id,
-                                    DriverLedgerEntry.category.in_(["COMMISSION_PAYABLE", "COMMISSION"]),
-                                )
+                    existing_comm = (
+                        await self.db.execute(
+                            select(DriverLedgerEntry).where(
+                                DriverLedgerEntry.driver_id == ride.assigned_driver_id,
+                                DriverLedgerEntry.reference_id == ride.id,
+                                DriverLedgerEntry.category.in_(["COMMISSION_PAYABLE", "COMMISSION"]),
                             )
-                        ).scalar_one_or_none()
-                        if not existing_comm and commission_cents > 0:
-                            self.db.add(
-                                DriverLedgerEntry(
-                                    id=str(uuid.uuid4()),
-                                    driver_id=ride.assigned_driver_id,
-                                    entry_type="DEBIT",
-                                    category="COMMISSION_PAYABLE",
-                                    amount_cents=-commission_cents,
-                                    balance_after_cents=d_wallet.balance_cents,
-                                    reference_id=ride.id,
-                                    description=f"Platform commission ({snap.percentage}% v{snap.version}) for online ride #{ride.id[:8]}",
-                                    created_at=now_ts,
-                                )
+                        )
+                    ).scalar_one_or_none()
+                    if not existing_comm and commission_cents > 0:
+                        now_ts = datetime.now(timezone.utc)
+                        self.db.add(
+                            DriverLedgerEntry(
+                                id=str(uuid.uuid4()),
+                                driver_id=ride.assigned_driver_id,
+                                entry_type="DEBIT",
+                                category="COMMISSION_PAYABLE",
+                                amount_cents=-commission_cents,
+                                balance_after_cents=d_wallet.balance_cents,
+                                reference_id=ride.id,
+                                description=f"Platform commission ({snap.percentage}% v{snap.version}) for online ride #{ride.id[:8]}",
+                                created_at=now_ts,
                             )
+                        )
 
         if auto_commit:
             try:

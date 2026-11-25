@@ -176,6 +176,23 @@ class CommissionService:
             )
         ).scalar_one_or_none()
         if existing is not None:
+            mismatches = []
+            if existing.gross_fare_cents != snapshot.gross_cents:
+                mismatches.append(f"gross_fare_cents({existing.gross_fare_cents}!={snapshot.gross_cents})")
+            if existing.commission_cents != snapshot.commission_cents:
+                mismatches.append(f"commission_cents({existing.commission_cents}!={snapshot.commission_cents})")
+            if existing.commission_classification != commission_classification:
+                mismatches.append(f"classification({existing.commission_classification}!={commission_classification})")
+            if abs(float(existing.commission_percentage) - float(snapshot.percentage)) > 1e-6:
+                mismatches.append(f"percentage({existing.commission_percentage}!={snapshot.percentage})")
+            if existing.currency != currency:
+                mismatches.append(f"currency({existing.currency}!={currency})")
+            if mismatches:
+                logger.error("Immutable commission snapshot mismatch for ride %s: %s", ride_id, ", ".join(mismatches))
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Immutable commission snapshot mismatch for ride {ride_id}: {', '.join(mismatches)}",
+                )
             return existing
 
         row = RideCommissionSnapshot(

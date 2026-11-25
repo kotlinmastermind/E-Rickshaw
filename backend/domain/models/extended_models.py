@@ -67,7 +67,7 @@ class RideCommissionSnapshot(Base):
     __table_args__ = {"extend_existing": True}
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    ride_id: Mapped[str] = mapped_column(String(36), ForeignKey("rides.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
     commission_rule_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("commission_rules.id", ondelete="SET NULL"), nullable=True)
     commission_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     commission_percentage: Mapped[float] = mapped_column(Float, nullable=False)
