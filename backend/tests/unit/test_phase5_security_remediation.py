@@ -257,34 +257,73 @@ async def test_payment_webhook_hmac_verification_and_rejection():
 
 
 @pytest.mark.asyncio
-async def test_payment_webhook_duplicate_idempotency_acknowledged():
+async def test_payment_webhook_duplicate_idempotency_acknowledged(db_session):
     """Verify that a payment already in CAPTURED status returns ALREADY_PROCESSED gracefully."""
-    from unittest.mock import AsyncMock, MagicMock
+    import hashlib
+    import hmac
+    import json
+    import uuid
     from backend.application.services.payment_service import PaymentService
-    from backend.domain.models import Payment
+    from backend.domain.models import Payment, User
+    from backend.integrations.payments.provider import get_payment_provider
 
-    mock_db = AsyncMock()
-    # In SQLAlchemy, AsyncSession.add() is strictly synchronous
-    mock_db.add = MagicMock()
-    mock_payment = MagicMock(spec=Payment)
-    mock_payment.id = "pay_rec_123"
-    mock_payment.status = "CAPTURED"
-
-    # Mock execute to return mock_payment
-    mock_result = MagicMock()
-    mock_result.scalar_one_or_none.return_value = mock_payment
-    mock_db.execute.return_value = mock_result
-
-    service = PaymentService(mock_db)
-    service.provider = MagicMock()
-    service.provider.verify_webhook_payload = AsyncMock(
-        return_value=MagicMock(is_valid=True, payment_id="pay_razor_123")
+    user = User(
+        phone_number=f"+9177{uuid.uuid4().hex[:8]}",
+        full_name="Dup Webhook User",
+        role="customer",
     )
+    db_session.add(user)
+    await db_session.flush()
 
-    body = b'{"event":"payment.captured","order_id":"order_dup_123","payload":{"payment":{"entity":{"id":"pay_razor_123"}}}}'
-    res = await service.process_webhook(body, "valid_sig")
-    assert res["status"] == "ALREADY_PROCESSED"
-    assert res["payment_id"] == "pay_rec_123"
+    order_id = f"order_dup_{uuid.uuid4().hex[:10]}"
+    pay_id = f"pay_razor_{uuid.uuid4().hex[:10]}"
+    payment = Payment(
+        user_id=user.id,
+        amount_cents=10000,
+        currency="INR",
+        purpose="WALLET_TOPUP",
+        status="CAPTURED",
+        payment_method="RAZORPAY",
+        provider_name="RAZORPAY",
+        provider_order_id=order_id,
+        provider_payment_id=pay_id,
+        idempotency_key=f"dup_{order_id}",
+    )
+    db_session.add(payment)
+    await db_session.commit()
+
+    provider = get_payment_provider()
+    orig_wh = provider.webhook_secret
+    secret = "whsec_dup_phase5_test_secret"
+    provider.webhook_secret = secret
+    try:
+        service = PaymentService(db_session)
+        body = json.dumps({
+            "event": "payment.captured",
+            "order_id": order_id,
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": pay_id,
+                        "order_id": order_id,
+                        "amount": 10000,
+                        "currency": "INR",
+                        "status": "captured",
+                    }
+                }
+            },
+        }).encode("utf-8")
+        sig = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+        res = await service.process_webhook(body, sig)
+        assert res["status"] == "ALREADY_PROCESSED"
+        assert res["payment_id"] == payment.id
+
+        # Second identical webhook delivery also returns ALREADY_PROCESSED via inbox
+        res_replay = await service.process_webhook(body, sig)
+        assert res_replay["status"] == "ALREADY_PROCESSED"
+    finally:
+        provider.webhook_secret = orig_wh
 
 
 @pytest.mark.asyncio

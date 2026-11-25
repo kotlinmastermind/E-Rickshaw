@@ -15,6 +15,7 @@ from backend.domain.models import (
     PaymentRefund, FareDispute
 )
 from backend.application.services.wallet_service import WalletService
+from backend.application.services.payment_service import transition_payment_status
 from backend.integrations.payments.provider import get_payment_provider
 class SettlementAdvancedService:
     def __init__(self, db: AsyncSession):
@@ -484,7 +485,10 @@ class SettlementAdvancedService:
         payment = pay_res.scalar_one_or_none()
         if payment:
             payment.payment_method = "CORPORATE_BILLING"
-            payment.status = "CAPTURED"
+            try:
+                transition_payment_status(payment, "CAPTURED", context="corporate billing")
+            except ValueError as err:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
             payment.corporate_account_id = cost_center
             payment.provider_name = "ENTERPRISE_DIRECT"
 
@@ -628,16 +632,19 @@ class SettlementAdvancedService:
         is_partial: bool = False
     ) -> Dict[str, Any]:
         """Initiate authentic gateway refund via Razorpay API."""
+        if not isinstance(amount_cents, int) or isinstance(amount_cents, bool) or amount_cents <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Refund amount must be a positive integer in paise.")
+
         stmt = select(Payment).where(Payment.id == payment_id).with_for_update()
         res = await self.db.execute(stmt)
         payment = res.scalar_one_or_none()
         if not payment:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment record not found.")
 
-        if payment.status != "CAPTURED":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CAPTURED payments can be refunded.")
+        if payment.status not in {"CAPTURED", "PARTIALLY_REFUNDED"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only CAPTURED or PARTIALLY_REFUNDED payments can be refunded.")
 
-        remaining = payment.amount_cents - (payment.refunded_amount_cents or 0)
+        remaining = int(payment.amount_cents) - int(payment.refunded_amount_cents or 0)
         if amount_cents > remaining:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -666,7 +673,6 @@ class SettlementAdvancedService:
                 )
 
         provider = get_payment_provider()
-        # Call live Razorpay Refund API
         gateway_refund = await provider.create_refund(
             payment_id=payment.provider_payment_id,
             amount_cents=amount_cents,
@@ -674,28 +680,37 @@ class SettlementAdvancedService:
         )
 
         real_refund_id = gateway_refund.get("id")
-        real_arn = gateway_refund.get("acquirer_data", {}).get("arn")
+        if not real_refund_id:
+            await self.db.rollback()
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Gateway did not return a valid refund identifier.")
+
+        real_arn = (gateway_refund.get("acquirer_data") or {}).get("arn") or real_refund_id
         settlement_status = "PROCESSED" if gateway_refund.get("status") == "processed" else "GATEWAY_PROCESSING"
 
         refund = PaymentRefund(
-            id=real_refund_id or str(uuid.uuid4()),
+            id=real_refund_id,
             payment_id=payment.id,
             ride_id=payment.ride_id,
             customer_id=payment.customer_id,
             amount_cents=amount_cents,
-            is_partial=is_partial,
+            raw_gateway_amount_cents=gateway_refund.get("amount") or amount_cents,
+            excess_amount_cents=0,
+            is_partial=is_partial or (int(payment.refunded_amount_cents or 0) + amount_cents < int(payment.amount_cents)),
             reason=reason,
             status=settlement_status,
+            provider_refund_id=real_refund_id,
             arn_reference=real_arn,
             estimated_settlement_date=datetime.now(timezone.utc) + timedelta(days=3)
         )
         self.db.add(refund)
 
-        payment.refunded_amount_cents = (payment.refunded_amount_cents or 0) + amount_cents
-        if payment.refunded_amount_cents >= payment.amount_cents:
-            payment.status = "REFUNDED"
-        else:
-            payment.status = "PARTIALLY_REFUNDED"
+        payment.refunded_amount_cents = int(payment.refunded_amount_cents or 0) + amount_cents
+        target_status = "REFUNDED" if payment.refunded_amount_cents >= int(payment.amount_cents) else "PARTIALLY_REFUNDED"
+        try:
+            transition_payment_status(payment, target_status, context="create_refund")
+        except ValueError as err:
+            await self.db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
 
         await self.db.commit()
         return {
@@ -714,9 +729,9 @@ class SettlementAdvancedService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Refund not found.")
 
         steps = [
-            {"step": "Refund Initiated", "completed": True, "date": refund.created_at.strftime("%b %d, %H:%M")},
-            {"step": "Banking Gateway Verified", "completed": refund.status in ["GATEWAY_PROCESSING", "CREDITED"], "arn": refund.arn_reference},
-            {"step": "Settled to Original Account", "completed": refund.status == "CREDITED", "est": refund.estimated_settlement_date.strftime("%b %d, %Y") if refund.estimated_settlement_date else "1-3 days"}
+            {"step": "Refund Initiated", "completed": True, "timestamp": refund.created_at.isoformat()},
+            {"step": "Banking Gateway Verified", "completed": refund.status in ["GATEWAY_PROCESSING", "PROCESSED", "CREDITED"], "arn": refund.arn_reference},
+            {"step": "Settled to Original Account", "completed": refund.status in ["CREDITED", "PROCESSED"], "est": refund.estimated_settlement_date.strftime("%b %d, %Y") if refund.estimated_settlement_date else "1-3 days"}
         ]
 
         return {

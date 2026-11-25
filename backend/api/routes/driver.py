@@ -386,11 +386,11 @@ async def request_payout(
     )
     await db.commit()
     return {
-        "status": "REQUESTED",
+        "status": payout.status,
         "payout_id": payout.id,
         "amount_cents": payout.amount_cents,
-        "bank_account_mask": payout.bank_account_mask,
-        "requested_at": payout.requested_at.isoformat()
+        "bank_account_mask": payout.bank_account_masked,
+        "requested_at": payout.created_at.isoformat()
     }
 
 @router.get("/payouts/history")

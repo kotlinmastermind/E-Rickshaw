@@ -18,6 +18,7 @@ from backend.domain.models import (
     WalletTransaction, DriverLedgerEntry
 )
 from backend.application.services.wallet_service import WalletService
+from backend.application.services.payment_service import PaymentService, transition_refund_status
 
 
 class AdminFinanceSupportService:
@@ -227,7 +228,10 @@ class AdminFinanceSupportService:
         if len(reason.strip()) < 10: raise HTTPException(422, "Provide a review reason of at least 10 characters.")
         row.reviewed_by_admin_id, row.reviewed_at, row.review_reason = admin_id, datetime.now(timezone.utc), reason.strip()
         row.approval_status = "APPROVED" if approve else "REJECTED"
-        row.status = "APPROVED_AWAITING_PROVIDER" if approve else "REJECTED"
+        try:
+            transition_refund_status(row, "APPROVED_AWAITING_PROVIDER" if approve else "REJECTED", context="admin review_refund")
+        except ValueError as err:
+            raise HTTPException(409, str(err))
         self.audit(admin_id, "REFUND_APPROVED" if approve else "REFUND_REJECTED", "payment_refunds", row.id, {"reason": reason.strip(), "amount_cents": row.amount_cents})
         await self.db.commit()
         return {"id": row.id, "approval_status": row.approval_status, "status": row.status,
@@ -242,26 +246,41 @@ class AdminFinanceSupportService:
                  "signature_verified": r.signature_verified} for r in rows]
 
     async def replay_webhook(self, admin_id: str, inbox_id: str) -> Dict[str, Any]:
-        row = await self.db.get(PaymentWebhookInbox, inbox_id)
-        if not row or row.status != "FAILED" or not row.signature_verified: raise HTTPException(409, "Only failed, signature-verified webhook deliveries can be replayed.")
-        if row.attempts >= 5: raise HTTPException(429, "Replay limit reached. Investigate the payment/provider before retrying.")
+        row = (
+            await self.db.execute(select(PaymentWebhookInbox).where(PaymentWebhookInbox.id == inbox_id).with_for_update())
+        ).scalar_one_or_none()
+        if not row or row.status != "FAILED" or not row.signature_verified:
+            raise HTTPException(409, "Only failed, signature-verified webhook deliveries can be replayed.")
+        if row.attempts >= 5:
+            raise HTTPException(429, "Replay limit reached. Investigate the payment/provider before retrying.")
         data = json.loads(row.payload_json)
-        if data.get("event") not in (None, "payment.captured"):
+        if data.get("event") not in ("payment.captured", "order.paid"):
             raise HTTPException(409, "Only verified capture events can be safely reapplied; inspect this event with the provider.")
-        order_id = data.get("order_id") or data.get("payload", {}).get("payment", {}).get("entity", {}).get("order_id")
-        payment = (await self.db.execute(select(Payment).where(Payment.provider_order_id == order_id))).scalar_one_or_none() if order_id else None
+        entity = (data.get("payload") or {}).get("payment", {}).get("entity", {})
+        order_id = entity.get("order_id") or data.get("order_id")
+        payment = (
+            await self.db.execute(select(Payment).where(Payment.provider_order_id == order_id).with_for_update())
+        ).scalar_one_or_none() if order_id else None
         row.attempts += 1
         row.last_attempt_at = datetime.now(timezone.utc)
         if not payment:
             row.last_error = "No matching payment order exists yet."
             await self.db.commit()
             raise HTTPException(404, row.last_error)
-        if payment.status not in {"CAPTURED", "SETTLED", "SUCCESS"}:
-            payment.status = "CAPTURED"
-            entity = data.get("payload", {}).get("payment", {}).get("entity", {})
-            payment.provider_payment_id = entity.get("id") or data.get("payment_id") or payment.provider_payment_id
+        provider_payment_id = entity.get("id") or data.get("payment_id") or payment.provider_payment_id
+        if entity.get("amount") is not None and entity.get("amount") != payment.amount_cents:
+            row.status = "RECONCILIATION_REQUIRED"
+            row.last_error = f"Replay amount mismatch: expected {payment.amount_cents}, got {entity.get('amount')}"
+            await self.db.commit()
+            raise HTTPException(400, row.last_error)
+        if payment.status not in {"CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "SETTLED", "SUCCESS"}:
+            await PaymentService(self.db).finalize_payment_capture(
+                payment=payment,
+                provider_payment_id=provider_payment_id,
+                auto_commit=False,
+            )
             self.db.add(PaymentEvent(payment_id=payment.id, event_type="WEBHOOK_CAPTURED_REPLAY", payload_json=json.dumps({"inbox_id": row.id, "digest": row.event_digest})))
-        row.status, row.last_error = "PROCESSED", None
+        row.status, row.last_error, row.processed_at = "PROCESSED", None, datetime.now(timezone.utc)
         self.audit(admin_id, "PAYMENT_WEBHOOK_REPLAYED", "payment_webhook_inbox", row.id, {"attempt": row.attempts, "payment_id": payment.id})
         await self.db.commit()
         return {"id": row.id, "status": row.status, "attempts": row.attempts, "payment_id": payment.id}

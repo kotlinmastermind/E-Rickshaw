@@ -1122,7 +1122,8 @@ async def test_driver_payout_uses_driver_wallet_and_driver_ledger(db_session):
         session=db_session,
         driver_id_or_user_id=driver_prof.id,
         amount_cents=20000,
-        bank_details={"account_number_mask": "HDFC *******1234"}
+        bank_details={"account_number_mask": "HDFC *******1234"},
+        idempotency_key=f"payout_req_1_{uuid.uuid4().hex[:12]}"
     )
     assert payout.id is not None
     assert payout.status == "REQUESTED"
@@ -1161,7 +1162,8 @@ async def test_driver_payout_uses_driver_wallet_and_driver_ledger(db_session):
         session=db_session,
         driver_id_or_user_id=driver_prof.id,
         amount_cents=10000,
-        bank_details={"account_number_mask": "HDFC *******1234"}
+        bank_details={"account_number_mask": "HDFC *******1234"},
+        idempotency_key=f"payout_req_2_{uuid.uuid4().hex[:12]}"
     )
     await db_session.refresh(d_wallet)
     assert d_wallet.balance_cents == 20000

@@ -934,6 +934,10 @@ fun InstantPayoutScreen(
         primaryAccount?.accountNumberMask ?: "**** 9988"
     }
     val resolvedIfsc = if (payoutMethod == "UPI Direct") "UPI" else (primaryAccount?.ifscCode ?: "HDFC0001234")
+    var attemptNonce by remember(withdrawAmount, resolvedMask, resolvedIfsc) { mutableStateOf(0) }
+    val pendingIdempotencyKey = remember(withdrawAmount, resolvedMask, resolvedIfsc, attemptNonce) {
+        "payout_${java.util.UUID.randomUUID()}"
+    }
 
     Column(
         modifier = Modifier
@@ -1022,10 +1026,12 @@ fun InstantPayoutScreen(
                     DriverRepository.requestInstantWithdrawal(
                         amountRupees = amt,
                         accountNumberMask = resolvedMask,
-                        ifsc = resolvedIfsc
+                        ifsc = resolvedIfsc,
+                        idempotencyKey = pendingIdempotencyKey
                     ) { ok ->
                         isSubmitting = false
                         if (ok) {
+                            attemptNonce++
                             onShowToast("Payout request of ₹$amt submitted!")
                             onPayoutSuccess()
                         } else {

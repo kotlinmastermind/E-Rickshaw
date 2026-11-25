@@ -83,6 +83,27 @@ class RazorpayPaymentProvider(PaymentProvider):
             }
         }
 
+        # Avoid outbound unauthenticated network calls when running synthetic tests without keys
+        if (
+            os.getenv("TESTING") == "1"
+            and settings.ENVIRONMENT != "production"
+            and (not self.key_id or not self.key_secret)
+        ):
+            fallback_order_id = f"order_test_{uuid.uuid4().hex[:14]}"
+            return {
+                "id": fallback_order_id,
+                "entity": "order",
+                "amount": amount_cents,
+                "amount_paid": 0,
+                "amount_due": amount_cents,
+                "currency": currency or "INR",
+                "receipt": receipt_str,
+                "status": "created",
+                "attempts": 0,
+                "notes": notes or {},
+                "created_at": 1730440000
+            }
+
         # 1. Try Razorpay official SDK client
         if self._client:
             try:
@@ -186,23 +207,35 @@ class RazorpayPaymentProvider(PaymentProvider):
 
         return PaymentVerificationResult(True, "CAPTURED", payment_id, "Webhook verified")
 
-    async def fetch_payment(self, payment_id: str, expected_amount_cents: Optional[int] = None) -> Dict[str, Any]:
+    async def fetch_payment(
+        self,
+        payment_id: str,
+        expected_amount_cents: Optional[int] = None,
+        expected_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Fetch authoritative live payment status directly from Razorpay API."""
+        # Fallback for synthetic automated test suites without live gateway connectivity
+        if (
+            os.getenv("TESTING") == "1"
+            and settings.ENVIRONMENT != "production"
+            and (payment_id.startswith("pay_test_") or not self.key_id or not self.key_secret)
+        ):
+            result: Dict[str, Any] = {
+                "id": payment_id,
+                "entity": "payment",
+                "amount": expected_amount_cents if expected_amount_cents is not None else 500000,
+                "currency": "INR",
+                "status": "captured",
+            }
+            if expected_order_id is not None:
+                result["order_id"] = expected_order_id
+            return result
+
         if self._client:
             try:
                 return self._client.payment.fetch(payment_id)
             except Exception as e:
                 logger.warning(f"Razorpay SDK fetch failed, falling back to HTTPX: {e}")
-
-        # Fallback for synthetic automated test suites without live gateway connectivity
-        if os.getenv("TESTING") == "1" and (payment_id.startswith("pay_test_") or not self.key_id or not self.key_secret):
-            return {
-                "id": payment_id,
-                "entity": "payment",
-                "amount": expected_amount_cents if expected_amount_cents is not None else 500000,
-                "currency": "INR",
-                "status": "captured"
-            }
 
         import httpx
         url = f"https://api.razorpay.com/v1/payments/{payment_id}"
@@ -243,20 +276,37 @@ class CashPaymentProvider:
         return PaymentVerificationResult(False, "PENDING", "", "Awaiting chauffeur physical collection confirmation")
 
 _payment_provider_instance: Optional[RazorpayPaymentProvider] = None
+_last_provider_settings: Optional[tuple[str, str, str]] = None
+
+
+def _rebuild_razorpay_sdk_client(provider: RazorpayPaymentProvider) -> None:
+    provider._client = None
+    try:
+        import razorpay
+        if provider.key_id and provider.key_secret:
+            provider._client = razorpay.Client(auth=(provider.key_id, provider.key_secret))
+    except ImportError:
+        pass
+
 
 def get_payment_provider() -> RazorpayPaymentProvider:
-    global _payment_provider_instance
+    global _payment_provider_instance, _last_provider_settings
+    current_creds = (
+        settings.RAZORPAY_KEY_ID or "",
+        settings.RAZORPAY_KEY_SECRET or "",
+        settings.RAZORPAY_WEBHOOK_SECRET or "",
+    )
     if _payment_provider_instance is None:
         _payment_provider_instance = RazorpayPaymentProvider(
-            key_id=settings.RAZORPAY_KEY_ID or "",
-            key_secret=settings.RAZORPAY_KEY_SECRET or "",
-            webhook_secret=settings.RAZORPAY_WEBHOOK_SECRET or ""
+            key_id=current_creds[0],
+            key_secret=current_creds[1],
+            webhook_secret=current_creds[2],
         )
-    else:
-        if settings.RAZORPAY_KEY_ID and not _payment_provider_instance.key_id:
-            _payment_provider_instance.key_id = settings.RAZORPAY_KEY_ID
-        if settings.RAZORPAY_KEY_SECRET and not _payment_provider_instance.key_secret:
-            _payment_provider_instance.key_secret = settings.RAZORPAY_KEY_SECRET
-        if settings.RAZORPAY_WEBHOOK_SECRET and not _payment_provider_instance.webhook_secret:
-            _payment_provider_instance.webhook_secret = settings.RAZORPAY_WEBHOOK_SECRET
+        _last_provider_settings = current_creds
+    elif current_creds != _last_provider_settings:
+        _payment_provider_instance.key_id = current_creds[0]
+        _payment_provider_instance.key_secret = current_creds[1]
+        _payment_provider_instance.webhook_secret = current_creds[2]
+        _rebuild_razorpay_sdk_client(_payment_provider_instance)
+        _last_provider_settings = current_creds
     return _payment_provider_instance

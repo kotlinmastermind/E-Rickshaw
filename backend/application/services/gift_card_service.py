@@ -20,6 +20,7 @@ from backend.domain.models import (
     AdministrativeAuditLog
 )
 from backend.application.services.wallet_service import WalletService
+from backend.application.services.payment_service import transition_payment_status
 from backend.integrations.payments.provider import get_payment_provider
 
 
@@ -226,7 +227,10 @@ class GiftCardService:
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Amount mismatch: Payment amount (₹{payment_rec.amount_cents/100:.2f}) does not match gift card denomination (₹{amount_cents/100:.2f})."
                         )
-                    payment_rec.status = "CAPTURED"
+                    try:
+                        transition_payment_status(payment_rec, "CAPTURED", context="gift_card_purchase")
+                    except ValueError as err:
+                        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
                     payment_rec.purpose = "GIFT_CARD_PURCHASE"
                     payment_rec.provider_payment_id = rzp_payment_id
                     payment_rec.provider_signature = rzp_sig

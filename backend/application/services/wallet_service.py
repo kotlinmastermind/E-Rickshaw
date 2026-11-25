@@ -7,6 +7,7 @@ import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 from backend.domain.models import Wallet, WalletTransaction, RefundLiability
@@ -37,8 +38,14 @@ class WalletService:
                 currency=currency,
                 balance_cents=0
             )
-            session.add(wallet)
-            await session.flush()
+            try:
+                async with session.begin_nested():
+                    session.add(wallet)
+                    await session.flush()
+            except IntegrityError:
+                wallet = (await session.execute(stmt)).scalars().first()
+                if not wallet:
+                    raise
         return wallet
 
     @staticmethod

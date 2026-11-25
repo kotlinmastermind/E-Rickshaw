@@ -3,7 +3,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import (
-    String, Integer, Float, Boolean, DateTime, ForeignKey, Text, Index, UniqueConstraint
+    String, Integer, Float, Boolean, DateTime, ForeignKey, Text, Index, UniqueConstraint, CheckConstraint, text
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, relationship as orm_relationship
 from backend.infrastructure.database.session import Base
@@ -855,6 +855,10 @@ class DriverPayoutRequest(Base):
 
     driver: Mapped["DriverProfile"] = relationship(back_populates="payout_requests")
 
+    __table_args__ = (
+        UniqueConstraint("settlement_reference", name="uq_driver_payout_requests_settlement_reference"),
+    )
+
 
 class GeofenceZone(Base):
     __tablename__ = "geofence_zones"
@@ -1002,6 +1006,12 @@ class Payment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     ride: Mapped[Optional["Ride"]] = relationship(back_populates="payment")
+
+    __table_args__ = (
+        CheckConstraint("amount_cents >= 0", name="ck_payments_non_negative_amount"),
+        CheckConstraint("refunded_amount_cents >= 0", name="ck_payments_non_negative_refunded"),
+        CheckConstraint("refunded_amount_cents <= amount_cents", name="ck_payments_refunded_lte_amount"),
+    )
 
 
 
@@ -1338,10 +1348,13 @@ class PaymentRefund(Base):
     ride_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("rides.id"), nullable=True, index=True)
     customer_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("customer_profiles.id"), nullable=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_gateway_amount_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    excess_amount_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_partial: Mapped[bool] = mapped_column(Boolean, default=False)
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(String(30), default="INITIATED")  # INITIATED, GATEWAY_PROCESSING, CREDITED, FAILED
-    arn_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # Bank ARN
+    status: Mapped[str] = mapped_column(String(30), default="INITIATED")  # INITIATED, GATEWAY_PROCESSING, CREDITED, FAILED, ANOMALY_EXCESS
+    provider_refund_id: Mapped[Optional[str]] = mapped_column(String(128), unique=True, index=True, nullable=True)
+    arn_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)  # Bank ARN or legacy ref
     estimated_settlement_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     approval_status: Mapped[str] = mapped_column(String(24), default="APPROVED", nullable=False)
     requested_by_admin_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
@@ -1350,6 +1363,11 @@ class PaymentRefund(Base):
     review_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        CheckConstraint("amount_cents >= 0", name="ck_payment_refunds_non_negative_amount"),
+        CheckConstraint("excess_amount_cents >= 0", name="ck_payment_refunds_non_negative_excess"),
+    )
 
 
 class RefundLiability(Base):
@@ -1369,6 +1387,37 @@ class RefundLiability(Base):
     status: Mapped[str] = mapped_column(String(30), default="ACTIVE", nullable=False)  # ACTIVE, RECOVERED, WRITTEN_OFF
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class PaymentReconciliationAnomaly(Base):
+    """
+    Dedicated financial reconciliation anomaly ledger for excess gateway refunds,
+    unmatched webhook deliveries, payload/amount discrepancies, and ownership conflicts.
+    """
+    __tablename__ = "payment_reconciliation_anomalies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    payment_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("payments.id"), nullable=True, index=True)
+    webhook_inbox_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    provider_name: Mapped[str] = mapped_column(String(32), default="RAZORPAY", nullable=False)
+    provider_payment_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    provider_order_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    provider_refund_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    anomaly_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    expected_amount_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    raw_gateway_amount_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    applied_amount_cents: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    excess_amount_cents: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), default="INR", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="OPEN", nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    details_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("anomaly_type", "provider_refund_id", name="uq_recon_anomaly_type_refund_id"),
+    )
 
 
 class FareDispute(Base):
@@ -1593,6 +1642,18 @@ class DriverLedgerEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     driver: Mapped["DriverProfile"] = relationship()
+
+    __table_args__ = (
+        Index(
+            "ix_driver_ledger_unique_category_ref",
+            "driver_id",
+            "category",
+            "reference_id",
+            unique=True,
+            sqlite_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION') AND reference_id IS NOT NULL"),
+            postgresql_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION') AND reference_id IS NOT NULL"),
+        ),
+    )
 
 
 class DriverIncentiveProgress(Base):

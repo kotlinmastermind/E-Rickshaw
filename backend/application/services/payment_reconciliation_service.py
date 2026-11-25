@@ -9,7 +9,11 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 from backend.infrastructure.database.session import async_session_maker
 from backend.domain.models import Payment, RefundLiability
-from backend.application.services.payment_service import PaymentService
+from backend.application.services.payment_service import (
+    PaymentService,
+    transition_payment_status,
+    validate_payment_transition,
+)
 from backend.integrations.payments.provider import get_payment_provider
 
 logger = logging.getLogger("reconciliation.worker")
@@ -43,7 +47,15 @@ class PaymentReconciliationService:
                         data = resp.json()
                         items = data.get("items", [])
                         
-                        captured_payment = next((p for p in items if p.get("status") == "captured"), None)
+                        captured_payment = next(
+                            (
+                                p for p in items
+                                if str(p.get("status") or "").lower() == "captured"
+                                and p.get("amount") == pay.amount_cents
+                                and str(p.get("currency") or "").upper() == "INR"
+                            ),
+                            None,
+                        )
                         if captured_payment:
                             logger.info(f"Reconciling captured payment {captured_payment['id']} for order {pay.provider_order_id}")
                             service = PaymentService(session)
@@ -51,9 +63,10 @@ class PaymentReconciliationService:
                                 payment=pay,
                                 provider_payment_id=captured_payment["id"]
                             )
-                        elif all(p.get("status") == "failed" for p in items) and len(items) > 0:
-                            pay.status = "FAILED"
-                            await session.commit()
+                        elif all(str(p.get("status") or "").lower() == "failed" for p in items) and len(items) > 0:
+                            if validate_payment_transition(pay.status, "FAILED"):
+                                transition_payment_status(pay, "FAILED", context="reconciliation worker")
+                                await session.commit()
                 except Exception as e:
                     logger.error(f"Reconciliation error on order {pay.provider_order_id}: {e}")
 

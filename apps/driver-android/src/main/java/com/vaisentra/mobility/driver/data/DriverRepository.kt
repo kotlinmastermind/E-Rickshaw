@@ -1130,6 +1130,7 @@ object DriverRepository {
         amountRupees: Double,
         accountNumberMask: String = "**** 9988",
         ifsc: String = "HDFC0001234",
+        idempotencyKey: String? = null,
         onResult: (Boolean) -> Unit = {}
     ) {
         val amountCents = (amountRupees * 100).toLong()
@@ -1137,15 +1138,15 @@ object DriverRepository {
             onResult(false)
             return
         }
+        val resolvedKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: "payout_${java.util.UUID.randomUUID()}"
         scope.launch {
             try {
-                val idempotencyKey = "payout_${java.util.UUID.randomUUID()}"
                 val res = DriverNetworkClient.apiService.requestInstantPayout(
                     PayoutRequestDto(
                         amountCents = amountCents,
                         accountNumberMask = accountNumberMask,
                         ifsc = ifsc,
-                        idempotencyKey = idempotencyKey
+                        idempotencyKey = resolvedKey
                     )
                 )
                 if (res.isSuccessful) {

@@ -258,8 +258,23 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             }, headers=cust_headers)
             assert intent_resp.status_code == 200
             order_id = intent_resp.json()["order_id"]
+            amount_cents = intent_resp.json()["amount_cents"]
 
-            webhook_body = json.dumps({"order_id": order_id, "amount_cents": 100000}).encode("utf-8")
+            webhook_body = json.dumps({
+                "event": "payment.captured",
+                "order_id": order_id,
+                "payload": {
+                    "payment": {
+                        "entity": {
+                            "id": f"pay_wf_{ride_id[:12]}",
+                            "order_id": order_id,
+                            "amount": amount_cents,
+                            "currency": "INR",
+                            "status": "captured",
+                        }
+                    }
+                },
+            }).encode("utf-8")
             from backend.integrations.payments.provider import get_payment_provider
             provider = get_payment_provider()
             orig_secret = provider.webhook_secret

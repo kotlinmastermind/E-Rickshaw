@@ -494,13 +494,16 @@ class PaymentWebhookInbox(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     provider_name: Mapped[str] = mapped_column(String(32), default="RAZORPAY", nullable=False)
     event_digest: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    event_type: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    provider_event_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     signature_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="RECEIVED", index=True, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     last_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     last_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     __table_args__ = (
         UniqueConstraint("event_digest", name="uq_payment_webhook_inbox_event_digest"),

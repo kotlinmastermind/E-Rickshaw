@@ -16,6 +16,7 @@ import uuid
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, func, and_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
@@ -498,6 +499,9 @@ class DispatchAdvancedService:
     ) -> DriverPayoutRequest:
         if amount_cents < 10000:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Minimum payout request is ₹100 (10000 cents)")
+        if not idempotency_key or not str(idempotency_key).strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Client idempotency_key is required.")
+        idempotency_key = str(idempotency_key).strip()
 
         driver_prof = await DispatchAdvancedService._resolve_driver_profile(session, driver_id_or_user_id)
         if not driver_prof:
@@ -530,7 +534,7 @@ class DispatchAdvancedService:
                 detail=f"Insufficient driver wallet balance. Available: ₹{d_wallet.balance_cents / 100:.2f}"
             )
 
-        # Create Payout Record
+        # Create Payout Record inside savepoint to survive concurrent idempotency_key collision safely
         payout = DriverPayoutRequest(
             driver_id=driver_prof.id,
             amount_cents=amount_cents,
@@ -538,8 +542,19 @@ class DispatchAdvancedService:
             bank_account_masked=bank_details.get("account_number_mask", "HDFC *******9988"),
             idempotency_key=idempotency_key
         )
-        session.add(payout)
-        await session.flush()
+        try:
+            async with session.begin_nested():
+                session.add(payout)
+                await session.flush()
+        except IntegrityError:
+            existing_payout = (await session.execute(existing_payout_stmt)).scalar_one_or_none()
+            if existing_payout:
+                if existing_payout.driver_id != driver_prof.id:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key owned by another driver.")
+                if existing_payout.amount_cents != amount_cents:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key reused with different amount.")
+                return existing_payout
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Concurrent payout creation conflict.")
 
         # Deduct Balance and Record Immutable PAYOUT_HOLD Ledger Entry
         d_wallet.balance_cents -= amount_cents

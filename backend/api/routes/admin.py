@@ -1049,8 +1049,8 @@ async def list_payouts(
             "requested_at": p.created_at.isoformat(),
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
             "rejection_reason": p.rejection_reason,
-            "payout_reference": p.payout_reference,
-            "settlement_reference": p.payout_reference
+            "payout_reference": p.payout_reference or p.settlement_reference,
+            "settlement_reference": p.settlement_reference or p.payout_reference
         }
         for p in payouts
     ]

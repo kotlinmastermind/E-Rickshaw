@@ -12,6 +12,7 @@ import uuid
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, func, and_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
@@ -231,22 +232,29 @@ class AdminAdvancedService:
         if not d_wallet:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Driver wallet missing during reversal.")
 
-        # Reversal Ledger Entry & Balance Restoration
-        d_wallet.balance_cents += payout.amount_cents
-        d_wallet.updated_at = datetime.now(timezone.utc)
+        # Idempotent Reversal Check: Prevent duplicate reversal ledger credits
+        existing_rev = (await session.execute(select(DriverLedgerEntry).where(
+            DriverLedgerEntry.driver_id == payout.driver_id,
+            DriverLedgerEntry.category == "PAYOUT_REVERSAL",
+            DriverLedgerEntry.reference_id == payout.id
+        ))).scalar_one_or_none()
 
-        rev_entry = DriverLedgerEntry(
-            id=str(uuid.uuid4()),
-            driver_id=payout.driver_id,
-            entry_type="CREDIT",
-            category="PAYOUT_REVERSAL",
-            amount_cents=payout.amount_cents,
-            balance_after_cents=d_wallet.balance_cents,
-            reference_id=payout.id,
-            description=f"Refund for rejected payout: {rejection_reason}",
-            created_at=datetime.now(timezone.utc)
-        )
-        session.add(rev_entry)
+        if not existing_rev:
+            d_wallet.balance_cents += payout.amount_cents
+            d_wallet.updated_at = datetime.now(timezone.utc)
+
+            rev_entry = DriverLedgerEntry(
+                id=str(uuid.uuid4()),
+                driver_id=payout.driver_id,
+                entry_type="CREDIT",
+                category="PAYOUT_REVERSAL",
+                amount_cents=payout.amount_cents,
+                balance_after_cents=d_wallet.balance_cents,
+                reference_id=payout.id,
+                description=f"Refund for rejected payout: {rejection_reason}",
+                created_at=datetime.now(timezone.utc)
+            )
+            session.add(rev_entry)
 
         payout.status = "REJECTED"
         payout.rejection_reason = rejection_reason
@@ -264,6 +272,7 @@ class AdminAdvancedService:
     async def mark_payout_paid(session: AsyncSession, payout_id: str, admin_user_id: str, settlement_ref: str) -> DriverPayoutRequest:
         if not settlement_ref or len(settlement_ref.strip()) < 8:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid banking settlement reference (UTR/RRN) required.")
+        clean_ref = settlement_ref.strip()
 
         stmt = select(DriverPayoutRequest).where(DriverPayoutRequest.id == payout_id).with_for_update()
         payout = (await session.execute(stmt)).scalar_one_or_none()
@@ -275,24 +284,35 @@ class AdminAdvancedService:
 
         # Enforce unique banking settlement reference
         dup_check = (await session.execute(
-            select(DriverPayoutRequest).where(DriverPayoutRequest.settlement_reference == settlement_ref.strip())
+            select(DriverPayoutRequest).where(DriverPayoutRequest.settlement_reference == clean_ref)
         )).scalar_one_or_none()
         if dup_check and dup_check.id != payout.id:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Settlement reference {settlement_ref} already used for payout {dup_check.id}.")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Settlement reference {clean_ref} already used for payout {dup_check.id}.")
 
         payout.status = "PAID"
-        payout.payout_reference = settlement_ref.strip()
-        payout.settlement_reference = settlement_ref.strip()
+        payout.payout_reference = clean_ref
+        payout.settlement_reference = clean_ref
         payout.reviewed_by = admin_user_id
         payout.updated_at = datetime.now(timezone.utc)
         payout.reviewed_at = payout.updated_at
 
         session.add(AdministrativeAuditLog(
-            admin_user_id=admin_user_id, action="PAYOUT_SETTLED",
+            admin_user_id=admin_user_id, action="PAYOUT_SETTLED_MANUAL",
             target_resource="driver_payout_requests", target_id=payout.id,
-            changes_json=json.dumps({"settlement_reference": settlement_ref})
+            changes_json=json.dumps({
+                "settlement_reference": clean_ref,
+                "settlement_mode": "MANUAL_BANK_UTR",
+                "amount_cents": payout.amount_cents,
+            })
         ))
-        await session.flush()
+        try:
+            async with session.begin_nested():
+                await session.flush()
+        except IntegrityError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Settlement reference {clean_ref} is already assigned to another payout."
+            )
         return payout
     # ---------------- BROADCAST NOTIFICATIONS ----------------
     @staticmethod
