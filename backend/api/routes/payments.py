@@ -215,7 +215,10 @@ async def create_razorpay_order(
     elif payload.amount_rupees is not None:
         amount_paise = int(round(payload.amount_rupees * 100))
     else:
-        amount_paise = 10000
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order amount (amount_cents or amount_rupees) is required."
+        )
 
     if amount_paise <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order amount must be positive.")

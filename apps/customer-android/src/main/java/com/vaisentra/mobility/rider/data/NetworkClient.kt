@@ -51,9 +51,9 @@ object NetworkClient {
             }
         }
     }
-    // Default to Android Emulator host or local LAN server (configurable at runtime)
+    // Default from BuildConfig environment flavor (configurable at runtime)
     @Volatile
-    var baseUrl: String = "https://e-rickshaw-z32z.onrender.com/"
+    var baseUrl: String = com.vaisentra.mobility.rider.BuildConfig.API_BASE_URL
 
     @Volatile
     var mapboxPublicToken: String = ""

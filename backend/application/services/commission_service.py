@@ -141,6 +141,12 @@ class CommissionService:
             rule_id = rule.id
             version = rule.version or 1
         else:
+            from backend.core.config import settings
+            if getattr(settings, "ENVIRONMENT", "development").lower() == "production":
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="No active commission rule configured for this category or globally.",
+                )
             pct = DEFAULT_FALLBACK_COMMISSION_PERCENT
             rule_id = None
             version = 0

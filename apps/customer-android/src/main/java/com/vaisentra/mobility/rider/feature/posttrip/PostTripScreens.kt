@@ -32,10 +32,14 @@ fun RideReceiptScreen(onNavigate: (String) -> Unit) {
     val context = LocalContext.current
     val activeRide by RiderRepository.activeRide.collectAsState()
 
-    LaunchedEffect(Unit) {
+    val ridePayState by RiderRepository.ridePaymentState.collectAsState()
+
+    LaunchedEffect(activeRide?.id) {
         RiderRepository.restoreCheckoutStates()
-        val rideId = activeRide?.id ?: "ride-latest"
-        RiderRepository.fetchRideReceipt(rideId)
+        val rideId = activeRide?.id?.takeIf { it.isNotBlank() }
+        if (rideId != null) {
+            RiderRepository.fetchRideReceipt(rideId)
+        }
     }
 
     val total = receipt?.totalAmountRupees ?: 0.0
@@ -58,14 +62,27 @@ fun RideReceiptScreen(onNavigate: (String) -> Unit) {
         NeoHeader(title = "Trip Receipt", subtitle = "Itemized Settlement Slip", onBack = { onNavigate("map_home") })
         Spacer(modifier = Modifier.height(16.dp))
 
-        NeoCard(borderColor = EmeraldGreen) {
+        val (badgeText, badgeColor, cardBorderColor) = when {
+            receipt == null && activeRide?.id.isNullOrBlank() -> Triple("NO ACTIVE RIDE", TextMuted, BorderSubtle)
+            method == "WALLET" && total > 0.0 -> Triple("PAID IN FULL ✓", EmeraldGreen, EmeraldGreen)
+            ridePayState is RiderRepository.RidePaymentState.Success -> Triple("PAID IN FULL ✓", EmeraldGreen, EmeraldGreen)
+            ridePayState is RiderRepository.RidePaymentState.Error -> Triple("PAYMENT FAILED", CrimsonRed, CrimsonRed)
+            ridePayState is RiderRepository.RidePaymentState.AuthorizedPending ||
+                ridePayState is RiderRepository.RidePaymentState.ReconciliationRequired ||
+                ridePayState is RiderRepository.RidePaymentState.CreatingOrder ||
+                ridePayState is RiderRepository.RidePaymentState.Verifying -> Triple("PAYMENT PENDING", AmberGold, AmberGold)
+            total > 0.0 -> Triple("SETTLEMENT PENDING", AmberGold, BorderSubtle)
+            else -> Triple("NO RECEIPT", TextMuted, BorderSubtle)
+        }
+
+        NeoCard(borderColor = cardBorderColor) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(text = "Amount Paid via $method", color = TextMuted, fontSize = 12.sp)
-                NeoBadge(text = "PAID IN FULL ✓", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+                NeoBadge(text = badgeText, backgroundColor = SurfaceElevated, textColor = badgeColor)
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = "₹${"%.2f".format(total)}", color = ElectricCyan, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
@@ -221,16 +238,39 @@ fun DriverRatingScreen(onNavigate: (String) -> Unit) {
             }
         }
 
+        val scope = rememberCoroutineScope()
+        var isSubmittingRating by remember { mutableStateOf(false) }
+        var ratingError by remember { mutableStateOf<String?>(null) }
+
+        if (ratingError != null) {
+            Text(text = "⚠️ $ratingError", color = CrimsonRed, fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
         Spacer(modifier = Modifier.height(16.dp))
         NeoButton(
-            text = "Submit Rating & Tip Driver →",
+            text = if (isSubmittingRating) "Submitting Rating..." else "Submit Rating & Tip Driver →",
+            enabled = !isSubmittingRating,
             onClick = {
-                val rideId = RiderRepository.activeRide.value?.id ?: "ride-latest"
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    RiderRepository.submitRating(rideId, rating, selectedCompliments.joinToString(", "))
+                val rideId = RiderRepository.activeRide.value?.id?.takeIf { it.isNotBlank() }
+                if (rideId == null) {
+                    ratingError = "Missing ride identifier for rating."
+                    DialogController.showToast("Missing ride identifier for rating.")
+                    return@NeoButton
                 }
-                DialogController.showToast("Rating submitted to pilot ledger!")
-                onNavigate("tip_driver")
+                isSubmittingRating = true
+                ratingError = null
+                scope.launch {
+                    val res = RiderRepository.submitRating(rideId, rating, selectedCompliments.joinToString(", "))
+                    isSubmittingRating = false
+                    if (res.isSuccess) {
+                        DialogController.showToast("Rating submitted to pilot ledger!")
+                        onNavigate("tip_driver")
+                    } else {
+                        val msg = res.exceptionOrNull()?.message ?: "Failed to submit rating. Please retry."
+                        ratingError = msg
+                        DialogController.showToast(msg)
+                    }
+                }
             },
             backgroundColor = SapphirePrimary
         )
@@ -270,17 +310,44 @@ fun DriverTipScreen(onNavigate: (String) -> Unit) {
                 }
             }
         }
+        val tipScope = rememberCoroutineScope()
+        var isSubmittingTip by remember { mutableStateOf(false) }
+        var tipError by remember { mutableStateOf<String?>(null) }
+
+        if (tipError != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = "⚠️ $tipError", color = CrimsonRed, fontSize = 12.sp)
+        }
         Spacer(modifier = Modifier.height(20.dp))
-        NeoButton(text = "Pay ₹$tipAmt Tip via UPI", onClick = {
-            val activeRide = RiderRepository.activeRide.value
-            val rideId = activeRide?.id ?: "ride-latest"
-            val driverName = activeRide?.driverName ?: activeRide?.driver?.name ?: "Pilot"
-            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                RiderRepository.submitTip(rideId, tipAmt)
-            }
-            DialogController.showToast("₹$tipAmt tip credited to $driverName!")
-            onNavigate("past_trips")
-        }, icon = "💵")
+        NeoButton(
+            text = if (isSubmittingTip) "Processing Tip..." else "Pay ₹$tipAmt Tip via UPI",
+            enabled = !isSubmittingTip,
+            onClick = {
+                val activeRide = RiderRepository.activeRide.value
+                val rideId = activeRide?.id?.takeIf { it.isNotBlank() }
+                if (rideId == null) {
+                    tipError = "Missing ride identifier for tip."
+                    DialogController.showToast("Missing ride identifier for tip.")
+                    return@NeoButton
+                }
+                val driverName = activeRide.driverName ?: activeRide.driver?.name ?: "Pilot"
+                isSubmittingTip = true
+                tipError = null
+                tipScope.launch {
+                    val res = RiderRepository.submitTip(rideId, tipAmt)
+                    isSubmittingTip = false
+                    if (res.isSuccess) {
+                        DialogController.showToast("₹$tipAmt tip credited to $driverName!")
+                        onNavigate("past_trips")
+                    } else {
+                        val msg = res.exceptionOrNull()?.message ?: "Failed to process tip. Please retry."
+                        tipError = msg
+                        DialogController.showToast(msg)
+                    }
+                }
+            },
+            icon = "💵"
+        )
     }
 }
 
