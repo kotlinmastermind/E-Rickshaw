@@ -153,7 +153,7 @@ async def test_online_payment_100_rupees_at_15_percent_model(db_session):
     wallet = (
         await db_session.execute(select(DriverWallet).where(DriverWallet.driver_id == driver_p.id))
     ).scalar_one()
-    assert wallet.balance_cents == 8500
+    assert wallet.balance_cents == 10000
 
     entries = (
         await db_session.execute(select(DriverLedgerEntry).where(DriverLedgerEntry.driver_id == driver_p.id))

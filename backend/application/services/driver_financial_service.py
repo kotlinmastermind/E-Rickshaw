@@ -331,7 +331,7 @@ class DriverFinancialService:
             },
             "deductions_and_supplements": {
                 "platform_commission_cents": commission_cents,
-                "platform_commission_percentage": 20.0,
+                "platform_commission_percentage": snap.percentage,
                 "customer_tip_cents": tip_cents,
                 "customer_tip_rupees": round(tip_cents / 100, 2),
                 "toll_reimbursement_cents": toll_cents,

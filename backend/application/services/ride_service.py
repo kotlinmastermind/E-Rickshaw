@@ -709,8 +709,6 @@ class RideService:
                     DriverLedgerEntry.category.in_(["COMMISSION_PAYABLE", "COMMISSION"])
                 ))).scalar_one_or_none()
                 if not existing_comm and commission_cents > 0:
-                    d_wallet.balance_cents -= commission_cents
-                    d_wallet.updated_at = now
                     self.db.add(DriverLedgerEntry(
                         id=str(uuid.uuid4()),
                         driver_id=driver.id,

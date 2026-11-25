@@ -340,8 +340,6 @@ class PaymentService:
                             )
                         ).scalar_one_or_none()
                         if not existing_comm and commission_cents > 0:
-                            d_wallet.balance_cents -= commission_cents
-                            d_wallet.updated_at = now_ts
                             self.db.add(
                                 DriverLedgerEntry(
                                     id=str(uuid.uuid4()),

@@ -108,14 +108,28 @@ class AdminFinanceSupportService:
         if end: stmt = stmt.where(Ride.completed_at < end)
         rides = (await self.db.execute(stmt.limit(10000))).scalars().all()
         gross = sum(max(0, r.final_fare_cents or r.estimated_fare_cents or 0) for r in rides)
-        prior_rows = (await self.db.execute(select(CommissionRule).where(
-            CommissionRule.is_active.is_(True), or_(CommissionRule.category_id.is_(None), CommissionRule.category_id == category_id)
-        ).order_by(CommissionRule.effective_from.desc()))).scalars().all()
-        previous_pct = prior_rows[0].platform_commission_percentage if prior_rows else 20.0
+        from backend.application.services.commission_service import CommissionService, DEFAULT_FALLBACK_COMMISSION_PERCENT
+        from backend.domain.models.extended_models import RideCommissionSnapshot
+        active_rule = await CommissionService.resolve_rule(self.db, category_id=category_id)
+        previous_pct = (
+            float(active_rule.platform_commission_percentage)
+            if active_rule and active_rule.platform_commission_percentage is not None
+            else float(DEFAULT_FALLBACK_COMMISSION_PERCENT)
+        )
+        ride_ids = [r.id for r in rides]
+        snap_map: dict[str, int] = {}
+        if ride_ids:
+            snap_rows = (await self.db.execute(select(RideCommissionSnapshot).where(RideCommissionSnapshot.ride_id.in_(ride_ids)))).scalars().all()
+            snap_map = {s.ride_id: s.commission_cents for s in snap_rows}
+        current_comm_cents = sum(
+            snap_map[r.id] if r.id in snap_map else CommissionService.compute_commission_cents(max(0, r.final_fare_cents or r.estimated_fare_cents or 0), previous_pct)
+            for r in rides
+        )
+        proposed_comm_cents = CommissionService.compute_commission_cents(gross, percent)
         return {"completed_rides": len(rides), "gross_fare_cents": gross, "current_commission_percent": previous_pct,
-                "proposed_commission_percent": percent, "current_commission_cents": round(gross * previous_pct / 100),
-                "proposed_commission_cents": round(gross * percent / 100),
-                "estimated_change_cents": round(gross * (percent - previous_pct) / 100),
+                "proposed_commission_percent": percent, "current_commission_cents": current_comm_cents,
+                "proposed_commission_cents": proposed_comm_cents,
+                "estimated_change_cents": proposed_comm_cents - current_comm_cents,
                 "window_start": start.isoformat() if start else None, "window_end": end.isoformat() if end else None,
                 "notice": "Historical completed rides only. This preview is an estimate and does not recalculate settled payouts."}
 

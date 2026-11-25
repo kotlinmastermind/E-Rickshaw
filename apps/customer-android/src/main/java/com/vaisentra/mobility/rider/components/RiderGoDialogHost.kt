@@ -686,14 +686,15 @@ private fun AirportDelayPopup() {
                     }
                     val newPickupTimeIso = isoFmt.format(java.util.Date(futureMs))
 
-                    if (activeRide != null) {
-                        val res = RiderRepository.syncFlightDelay(activeRide.id, flightCode.trim())
+                    val currentRide = activeRide
+                    if (currentRide != null) {
+                        val res = RiderRepository.syncFlightDelay(currentRide.id, flightCode.trim())
                         isRescheduling = false
                         DialogController.dismiss()
                         if (res.isSuccess) {
                             DialogController.showToast("Chauffeur pickup rescheduled to +45 mins via FastAPI!")
                         } else {
-                            val res2 = RiderRepository.rescheduleRide(activeRide.id, newPickupTimeIso, "Flight delay auto-reschedule", flightCode.trim())
+                            val res2 = RiderRepository.rescheduleRide(currentRide.id, newPickupTimeIso, "Flight delay auto-reschedule", flightCode.trim())
                             if (res2.isSuccess) {
                                 DialogController.showToast("Chauffeur pickup rescheduled via FastAPI.")
                             } else {
