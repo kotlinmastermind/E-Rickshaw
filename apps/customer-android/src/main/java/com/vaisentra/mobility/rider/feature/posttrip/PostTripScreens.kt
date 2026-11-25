@@ -64,7 +64,6 @@ fun RideReceiptScreen(onNavigate: (String) -> Unit) {
 
         val (badgeText, badgeColor, cardBorderColor) = when {
             receipt == null && activeRide?.id.isNullOrBlank() -> Triple("NO ACTIVE RIDE", TextMuted, BorderSubtle)
-            method == "WALLET" && total > 0.0 -> Triple("PAID IN FULL ✓", EmeraldGreen, EmeraldGreen)
             ridePayState is RiderRepository.RidePaymentState.Success -> Triple("PAID IN FULL ✓", EmeraldGreen, EmeraldGreen)
             ridePayState is RiderRepository.RidePaymentState.Error -> Triple("PAYMENT FAILED", CrimsonRed, CrimsonRed)
             ridePayState is RiderRepository.RidePaymentState.AuthorizedPending ||
