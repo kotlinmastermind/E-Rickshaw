@@ -144,21 +144,15 @@ class DriverFinancialService:
 
         ride_comm_map: dict[str, int] = {}
         ride_pct_map: dict[str, float] = {}
+        missing_snapshot_count = 0
         for r in rides:
             snap_row = snapshots_by_ride.get(r.id)
             if snap_row is not None:
                 ride_comm_map[r.id] = snap_row.commission_cents
                 ride_pct_map[r.id] = snap_row.commission_percentage
             else:
-                hist_snap = await CommissionService.calculate_for_ride(
-                    self.db,
-                    gross_cents=r.final_fare_cents or 0,
-                    category_id=getattr(r, "vehicle_category_id", None),
-                    effective_at=getattr(r, "completed_at", None) or getattr(r, "requested_at", None),
-                    calculation_basis="HISTORICAL_LOOKUP",
-                )
-                ride_comm_map[r.id] = hist_snap.commission_cents
-                ride_pct_map[r.id] = hist_snap.percentage
+                missing_snapshot_count += 1
+                ride_comm_map[r.id] = 0
 
         total_gross_cents = sum(r.final_fare_cents or 0 for r in rides)
         total_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in rides)

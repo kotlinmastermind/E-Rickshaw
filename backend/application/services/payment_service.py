@@ -269,6 +269,22 @@ class PaymentService:
                     ride.assigned_driver_id = payment.driver_id
 
                 if ride.assigned_driver_id:
+                    if ride.final_fare_cents is not None and ride.final_fare_cents != payment.amount_cents:
+                        logger.warning(
+                            "Payment/fare mismatch for ride %s: payment=%s, final_fare=%s",
+                            ride.id, payment.amount_cents, ride.final_fare_cents,
+                        )
+                        if auto_commit:
+                            await self.db.commit()
+                        else:
+                            await self.db.flush()
+                        return {
+                            "status": "RECONCILIATION_REQUIRED",
+                            "payment_id": payment.id,
+                            "purpose": payment.purpose,
+                            "amount_cents": payment.amount_cents,
+                            "ride_final_fare_cents": ride.final_fare_cents,
+                        }
                     from backend.application.services.commission_service import CommissionService
                     fare_cents = payment.amount_cents
                     snap = await CommissionService.calculate_for_ride(

@@ -179,14 +179,24 @@ class CommissionService:
             mismatches = []
             if existing.gross_fare_cents != snapshot.gross_cents:
                 mismatches.append(f"gross_fare_cents({existing.gross_fare_cents}!={snapshot.gross_cents})")
+            if existing.driver_gross_cents != snapshot.gross_cents:
+                mismatches.append(f"driver_gross_cents({existing.driver_gross_cents}!={snapshot.gross_cents})")
             if existing.commission_cents != snapshot.commission_cents:
                 mismatches.append(f"commission_cents({existing.commission_cents}!={snapshot.commission_cents})")
             if existing.commission_classification != commission_classification:
                 mismatches.append(f"classification({existing.commission_classification}!={commission_classification})")
             if abs(float(existing.commission_percentage) - float(snapshot.percentage)) > 1e-6:
                 mismatches.append(f"percentage({existing.commission_percentage}!={snapshot.percentage})")
+            if existing.commission_rule_id != snapshot.rule_id:
+                mismatches.append(f"rule_id({existing.commission_rule_id}!={snapshot.rule_id})")
+            if existing.commission_version != snapshot.version:
+                mismatches.append(f"version({existing.commission_version}!={snapshot.version})")
+            if existing.category_id != category_id:
+                mismatches.append(f"category_id({existing.category_id}!={category_id})")
             if existing.currency != currency:
                 mismatches.append(f"currency({existing.currency}!={currency})")
+            if existing.calculation_basis != snapshot.calculation_basis:
+                mismatches.append(f"calculation_basis({existing.calculation_basis}!={snapshot.calculation_basis})")
             if mismatches:
                 logger.error("Immutable commission snapshot mismatch for ride %s: %s", ride_id, ", ".join(mismatches))
                 raise HTTPException(
