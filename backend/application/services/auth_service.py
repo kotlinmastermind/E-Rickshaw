@@ -139,6 +139,15 @@ class AuthService:
                 detail="Mobile phone number and OTP code are required."
             )
 
+        target_role = (role or "customer").lower().strip()
+        if target_role in ("admin", "superadmin", "super administrator"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Administrator accounts cannot be self-registered via OTP."
+            )
+        if target_role not in ("customer", "driver"):
+            target_role = "customer"
+
         # 1. Twilio Verify API check (NO BYPASS)
         sms_provider = get_sms_provider()
         is_valid = await sms_provider.verify_otp(norm_phone, clean_code)
@@ -161,9 +170,6 @@ class AuthService:
         user = res.scalars().first()
 
         is_new_user = False
-        target_role = (role or "customer").lower().strip()
-        if target_role not in ("customer", "driver", "admin"):
-            target_role = "customer"
 
         if not user:
             # Auto-create user account seamlessly
@@ -187,6 +193,11 @@ class AuthService:
         else:
             if not user.is_active:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated. Please contact support.")
+            if (user.role or "").lower() in ("admin", "superadmin", "super administrator"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Administrator accounts cannot sign in via OTP. Use administrator password and MFA sign-in."
+                )
             # If user provided their full name and previous full name was placeholder, update it
             if full_name and full_name.strip() and user.full_name in ("Valued Customer", "Driver Partner", None, ""):
                 user.full_name = full_name.strip()

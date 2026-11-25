@@ -26,7 +26,7 @@ local.properties
 .env
 .env.*
 !.env.example
-!.env.production
+# .env.production must never be unignored or committed
 *.env.local
 *.pem
 *.key

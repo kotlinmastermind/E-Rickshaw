@@ -1,13 +1,43 @@
+import hmac
 import os
 from typing import Optional, List
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+VALID_ENVIRONMENTS = frozenset({"development", "test", "staging", "production"})
+WEAK_SECRET_VALUES = frozenset({
+    "dev-insecure-secret-key-change-in-production",
+    "change-me",
+    "changeme",
+    "secret",
+    "default",
+    "placeholder",
+    "your-secret-key",
+    "your_secret_key",
+})
+PLACEHOLDER_SUBSTRINGS = (
+    "placeholder",
+    "change-me",
+    "changeme",
+    "your_",
+    "your-",
+    "<secret",
+    "<password",
+    "example.com",
+)
+
+
+def _contains_placeholder(value: Optional[str]) -> bool:
+    if not value:
+        return True
+    lower = value.strip().lower()
+    return any(tok in lower for tok in PLACEHOLDER_SUBSTRINGS)
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "VAISENTRA MOBILITY"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
-    DEBUG: bool = os.getenv("DEBUG", "True").lower() in ("true", "1", "yes")
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
 
     # Database (Supabase PostgreSQL Production Pooler)
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
@@ -41,6 +71,7 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: Optional[str] = os.getenv("RAZORPAY_KEY_ID", None)
     RAZORPAY_KEY_SECRET: Optional[str] = os.getenv("RAZORPAY_KEY_SECRET", None)
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = os.getenv("RAZORPAY_WEBHOOK_SECRET", None)
+    RAZORPAY_MERCHANT_ACCOUNT_ID: Optional[str] = os.getenv("RAZORPAY_MERCHANT_ACCOUNT_ID", None)
 
     # Primary SMS Gateway (Twilio Verify Service)
     SMS_PROVIDER: str = os.getenv("SMS_PROVIDER", "twilio")
@@ -88,6 +119,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_security(self) -> "Settings":
+        # Normalize and reject unknown environments rather than falling back silently
+        self.ENVIRONMENT = (self.ENVIRONMENT or "development").strip().lower()
+        if self.ENVIRONMENT not in VALID_ENVIRONMENTS:
+            raise ValueError(
+                f"CRITICAL CONFIGURATION ERROR: Unrecognized ENVIRONMENT '{self.ENVIRONMENT}'. "
+                f"Expected one of: {sorted(VALID_ENVIRONMENTS)}."
+            )
+
         # Testing mode overrides
         if os.getenv("TESTING") == "1":
             if not self.DATABASE_URL or not self.DATABASE_URL.startswith("sqlite"):
@@ -100,23 +139,66 @@ class Settings(BaseSettings):
 
         # Strict production validation
         if self.ENVIRONMENT == "production":
-            if not self.DATABASE_URL:
-                raise ValueError("CRITICAL CONFIGURATION ERROR: DATABASE_URL must be provided via environment variables in production.")
-            if not self.DATABASE_URL_SYNC:
-                raise ValueError("CRITICAL CONFIGURATION ERROR: DATABASE_URL_SYNC must be provided via environment variables in production.")
-            if not self.SECRET_KEY or self.SECRET_KEY in (
-                "dev-insecure-secret-key-change-in-production",
-                "change-me",
-                "secret",
-                "default"
+            if self.DEBUG:
+                raise ValueError("CRITICAL CONFIGURATION ERROR: DEBUG must be False in production.")
+            if self.ACCESS_TOKEN_EXPIRE_MINUTES < 1 or self.ACCESS_TOKEN_EXPIRE_MINUTES > 60:
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 60 in production."
+                )
+
+            db_url = (self.DATABASE_URL or "").strip()
+            db_sync_url = (self.DATABASE_URL_SYNC or "").strip()
+            if (
+                not db_url
+                or not db_url.startswith(("postgresql://", "postgresql+asyncpg://"))
+                or _contains_placeholder(db_url)
             ):
-                raise ValueError("CRITICAL CONFIGURATION ERROR: A secure SECRET_KEY must be provided via environment variables in production.")
-            if not self.RAZORPAY_KEY_ID or not self.RAZORPAY_KEY_ID.startswith(("rzp_live_", "rzp_test_")):
-                raise ValueError("CRITICAL CONFIGURATION ERROR: A valid RAZORPAY_KEY_ID must be configured in production.")
-            if not self.RAZORPAY_KEY_SECRET or len(self.RAZORPAY_KEY_SECRET.strip()) < 16:
-                raise ValueError("CRITICAL CONFIGURATION ERROR: A valid RAZORPAY_KEY_SECRET must be configured in production.")
-            if not self.RAZORPAY_WEBHOOK_SECRET or len(self.RAZORPAY_WEBHOOK_SECRET.strip()) < 16:
-                raise ValueError("CRITICAL CONFIGURATION ERROR: A valid RAZORPAY_WEBHOOK_SECRET must be configured in production.")
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: Valid PostgreSQL DATABASE_URL must be provided via environment variables in production."
+                )
+            if (
+                not db_sync_url
+                or not db_sync_url.startswith(("postgresql://", "postgresql+psycopg2://", "postgres://"))
+                or _contains_placeholder(db_sync_url)
+            ):
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: Valid PostgreSQL DATABASE_URL_SYNC must be provided via environment variables in production."
+                )
+
+            secret = (self.SECRET_KEY or "").strip()
+            if len(secret) < 32 or secret.lower() in WEAK_SECRET_VALUES or _contains_placeholder(secret):
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: A secure SECRET_KEY must be provided via environment variables in production (minimum 32 characters)."
+                )
+
+            rzp_key_id = (self.RAZORPAY_KEY_ID or "").strip()
+            if not rzp_key_id.startswith("rzp_live_") or len(rzp_key_id) < 18 or _contains_placeholder(rzp_key_id):
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: A valid Live RAZORPAY_KEY_ID (rzp_live_*) must be configured in production."
+                )
+
+            rzp_key_secret = (self.RAZORPAY_KEY_SECRET or "").strip()
+            if len(rzp_key_secret) < 16 or _contains_placeholder(rzp_key_secret):
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: A valid RAZORPAY_KEY_SECRET must be configured in production."
+                )
+
+            rzp_webhook_secret = (self.RAZORPAY_WEBHOOK_SECRET or "").strip()
+            if len(rzp_webhook_secret) < 16 or _contains_placeholder(rzp_webhook_secret):
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: A valid RAZORPAY_WEBHOOK_SECRET must be configured in production."
+                )
+
+            if hmac.compare_digest(rzp_key_secret.encode("utf-8"), rzp_webhook_secret.encode("utf-8")):
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: RAZORPAY_WEBHOOK_SECRET must be distinct from RAZORPAY_KEY_SECRET in production."
+                )
+
+            merchant_acct = (self.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip()
+            if merchant_acct and (not merchant_acct.startswith("acc_") or len(merchant_acct) < 14):
+                raise ValueError(
+                    "CRITICAL CONFIGURATION ERROR: RAZORPAY_MERCHANT_ACCOUNT_ID must be a valid Razorpay account ID (acc_*)."
+                )
         else:
             # Safe development defaults when .env is absent
             if not self.DATABASE_URL:

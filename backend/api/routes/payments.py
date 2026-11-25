@@ -94,11 +94,16 @@ async def confirm_cash_collected(
 async def payment_webhook(
     request: Request,
     x_razorpay_signature: str = Header(None, alias="X-Razorpay-Signature"),
+    x_razorpay_account: Optional[str] = Header(None, alias="X-Razorpay-Account"),
     db: AsyncSession = Depends(get_db)
 ):
     body = await request.body()
     service = PaymentService(db)
-    return await service.process_webhook(raw_body=body, signature_header=x_razorpay_signature or "")
+    return await service.process_webhook(
+        raw_body=body,
+        signature_header=x_razorpay_signature or "",
+        account_header=x_razorpay_account,
+    )
 
 @router.get("/razorpay/webhook")
 @router.get("/webhook")
@@ -120,7 +125,8 @@ async def payment_webhook_status():
             "order.paid",
             "payment.failed",
             "refund.processed",
-            "refund.created"
+            "refund.created",
+            "refund.failed"
         ]
     }
 
@@ -132,7 +138,7 @@ async def get_razorpay_config():
         "currency": "INR",
         "company_name": "VAISENTRA MOBILITY",
         "theme_color": "#0D9488",
-        "is_live": not (settings.RAZORPAY_KEY_ID or "").startswith("rzp_test")
+        "is_live": (settings.RAZORPAY_KEY_ID or "").startswith("rzp_live_")
     }
 
 @router.post("/razorpay/create-order")

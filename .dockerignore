@@ -8,6 +8,11 @@
 venv
 .env
 .env.*
+**/.env
+**/.env.*
+backend/.env
+!backend/.env.example
+!.env.example
 apps
 release-apks
 backups

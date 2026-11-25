@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import asyncio
+import json
 import logging
 import os
 import time
@@ -12,7 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from backend.core.config import settings
 from backend.infrastructure.database.session import init_db, async_session_maker
 from backend.domain.models import VehicleCategory, FareRule, User, AdminRole, AdminUserRole
-from backend.infrastructure.security.crypto import hash_password
+from backend.domain.models.extended_models import AdministrativeAuditLog
+from backend.infrastructure.security.crypto import hash_password, validate_password_strength
 from backend.domain.state_machine.ride_state_machine import RideTransitionError
 from backend.api.routes import (
     auth, customer, driver, vehicles, location,
@@ -21,7 +23,7 @@ from backend.api.routes import (
     safety, loyalty_feedback, driver_onboarding, driver_safety, driver_financials,
     notifications, analytics_bi, dispatch, corporate, audio_recording, gift_cards
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 # 1. Imports add karein in backend/main.py:
 from backend.api.routes import fleet, tracking_public
@@ -100,84 +102,118 @@ async def _seed_baseline_data():
                     session.add(super_role)
                     await session.flush()
 
-                # 2. Seed / Sync primary admin users
-                admin_specs = [
-                    {
-                        "email": "kotlindeveloper75620@gmail.com",
-                        "phone_number": "+917562084184",
-                        "full_name": "BHISHMA"
-                    },
-                    {
-                        "email": "admin@luxurychauffeur.com",
-                        "phone_number": "+919999900000",
-                        "full_name": "Super Administrator"
-                    }
-                ]
+                # 2. Explicit, non-destructive initial administrator bootstrap (never resets existing credentials)
+                legacy_initial_pwd = os.getenv("ADMIN_INITIAL_PASSWORD")
+                if legacy_initial_pwd and legacy_initial_pwd.strip() == "Admin@1234":
+                    raise RuntimeError("SECURITY ERROR: Insecure default ADMIN_INITIAL_PASSWORD cannot be used.")
 
-                default_admin_pwd = hash_password(os.getenv("ADMIN_INITIAL_PASSWORD", "Admin@1234"))
+                bootstrap_email = (os.getenv("BOOTSTRAP_ADMIN_EMAIL") or "").strip().lower()
+                bootstrap_pwd = os.getenv("BOOTSTRAP_ADMIN_PASSWORD") or ""
+                bootstrap_phone = (os.getenv("BOOTSTRAP_ADMIN_PHONE") or "").strip()
+                bootstrap_name = (os.getenv("BOOTSTRAP_ADMIN_NAME") or "Platform Administrator").strip()
 
-                for spec in admin_specs:
-                    u_stmt = select(User).where(User.email == spec["email"])
-                    u_res = await session.execute(u_stmt)
-                    admin_user = u_res.scalar_one_or_none()
-
-                    if not admin_user:
-                        # Also check by phone number if email didn't match
-                        p_stmt = select(User).where(User.phone_number == spec["phone_number"])
-                        p_res = await session.execute(p_stmt)
-                        admin_user = p_res.scalar_one_or_none()
-
-                    if admin_user:
-                        admin_user.role = "admin"
-                        admin_user.is_active = True
-                        admin_user.is_verified = True
-                        admin_user.email_verified = True
-                        admin_user.mfa_enabled = True
-                        if not admin_user.email:
-                            admin_user.email = spec["email"]
-                        if not admin_user.password_hash or spec["email"] in ["kotlindeveloper75620@gmail.com", "admin@luxurychauffeur.com"]:
-                            admin_user.password_hash = default_admin_pwd
-                        if not admin_user.mfa_secret:
-                            admin_user.mfa_secret = "JBSWY3DPEHPK3PXP"
-                    else:
-                        admin_user = User(
-                            id=str(uuid.uuid4()),
-                            phone_number=spec["phone_number"],
-                            email=spec["email"],
-                            full_name=spec["full_name"],
-                            role="admin",
-                            is_active=True,
-                            is_verified=True,
-                            email_verified=True,
-                            mfa_enabled=True,
-                            mfa_secret="JBSWY3DPEHPK3PXP",
-                            password_hash=default_admin_pwd
+                if any([bootstrap_email, bootstrap_pwd, bootstrap_phone]):
+                    if not (bootstrap_email and bootstrap_pwd):
+                        raise RuntimeError(
+                            "BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD must both be set for initial admin provisioning."
                         )
-                        session.add(admin_user)
-                        await session.flush()
+                    if bootstrap_pwd.strip() == "Admin@1234" or len(bootstrap_pwd) < 12:
+                        raise RuntimeError(
+                            "BOOTSTRAP_ADMIN_PASSWORD must be at least 12 characters and not a default password."
+                        )
+                    validate_password_strength(bootstrap_pwd)
 
-                    # Assign Super Administrator role
-                    aur_stmt = select(AdminUserRole).where(
-                        AdminUserRole.user_id == admin_user.id,
-                        AdminUserRole.role_id == super_role.id
-                    )
-                    aur_res = await session.execute(aur_stmt)
-                    if not aur_res.scalar_one_or_none():
-                        session.add(AdminUserRole(user_id=admin_user.id, role_id=super_role.id))
+                    existing_by_email = (
+                        await session.execute(select(User).where(User.email == bootstrap_email))
+                    ).scalar_one_or_none()
+                    if existing_by_email:
+                        if (existing_by_email.role or "").lower() != "admin":
+                            raise RuntimeError(
+                                "Refusing to elevate existing non-admin account via startup bootstrap."
+                            )
+                        logger.info(
+                            "Bootstrap administrator '%s' already exists; preserving existing password and MFA configuration.",
+                            bootstrap_email,
+                        )
+                    else:
+                        admin_count = (
+                            await session.execute(select(func.count(User.id)).where(User.role == "admin"))
+                        ).scalar_one() or 0
+                        if admin_count > 0:
+                            logger.info(
+                                "Administrator account(s) already exist; skipping startup bootstrap for '%s'.",
+                                bootstrap_email,
+                            )
+                        else:
+                            if not bootstrap_phone:
+                                raise RuntimeError(
+                                    "BOOTSTRAP_ADMIN_PHONE must be provided when provisioning the initial administrator account."
+                                )
+                            existing_by_phone = (
+                                await session.execute(select(User).where(User.phone_number == bootstrap_phone))
+                            ).scalar_one_or_none()
+                            if existing_by_phone:
+                                raise RuntimeError(
+                                    "Refusing to overwrite or elevate existing account matching BOOTSTRAP_ADMIN_PHONE."
+                                )
+                            admin_user = User(
+                                id=str(uuid.uuid4()),
+                                phone_number=bootstrap_phone,
+                                email=bootstrap_email,
+                                full_name=bootstrap_name,
+                                role="admin",
+                                is_active=True,
+                                is_verified=True,
+                                email_verified=True,
+                                mfa_enabled=False,
+                                mfa_secret=None,
+                                password_hash=hash_password(bootstrap_pwd),
+                            )
+                            session.add(admin_user)
+                            await session.flush()
+
+                            session.add(AdminUserRole(user_id=admin_user.id, role_id=super_role.id))
+                            session.add(
+                                AdministrativeAuditLog(
+                                    admin_user_id=admin_user.id,
+                                    action="ADMIN_BOOTSTRAP_PROVISIONED",
+                                    target_resource="user",
+                                    target_id=admin_user.id,
+                                    changes_json=json.dumps(
+                                        {
+                                            "email": bootstrap_email,
+                                            "role": "admin",
+                                            "mfa_enrolled": False,
+                                            "source": "explicit_env_bootstrap",
+                                        }
+                                    ),
+                                )
+                            )
+                            logger.info(
+                                "Provisioned initial administrator account '%s' with per-account MFA enrollment required.",
+                                bootstrap_email,
+                            )
 
                 await session.commit()
             logger.info("Database initialization and baseline seeding completed successfully.")
             return True
+        except (RuntimeError, ValueError):
+            logger.critical("Security or bootstrap configuration validation failed during startup.", exc_info=True)
+            raise
         except Exception as exc:
             logger.warning("Database startup init/seed attempt %d/%d failed: %s", attempt, max_retries, exc)
             if attempt < max_retries:
                 await asyncio.sleep(1.5 * attempt)
             else:
+                if settings.ENVIRONMENT == "production":
+                    logger.critical("Database unavailable during production startup; aborting boot safely.", exc_info=True)
+                    raise
                 logger.error("Database connection unavailable during startup lifespan. Application starting in degraded mode.", exc_info=True)
                 return False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.validate_production_security()
     # Initialize database tables with retry protection
     await _seed_baseline_data()
     dispatcher = asyncio.create_task(_dispatch_scheduled_broadcasts(), name="scheduled-in-app-broadcasts")

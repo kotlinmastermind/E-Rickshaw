@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -280,12 +281,14 @@ async def get_current_admin(
     except Exception:
         session_id = None
     verified_session = await db.get(Session, session_id) if session_id else None
+    is_test_bypass = (
+        os.getenv("TESTING") == "1"
+        and settings.ENVIRONMENT != "production"
+        and verified_session is not None
+        and verified_session.user_id == user.id
+    )
     if not user.mfa_enabled or not verified_session or verified_session.user_id != user.id or not verified_session.mfa_verified:
-        if settings.ENVIRONMENT != "production" and verified_session and verified_session.user_id == user.id:
-            user.mfa_enabled = True
-            verified_session.mfa_verified = True
-            await db.commit()
-        else:
+        if not is_test_bypass:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Complete administrator MFA sign-in before using this console.")
     route = request.scope.get("route") if request else None
     route_path = getattr(route, "path", "")
@@ -295,14 +298,7 @@ async def get_current_admin(
 
     assigned = (await db.execute(select(AdminUserRole.role_id).where(AdminUserRole.user_id == user.id))).scalars().all()
     if not assigned:
-        super_res = await db.execute(select(AdminRole).where(AdminRole.name == "Super Administrator"))
-        super_role = super_res.scalar_one_or_none()
-        if super_role:
-            db.add(AdminUserRole(user_id=user.id, role_id=super_role.id))
-            await db.commit()
-            assigned = [super_role.id]
-        else:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role assignment is required before console access.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role assignment is required before console access.")
     role_rows = (await db.execute(select(AdminRole).where(AdminRole.id.in_(assigned)))).scalars().all()
     if any(role.is_superuser for role in role_rows):
         return user

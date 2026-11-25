@@ -63,10 +63,13 @@ async def test_passkey_registration_fails_closed(db_session):
 def test_no_hardcoded_live_credentials_in_active_source():
     """Scan source code files to verify compromised credentials are not present."""
     import glob
-    forbidden_tokens = [
-        "rzp_live_TunGmzfpWlcatO",
-        "CSIhchRsNTdHx270VZthHSUE"
-    ]
+    import hashlib
+    import re
+
+    compromised_sha256_digests = {
+        "5fed94849bed0cf6091e179e38568428e373890745433d9487c4b714e6959c7c",
+        "ccfa99b2b0d03200160f19821399c05a0bd978b12565b25e1b786bd5eca18d77",
+    }
     files_to_check = (
         glob.glob("backend/api/**/*.py", recursive=True) +
         glob.glob("backend/integrations/**/*.py", recursive=True) +
@@ -78,19 +81,29 @@ def test_no_hardcoded_live_credentials_in_active_source():
     for fpath in files_to_check:
         with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
-            for token in forbidden_tokens:
-                assert token not in content, f"Hardcoded credential '{token}' found in {fpath}"
+            assert not re.search(r"rzp_live_[A-Za-z0-9]{8,}", content), (
+                f"Hardcoded live Razorpay key found in {fpath}"
+            )
+            for token in re.findall(r"[A-Za-z0-9_.%+/-]{16,}", content):
+                digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+                assert digest not in compromised_sha256_digests, (
+                    f"Hardcoded compromised credential digest found in {fpath}"
+                )
 
 @pytest.mark.asyncio
 async def test_razorpay_config_endpoint_safe():
     """Verify that /razorpay/config returns safe brand and empty default key without hardcoded live secret."""
+    import hashlib
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/v1/payments/razorpay/config")
         assert resp.status_code == 200
         data = resp.json()
         assert data["company_name"] == "VAISENTRA MOBILITY"
-        assert "rzp_live_TunGmzfpWlcatO" not in data.get("key_id", "")
+        key_id = data.get("key_id", "")
+        assert not key_id.startswith("rzp_live_")
+        assert hashlib.sha256(key_id.encode("utf-8")).hexdigest() != "5fed94849bed0cf6091e179e38568428e373890745433d9487c4b714e6959c7c"
 
 def test_payment_signature_verification_rejects_missing_secret():
     """Verify that payment signature verification fails safely when key_secret is blank."""

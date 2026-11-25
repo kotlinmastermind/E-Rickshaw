@@ -60,18 +60,35 @@ def test_development_fallback_defaults(monkeypatch):
     assert cfg.SECRET_KEY == "dev-insecure-secret-key-change-in-production"
 
 def test_no_hardcoded_passwords_or_tokens_in_config_source():
+    import hashlib
+    import re
+
     with open("backend/core/config.py", "r", encoding="utf-8") as f:
         src = f.read()
 
-    forbidden_patterns = [
-        "sunil%40%2375620",
-        "sk.eyJ1Ijoia290bGlubWFzdGVybWluZC",
-        "gQAAAAAAA6FxAAIgcDFlMDE2ZjlkMDZlZTQ0ODIwYjg5NzdiODFkMmU1YzM4OQ",
-        "rzp_live_TunGmzfpWlcatO",
-        "CSIhchRsNTdHx270VZthHSUE"
-    ]
-    for pattern in forbidden_patterns:
-        assert pattern not in src, f"Security Violation: Pattern '{pattern}' found in backend/core/config.py source code!"
+    # SHA-256 digests of historically compromised credentials (stored only as irreversible hashes)
+    compromised_sha256_digests = {
+        "078609acf0e6dc35066737e1ea5a17fa2845b2f5ae92ef2572814765e4de64d3",
+        "71be9f29fea3d8b57db08fa7b5ff524e27bd0d1f457bcba364737bfa6786fce7",
+        "94c89a0b7924b1ea176c8ac5829c5ed3a59faa505f5823c626425a6b8b8ae4e7",
+        "5fed94849bed0cf6091e179e38568428e373890745433d9487c4b714e6959c7c",
+        "ccfa99b2b0d03200160f19821399c05a0bd978b12565b25e1b786bd5eca18d77",
+    }
+    candidates = re.findall(r"[A-Za-z0-9_.%+/-]{14,}", src)
+    for token in candidates:
+        digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        assert digest not in compromised_sha256_digests, (
+            f"Security Violation: Compromised credential digest matched in backend/core/config.py!"
+        )
+    assert not re.search(r"postgresql(?:\+\w+)?://[^$\"'\s]+:[^@$\"'\s]+@", src), (
+        "Embedded database credentials must not appear in backend/core/config.py"
+    )
+    assert not re.search(r"rzp_live_[A-Za-z0-9]{8,}", src), (
+        "Live Razorpay key literal must not appear in backend/core/config.py"
+    )
+    assert not re.search(r"sk\.[A-Za-z0-9_-]{12,}", src), (
+        "Mapbox token literal must not appear in backend/core/config.py"
+    )
 
 @pytest.mark.asyncio
 async def test_init_db_skips_ddl_in_production(monkeypatch):

@@ -36,6 +36,15 @@ class UserGovernanceService:
         except ValueError as err:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
 
+        normalized_role = (role or "customer").lower().strip()
+        if normalized_role in ("admin", "superadmin", "super administrator"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Administrator accounts cannot be self-registered."
+            )
+        if normalized_role not in ("customer", "driver"):
+            normalized_role = "customer"
+
         # Check existing email
         stmt_email = select(User).where(User.email == email)
         res_email = await self.db.execute(stmt_email)
@@ -48,28 +57,28 @@ class UserGovernanceService:
         user = res_phone.scalar_one_or_none()
 
         if user:
-            # Associate email and password to existing user
-            user.email = email
-            user.password_hash = hash_password(password)
-            user.full_name = full_name
-        else:
-            user = User(
-                email=email,
-                phone_number=phone,
-                password_hash=hash_password(password),
-                full_name=full_name,
-                role=role,
-                is_active=True,
-                is_verified=False,
-                email_verified=False
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account with this phone number already exists."
             )
-            self.db.add(user)
-            await self.db.flush()
 
-            if role == "customer":
-                profile = CustomerProfile(user_id=user.id)
-                self.db.add(profile)
-            await self.db.flush()
+        user = User(
+            email=email,
+            phone_number=phone,
+            password_hash=hash_password(password),
+            full_name=full_name,
+            role=normalized_role,
+            is_active=True,
+            is_verified=False,
+            email_verified=False
+        )
+        self.db.add(user)
+        await self.db.flush()
+
+        if normalized_role == "customer":
+            profile = CustomerProfile(user_id=user.id)
+            self.db.add(profile)
+        await self.db.flush()
 
         # Create preferences record
         await self._ensure_user_preferences(user.id)
@@ -158,41 +167,11 @@ class UserGovernanceService:
         if not user.is_active:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This account has been deactivated.")
 
-        # In non-production environments, issue direct verified admin session for seamless local dev & staging
-        if require_admin and settings.ENVIRONMENT != "production":
-            user.mfa_enabled = True
-            token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
-            session = Session(
-                user_id=user.id,
-                token_hash=token_hash,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                is_revoked=False,
-                mfa_verified=True,
-                expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-            )
-            self.db.add(session)
-            await self.db.commit()
-
-            access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
-            refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
-
-            return {
-                "mfa_required": False,
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-                "token_type": "bearer",
-                "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "phone_number": user.phone_number,
-                    "full_name": user.full_name,
-                    "role": user.role,
-                    "email_verified": user.email_verified,
-                    "mfa_enabled": True
-                }
-            }
+        if require_admin and os.getenv("TESTING") == "1" and settings.ENVIRONMENT != "production" and not user.mfa_enabled:
+            session_data = await self._issue_admin_session(user, ip_address, user_agent)
+            session_data["mfa_required"] = False
+            session_data["user"]["mfa_enabled"] = False
+            return session_data
 
         if require_admin and not user.mfa_enabled:
             return {"mfa_setup_required": True, "message": "Administrator MFA enrollment is required before console access."}
@@ -296,6 +275,15 @@ class UserGovernanceService:
         phone_number: Optional[str] = None, role: str = "customer",
         ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
+        normalized_role = (role or "customer").lower().strip()
+        if normalized_role in ("admin", "superadmin", "super administrator"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Administrator accounts cannot be self-registered via OAuth."
+            )
+        if normalized_role not in ("customer", "driver"):
+            normalized_role = "customer"
+
         email = email.strip().lower()
         stmt = select(User).where(User.email == email)
         res = await self.db.execute(stmt)
@@ -307,7 +295,7 @@ class UserGovernanceService:
                 email=email,
                 phone_number=phone,
                 full_name=full_name or f"{provider.capitalize()} Guest",
-                role=role,
+                role=normalized_role,
                 is_active=True,
                 is_verified=True,
                 email_verified=True
@@ -315,11 +303,16 @@ class UserGovernanceService:
             self.db.add(user)
             await self.db.flush()
 
-            if role == "customer":
+            if normalized_role == "customer":
                 profile = CustomerProfile(user_id=user.id)
                 self.db.add(profile)
             await self.db.flush()
         else:
+            if (user.role or "").lower() in ("admin", "superadmin", "super administrator"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Administrator accounts cannot sign in via OAuth. Use administrator password and MFA sign-in."
+                )
             user.email_verified = True
             if full_name and not user.full_name:
                 user.full_name = full_name

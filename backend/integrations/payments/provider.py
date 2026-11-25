@@ -247,7 +247,11 @@ class RazorpayPaymentProvider(PaymentProvider):
 
     async def create_refund(self, payment_id: str, amount_cents: int, notes: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """Execute real gateway refund via Razorpay Refund API."""
-        if os.getenv("TESTING") == "1" and (payment_id.startswith("pay_test_") or not self.key_id or not self.key_secret):
+        if (
+            os.getenv("TESTING") == "1"
+            and settings.ENVIRONMENT != "production"
+            and (payment_id.startswith("pay_test_") or not self.key_id or not self.key_secret)
+        ):
             return {
                 "id": f"rfd_test_{uuid.uuid4().hex[:14]}",
                 "entity": "refund",
@@ -267,6 +271,25 @@ class RazorpayPaymentProvider(PaymentProvider):
                 return resp.json()
             raise HTTPException(status_code=resp.status_code, detail=f"Razorpay Refund API error: {resp.text}")
 
+    def validate_merchant_account(self, incoming_account_id: Optional[str]) -> tuple[bool, str]:
+        """Enforce single configured Production Razorpay merchant account isolation."""
+        expected = (getattr(self, "merchant_account_id", None) or settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "").strip()
+        if not expected:
+            return True, ""
+
+        candidate = (incoming_account_id or "").strip()
+        if not candidate:
+            return False, (
+                f"Webhook missing merchant account_id; expected configured production merchant account '{expected}'."
+            )
+
+        import hmac
+        if not hmac.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8")):
+            return False, (
+                f"Webhook merchant account '{candidate}' does not match configured production merchant '{expected}'."
+            )
+        return True, ""
+
 class CashPaymentProvider:
     """Cash on delivery / chauffeur direct collection handler."""
     @staticmethod
@@ -276,7 +299,7 @@ class CashPaymentProvider:
         return PaymentVerificationResult(False, "PENDING", "", "Awaiting chauffeur physical collection confirmation")
 
 _payment_provider_instance: Optional[RazorpayPaymentProvider] = None
-_last_provider_settings: Optional[tuple[str, str, str]] = None
+_last_provider_settings: Optional[tuple[str, str, str, str]] = None
 
 
 def _rebuild_razorpay_sdk_client(provider: RazorpayPaymentProvider) -> None:
@@ -295,6 +318,7 @@ def get_payment_provider() -> RazorpayPaymentProvider:
         settings.RAZORPAY_KEY_ID or "",
         settings.RAZORPAY_KEY_SECRET or "",
         settings.RAZORPAY_WEBHOOK_SECRET or "",
+        settings.RAZORPAY_MERCHANT_ACCOUNT_ID or "",
     )
     if _payment_provider_instance is None:
         _payment_provider_instance = RazorpayPaymentProvider(
@@ -302,11 +326,13 @@ def get_payment_provider() -> RazorpayPaymentProvider:
             key_secret=current_creds[1],
             webhook_secret=current_creds[2],
         )
+        _payment_provider_instance.merchant_account_id = current_creds[3]
         _last_provider_settings = current_creds
     elif current_creds != _last_provider_settings:
         _payment_provider_instance.key_id = current_creds[0]
         _payment_provider_instance.key_secret = current_creds[1]
         _payment_provider_instance.webhook_secret = current_creds[2]
+        _payment_provider_instance.merchant_account_id = current_creds[3]
         _rebuild_razorpay_sdk_client(_payment_provider_instance)
         _last_provider_settings = current_creds
     return _payment_provider_instance

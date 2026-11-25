@@ -39,7 +39,7 @@ services:
       - key: ALGORITHM
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
-        value: "10080"
+        value: "15"
       - key: MAPBOX_SECRET_TOKEN
         sync: false
       - key: MAPBOX_PUBLIC_TOKEN
@@ -49,6 +49,8 @@ services:
       - key: RAZORPAY_KEY_SECRET
         sync: false
       - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: RAZORPAY_MERCHANT_ACCOUNT_ID
         sync: false
       - key: SMS_PROVIDER
         value: twilio

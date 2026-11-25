@@ -367,7 +367,12 @@ class PaymentService:
     # ------------------------------------------------------------------
     # Authoritative Razorpay Webhook Processor (Single Consolidated Path)
     # ------------------------------------------------------------------
-    async def process_webhook(self, raw_body: bytes, signature_header: str) -> Dict[str, Any]:
+    async def process_webhook(
+        self,
+        raw_body: bytes,
+        signature_header: str,
+        account_header: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Cryptographically verifies and processes inbound Razorpay webhooks atomically.
         Steps:
@@ -414,6 +419,15 @@ class PaymentService:
         webhook_event = raw_event.strip()
         provider_event_id = data.get("id") if isinstance(data.get("id"), str) else None
 
+        header_acct = account_header.strip() if isinstance(account_header, str) and account_header.strip() else None
+        raw_payload_acct = data.get("account_id")
+        if raw_payload_acct is not None and not isinstance(raw_payload_acct, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Malformed Razorpay webhook payload: account_id must be a string.",
+            )
+        payload_acct = raw_payload_acct.strip() if isinstance(raw_payload_acct, str) and raw_payload_acct.strip() else None
+
         # 3. Acquire / initialize locked inbox row with concurrent race handling
         inbox, early_dup = await self._acquire_or_create_inbox(
             digest=digest,
@@ -424,6 +438,32 @@ class PaymentService:
         )
         if early_dup is not None:
             return early_dup
+
+        # Enforce strict single-merchant account isolation
+        if header_acct and payload_acct and header_acct != payload_acct:
+            reason = f"Merchant account header mismatch: header '{header_acct}' disagrees with payload '{payload_acct}'."
+            await self._record_anomaly_and_require_reconciliation(
+                inbox=inbox,
+                anomaly_type="MERCHANT_ACCOUNT_MISMATCH",
+                payment=None,
+                parsed={"provider_payment_id": None, "order_id": None, "refund_id": None, "currency": "INR"},
+                reason=reason,
+                now=now,
+            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
+
+        effective_account = header_acct or payload_acct
+        acct_ok, acct_reason = self.provider.validate_merchant_account(effective_account)
+        if not acct_ok:
+            await self._record_anomaly_and_require_reconciliation(
+                inbox=inbox,
+                anomaly_type="MERCHANT_ACCOUNT_MISMATCH",
+                payment=None,
+                parsed={"provider_payment_id": None, "order_id": None, "refund_id": None, "currency": "INR"},
+                reason=acct_reason,
+                now=now,
+            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=acct_reason)
 
         # Reject unsupported event types cleanly without financial mutations
         if webhook_event not in SUPPORTED_WEBHOOK_EVENTS:

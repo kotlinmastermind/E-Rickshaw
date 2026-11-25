@@ -194,8 +194,8 @@ object RiderRepository {
                 )
             }
 
-            // Store token in NetworkClient memory.
-            NetworkClient.setAuthToken(token)
+            // Store access and refresh tokens in NetworkClient memory and prefs.
+            NetworkClient.setAuthToken(token, authResponse.refreshToken?.trim())
 
             Result.success(authResponse)
 
