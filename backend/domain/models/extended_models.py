@@ -1164,3 +1164,41 @@ class SupportTicketEscalationLog(Base):
     escalation_reason: Mapped[str] = mapped_column(Text, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
     escalated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+class CustomerKycDocument(Base):
+    __tablename__ = "customer_kyc_documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_type: Mapped[str] = mapped_column(String(32), nullable=False)  # PAN_CARD, DRIVING_LICENSE, PASSPORT, VOTER_ID
+    storage_path: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    file_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="PENDING_REVIEW", nullable=False)  # PENDING_REVIEW, APPROVED, REJECTED, WITHDRAWN
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    reviewed_by_admin_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_notes: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("ix_customer_kyc_user_status", "user_id", "status"),
+        Index("ix_customer_kyc_status_submitted", "status", "submitted_at"),
+    )
+
+
+class CustomerKycAuditLog(Base):
+    __tablename__ = "customer_kyc_audit_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    document_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("customer_kyc_documents.id", ondelete="SET NULL"), nullable=True, index=True)
+    actor_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    actor_role: Mapped[str] = mapped_column(String(24), nullable=False)
+    action: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
