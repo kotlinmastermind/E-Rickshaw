@@ -175,3 +175,15 @@ async def test_customer_kyc_upload_requires_authentication(client):
         files={"file": ("identity.pdf", b"%PDF-1.7 content", "application/pdf")},
     )
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_customer_kyc_requires_explicit_processing_consent(client, customer_token):
+    response = await client.post(
+        "/api/v1/customers/kyc/documents",
+        data={"document_type": "PAN_CARD", "consent_to_processing": "false"},
+        files={"file": ("identity.pdf", b"%PDF-1.7 content", "application/pdf")},
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert response.status_code == 422
+    assert "consent" in response.text.lower()
