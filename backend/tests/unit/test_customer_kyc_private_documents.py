@@ -15,6 +15,9 @@ async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_a
 ):
     from backend.integrations.storage.customer_kyc import customer_kyc_storage
 
+    customer_user.is_verified = False
+    await db_session.commit()
+
     async def fake_upload(**kwargs):
         assert kwargs["user_id"] == customer_user.id
         assert kwargs["mime_type"] == "application/pdf"
@@ -46,7 +49,7 @@ async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_a
     assert document.storage_path.startswith("private://")
     assert document.status == "PENDING_REVIEW"
     await db_session.refresh(customer_user)
-    assert customer_user.is_verified is True  # document submission does not toggle account verification
+    assert customer_user.is_verified is False  # document submission does not toggle account verification
 
     status_response = await client.get(
         "/api/v1/customers/kyc",
@@ -88,7 +91,7 @@ async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_a
         await db_session.refresh(customer_user)
         assert document.status == "APPROVED"
         assert document.reviewed_by_admin_id == admin.id
-        assert customer_user.is_verified is True
+        assert customer_user.is_verified is False
 
         audit_rows = (
             await db_session.execute(
