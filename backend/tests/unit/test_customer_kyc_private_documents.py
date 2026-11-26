@@ -11,7 +11,7 @@ from backend.main import app
 
 @pytest.mark.asyncio
 async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_audited(
-    client, db_session, customer_user, customer_token, monkeypatch
+    client, db_session, customer_user, customer_token, second_customer_user, second_customer_token, monkeypatch
 ):
     from backend.integrations.storage.customer_kyc import customer_kyc_storage
 
@@ -58,6 +58,13 @@ async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_a
     assert status_response.status_code == 200
     assert status_response.json()["kyc_status"] == "PENDING_REVIEW"
     assert "storage_path" not in str(status_response.json())
+
+    other_customer_status = await client.get(
+        "/api/v1/customers/kyc",
+        headers={"Authorization": f"Bearer {second_customer_token}"},
+    )
+    assert other_customer_status.status_code == 200
+    assert other_customer_status.json()["documents"] == []
 
     admin = User(
         id=str(uuid.uuid4()),
@@ -125,3 +132,32 @@ async def test_customer_kyc_rejects_aadhaar_and_invalid_file_content(client, cus
         headers=headers,
     )
     assert invalid.status_code == 400
+
+@pytest.mark.asyncio
+async def test_customer_kyc_storage_fails_closed_without_service_role_configuration(monkeypatch):
+    from fastapi import HTTPException
+    from backend.core.config import settings
+    from backend.integrations.storage.customer_kyc import CustomerKycStorage
+
+    monkeypatch.setattr(settings, "SUPABASE_URL", "")
+    monkeypatch.setattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "")
+    storage = CustomerKycStorage()
+    with pytest.raises(HTTPException) as error:
+        await storage.upload(
+            user_id=str(uuid.uuid4()),
+            document_id=str(uuid.uuid4()),
+            extension="pdf",
+            mime_type="application/pdf",
+            content=b"%PDF-1.7",
+        )
+    assert error.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_customer_kyc_upload_requires_authentication(client):
+    response = await client.post(
+        "/api/v1/customers/kyc/documents",
+        data={"document_type": "PAN_CARD"},
+        files={"file": ("identity.pdf", b"%PDF-1.7 content", "application/pdf")},
+    )
+    assert response.status_code == 401
