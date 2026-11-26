@@ -144,10 +144,17 @@ async def withdraw_customer_kyc_documents(
 async def submit_customer_kyc_document(
     request: Request,
     document_type: str = Form(...),
+    consent_to_processing: bool = Form(False),
     file: UploadFile = File(...),
     user: User = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db),
 ):
+    if not consent_to_processing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Consent to private document storage and manual review is required.",
+        )
+
     normalized_type = (document_type or "").strip().upper()
     if normalized_type not in ALLOWED_DOCUMENT_TYPES:
         raise HTTPException(
@@ -206,7 +213,13 @@ async def submit_customer_kyc_document(
             actor=user,
             action="DOCUMENT_SUBMITTED",
             request=request,
-            metadata={"document_type": normalized_type, "mime_type": mime_type, "file_size_bytes": len(content)},
+            metadata={
+                "document_type": normalized_type,
+                "mime_type": mime_type,
+                "file_size_bytes": len(content),
+                "consent_to_processing": True,
+                "consented_at": now.isoformat(),
+            },
         )
     )
     try:
