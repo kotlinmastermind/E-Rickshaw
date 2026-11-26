@@ -3,7 +3,7 @@ import secrets
 from datetime import datetime, timezone, date
 from typing import Optional, List
 from sqlalchemy import (
-    String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, Index, UniqueConstraint
+    String, Integer, Float, Boolean, DateTime, Date, ForeignKey, Text, Index, UniqueConstraint, text
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.infrastructure.database.session import Base
@@ -1186,6 +1186,14 @@ class CustomerKycDocument(Base):
     __table_args__ = (
         Index("ix_customer_kyc_user_status", "user_id", "status"),
         Index("ix_customer_kyc_status_submitted", "status", "submitted_at"),
+        Index(
+            "uq_customer_kyc_one_pending_document_type",
+            "user_id",
+            "document_type",
+            unique=True,
+            postgresql_where=text("status = 'PENDING_REVIEW'"),
+            sqlite_where=text("status = 'PENDING_REVIEW'"),
+        ),
     )
 
 
