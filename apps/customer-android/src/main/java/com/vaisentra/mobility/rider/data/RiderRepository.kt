@@ -1360,9 +1360,10 @@ object RiderRepository {
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             } ?: "identity-document"
             val documentTypeBody = documentType.toRequestBody("text/plain".toMediaType())
+            val consentBody = "true".toRequestBody("text/plain".toMediaType())
             val fileBody = bytes.toRequestBody(mimeType.toMediaType())
             val filePart = MultipartBody.Part.createFormData("file", displayName, fileBody)
-            val response = NetworkClient.apiService.submitCustomerKycDocument(documentTypeBody, filePart)
+            val response = NetworkClient.apiService.submitCustomerKycDocument(documentTypeBody, consentBody, filePart)
             if (response.isSuccessful) {
                 Result.success(response.body()?.get("message")?.toString() ?: "Document submitted for manual review.")
             } else {
