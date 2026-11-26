@@ -1294,23 +1294,19 @@ object RiderRepository {
 
     suspend fun registerCustomerProfile(
         name: String,
-        email: String,
-        phone: String? = null,
-        govtId: String? = null
+        email: String
     ): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.registerProfile(
                 RegisterCustomerRequest(
-                    phoneNumber = phone?.trim(),
                     fullName = name.trim(),
-                    email = email.trim(),
-                    govtIdNumber = govtId?.trim()
+                    email = email.trim().ifBlank { null }
                 )
             )
             if (res.isSuccessful) {
                 Result.success(true)
             } else {
-                val errBody = res.errorBody()?.string() ?: "KYC sync failed: HTTP ${res.code()}"
+                val errBody = res.errorBody()?.string() ?: "Profile save failed: HTTP ${res.code()}"
                 Result.failure(Exception(errBody))
             }
         } catch (e: Exception) {
