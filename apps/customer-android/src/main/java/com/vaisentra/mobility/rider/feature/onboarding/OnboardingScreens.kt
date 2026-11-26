@@ -427,6 +427,8 @@ fun CustomerKycDocumentsScreen(onNavigate: (String) -> Unit) {
     var selectedDocumentType by remember { mutableStateOf("PAN_CARD") }
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var isUploading by remember { mutableStateOf(false) }
+    var isWithdrawing by remember { mutableStateOf(false) }
+    var showWithdrawConfirmation by remember { mutableStateOf(false) }
     var reviewStatus by remember { mutableStateOf("Loading review status...") }
 
     val documentPicker = rememberLauncherForActivityResult(
@@ -516,7 +518,52 @@ fun CustomerKycDocumentsScreen(onNavigate: (String) -> Unit) {
             )
             Spacer(modifier = Modifier.height(10.dp))
             Text("Current review status: $reviewStatus", color = ElectricCyan, fontSize = 12.sp)
+            if (reviewStatus !in setOf("NOT SUBMITTED", "LOADING REVIEW STATUS...", "STATUS UNAVAILABLE")) {
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { showWithdrawConfirmation = true },
+                    enabled = !isWithdrawing,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isWithdrawing) "Removing documents..." else "Withdraw and delete submitted documents")
+                }
+            }
         }
+    }
+
+    if (showWithdrawConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showWithdrawConfirmation = false },
+            title = { Text("Withdraw identity documents?") },
+            text = {
+                Text("This removes all submitted customer identity files from private storage and withdraws them from manual review.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showWithdrawConfirmation = false
+                        if (isWithdrawing) return@TextButton
+                        isWithdrawing = true
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                RiderRepository.withdrawCustomerKycDocuments()
+                            }
+                            isWithdrawing = false
+                            result.onSuccess { message ->
+                                DialogController.showToast(message)
+                                reviewStatus = "NOT SUBMITTED"
+                                selectedUri = null
+                            }.onFailure { error ->
+                                DialogController.showToast(error.message ?: "Unable to withdraw documents.")
+                            }
+                        }
+                    }
+                ) { Text("Withdraw", color = CrimsonRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWithdrawConfirmation = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
