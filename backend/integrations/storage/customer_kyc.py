@@ -152,7 +152,7 @@ class CustomerKycStorage:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Customer KYC document could not be removed from private storage.",
             ) from exc
-        if response.status_code not in (200, 204):
+        if response.status_code not in (200, 204, 404):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Customer KYC document could not be removed from private storage.",
