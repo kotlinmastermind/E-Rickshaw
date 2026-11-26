@@ -80,8 +80,8 @@ async def get_customer_kyc_status(
     return {
         "kyc_status": (
             "PENDING_REVIEW" if any(d.status == "PENDING_REVIEW" for d in documents)
-            else "APPROVED" if any(d.status == "APPROVED" for d in documents)
             else "REJECTED" if any(d.status == "REJECTED" for d in documents)
+            else "APPROVED" if any(d.status == "APPROVED" for d in documents)
             else "NOT_SUBMITTED"
         ),
         "documents": [
