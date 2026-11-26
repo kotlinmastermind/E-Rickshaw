@@ -428,6 +428,7 @@ fun CustomerKycDocumentsScreen(onNavigate: (String) -> Unit) {
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var isUploading by remember { mutableStateOf(false) }
     var isWithdrawing by remember { mutableStateOf(false) }
+    var consentGiven by remember { mutableStateOf(false) }
     var showWithdrawConfirmation by remember { mutableStateOf(false) }
     var reviewStatus by remember { mutableStateOf("Loading review status...") }
 
@@ -489,8 +490,20 @@ fun CustomerKycDocumentsScreen(onNavigate: (String) -> Unit) {
                 fontSize = 11.sp
             )
             Spacer(modifier = Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = consentGiven,
+                    onCheckedChange = { consentGiven = it }
+                )
+                Text(
+                    "I consent to private storage of this selected document and access by authorized administrators for manual review.",
+                    color = Color.LightGray,
+                    fontSize = 11.sp
+                )
+            }
             NeoButton(
                 text = if (isUploading) "Uploading securely..." else "Submit for manual review",
+                enabled = consentGiven && selectedUri != null && !isUploading,
                 onClick = {
                     val uri = selectedUri
                     if (uri == null) {
