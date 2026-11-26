@@ -186,6 +186,45 @@ async def test_ws_ticket_single_use_replay_rejected():
 
 
 @pytest.mark.asyncio
+async def test_ws_admin_telemetry_rejects_admin_without_mfa_or_role_assignment():
+    """A role claim alone must not authorize the protected admin telemetry stream."""
+    uid = str(uuid.uuid4())
+    sid = str(uuid.uuid4())
+    async with async_session_maker() as db:
+        user = User(
+            id=uid,
+            email=f"ws_unassigned_{uid[:8]}@vaisentra.com",
+            phone_number=f"+9199{uid[:8]}",
+            full_name="Unassigned Admin Test",
+            role="admin",
+            is_active=True,
+            mfa_enabled=False
+        )
+        session = Session(
+            id=sid,
+            user_id=uid,
+            token_hash=hash_secret("sample_refresh_unassigned"),
+            is_revoked=False,
+            mfa_verified=False,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1)
+        )
+        db.add_all([user, session])
+        await db.commit()
+
+    ticket = str(uuid.uuid4())
+    await redis_client.set_json(
+        f"ws_ticket:{ticket}",
+        {"user_id": uid, "session_id": sid, "role": "admin"},
+        ex=30
+    )
+    client = TestClient(app)
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}"):
+            pass
+    assert exc.value.code == 1008
+
+
+@pytest.mark.asyncio
 async def test_ws_expired_ticket_rejected():
     """Verify that nonexistent or expired ticket UUID is rejected."""
     client = TestClient(app)
