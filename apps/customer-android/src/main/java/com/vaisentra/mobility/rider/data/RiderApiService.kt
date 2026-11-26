@@ -51,6 +51,7 @@ interface RiderApiService {
     @POST("api/v1/customers/kyc/documents")
     suspend fun submitCustomerKycDocument(
         @Part("document_type") documentType: okhttp3.RequestBody,
+        @Part("consent_to_processing") consentToProcessing: okhttp3.RequestBody,
         @Part file: okhttp3.MultipartBody.Part
     ): Response<Map<String, Any>>
 
