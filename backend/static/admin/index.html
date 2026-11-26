@@ -3055,8 +3055,10 @@
 
                 const customerDocs = documents.filter(doc => doc.customer_id === user.id);
                 const pendingDoc = customerDocs.find(doc => doc.status === 'PENDING_REVIEW');
-                const latestDoc = customerDocs[0];
-                const kycStatus = pendingDoc ? 'PENDING_REVIEW' : (latestDoc?.status || 'NOT_SUBMITTED');
+                const hasRejectedDoc = customerDocs.some(doc => doc.status === 'REJECTED');
+                const hasApprovedDoc = customerDocs.some(doc => doc.status === 'APPROVED');
+                const kycStatus = pendingDoc ? 'PENDING_REVIEW'
+                    : (hasRejectedDoc ? 'REJECTED' : (hasApprovedDoc ? 'APPROVED' : 'NOT_SUBMITTED'));
                 const kycClass = kycStatus === 'APPROVED'
                     ? 'bg-emerald-dim text-emerald-glow'
                     : (kycStatus === 'REJECTED' ? 'bg-crimson-dim text-crimson-glow' : 'bg-amber-dim text-amber-glow');
