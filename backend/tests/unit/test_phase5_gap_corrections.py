@@ -218,16 +218,18 @@ async def test_ws_admin_telemetry_rejects_admin_without_mfa_or_role_assignment()
         await db.commit()
 
     ticket = str(uuid.uuid4())
-    await redis_client.set_json_strict(
-        f"ws_ticket:{ticket}",
-        {"user_id": uid, "session_id": sid, "role": "admin"},
-        ex=30
-    )
-    client = TestClient(app)
-    with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}"):
-            pass
-    assert exc.value.code == 1008
+    with TestClient(app) as client:
+        # Seed Redis on the same portal loop used by the WebSocket handshake.
+        client.portal.call(
+            redis_client.set_json_strict,
+            f"ws_ticket:{ticket}",
+            {"user_id": uid, "session_id": sid, "role": "admin"},
+            ex=30
+        )
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}"):
+                pass
+        assert exc.value.code == 1008
 
 
 @pytest.mark.asyncio
@@ -266,14 +268,15 @@ async def test_ws_session_revocation_enforced():
         db.add_all([user, profile, session])
         await db.commit()
 
-    await redis_client.set(f"revoked_session:{sid}", "true", ex=300)
     token = create_jwt_token(user_id=uid, role="driver", session_id=sid, expires_delta=timedelta(hours=1))
 
-    client = TestClient(app)
-    with pytest.raises(WebSocketDisconnect) as exc:
-        with client.websocket_connect("/api/v1/ws/driver/dispatch", headers={"Authorization": f"Bearer {token}"}) as ws:
-            pass
-    assert exc.value.code == 1008
+    with TestClient(app) as client:
+        # Seed the revocation marker on the same portal loop as the handshake.
+        client.portal.call(redis_client.set, f"revoked_session:{sid}", "true", ex=300)
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect("/api/v1/ws/driver/dispatch", headers={"Authorization": f"Bearer {token}"}) as ws:
+                pass
+        assert exc.value.code == 1008
 
 
 def test_android_and_web_clients_no_jwt_query_params():
