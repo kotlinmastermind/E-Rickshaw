@@ -24,11 +24,8 @@ data class LoginRequest(
 )
 
 data class RegisterCustomerRequest(
-    @SerializedName("phone_number") val phoneNumber: String? = null,
     @SerializedName("full_name") val fullName: String,
-    @SerializedName("email") val email: String? = null,
-    @SerializedName("govt_id_number") val govtIdNumber: String? = null,
-    @SerializedName("preferred_language") val preferredLanguage: String = "en"
+    @SerializedName("email") val email: String? = null
 )
 
 data class TokenResponse(
