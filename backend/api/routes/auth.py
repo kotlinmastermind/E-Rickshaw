@@ -1,6 +1,6 @@
 from typing import Optional
 from sqlalchemy import update
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from backend.domain.models import User, CustomerProfile
 from fastapi import APIRouter, Body, Depends, Request, HTTPException, status
 from pydantic import BaseModel, Field
@@ -60,66 +60,39 @@ class CustomerKycUpdatePayload(BaseModel):
 @router.put("/kyc/customer")
 async def update_customer_kyc(
     payload: CustomerKycUpdatePayload,
-    request: Request,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    user: Optional[User] = None
-
-    # 1. Pehle Bearer token se logged-in user ko dhundhein
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        try:
-            token = auth_header.split(" ")[1]
-            decoded = decode_jwt_token(token)
-            user_id = decoded.get("sub")
-            if user_id:
-                res = await db.execute(select(User).where(User.id == user_id))
-                user = res.scalar_one_or_none()
-        except Exception:
-            pass
-
-    # 2. Agar token nahi hai toh phone_number se user dhundhein
-    if not user and payload.phone_number:
-        digits = "".join(filter(str.isdigit, payload.phone_number))
-        last_10 = digits[-10:] if len(digits) >= 10 else digits
-        res = await db.execute(
-            select(User).where(
-                or_(
-                    User.phone_number == payload.phone_number.strip(),
-                    User.phone_number.endswith(last_10)
-                )
-            )
-        )
-        user = res.scalars().first()
-
-    if not user:
+    # KYC/profile completion is allowed only for the authenticated customer.
+    # The submitted phone number is legacy client data and must never select an account.
+    if (current_user.role or "").strip().lower() != "customer":
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Account nahi mila. Kripya pehle phone number se OTP verify karein."
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the authenticated customer can update this profile."
         )
 
-    # 3. User details update karein
-    user.full_name = payload.full_name.strip()
+    current_user.full_name = payload.full_name.strip()
     if payload.email and payload.email.strip():
-        user.email = payload.email.strip().lower()
-    user.is_verified = True
+        current_user.email = payload.email.strip().lower()
 
-    # 4. CustomerProfile record ensure/update karein
-    prof_res = await db.execute(select(CustomerProfile).where(CustomerProfile.user_id == user.id))
+    # Phone ownership is established by the verified OTP session, not this payload.
+    # Profile completion must not promote an account to phone/KYC-verified status.
+    prof_res = await db.execute(
+        select(CustomerProfile).where(CustomerProfile.user_id == current_user.id)
+    )
     profile = prof_res.scalar_one_or_none()
     if not profile:
-        profile = CustomerProfile(user_id=user.id)
+        profile = CustomerProfile(user_id=current_user.id)
         db.add(profile)
 
     await db.commit()
     return {
         "message": "Customer profile and KYC saved successfully.",
-        "user_id": user.id,
-        "full_name": user.full_name,
-        "email": user.email,
-        "is_verified": user.is_verified
+        "user_id": current_user.id,
+        "full_name": current_user.full_name,
+        "email": current_user.email,
+        "is_verified": current_user.is_verified
     }
-
 
 @router.put("/avatar")
 @router.post("/avatar")
