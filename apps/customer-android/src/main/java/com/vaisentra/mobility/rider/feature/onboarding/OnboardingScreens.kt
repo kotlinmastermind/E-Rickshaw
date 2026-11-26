@@ -381,7 +381,6 @@ fun CustomerKycScreen(
                 placeholder = "Enter Email Address",
                 label = "Email"
             )
-            Spacer(modifier = Modifier.height(12.dp))
             Spacer(modifier = Modifier.height(20.dp))
             NeoButton(
                 text = if (isSaving) "Saving Profile..." else "Save Profile & Continue",
@@ -404,7 +403,7 @@ fun CustomerKycScreen(
                                 DialogController.showToast("Profile saved successfully.")
                                 onNavigate("auth_biometric")
                             }.onFailure { err ->
-                                DialogController.showToast(err.message ?: "KYC update failed!")
+                                DialogController.showToast(err.message ?: "Profile update failed!")
                             }
                         }
                     }
