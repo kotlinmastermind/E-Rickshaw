@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import java.io.ByteArrayOutputStream
 import okhttp3.MultipartBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -1349,10 +1350,23 @@ object RiderRepository {
             if (mimeType !in setOf("application/pdf", "image/jpeg", "image/png")) {
                 return Result.failure(IllegalArgumentException("Choose a PDF, JPEG, or PNG document."))
             }
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: return Result.failure(IllegalArgumentException("Unable to read the selected document."))
-            if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) {
-                return Result.failure(IllegalArgumentException("The document must be non-empty and 5 MB or smaller."))
+            val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                var totalBytes = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    totalBytes += count
+                    if (totalBytes > 5 * 1024 * 1024) {
+                        return Result.failure(IllegalArgumentException("The document must be 5 MB or smaller."))
+                    }
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            } ?: return Result.failure(IllegalArgumentException("Unable to read the selected document."))
+            if (bytes.isEmpty()) {
+                return Result.failure(IllegalArgumentException("The selected document is empty."))
             }
             val displayName = context.contentResolver.query(
                 uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
