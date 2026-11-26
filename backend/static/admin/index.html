@@ -3047,10 +3047,19 @@
             const tbody = document.getElementById('customer-table-body');
             const search = (document.getElementById('customer-search-input')?.value || '').toLowerCase();
             const customers = STATE.customers || [];
+            const documents = STATE.customerKycDocuments || [];
 
             tbody.innerHTML = '';
             customers.forEach(user => {
                 if (search && !user.name.toLowerCase().includes(search) && !user.phone.includes(search)) return;
+
+                const customerDocs = documents.filter(doc => doc.customer_id === user.id);
+                const pendingDoc = customerDocs.find(doc => doc.status === 'PENDING_REVIEW');
+                const latestDoc = customerDocs[0];
+                const kycStatus = pendingDoc ? 'PENDING_REVIEW' : (latestDoc?.status || 'NOT_SUBMITTED');
+                const kycClass = kycStatus === 'APPROVED'
+                    ? 'bg-emerald-dim text-emerald-glow'
+                    : (kycStatus === 'REJECTED' ? 'bg-crimson-dim text-crimson-glow' : 'bg-amber-dim text-amber-glow');
 
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-surface/50 transition-colors';
@@ -3068,12 +3077,24 @@
                             ${user.active ? 'ACTIVE' : 'SUSPENDED'}
                         </span>
                     </td>
+                    <td class="py-3.5 px-4">
+                        <span class="px-2 py-0.5 rounded-md ${kycClass} font-mono text-[10px] font-bold">${kycStatus}</span>
+                    </td>
                     <td class="py-3.5 px-4 text-right">
                         <button onclick="toggleCustomerStatus('${user.id}', ${!user.active})" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-white text-[11px] transition-all">
                             ${user.active ? 'Suspend' : 'Activate'}
                         </button>
                     </td>
                 `;
+                if (pendingDoc) {
+                    const actionCell = tr.querySelector('td:last-child');
+                    const reviewButton = document.createElement('button');
+                    reviewButton.type = 'button';
+                    reviewButton.className = 'ml-2 px-2.5 py-1 rounded-lg bg-cyan-dim border border-cyan-glow/30 text-cyan-glow text-[11px] font-bold';
+                    reviewButton.textContent = 'Review KYC';
+                    reviewButton.addEventListener('click', () => openCustomerKycModal(pendingDoc.id));
+                    actionCell.appendChild(reviewButton);
+                }
                 tbody.appendChild(tr);
             });
         }
@@ -3269,6 +3290,65 @@
                 }
             } catch (e) {
                 showToast('Network error updating corridor surge', 'error');
+            }
+        }
+
+        // Customer KYC review uses a fresh 60-second signed URL issued only after Admin authorization.
+        async function openCustomerKycModal(documentId) {
+            const doc = (STATE.customerKycDocuments || []).find(item => item.id === documentId);
+            if (!doc) return showToast('Customer KYC document is no longer in the review queue.', 'error');
+            STATE.activeCustomerKycDocumentId = documentId;
+            document.getElementById('customer-kyc-name').textContent = doc.customer_name || 'Customer';
+            document.getElementById('customer-kyc-phone').textContent = doc.customer_phone || '';
+            document.getElementById('customer-kyc-type').textContent = doc.document_type || '';
+            document.getElementById('customer-kyc-status').textContent = doc.status || '';
+            document.getElementById('customer-kyc-review-reason').value = '';
+            const link = document.getElementById('customer-kyc-open-document');
+            link.removeAttribute('href');
+            link.setAttribute('aria-disabled', 'true');
+            document.getElementById('modal-customer-kyc-review').classList.remove('hidden');
+            try {
+                const response = await fetch(`/api/v1/admin/customer-kyc/documents/${encodeURIComponent(documentId)}/download`);
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.detail || 'Unable to authorize document access.');
+                }
+                const result = await response.json();
+                link.href = result.url;
+                link.removeAttribute('aria-disabled');
+            } catch (error) {
+                showToast(error.message || 'Unable to open customer KYC document.', 'error');
+            }
+        }
+
+        function closeCustomerKycModal() {
+            document.getElementById('modal-customer-kyc-review').classList.add('hidden');
+            STATE.activeCustomerKycDocumentId = null;
+        }
+
+        async function submitCustomerKycReview(approved) {
+            const documentId = STATE.activeCustomerKycDocumentId;
+            if (!documentId) return;
+            const reason = document.getElementById('customer-kyc-review-reason').value.trim();
+            if (!approved && reason.length < 5) {
+                showToast('Enter a rejection reason of at least 5 characters.', 'error');
+                return;
+            }
+            try {
+                const response = await fetch(`/api/v1/admin/customer-kyc/documents/${encodeURIComponent(documentId)}/review`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ approved, reason: reason || null })
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.detail || 'Customer KYC review failed.');
+                }
+                showToast(approved ? 'Customer document approved.' : 'Customer document rejected.');
+                closeCustomerKycModal();
+                await loadInitialData();
+            } catch (error) {
+                showToast(error.message || 'Customer KYC review failed.', 'error');
             }
         }
 
