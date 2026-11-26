@@ -3,6 +3,9 @@
 package com.vaisentra.mobility.rider.feature.onboarding
 
 import androidx.compose.foundation.background
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -409,9 +412,114 @@ fun CustomerKycScreen(
                     }
                 }
             )
+            TextButton(onClick = { onNavigate("customer_kyc_documents") }) {
+                Text("Submit identity document (optional)", color = CyanGlow)
+            }
         }
     }
 }
+
+// Optional Customer Identity Document Submission
+@Composable
+fun CustomerKycDocumentsScreen(onNavigate: (String) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var selectedDocumentType by remember { mutableStateOf("PAN_CARD") }
+    var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    var isUploading by remember { mutableStateOf(false) }
+    var reviewStatus by remember { mutableStateOf("Loading review status...") }
+
+    val documentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        selectedUri = uri
+    }
+
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchCustomerKycStatus().onSuccess {
+            reviewStatus = it.replace("_", " ")
+        }.onFailure {
+            reviewStatus = "Status unavailable"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(CanvasBlack)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        NeoHeader(
+            title = "Identity Verification",
+            subtitle = "Optional manual review. Aadhaar is not collected. Upload only a document you choose to provide.",
+            onBack = { onNavigate("map_home") }
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+        NeoCard {
+            Text("Select document type", color = Color.White, fontWeight = FontWeight.Bold)
+            listOf(
+                "PAN_CARD" to "PAN Card",
+                "DRIVING_LICENSE" to "Driving Licence",
+                "PASSPORT" to "Passport",
+                "VOTER_ID" to "Voter ID"
+            ).forEach { (value, label) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = selectedDocumentType == value,
+                        onClick = { selectedDocumentType = value }
+                    )
+                    Text(label, color = Color.White)
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = {
+                    documentPicker.launch(arrayOf("application/pdf", "image/jpeg", "image/png"))
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(selectedUri?.lastPathSegment ?: "Choose PDF, JPEG, or PNG")
+            }
+            Text(
+                "Maximum file size: 5 MB. Documents are stored privately and reviewed manually.",
+                color = Color.LightGray,
+                fontSize = 11.sp
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            NeoButton(
+                text = if (isUploading) "Uploading securely..." else "Submit for manual review",
+                onClick = {
+                    val uri = selectedUri
+                    if (uri == null) {
+                        DialogController.showToast("Choose an identity document first.")
+                        return@NeoButton
+                    }
+                    if (isUploading) return@NeoButton
+                    isUploading = true
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            RiderRepository.submitCustomerKycDocument(context, uri, selectedDocumentType)
+                        }
+                        isUploading = false
+                        result.onSuccess { message ->
+                            DialogController.showToast(message)
+                            selectedUri = null
+                            RiderRepository.fetchCustomerKycStatus().onSuccess {
+                                reviewStatus = it.replace("_", " ")
+                            }
+                        }.onFailure { error ->
+                            DialogController.showToast(error.message ?: "Document upload failed.")
+                        }
+                    }
+                }
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text("Current review status: $reviewStatus", color = CyanGlow, fontSize = 12.sp)
+        }
+    }
+}
+
 // Screen 6: Passkey & Hardware Biometric Enrolment
 
 
