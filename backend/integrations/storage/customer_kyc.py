@@ -25,9 +25,10 @@ class CustomerKycStorage:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Customer KYC private storage is not configured.",
             )
+        # Supabase sb_secret_* keys are API keys, not JWTs. Send the credential
+        # through apikey only; using it as a Bearer JWT causes Invalid JWT errors.
         return {
             "apikey": self.service_role_key,
-            "Authorization": f"Bearer {self.service_role_key}",
             "Content-Type": content_type,
         }
 
@@ -37,37 +38,17 @@ class CustomerKycStorage:
         try:
             response = await client.get(url, headers=headers)
         except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC private storage is temporarily unavailable.",
-            ) from exc
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC private storage is temporarily unavailable.") from exc
         if response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC private storage bucket is missing or inaccessible.",
-            )
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC private storage bucket is missing or inaccessible.")
         try:
             bucket_config = response.json()
         except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC storage configuration could not be verified.",
-            ) from exc
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC storage configuration could not be verified.") from exc
         if not isinstance(bucket_config, dict) or bucket_config.get("public") is not False:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC storage bucket must be private.",
-            )
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC storage bucket must be private.")
 
-    async def upload(
-        self,
-        *,
-        user_id: str,
-        document_id: str,
-        extension: str,
-        mime_type: str,
-        content: bytes,
-    ) -> str:
+    async def upload(self, *, user_id: str, document_id: str, extension: str, mime_type: str, content: bytes) -> str:
         object_path = f"{user_id}/{document_id}.{extension}"
         encoded_path = quote(object_path, safe="/")
         url = f"{self.base_url}/storage/v1/object/{quote(self.bucket, safe='')}/{encoded_path}"
@@ -80,15 +61,9 @@ class CustomerKycStorage:
         except HTTPException:
             raise
         except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC document could not be uploaded to private storage.",
-            ) from exc
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC document could not be uploaded to private storage.") from exc
         if response.status_code not in (200, 201):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC document could not be saved to private storage.",
-            )
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC document could not be saved to private storage.")
         return f"private://{self.bucket}/{object_path}"
 
     async def create_signed_url(self, storage_path: str, expires_in_seconds: int = 60) -> str:
@@ -106,32 +81,20 @@ class CustomerKycStorage:
         except HTTPException:
             raise
         except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC document access is temporarily unavailable.",
-            ) from exc
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC document access is temporarily unavailable.") from exc
         if response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC document access could not be authorized.",
-            )
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC document access could not be authorized.")
         try:
             signed_url = response.json().get("signedURL")
         except (ValueError, AttributeError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC signed URL response was invalid.",
-            ) from exc
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC signed URL response was invalid.") from exc
         if not isinstance(signed_url, str) or not signed_url:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC signed URL was not returned by storage.",
-            )
-        if signed_url.startswith("http://") or signed_url.startswith("https://"):
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC signed URL was not returned by storage.")
+        if signed_url.startswith(("http://", "https://")):
             return signed_url
         if signed_url.startswith("/storage/v1/"):
             return f"{self.base_url}{signed_url}"
-        return f"{self.base_url}/storage/v1/{signed_url.lstrip("/")}"
+        return f"{self.base_url}/storage/v1/{signed_url.lstrip('/')}"
 
     async def delete(self, storage_path: str) -> None:
         prefix = f"private://{self.bucket}/"
@@ -148,15 +111,9 @@ class CustomerKycStorage:
         except HTTPException:
             raise
         except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC document could not be removed from private storage.",
-            ) from exc
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC document could not be removed from private storage.") from exc
         if response.status_code not in (200, 204, 404):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Customer KYC document could not be removed from private storage.",
-            )
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Customer KYC document could not be removed from private storage.")
 
 
 customer_kyc_storage = CustomerKycStorage()
