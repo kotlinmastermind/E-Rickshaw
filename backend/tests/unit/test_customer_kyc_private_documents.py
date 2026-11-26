@@ -34,7 +34,7 @@ async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_a
     monkeypatch.setattr(customer_kyc_storage, "create_signed_url", fake_signed_url)
     monkeypatch.setattr(customer_kyc_storage, "delete", fake_delete)
 
-    payload = b"%PDF-1.7\nprivate customer identity test document"
+    payload = b"%PDF-1.7\\nprivate customer identity test document"
     response = await client.post(
         "/api/v1/customers/kyc/documents",
         data={"document_type": "PAN_CARD", "consent_to_processing": "true"},
@@ -52,7 +52,7 @@ async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_a
     assert document.storage_path.startswith("private://")
     assert document.status == "PENDING_REVIEW"
     await db_session.refresh(customer_user)
-    assert customer_user.is_verified is False  # document submission does not toggle account verification
+    assert customer_user.is_verified is False
 
     status_response = await client.get(
         "/api/v1/customers/kyc",
@@ -146,6 +146,7 @@ async def test_customer_kyc_rejects_aadhaar_and_invalid_file_content(client, cus
     )
     assert invalid.status_code == 400
 
+
 @pytest.mark.asyncio
 async def test_customer_kyc_storage_fails_closed_without_service_role_configuration(monkeypatch):
     from fastapi import HTTPException
@@ -164,6 +165,17 @@ async def test_customer_kyc_storage_fails_closed_without_service_role_configurat
             content=b"%PDF-1.7",
         )
     assert error.value.status_code == 503
+
+
+def test_customer_kyc_storage_uses_secret_key_as_apikey_not_bearer_jwt(monkeypatch):
+    from backend.core.config import settings
+    from backend.integrations.storage.customer_kyc import CustomerKycStorage
+
+    monkeypatch.setattr(settings, "SUPABASE_URL", "https://project.example.supabase.co")
+    monkeypatch.setattr(settings, "SUPABASE_SERVICE_ROLE_KEY", "sb_secret_test_value")
+    headers = CustomerKycStorage()._headers()
+    assert headers["apikey"] == "sb_secret_test_value"
+    assert "Authorization" not in headers
 
 
 @pytest.mark.asyncio
