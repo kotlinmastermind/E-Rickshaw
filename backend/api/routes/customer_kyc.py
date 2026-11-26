@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import desc, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.deps import get_current_customer
@@ -224,6 +225,16 @@ async def submit_customer_kyc_document(
     )
     try:
         await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        try:
+            await customer_kyc_storage.delete(storage_path)
+        except Exception:
+            logger.exception("Failed to clean up orphaned customer KYC object after database integrity failure.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A conflicting customer KYC document submission already exists.",
+        ) from exc
     except Exception:
         await db.rollback()
         try:
