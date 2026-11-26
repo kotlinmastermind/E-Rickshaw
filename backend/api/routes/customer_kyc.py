@@ -100,6 +100,46 @@ async def get_customer_kyc_status(
     }
 
 
+@router.delete("/documents")
+async def withdraw_customer_kyc_documents(
+    request: Request,
+    user: User = Depends(get_current_customer),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(CustomerKycDocument).where(
+            CustomerKycDocument.user_id == user.id,
+            CustomerKycDocument.status != "WITHDRAWN",
+        )
+    )
+    documents = result.scalars().all()
+    withdrawn_count = 0
+    for document in documents:
+        await customer_kyc_storage.delete(document.storage_path)
+        document.status = "WITHDRAWN"
+        document.storage_path = f"purged://{document.id}"
+        document.mime_type = "application/octet-stream"
+        document.file_size_bytes = 0
+        document.sha256_hash = "0" * 64
+        document.review_notes = None
+        document.updated_at = datetime.now(timezone.utc)
+        db.add(
+            _audit(
+                document_id=document.id,
+                actor=user,
+                action="DOCUMENT_WITHDRAWN",
+                request=request,
+                metadata={"reason": "CUSTOMER_REQUEST", "document_type": document.document_type},
+            )
+        )
+        withdrawn_count += 1
+    await db.commit()
+    return {
+        "withdrawn_count": withdrawn_count,
+        "message": "Submitted identity documents were removed from private storage and withdrawn from review.",
+    }
+
+
 @router.post("/documents", status_code=status.HTTP_201_CREATED)
 async def submit_customer_kyc_document(
     request: Request,
