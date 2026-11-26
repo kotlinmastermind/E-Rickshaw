@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     # Supabase Credentials
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+    SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    CUSTOMER_KYC_STORAGE_BUCKET: str = os.getenv("CUSTOMER_KYC_STORAGE_BUCKET", "customer-kyc-documents")
     SUPABASE_PUBLISHABLE_KEY: str = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 
     # Security (JWT Authentication)

@@ -10,7 +10,7 @@ from backend.api.deps import get_current_admin
 from backend.domain.models import (
     User, Session, DriverProfile, CustomerProfile, Ride, VehicleCategory,
     DriverAvailability, DriverLocation, FareRule, Vehicle, DriverDocument,
-    AdministrativeAuditLog
+    AdministrativeAuditLog, CustomerKycDocument, CustomerKycAuditLog
 )
 from backend.infrastructure.security.crypto import create_jwt_token, decode_jwt_token,hash_secret , verify_password
 from backend.application.services.admin_service import AdminService
@@ -1668,3 +1668,129 @@ async def admin_run_reconciliation(
 
 
 
+
+
+# --- Customer KYC: restricted manual review and audited document access ---
+
+class AdminCustomerKycReviewPayload(BaseModel):
+    approved: bool
+    reason: Optional[str] = Field(None, max_length=500)
+
+
+@router.get("/customer-kyc/documents")
+async def admin_list_customer_kyc_documents(
+    status_filter: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    allowed_statuses = {"PENDING_REVIEW", "APPROVED", "REJECTED", "WITHDRAWN"}
+    normalized_status = status_filter.strip().upper() if status_filter else None
+    if normalized_status and normalized_status not in allowed_statuses:
+        raise HTTPException(status_code=400, detail="Invalid customer KYC status filter.")
+
+    stmt = (
+        select(CustomerKycDocument, User)
+        .join(User, User.id == CustomerKycDocument.user_id)
+        .order_by(desc(CustomerKycDocument.submitted_at))
+        .limit(limit)
+        .offset(offset)
+    )
+    if normalized_status:
+        stmt = stmt.where(CustomerKycDocument.status == normalized_status)
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "id": document.id,
+            "customer_id": customer.id,
+            "customer_name": customer.full_name,
+            "customer_phone": customer.phone_number,
+            "customer_email": customer.email,
+            "document_type": document.document_type,
+            "status": document.status,
+            "submitted_at": document.submitted_at.isoformat() if document.submitted_at else None,
+            "reviewed_at": document.reviewed_at.isoformat() if document.reviewed_at else None,
+            "review_notes": document.review_notes,
+        }
+        for document, customer in rows
+    ]
+
+
+@router.get("/customer-kyc/documents/{document_id}/download")
+async def admin_get_customer_kyc_document_download(
+    document_id: str,
+    request: Request,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    document = (
+        await db.execute(select(CustomerKycDocument).where(CustomerKycDocument.id == document_id))
+    ).scalar_one_or_none()
+    if not document or document.status == "WITHDRAWN":
+        raise HTTPException(status_code=404, detail="Customer KYC document not found.")
+    from backend.integrations.storage.customer_kyc import customer_kyc_storage
+    signed_url = await customer_kyc_storage.create_signed_url(document.storage_path, expires_in_seconds=60)
+    db.add(
+        CustomerKycAuditLog(
+            document_id=document.id,
+            actor_id=admin.id,
+            actor_role="ADMIN",
+            action="DOCUMENT_SIGNED_URL_ISSUED",
+            metadata_json='{"expires_in_seconds":60}',
+            ip_address=request.client.host if request.client else None,
+            user_agent=(request.headers.get("user-agent") or "")[:255] or None,
+        )
+    )
+    await db.commit()
+    return {"url": signed_url, "expires_in_seconds": 60}
+
+
+@router.post("/customer-kyc/documents/{document_id}/review")
+async def admin_review_customer_kyc_document(
+    document_id: str,
+    payload: AdminCustomerKycReviewPayload,
+    request: Request,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    document = (
+        await db.execute(
+            select(CustomerKycDocument)
+            .where(CustomerKycDocument.id == document_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if not document:
+        raise HTTPException(status_code=404, detail="Customer KYC document not found.")
+    if document.status != "PENDING_REVIEW":
+        raise HTTPException(status_code=409, detail="Only pending customer KYC documents can be reviewed.")
+
+    reason = (payload.reason or "").strip()
+    if not payload.approved and len(reason) < 5:
+        raise HTTPException(status_code=422, detail="A rejection reason of at least 5 characters is required.")
+
+    now = datetime.now(timezone.utc)
+    document.status = "APPROVED" if payload.approved else "REJECTED"
+    document.reviewed_by_admin_id = admin.id
+    document.reviewed_at = now
+    document.review_notes = reason[:500] or None
+    db.add(
+        CustomerKycAuditLog(
+            document_id=document.id,
+            actor_id=admin.id,
+            actor_role="ADMIN",
+            action="DOCUMENT_APPROVED" if payload.approved else "DOCUMENT_REJECTED",
+            reason=reason[:500] or None,
+            metadata_json='{"manual_review":true,"user_is_verified_changed":false}',
+            ip_address=request.client.host if request.client else None,
+            user_agent=(request.headers.get("user-agent") or "")[:255] or None,
+        )
+    )
+    await db.commit()
+    return {
+        "document_id": document.id,
+        "status": document.status,
+        "reviewed_at": now.isoformat(),
+        "message": "Customer document review saved. Account-wide verification status was not changed.",
+    }

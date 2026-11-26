@@ -1,6 +1,13 @@
 package com.vaisentra.mobility.rider.data
 
 import android.graphics.Bitmap
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import java.io.ByteArrayOutputStream
+import okhttp3.MultipartBody
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -1294,29 +1301,117 @@ object RiderRepository {
 
     suspend fun registerCustomerProfile(
         name: String,
-        email: String,
-        phone: String? = null,
-        govtId: String? = null
+        email: String
     ): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.registerProfile(
                 RegisterCustomerRequest(
-                    phoneNumber = phone?.trim(),
                     fullName = name.trim(),
-                    email = email.trim(),
-                    govtIdNumber = govtId?.trim()
+                    email = email.trim().ifBlank { null }
                 )
             )
             if (res.isSuccessful) {
                 Result.success(true)
             } else {
-                val errBody = res.errorBody()?.string() ?: "KYC sync failed: HTTP ${res.code()}"
+                val errBody = res.errorBody()?.string() ?: "Profile save failed: HTTP ${res.code()}"
                 Result.failure(Exception(errBody))
             }
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
+    suspend fun fetchCustomerKycStatus(): Result<String> {
+        return try {
+            val response = NetworkClient.apiService.getCustomerKycStatus()
+            if (response.isSuccessful) {
+                Result.success(response.body()?.get("kyc_status")?.toString() ?: "NOT_SUBMITTED")
+            } else {
+                Result.failure(Exception(parseApiErrorMessage(response.errorBody()?.string(), "Unable to load identity review status.")))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitCustomerKycDocument(
+        context: Context,
+        uri: Uri,
+        documentType: String
+    ): Result<String> {
+        return try {
+            val allowedTypes = setOf("PAN_CARD", "DRIVING_LICENSE", "PASSPORT", "VOTER_ID")
+            if (documentType !in allowedTypes) {
+                return Result.failure(IllegalArgumentException("Select a supported identity document type."))
+            }
+            val mimeType = context.contentResolver.getType(uri)
+                ?: return Result.failure(IllegalArgumentException("The selected file type could not be determined."))
+            if (mimeType !in setOf("application/pdf", "image/jpeg", "image/png")) {
+                return Result.failure(IllegalArgumentException("Choose a PDF, JPEG, or PNG document."))
+            }
+            val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+                val output = ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                var totalBytes = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    totalBytes += count
+                    if (totalBytes > 5 * 1024 * 1024) {
+                        return Result.failure(IllegalArgumentException("The document must be 5 MB or smaller."))
+                    }
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            } ?: return Result.failure(IllegalArgumentException("Unable to read the selected document."))
+            if (bytes.isEmpty()) {
+                return Result.failure(IllegalArgumentException("The selected document is empty."))
+            }
+            val displayName = context.contentResolver.query(
+                uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            } ?: "identity-document"
+            val documentTypeBody = documentType.toRequestBody("text/plain".toMediaType())
+            val consentBody = "true".toRequestBody("text/plain".toMediaType())
+            val fileBody = bytes.toRequestBody(mimeType.toMediaType())
+            val filePart = MultipartBody.Part.createFormData("file", displayName, fileBody)
+            val response = NetworkClient.apiService.submitCustomerKycDocument(documentTypeBody, consentBody, filePart)
+            if (response.isSuccessful) {
+                Result.success(response.body()?.get("message")?.toString() ?: "Document submitted for manual review.")
+            } else {
+                Result.failure(
+                    Exception(
+                        parseApiErrorMessage(
+                            response.errorBody()?.string(),
+                            "Identity document upload failed (HTTP ${response.code()})."
+                        )
+                    )
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun withdrawCustomerKycDocuments(): Result<String> {
+        return try {
+            val response = NetworkClient.apiService.withdrawCustomerKycDocuments()
+            if (response.isSuccessful) {
+                Result.success(response.body()?.get("message")?.toString() ?: "Submitted identity documents withdrawn.")
+            } else {
+                Result.failure(Exception(parseApiErrorMessage(response.errorBody()?.string(), "Unable to withdraw identity documents.")))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun resetForgotPassword(recoveryCode: String, newPassword: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.resetForgotPassword(

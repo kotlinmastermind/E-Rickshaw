@@ -528,8 +528,11 @@ class RedisManager:
                 res = await client.eval(self.RELEASE_LOCK_LUA, 1, key, token)
                 return bool(res)
         except Exception as e:
-            logger.warning(f"Redis release_lock failed, using memory fallback: {e}")
+            logger.warning(f"Redis release_lock failed: {e}")
             self.is_connected = False
+        if (getattr(settings, "ENVIRONMENT", "") or "").strip().lower() == "production":
+            logger.error(f"Refusing local in-memory lock release fallback in production for key={key}")
+            return False
         return await self._fallback.release_lock(key, token)
 
     @asynccontextmanager

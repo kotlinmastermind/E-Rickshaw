@@ -3,6 +3,9 @@
 package com.vaisentra.mobility.rider.feature.onboarding
 
 import androidx.compose.foundation.background
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -331,13 +334,10 @@ fun PasswordResetScreen(onNavigate: (String) -> Unit) {
 
 @Composable
 fun CustomerKycScreen(
-    prefilledPhone: String = "",
     onNavigate: (String) -> Unit
 ) {
     var fullName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf(prefilledPhone) }
-    var govtIdNumber by remember { mutableStateOf("") }
     var isSaving by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -353,9 +353,6 @@ fun CustomerKycScreen(
             if (!me.email.isNullOrBlank()) {
                 email = me.email
             }
-            if (!me.phoneNumber.isNullOrBlank() && phone.isBlank()) {
-                phone = me.phoneNumber
-            }
         }
     }
 
@@ -367,8 +364,8 @@ fun CustomerKycScreen(
             .verticalScroll(rememberScrollState())
     ) {
         NeoHeader(
-            title = "Customer Profile & KYC",
-            subtitle = "Verified commuter account",
+            title = "Complete Your Profile",
+            subtitle = "Your mobile number was verified through OTP. No government ID is collected here.",
             onBack = { onNavigate("auth_phone") }
         )
         Spacer(modifier = Modifier.height(20.dp))
@@ -387,23 +384,9 @@ fun CustomerKycScreen(
                 placeholder = "Enter Email Address",
                 label = "Email"
             )
-            Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(
-                value = phone,
-                onValueChange = { phone = it },
-                placeholder = "+91 XXXXX XXXXX",
-                label = "Registered Mobile Number"
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(
-                value = govtIdNumber,
-                onValueChange = { govtIdNumber = it },
-                placeholder = "Enter 12-Digit Govt ID",
-                label = "Govt ID / Aadhaar"
-            )
             Spacer(modifier = Modifier.height(20.dp))
             NeoButton(
-                text = if (isSaving) "Syncing KYC..." else "Save KYC & Continue",
+                text = if (isSaving) "Saving Profile..." else "Save Profile & Continue",
                 onClick = {
                     if (fullName.trim().length < 2) {
                         DialogController.showToast("Please enter your full name")
@@ -415,25 +398,188 @@ fun CustomerKycScreen(
                     coroutineScope.launch(Dispatchers.IO) {
                         val result = RiderRepository.registerCustomerProfile(
                             name = fullName,
-                            email = email,
-                            phone = phone,
-                            govtId = govtIdNumber
+                            email = email
                         )
                         withContext(Dispatchers.Main) {
                             isSaving = false
                             result.onSuccess {
-                                DialogController.showToast("Profile and KYC synced with Supabase!")
+                                DialogController.showToast("Profile saved successfully.")
                                 onNavigate("auth_biometric")
                             }.onFailure { err ->
-                                DialogController.showToast(err.message ?: "KYC update failed!")
+                                DialogController.showToast(err.message ?: "Profile update failed!")
                             }
                         }
                     }
                 }
             )
+            TextButton(onClick = { onNavigate("customer_kyc_documents") }) {
+                Text("Submit identity document (optional)", color = ElectricCyan)
+            }
         }
     }
 }
+
+// Optional Customer Identity Document Submission
+@Composable
+fun CustomerKycDocumentsScreen(onNavigate: (String) -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var selectedDocumentType by remember { mutableStateOf("PAN_CARD") }
+    var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    var isUploading by remember { mutableStateOf(false) }
+    var isWithdrawing by remember { mutableStateOf(false) }
+    var consentGiven by remember { mutableStateOf(false) }
+    var showWithdrawConfirmation by remember { mutableStateOf(false) }
+    var reviewStatus by remember { mutableStateOf("Loading review status...") }
+
+    val documentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        selectedUri = uri
+    }
+
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchCustomerKycStatus().onSuccess {
+            reviewStatus = it.replace("_", " ")
+        }.onFailure {
+            reviewStatus = "Status unavailable"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(CanvasBlack)
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        NeoHeader(
+            title = "Identity Verification",
+            subtitle = "Optional manual review. Aadhaar is not collected. Upload only a document you choose to provide.",
+            onBack = { onNavigate("map_home") }
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+        NeoCard {
+            Text("Select document type", color = Color.White, fontWeight = FontWeight.Bold)
+            listOf(
+                "PAN_CARD" to "PAN Card",
+                "DRIVING_LICENSE" to "Driving Licence",
+                "PASSPORT" to "Passport",
+                "VOTER_ID" to "Voter ID"
+            ).forEach { (value, label) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = selectedDocumentType == value,
+                        onClick = { selectedDocumentType = value }
+                    )
+                    Text(label, color = Color.White)
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = {
+                    documentPicker.launch(arrayOf("application/pdf", "image/jpeg", "image/png"))
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(selectedUri?.lastPathSegment ?: "Choose PDF, JPEG, or PNG")
+            }
+            Text(
+                "Maximum file size: 5 MB. Documents are stored privately and reviewed manually.",
+                color = Color.LightGray,
+                fontSize = 11.sp
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(
+                    checked = consentGiven,
+                    onCheckedChange = { consentGiven = it }
+                )
+                Text(
+                    "I consent to private storage of this selected document and access by authorized administrators for manual review.",
+                    color = Color.LightGray,
+                    fontSize = 11.sp
+                )
+            }
+            NeoButton(
+                text = if (isUploading) "Uploading securely..." else "Submit for manual review",
+                enabled = consentGiven && selectedUri != null && !isUploading,
+                onClick = {
+                    val uri = selectedUri
+                    if (uri == null) {
+                        DialogController.showToast("Choose an identity document first.")
+                        return@NeoButton
+                    }
+                    if (isUploading) return@NeoButton
+                    isUploading = true
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            RiderRepository.submitCustomerKycDocument(context, uri, selectedDocumentType)
+                        }
+                        isUploading = false
+                        result.onSuccess { message ->
+                            DialogController.showToast(message)
+                            selectedUri = null
+                            RiderRepository.fetchCustomerKycStatus().onSuccess {
+                                reviewStatus = it.replace("_", " ")
+                            }
+                        }.onFailure { error ->
+                            DialogController.showToast(error.message ?: "Document upload failed.")
+                        }
+                    }
+                }
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text("Current review status: $reviewStatus", color = ElectricCyan, fontSize = 12.sp)
+            if (reviewStatus !in setOf("NOT SUBMITTED", "LOADING REVIEW STATUS...", "STATUS UNAVAILABLE")) {
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { showWithdrawConfirmation = true },
+                    enabled = !isWithdrawing,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isWithdrawing) "Removing documents..." else "Withdraw and delete submitted documents")
+                }
+            }
+        }
+    }
+
+    if (showWithdrawConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showWithdrawConfirmation = false },
+            title = { Text("Withdraw identity documents?") },
+            text = {
+                Text("This removes all submitted customer identity files from private storage and withdraws them from manual review.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showWithdrawConfirmation = false
+                        if (isWithdrawing) return@TextButton
+                        isWithdrawing = true
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                RiderRepository.withdrawCustomerKycDocuments()
+                            }
+                            isWithdrawing = false
+                            result.onSuccess { message ->
+                                DialogController.showToast(message)
+                                reviewStatus = "NOT SUBMITTED"
+                                selectedUri = null
+                            }.onFailure { error ->
+                                DialogController.showToast(error.message ?: "Unable to withdraw documents.")
+                            }
+                        }
+                    }
+                ) { Text("Withdraw", color = CrimsonRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWithdrawConfirmation = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
 // Screen 6: Passkey & Hardware Biometric Enrolment
 
 
@@ -696,7 +842,7 @@ fun AppLockScreenPreview() {
 @Composable
 fun CustomerKycScreenPreview() {
     RiderGoTheme {
-        CustomerKycScreen("",onNavigate = {})
+        CustomerKycScreen(onNavigate = {})
     }
 }
 

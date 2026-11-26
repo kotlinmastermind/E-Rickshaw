@@ -46,14 +46,14 @@ class OAuthPayload(BaseModel):
     identity_token: Optional[str] = None
     id_token: Optional[str] = None
     apple_user_id: Optional[str] = None
-    email: Optional[str] = "guest@erickshaw.in"
+    email: Optional[str] = None
     full_name: Optional[str] = None
     phone_number: Optional[str] = None
     role: str = "customer"
 
     @property
-    def token(self) -> str:
-        return self.identity_token or self.id_token or "simulated_token"
+    def token(self) -> Optional[str]:
+        return self.identity_token or self.id_token
 
 class PasskeyLoginPayload(BaseModel):
     credential_id: Optional[str] = None

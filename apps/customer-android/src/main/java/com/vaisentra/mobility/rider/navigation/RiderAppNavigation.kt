@@ -129,7 +129,8 @@ fun RiderAppNavigation() {
                 onNavigate = { navigateTo(it) }
             )
             "auth_reset" -> PasswordResetScreen { navigateTo(it) }
-            "auth_kyc" -> CustomerKycScreen(prefilledPhone = authPhone) { navigateTo(it) }
+            "auth_kyc" -> CustomerKycScreen { navigateTo(it) }
+            "customer_kyc_documents" -> CustomerKycDocumentsScreen { navigateTo(it) }
             "auth_biometric" -> BiometricEnrolScreen { navigateTo(it) }
 
             // Category 2: Radar & Booking

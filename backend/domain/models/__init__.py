@@ -232,4 +232,6 @@ __all__ = [
     "AudioRecordingAuditLog",
     "RefundLiability",
     "PaymentReconciliationAnomaly",
+    "CustomerKycDocument",
+    "CustomerKycAuditLog",
 ]

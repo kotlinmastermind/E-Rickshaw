@@ -269,9 +269,11 @@ class UserGovernanceService:
                 "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
                 "user": {"id": user.id, "email": user.email, "full_name": user.full_name, "role": user.role, "mfa_enabled": True}}
 
-    # Supported OAuth SSO (Google Sign-In removed per security/provider policy)
+    # OAuth SSO is deliberately fail-closed until Apple identity-token signature,
+    # issuer, audience, expiry, and subject are verified against Apple's JWKS.
+    # Never trust client-supplied email/role or create a session from an unverified JWT.
     async def oauth_login_or_register(
-        self, provider: str, identity_token: str, email: str, full_name: Optional[str] = None,
+        self, provider: str, identity_token: Optional[str], email: Optional[str], full_name: Optional[str] = None,
         phone_number: Optional[str] = None, role: str = "customer",
         ip_address: Optional[str] = None, user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -281,80 +283,23 @@ class UserGovernanceService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Google Sign-In is disabled. Use OTP or email/password authentication."
             )
+        if normalized_provider != "apple":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This OAuth provider is not supported."
+            )
+
         normalized_role = (role or "customer").lower().strip()
         if normalized_role in ("admin", "superadmin", "super administrator"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Administrator accounts cannot be self-registered via OAuth."
             )
-        if normalized_role not in ("customer", "driver"):
-            normalized_role = "customer"
 
-        email = email.strip().lower()
-        stmt = select(User).where(User.email == email)
-        res = await self.db.execute(stmt)
-        user = res.scalar_one_or_none()
-
-        if not user:
-            phone = phone_number.strip() if phone_number else f"+9199{secrets.token_hex(4)[:8]}"
-            user = User(
-                email=email,
-                phone_number=phone,
-                full_name=full_name or f"{provider.capitalize()} Guest",
-                role=normalized_role,
-                is_active=True,
-                is_verified=True,
-                email_verified=True
-            )
-            self.db.add(user)
-            await self.db.flush()
-
-            if normalized_role == "customer":
-                profile = CustomerProfile(user_id=user.id)
-                self.db.add(profile)
-            await self.db.flush()
-        else:
-            if (user.role or "").lower() in ("admin", "superadmin", "super administrator"):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Administrator accounts cannot sign in via OAuth. Use administrator password and MFA sign-in."
-                )
-            user.email_verified = True
-            if full_name and not user.full_name:
-                user.full_name = full_name
-
-        await self._ensure_user_preferences(user.id)
-
-        token_hash = hash_secret(f"{user.id}:{datetime.now(timezone.utc).isoformat()}:{generate_secure_otp(12)}")
-        session = Session(
-            user_id=user.id,
-            token_hash=token_hash,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            is_revoked=False,
-            expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Apple Sign-In is temporarily unavailable until Apple identity tokens can be cryptographically verified."
         )
-        self.db.add(session)
-        await self.db.commit()
-
-        access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="access")
-        refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session.id, token_type="refresh")
-
-        return {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            "provider": provider,
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "phone_number": user.phone_number,
-                "full_name": user.full_name,
-                "role": user.role,
-                "email_verified": user.email_verified
-            }
-        }
 
     # 4. Passkey sign-in & registration (SECURITY CONTAINMENT: Fail-Closed until cryptographic verification is upgraded)
     async def create_passkey_challenge(self, user_id: Optional[str] = None) -> Dict[str, Any]:
