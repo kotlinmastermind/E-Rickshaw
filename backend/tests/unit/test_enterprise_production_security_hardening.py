@@ -705,3 +705,61 @@ def test_deployment_configs_and_client_auth_wiring():
         root / "apps/customer-android/src/main/java/com/vaisentra/mobility/rider/data/RiderRepository.kt"
     ).read_text(encoding="utf-8")
     assert "authResponse.refreshToken" in customer_repo
+
+@pytest.mark.asyncio
+async def test_apple_oauth_fails_closed_without_creating_accounts_or_sessions(db_session, customer_user):
+    transport = ASGITransport(app=app)
+    original_email = customer_user.email
+
+    before_sessions = (
+        await db_session.execute(
+            select(Session).where(Session.user_id == customer_user.id)
+        )
+    ).scalars().all()
+    before_session_ids = {session.id for session in before_sessions}
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        forged_existing_account = await client.post(
+            "/api/v1/auth/oauth/apple",
+            json={
+                "identity_token": "not-a-signed-apple-token",
+                "email": original_email,
+                "role": "customer",
+            },
+        )
+        forged_new_account = await client.post(
+            "/api/v1/auth/oauth/apple",
+            json={
+                "email": f"forged_{uuid.uuid4().hex[:12]}@example.com",
+                "role": "driver",
+            },
+        )
+        admin_attempt = await client.post(
+            "/api/v1/auth/oauth/apple",
+            json={
+                "identity_token": "forged",
+                "email": f"admin_{uuid.uuid4().hex[:8]}@example.com",
+                "role": "admin",
+            },
+        )
+
+    assert forged_existing_account.status_code == 503
+    assert forged_new_account.status_code == 503
+    assert admin_attempt.status_code == 403
+
+    await db_session.refresh(customer_user)
+    assert customer_user.email == original_email
+    after_sessions = (
+        await db_session.execute(
+            select(Session).where(Session.user_id == customer_user.id)
+        )
+    ).scalars().all()
+    assert {session.id for session in after_sessions} == before_session_ids
+
+    forged_user = (
+        await db_session.execute(
+            select(User).where(User.email.like("forged_%@example.com"))
+        )
+    ).scalars().first()
+    assert forged_user is None
+
