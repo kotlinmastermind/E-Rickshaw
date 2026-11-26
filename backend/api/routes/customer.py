@@ -7,7 +7,8 @@ from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_customer
 from backend.api.routes.notifications import DeviceTokenDeactivatePayload, DeviceTokenPayload
 from backend.application.services.notification_service import NotificationService
-from backend.domain.models import User, CustomerProfile, Notification
+from backend.domain.models import User, CustomerProfile, Notification, CustomerKycDocument, CustomerKycAuditLog
+from backend.integrations.storage.customer_kyc import customer_kyc_storage
 from backend.infrastructure.security.rate_limiter import device_token_rate_limiter
 
 router = APIRouter(prefix="/customers", tags=["Customer Profiles"])
@@ -295,15 +296,45 @@ async def deactivate_customer_device_token(
 
 @router.delete("/account")
 async def delete_customer_account(
+    request: Request,
     user: User = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Google Play Compliance: Allows user to permanently delete account and anonymize personal data.
+    Google Play Compliance: anonymizes the account after securely purging uploaded customer KYC files.
+    If private storage cannot confirm deletion, the account deletion is not partially finalized.
     """
+    documents_result = await db.execute(
+        select(CustomerKycDocument).where(
+            CustomerKycDocument.user_id == user.id,
+            CustomerKycDocument.status != "WITHDRAWN",
+        )
+    )
+    documents = documents_result.scalars().all()
+    for document in documents:
+        await customer_kyc_storage.delete(document.storage_path)
+        document.status = "WITHDRAWN"
+        document.storage_path = f"purged://{document.id}"
+        document.mime_type = "application/octet-stream"
+        document.file_size_bytes = 0
+        document.sha256_hash = "0" * 64
+        document.review_notes = None
+        document.updated_at = datetime.now(timezone.utc)
+        db.add(
+            CustomerKycAuditLog(
+                document_id=document.id,
+                actor_id=user.id,
+                actor_role="CUSTOMER",
+                action="DOCUMENT_WITHDRAWN_ACCOUNT_DELETION",
+                metadata_json='{"reason":"ACCOUNT_DELETION"}',
+                ip_address=request.client.host if request.client else None,
+                user_agent=(request.headers.get("user-agent") or "")[:255] or None,
+            )
+        )
+
     user.is_active = False
     user.phone_number = f"deleted_{user.id[:8]}_{user.phone_number[-4:]}"
     if user.email:
         user.email = f"deleted_{user.id[:8]}@anonymized.local"
     await db.commit()
-    return {"message": "Account successfully deleted and personal data anonymized."}
+    return {"message": "Account successfully deactivated and personal data anonymized; customer KYC files purged."}
