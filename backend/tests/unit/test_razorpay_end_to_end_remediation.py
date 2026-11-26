@@ -1101,7 +1101,9 @@ async def test_notification_webhooks_diagnostic_sync_concurrent_refunds_and_dup_
 
         outcomes = [p1, p2]
         assert sum(1 for o in outcomes if o.get("status") == "PROCESSED") == 1
-        assert sum(1 for o in outcomes if o.get("error_status") == 400) == 1
+        # A concurrent request may observe the exhausted refund ceiling (400) or the
+        # active DB reservation lease (409); both are safe fail-closed outcomes.
+        assert sum(1 for o in outcomes if o.get("error_status") in {400, 409}) == 1
 
         # 4. Android checkout isolation check (no mutable global checkout state or placeholder keys)
         rider_repo_src = pathlib.Path("apps/customer-android/src/main/java/com/vaisentra/mobility/rider/data/RiderRepository.kt").read_text(encoding="utf-8")
