@@ -56,7 +56,7 @@ async def create_websocket_ticket(
         }
         # Tickets must be shared across workers and atomically expire in Redis.
         # Never fall back to process-local storage: another worker cannot redeem it.
-        await redis_client.set_json(f"ws_ticket:{ticket_uuid}", ticket_data, ex=30)
+        await redis_client.set_json_strict(f"ws_ticket:{ticket_uuid}", ticket_data, ex=30)
         return WebSocketTicketResponse(ticket=ticket_uuid, expires_in_seconds=30)
     except HTTPException:
         raise
@@ -103,12 +103,13 @@ async def validate_ws_credentials(token_str: str) -> Optional[Dict[str, Any]]:
     """
     if token_str.startswith("TICKET:"):
         ticket_id = token_str[7:]
-        ticket_data = await redis_client.get_json(f"ws_ticket:{ticket_id}")
-        if not ticket_data:
+        try:
+            # Atomic Redis GET+DEL prevents simultaneous replay and never accepts
+            # a process-local fallback ticket on a different worker.
+            return await redis_client.consume_json_strict(f"ws_ticket:{ticket_id}")
+        except Exception:
+            logger.exception("Unable to redeem WebSocket ticket from Redis.")
             return None
-        # Single-use redemption: delete immediately
-        await redis_client.delete(f"ws_ticket:{ticket_id}")
-        return ticket_data
 
     try:
         payload = decode_jwt_token(token_str)
