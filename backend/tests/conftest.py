@@ -1,13 +1,13 @@
 import os
 os.environ["TESTING"] = "1"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=shared&uri=true"
-os.environ["REDIS_URL"] = ""
+os.environ["REDIS_URL"] = os.getenv("REDIS_TEST_URL", "")
 
 from backend.core.config import settings
 settings.TESTING = True
 settings.DATABASE_URL = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=shared&uri=true"
 settings.DATABASE_URL_SYNC = "sqlite:///file:testdb?mode=memory&cache=shared&uri=true"
-settings.REDIS_URL = None
+settings.REDIS_URL = os.getenv("REDIS_TEST_URL") or None
 
 import pytest
 import pytest_asyncio
