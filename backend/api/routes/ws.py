@@ -14,7 +14,7 @@ from backend.core.config import settings
 from backend.infrastructure.security.crypto import decode_jwt_token
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.infrastructure.database.session import async_session_maker
-from backend.domain.models import User, DriverProfile, CustomerProfile, RideAssignment, Ride
+from backend.domain.models import User, Session, AdminUserRole, AdminRole, AdminRolePermission, AdminPermission, DriverProfile, CustomerProfile, RideAssignment, Ride
 from backend.api.deps import get_current_user, security_scheme
 
 logger = logging.getLogger("backend.ws")
@@ -41,37 +41,31 @@ async def create_websocket_ticket(
     Prevents reusable JWT bearer tokens from appearing in reverse proxy access logs,
     browser history, or APM request URLs.
     """
+    token = credentials.credentials
     try:
-        token = credentials.credentials
-        try:
-            payload = decode_jwt_token(token)
-            session_id = payload.get("session_id", "")
-        except Exception:
-            session_id = ""
-
+        payload = decode_jwt_token(token)
+        session_id = payload.get("session_id")
+        if not session_id:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="An active authenticated session is required.")
         ticket_uuid = str(uuid.uuid4())
         ticket_data = {
             "user_id": user.id,
             "session_id": session_id,
-            "role": user.role,
+            "role": str(user.role or "").strip().lower(),
             "created_at": datetime.now(timezone.utc).isoformat()
         }
+        # Tickets must be shared across workers and atomically expire in Redis.
+        # Never fall back to process-local storage: another worker cannot redeem it.
         await redis_client.set_json(f"ws_ticket:{ticket_uuid}", ticket_data, ex=30)
         return WebSocketTicketResponse(ticket=ticket_uuid, expires_in_seconds=30)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error creating websocket ticket for user {getattr(user, 'id', None)}: {e}", exc_info=True)
-        ticket_uuid = str(uuid.uuid4())
-        fallback_data = {
-            "user_id": getattr(user, "id", None),
-            "session_id": "",
-            "role": getattr(user, "role", "ADMIN"),
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        try:
-            await redis_client._fallback.set(f"ws_ticket:{ticket_uuid}", json.dumps(fallback_data), ex=30)
-        except Exception:
-            pass
-        return WebSocketTicketResponse(ticket=ticket_uuid, expires_in_seconds=30)
+        logger.error("Unable to create WebSocket ticket for user %s: %s", user.id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="WebSocket ticket service is temporarily unavailable."
+        )
 
 
 def extract_ws_token(websocket: WebSocket) -> Optional[str]:
@@ -859,12 +853,62 @@ async def admin_telemetry_websocket(
     role = str(payload.get("role") or "").lower()
     session_id = payload.get("session_id", "")
 
-    if role not in ("admin", "superadmin") or not user_id:
+    if role not in ("admin", "superadmin") or not user_id or not session_id:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    if session_id and (await redis_client.exists(f"revoked_session:{session_id}") or await redis_client.exists(f"revoked_user:{user_id}")):
+    if await redis_client.exists(f"revoked_session:{session_id}") or await redis_client.exists(f"revoked_user:{user_id}"):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    # A ticket is only a transport credential. Re-check the authoritative account,
+    # MFA-verified session, and admin.access assignment before accepting telemetry.
+    try:
+        async with async_session_maker() as db:
+            user = (await db.execute(
+                select(User).where(User.id == user_id, User.is_active.is_(True))
+            )).scalar_one_or_none()
+            session = (await db.execute(
+                select(Session).where(
+                    Session.id == session_id,
+                    Session.user_id == user_id,
+                    Session.is_revoked.is_(False),
+                    Session.mfa_verified.is_(True),
+                    Session.expires_at > datetime.now(timezone.utc)
+                )
+            )).scalar_one_or_none()
+            if not user or str(user.role or "").strip().lower() not in ("admin", "superadmin") or not user.mfa_enabled or not session:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+
+            assigned_role_ids = (await db.execute(
+                select(AdminUserRole.role_id).where(AdminUserRole.user_id == user_id)
+            )).scalars().all()
+            if not assigned_role_ids:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+
+            admin_roles = (await db.execute(
+                select(AdminRole).where(AdminRole.id.in_(assigned_role_ids))
+            )).scalars().all()
+            has_admin_access = any(role_row.is_superuser for role_row in admin_roles)
+            if not has_admin_access:
+                permission = (await db.execute(
+                    select(AdminPermission.id)
+                    .join(AdminRolePermission, AdminRolePermission.permission_id == AdminPermission.id)
+                    .where(
+                        AdminRolePermission.role_id.in_(assigned_role_ids),
+                        AdminPermission.permission_key == "admin.access"
+                    )
+                    .limit(1)
+                )).first()
+                has_admin_access = permission is not None
+            if not has_admin_access:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+    except Exception:
+        logger.exception("Admin telemetry WebSocket authorization lookup failed.")
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         return
 
     await ws_manager.connect_admin(websocket)
