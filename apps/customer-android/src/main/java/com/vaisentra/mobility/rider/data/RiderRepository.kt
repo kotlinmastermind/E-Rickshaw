@@ -1382,6 +1382,21 @@ object RiderRepository {
         }
     }
 
+    suspend fun withdrawCustomerKycDocuments(): Result<String> {
+        return try {
+            val response = NetworkClient.apiService.withdrawCustomerKycDocuments()
+            if (response.isSuccessful) {
+                Result.success(response.body()?.get("message")?.toString() ?: "Submitted identity documents withdrawn.")
+            } else {
+                Result.failure(Exception(parseApiErrorMessage(response.errorBody()?.string(), "Unable to withdraw identity documents.")))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun resetForgotPassword(recoveryCode: String, newPassword: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.resetForgotPassword(
