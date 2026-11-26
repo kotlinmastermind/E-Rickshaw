@@ -34,7 +34,7 @@ async def test_customer_kyc_requires_authenticated_owner_and_ignores_submitted_p
         headers={"Authorization": f"Bearer {customer_token}"},
     )
     assert authenticated.status_code == 200, authenticated.text
-    assert authenticated.json()["user_id"] == customer_user.id
+    assert authenticated.json()["id"] == customer_user.id
     assert "not been submitted or verified" in authenticated.json()["message"].lower()
 
     await db_session.refresh(customer_user)
