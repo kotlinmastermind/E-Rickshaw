@@ -842,11 +842,13 @@ async def admin_telemetry_websocket(
 ):
     raw_token = extract_ws_token(websocket)
     if not raw_token:
+        logger.warning("Admin telemetry WebSocket rejected: reason=missing_credentials")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     payload = await validate_ws_credentials(raw_token)
     if not payload:
+        logger.warning("Admin telemetry WebSocket rejected: reason=invalid_or_expired_ticket")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -855,10 +857,12 @@ async def admin_telemetry_websocket(
     session_id = payload.get("session_id", "")
 
     if role not in ("admin", "superadmin") or not user_id or not session_id:
+        logger.warning("Admin telemetry WebSocket rejected: reason=invalid_role_or_missing_identity_or_session")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     if await redis_client.exists(f"revoked_session:{session_id}") or await redis_client.exists(f"revoked_user:{user_id}"):
+        logger.warning("Admin telemetry WebSocket rejected: reason=revoked_session_or_user")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -879,6 +883,7 @@ async def admin_telemetry_websocket(
                 )
             )).scalar_one_or_none()
             if not user or str(user.role or "").strip().lower() not in ("admin", "superadmin") or not user.mfa_enabled or not session:
+                logger.warning("Admin telemetry WebSocket rejected: reason=inactive_admin_or_mfa_or_session_validation_failed")
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
 
@@ -886,6 +891,7 @@ async def admin_telemetry_websocket(
                 select(AdminUserRole.role_id).where(AdminUserRole.user_id == user_id)
             )).scalars().all()
             if not assigned_role_ids:
+                logger.warning("Admin telemetry WebSocket rejected: reason=no_admin_role_assignment")
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
 
@@ -905,6 +911,7 @@ async def admin_telemetry_websocket(
                 )).first()
                 has_admin_access = permission is not None
             if not has_admin_access:
+                logger.warning("Admin telemetry WebSocket rejected: reason=admin_access_permission_missing")
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
     except Exception:

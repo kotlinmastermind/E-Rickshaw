@@ -3462,6 +3462,8 @@
         // single-use ticket over the authenticated HTTPS API before every connection.
         let _adminWsConnecting = false;
         let _adminWsReconnectTimer = null;
+        let _adminWsReconnectAttempts = 0;
+        const _adminWsMaxReconnectAttempts = 3;
         async function initWebSocket() {
             if (!STATE.adminToken || _adminWsConnecting) return;
             if (STATE.ws && (STATE.ws.readyState === WebSocket.CONNECTING || STATE.ws.readyState === WebSocket.OPEN)) return;
@@ -3495,6 +3497,8 @@
 
                 socket.onopen = () => {
                     if (STATE.ws !== socket) return;
+                    // Reset the retry budget only after a successful authenticated handshake.
+                    _adminWsReconnectAttempts = 0;
                     document.getElementById('connection-label').innerText = 'LIVE WS (SUPABASE AWS)';
                     document.getElementById('connection-status-pill').className = 'flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-dim border border-emerald-glow/30 text-xs text-emerald-glow font-mono';
                 };
@@ -3509,17 +3513,27 @@
 
                 socket.onclose = (event) => {
                     if (STATE.ws === socket) STATE.ws = null;
-                    // 1008 is an authorization/policy rejection; do not retry in a loop.
+                    // A server-side rejection before WebSocket upgrade is exposed by browsers
+                    // as close code 1006 (the HTTP 403 response is not available to JS).
                     if (event.code === 1008) {
+                        _adminWsReconnectAttempts = _adminWsMaxReconnectAttempts;
                         openAdminLoginModal();
                         return;
                     }
-                    if (STATE.adminToken && !_adminWsReconnectTimer) {
-                        _adminWsReconnectTimer = setTimeout(() => {
-                            _adminWsReconnectTimer = null;
-                            initWebSocket();
-                        }, 5000);
+                    if (!STATE.adminToken || _adminWsReconnectTimer) return;
+
+                    _adminWsReconnectAttempts += 1;
+                    if (_adminWsReconnectAttempts >= _adminWsMaxReconnectAttempts) {
+                        console.warn('Admin WebSocket could not authenticate/connect after bounded retries; stopping reconnects.');
+                        openAdminLoginModal();
+                        return;
                     }
+
+                    const retryDelayMs = 5000 * _adminWsReconnectAttempts;
+                    _adminWsReconnectTimer = setTimeout(() => {
+                        _adminWsReconnectTimer = null;
+                        initWebSocket();
+                    }, retryDelayMs);
                 };
 
                 socket.onerror = () => {
