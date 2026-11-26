@@ -22,7 +22,7 @@ from backend.core.config import settings
 from backend.infrastructure.database.session import async_session_maker
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.infrastructure.security.crypto import create_jwt_token, hash_secret
-from backend.domain.models.models import User, Session, DriverProfile
+from backend.domain.models.models import User, Session, DriverProfile, AdminRole, AdminUserRole
 from backend.application.services.auth_service import AuthService
 from backend.infrastructure.security.lockout import (
     check_account_lockout,
@@ -102,16 +102,21 @@ async def test_ws_ticket_auth_success():
             phone_number=f"+9177{uid[:8]}",
             full_name="WS Admin Test",
             role="admin",
-            is_active=True
+            is_active=True,
+            mfa_enabled=True
         )
         session = Session(
             id=sid,
             user_id=uid,
             token_hash=hash_secret("sample_refresh_admin"),
             is_revoked=False,
+            mfa_verified=True,
             expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
-        db.add_all([user, session])
+        admin_role = AdminRole(name=f"ws_admin_superuser_{uid[:8]}", is_superuser=True)
+        db.add_all([user, session, admin_role])
+        await db.flush()
+        db.add(AdminUserRole(user_id=uid, role_id=admin_role.id))
         await db.commit()
 
     token = create_jwt_token(user_id=uid, role="admin", session_id=sid, expires_delta=timedelta(hours=1))
@@ -144,16 +149,21 @@ async def test_ws_ticket_single_use_replay_rejected():
             phone_number=f"+9166{uid[:8]}",
             full_name="WS Replay Test",
             role="admin",
-            is_active=True
+            is_active=True,
+            mfa_enabled=True
         )
         session = Session(
             id=sid,
             user_id=uid,
             token_hash=hash_secret("sample_refresh_replay"),
             is_revoked=False,
+            mfa_verified=True,
             expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
-        db.add_all([user, session])
+        admin_role = AdminRole(name=f"ws_admin_superuser_{uid[:8]}", is_superuser=True)
+        db.add_all([user, session, admin_role])
+        await db.flush()
+        db.add(AdminUserRole(user_id=uid, role_id=admin_role.id))
         await db.commit()
 
     token = create_jwt_token(user_id=uid, role="admin", session_id=sid, expires_delta=timedelta(hours=1))
