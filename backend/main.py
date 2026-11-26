@@ -17,7 +17,7 @@ from backend.domain.models.extended_models import AdministrativeAuditLog
 from backend.infrastructure.security.crypto import hash_password, validate_password_strength
 from backend.domain.state_machine.ride_state_machine import RideTransitionError
 from backend.api.routes import (
-    auth, customer, driver, vehicles, location,
+    auth, customer, customer_kyc, driver, vehicles, location,
     fares, rides, payments, admin, ws, health,
     wallets, promos, support, chat, favorites, pools, user_governance,
     safety, loyalty_feedback, driver_onboarding, driver_safety, driver_financials,
@@ -299,6 +299,7 @@ async def ride_transition_exception_handler(request: Request, exc: RideTransitio
 app.include_router(health.router)
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(customer.router, prefix=settings.API_V1_STR)
+app.include_router(customer_kyc.router, prefix=settings.API_V1_STR)
 app.include_router(driver.router, prefix=settings.API_V1_STR)
 app.include_router(vehicles.router, prefix=settings.API_V1_STR)
 app.include_router(location.router, prefix=settings.API_V1_STR)
