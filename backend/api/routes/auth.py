@@ -51,10 +51,10 @@ class AvatarUpdatePayload(BaseModel):
 
 
 class CustomerKycUpdatePayload(BaseModel):
-    phone_number: Optional[str] = None
+    # Profile completion intentionally accepts no government-ID or phone-number fields.
+    # OTP-verified phone ownership is authoritative; identity verification is a separate workflow.
     full_name: str = Field(..., min_length=2)
     email: Optional[str] = None
-    govt_id_number: Optional[str] = None
 
 @router.post("/kyc/customer")
 @router.put("/kyc/customer")
@@ -87,7 +87,7 @@ async def update_customer_kyc(
 
     await db.commit()
     return {
-        "message": "Customer profile and KYC saved successfully.",
+        "message": "Customer profile saved. Government identity has not been submitted or verified.",
         "user_id": current_user.id,
         "full_name": current_user.full_name,
         "email": current_user.email,
