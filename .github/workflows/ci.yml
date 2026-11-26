@@ -125,7 +125,7 @@ jobs:
           POSTGRES_TEST_DATABASE_URL: "postgresql+asyncpg://erickshaw_test:erickshaw_test_password@127.0.0.1:5432/erickshaw_test_db"
           TEST_POSTGRES_URL: "postgresql+asyncpg://erickshaw_test:erickshaw_test_password@127.0.0.1:5432/erickshaw_test_db"
         run: |
-          pytest backend/tests/integration/test_postgres_financial_concurrency.py -rs -v --tb=short
+          pytest backend/tests/integration/test_postgres_financial_concurrency.py -rs -v --tb=short --timeout=180 --timeout-method=thread -o faulthandler_timeout=120 --durations=30
 
       - name: Run real Redis distributed-lock integration tests
         env:
@@ -133,7 +133,7 @@ jobs:
           ENVIRONMENT: "test"
           REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
         run: |
-          pytest backend/tests/integration/test_redis_distributed_lock.py -rs -v --tb=short
+          pytest backend/tests/integration/test_redis_distributed_lock.py -rs -v --tb=short --timeout=180 --timeout-method=thread -o faulthandler_timeout=120 --durations=30
 
       - name: Run full backend pytest suite
         env:
