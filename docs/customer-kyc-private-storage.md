@@ -28,3 +28,4 @@ The existing generic `SUPABASE_KEY` is deliberately not reused for customer iden
 - The current manual-review allowlist is PAN Card, Driving Licence, Passport, and Voter ID. Aadhaar is not accepted by this customer upload flow.
 - Document approval is a manual document-review outcome only. It does not set `users.is_verified` or claim government-source verification.
 - Do not enable customer document submission in production until the private bucket and backend service-role environment variable have been configured and verified.
+- This first release performs manual document review only; it does not run OCR, government-source verification, or antivirus/malware scanning. Add malware scanning and approve a formal retention schedule before treating the workflow as production-complete.
