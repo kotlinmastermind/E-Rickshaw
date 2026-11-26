@@ -44,6 +44,16 @@ interface RiderApiService {
     @POST("api/v1/auth/kyc/customer")
     suspend fun registerProfile(@Body request: RegisterCustomerRequest): Response<UserProfileDto>
 
+    @GET("api/v1/customers/kyc")
+    suspend fun getCustomerKycStatus(): Response<Map<String, Any>>
+
+    @Multipart
+    @POST("api/v1/customers/kyc/documents")
+    suspend fun submitCustomerKycDocument(
+        @Part("document_type") documentType: okhttp3.RequestBody,
+        @Part file: okhttp3.MultipartBody.Part
+    ): Response<Map<String, Any>>
+
     @GET("api/v1/customers/profile")
     suspend fun getProfile(): Response<UserProfileDto>
 
