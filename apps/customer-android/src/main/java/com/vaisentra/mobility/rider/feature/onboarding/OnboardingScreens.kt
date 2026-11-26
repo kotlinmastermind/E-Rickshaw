@@ -674,7 +674,7 @@ fun AppLockScreenPreview() {
 @Composable
 fun CustomerKycScreenPreview() {
     RiderGoTheme {
-        CustomerKycScreen("",onNavigate = {})
+        CustomerKycScreen(onNavigate = {})
     }
 }
 
