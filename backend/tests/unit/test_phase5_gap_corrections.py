@@ -121,20 +121,21 @@ async def test_ws_ticket_auth_success():
 
     token = create_jwt_token(user_id=uid, role="admin", session_id=sid, expires_delta=timedelta(hours=1))
 
-    # Obtain ticket via POST /api/v1/ws/ticket
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as aclient:
-        ticket_res = await aclient.post("/api/v1/ws/ticket", headers={"Authorization": f"Bearer {token}"})
+    # Keep the ticket HTTP request and WebSocket upgrade on the same
+    # TestClient portal/event loop. Mixing AsyncClient's pytest loop with
+    # TestClient's separate portal loop reuses a loop-bound Redis pool.
+    with TestClient(app) as client:
+        ticket_res = client.post(
+            "/api/v1/ws/ticket",
+            headers={"Authorization": f"Bearer {token}"}
+        )
         assert ticket_res.status_code == 200
         ticket = ticket_res.json()["ticket"]
 
-    # Connect to admin telemetry via ?ticket=
-    client = TestClient(app)
-    with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
-        # Connection succeeds
-        ws.send_text("ping")
-        resp = ws.receive_text()
-        assert resp == "pong"
+        # Connect to admin telemetry via the single-use ticket.
+        with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
+            ws.send_text("ping")
+            assert ws.receive_text() == "pong"
 
 
 @pytest.mark.asyncio
@@ -168,21 +169,26 @@ async def test_ws_ticket_single_use_replay_rejected():
 
     token = create_jwt_token(user_id=uid, role="admin", session_id=sid, expires_delta=timedelta(hours=1))
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as aclient:
-        ticket_res = await aclient.post("/api/v1/ws/ticket", headers={"Authorization": f"Bearer {token}"})
+    # Ticket issuance and both WebSocket attempts must share one TestClient
+    # portal/event loop so the Redis async connection pool is not crossed
+    # between pytest's loop and Starlette's WebSocket test loop.
+    with TestClient(app) as client:
+        ticket_res = client.post(
+            "/api/v1/ws/ticket",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert ticket_res.status_code == 200
         ticket = ticket_res.json()["ticket"]
 
-    client = TestClient(app)
-    # First connection consumes the ticket
-    with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
-        pass
-
-    # Second connection using same ticket MUST be rejected
-    with pytest.raises(WebSocketDisconnect) as exc:
+        # First connection consumes the ticket.
         with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
             pass
-    assert exc.value.code == 1008
+
+        # Second connection using same ticket MUST be rejected.
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
+                pass
+        assert exc.value.code == 1008
 
 
 @pytest.mark.asyncio
