@@ -3507,8 +3507,13 @@
                     } catch (e) { }
                 };
 
-                socket.onclose = () => {
+                socket.onclose = (event) => {
                     if (STATE.ws === socket) STATE.ws = null;
+                    // 1008 is an authorization/policy rejection; do not retry in a loop.
+                    if (event.code === 1008) {
+                        openAdminLoginModal();
+                        return;
+                    }
                     if (STATE.adminToken && !_adminWsReconnectTimer) {
                         _adminWsReconnectTimer = setTimeout(() => {
                             _adminWsReconnectTimer = null;
