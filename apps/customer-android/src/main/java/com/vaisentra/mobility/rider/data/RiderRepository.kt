@@ -1345,6 +1345,7 @@ object RiderRepository {
                 return Result.failure(IllegalArgumentException("Select a supported identity document type."))
             }
             val mimeType = context.contentResolver.getType(uri)
+                ?: return Result.failure(IllegalArgumentException("The selected file type could not be determined."))
             if (mimeType !in setOf("application/pdf", "image/jpeg", "image/png")) {
                 return Result.failure(IllegalArgumentException("Choose a PDF, JPEG, or PNG document."))
             }
