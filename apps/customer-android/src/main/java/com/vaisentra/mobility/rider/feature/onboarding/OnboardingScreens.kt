@@ -413,7 +413,7 @@ fun CustomerKycScreen(
                 }
             )
             TextButton(onClick = { onNavigate("customer_kyc_documents") }) {
-                Text("Submit identity document (optional)", color = CyanGlow)
+                Text("Submit identity document (optional)", color = ElectricCyan)
             }
         }
     }
@@ -515,7 +515,7 @@ fun CustomerKycDocumentsScreen(onNavigate: (String) -> Unit) {
                 }
             )
             Spacer(modifier = Modifier.height(10.dp))
-            Text("Current review status: $reviewStatus", color = CyanGlow, fontSize = 12.sp)
+            Text("Current review status: $reviewStatus", color = ElectricCyan, fontSize = 12.sp)
         }
     }
 }
