@@ -144,10 +144,10 @@ jobs:
           REDIS_TEST_URL: "redis://127.0.0.1:6379/15"
           PYTHONFAULTHANDLER: "1"
         run: |
-          pytest backend/tests -rs -v --tb=short \\
-            --timeout=180 \\
-            --timeout-method=thread \\
-            -o faulthandler_timeout=120 \\
+          pytest backend/tests -rs -v --tb=short \
+            --timeout=180 \
+            --timeout-method=thread \
+            -o faulthandler_timeout=120 \
             --durations=30
 
   android-build-and-unit-tests:
