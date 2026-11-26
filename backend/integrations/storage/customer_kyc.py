@@ -5,7 +5,7 @@ driver-document flows. Only a verified private Supabase Storage bucket is accept
 """
 from __future__ import annotations
 
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException, status
@@ -127,9 +127,11 @@ class CustomerKycStorage:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Customer KYC signed URL was not returned by storage.",
             )
-        return signed_url if signed_url.startswith("http://") or signed_url.startswith("https://") else urljoin(
-            f"{self.base_url}/storage/v1/", signed_url.lstrip("/")
-        )
+        if signed_url.startswith("http://") or signed_url.startswith("https://"):
+            return signed_url
+        if signed_url.startswith("/storage/v1/"):
+            return f"{self.base_url}{signed_url}"
+        return f"{self.base_url}/storage/v1/{signed_url.lstrip("/")}"
 
     async def delete(self, storage_path: str) -> None:
         prefix = f"private://{self.bucket}/"
