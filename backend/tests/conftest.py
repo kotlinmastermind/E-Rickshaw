@@ -1,13 +1,13 @@
 import os
 os.environ["TESTING"] = "1"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=shared&uri=true"
-os.environ["REDIS_URL"] = ""
+os.environ["REDIS_URL"] = os.getenv("REDIS_TEST_URL", "")
 
 from backend.core.config import settings
 settings.TESTING = True
 settings.DATABASE_URL = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=shared&uri=true"
 settings.DATABASE_URL_SYNC = "sqlite:///file:testdb?mode=memory&cache=shared&uri=true"
-settings.REDIS_URL = None
+settings.REDIS_URL = os.getenv("REDIS_TEST_URL") or None
 
 import pytest
 import pytest_asyncio
@@ -71,9 +71,34 @@ async def db_session():
 @pytest_asyncio.fixture(scope="function", loop_scope="function", autouse=True)
 async def flush_cache_isolation():
     from backend.infrastructure.cache.redis_client import redis_client
-    await redis_client.flushdb()
+
+    async def clear_cache_without_binding_async_redis():
+        # Do not call redis_client.flushdb() here: that initializes the
+        # global redis.asyncio pool on pytest's loop. WebSocket TestClient
+        # runs its ASGI app on a different portal loop and must create/use
+        # its own async Redis client there.
+        redis_client._redis = None
+        redis_client.is_connected = False
+        redis_client._last_reconnect_attempt = 0.0
+        redis_client._reconnect_backoff = 1.0
+
+        if redis_client.redis_url:
+            import redis as sync_redis
+            client = sync_redis.Redis.from_url(
+                redis_client.redis_url,
+                encoding="utf-8",
+                decode_responses=True
+            )
+            try:
+                client.flushdb()
+            finally:
+                client.close()
+        else:
+            await redis_client._fallback.clear()
+
+    await clear_cache_without_binding_async_redis()
     yield
-    await redis_client.flushdb()
+    await clear_cache_without_binding_async_redis()
 
 @pytest_asyncio.fixture(scope="function", loop_scope="function")
 async def client():

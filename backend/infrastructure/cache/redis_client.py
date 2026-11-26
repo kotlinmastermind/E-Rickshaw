@@ -376,6 +376,32 @@ class RedisManager:
     async def set_json(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
         return await self.set(key, json.dumps(value), ex=ex)
 
+    async def set_json_strict(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
+        """Store JSON in Redis only; fail closed instead of using process-local memory."""
+        client = await self._get_redis()
+        if client is None:
+            raise ConnectionError("Redis is required for this distributed operation.")
+        self.stats.record_set()
+        stored = await client.set(key, json.dumps(value), ex=ex)
+        if not stored:
+            raise RuntimeError("Redis did not confirm the ticket write.")
+        return True
+
+    async def consume_json_strict(self, key: str) -> Optional[Any]:
+        """Atomically GET-and-delete JSON from Redis; tickets cannot be replayed."""
+        client = await self._get_redis()
+        if client is None:
+            raise ConnectionError("Redis is required for this distributed operation.")
+        raw = await client.eval(
+            "local value = redis.call('GET', KEYS[1]); "
+            "if value then redis.call('DEL', KEYS[1]); end; return value",
+            1,
+            key
+        )
+        if raw is None:
+            return None
+        return json.loads(raw)
+
     async def delete(self, key: str) -> bool:
         client = await self._get_redis()
         try:

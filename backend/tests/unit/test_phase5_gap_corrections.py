@@ -22,7 +22,7 @@ from backend.core.config import settings
 from backend.infrastructure.database.session import async_session_maker
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.infrastructure.security.crypto import create_jwt_token, hash_secret
-from backend.domain.models.models import User, Session, DriverProfile
+from backend.domain.models.models import User, Session, DriverProfile, AdminRole, AdminUserRole
 from backend.application.services.auth_service import AuthService
 from backend.infrastructure.security.lockout import (
     check_account_lockout,
@@ -102,34 +102,40 @@ async def test_ws_ticket_auth_success():
             phone_number=f"+9177{uid[:8]}",
             full_name="WS Admin Test",
             role="admin",
-            is_active=True
+            is_active=True,
+            mfa_enabled=True
         )
         session = Session(
             id=sid,
             user_id=uid,
             token_hash=hash_secret("sample_refresh_admin"),
             is_revoked=False,
+            mfa_verified=True,
             expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
-        db.add_all([user, session])
+        admin_role = AdminRole(name=f"ws_admin_superuser_{uid[:8]}", is_superuser=True)
+        db.add_all([user, session, admin_role])
+        await db.flush()
+        db.add(AdminUserRole(user_id=uid, role_id=admin_role.id))
         await db.commit()
 
     token = create_jwt_token(user_id=uid, role="admin", session_id=sid, expires_delta=timedelta(hours=1))
 
-    # Obtain ticket via POST /api/v1/ws/ticket
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as aclient:
-        ticket_res = await aclient.post("/api/v1/ws/ticket", headers={"Authorization": f"Bearer {token}"})
+    # Keep the ticket HTTP request and WebSocket upgrade on the same
+    # TestClient portal/event loop. Mixing AsyncClient's pytest loop with
+    # TestClient's separate portal loop reuses a loop-bound Redis pool.
+    with TestClient(app) as client:
+        ticket_res = client.post(
+            "/api/v1/ws/ticket",
+            headers={"Authorization": f"Bearer {token}"}
+        )
         assert ticket_res.status_code == 200
         ticket = ticket_res.json()["ticket"]
 
-    # Connect to admin telemetry via ?ticket=
-    client = TestClient(app)
-    with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
-        # Connection succeeds
-        ws.send_text("ping")
-        resp = ws.receive_text()
-        assert resp == "pong"
+        # Connect to admin telemetry via the single-use ticket.
+        with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
+            ws.send_text("ping")
+            assert ws.receive_text() == "pong"
 
 
 @pytest.mark.asyncio
@@ -144,35 +150,86 @@ async def test_ws_ticket_single_use_replay_rejected():
             phone_number=f"+9166{uid[:8]}",
             full_name="WS Replay Test",
             role="admin",
-            is_active=True
+            is_active=True,
+            mfa_enabled=True
         )
         session = Session(
             id=sid,
             user_id=uid,
             token_hash=hash_secret("sample_refresh_replay"),
             is_revoked=False,
+            mfa_verified=True,
             expires_at=datetime.now(timezone.utc) + timedelta(days=7)
         )
-        db.add_all([user, session])
+        admin_role = AdminRole(name=f"ws_admin_superuser_{uid[:8]}", is_superuser=True)
+        db.add_all([user, session, admin_role])
+        await db.flush()
+        db.add(AdminUserRole(user_id=uid, role_id=admin_role.id))
         await db.commit()
 
     token = create_jwt_token(user_id=uid, role="admin", session_id=sid, expires_delta=timedelta(hours=1))
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as aclient:
-        ticket_res = await aclient.post("/api/v1/ws/ticket", headers={"Authorization": f"Bearer {token}"})
+    # Ticket issuance and both WebSocket attempts must share one TestClient
+    # portal/event loop so the Redis async connection pool is not crossed
+    # between pytest's loop and Starlette's WebSocket test loop.
+    with TestClient(app) as client:
+        ticket_res = client.post(
+            "/api/v1/ws/ticket",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert ticket_res.status_code == 200
         ticket = ticket_res.json()["ticket"]
 
-    client = TestClient(app)
-    # First connection consumes the ticket
-    with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
-        pass
-
-    # Second connection using same ticket MUST be rejected
-    with pytest.raises(WebSocketDisconnect) as exc:
+        # First connection consumes the ticket.
         with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
             pass
-    assert exc.value.code == 1008
+
+        # Second connection using same ticket MUST be rejected.
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}") as ws:
+                pass
+        assert exc.value.code == 1008
+
+
+@pytest.mark.asyncio
+async def test_ws_admin_telemetry_rejects_admin_without_mfa_or_role_assignment():
+    """A role claim alone must not authorize the protected admin telemetry stream."""
+    uid = str(uuid.uuid4())
+    sid = str(uuid.uuid4())
+    async with async_session_maker() as db:
+        user = User(
+            id=uid,
+            email=f"ws_unassigned_{uid[:8]}@vaisentra.com",
+            phone_number=f"+9199{uid[:8]}",
+            full_name="Unassigned Admin Test",
+            role="admin",
+            is_active=True,
+            mfa_enabled=False
+        )
+        session = Session(
+            id=sid,
+            user_id=uid,
+            token_hash=hash_secret("sample_refresh_unassigned"),
+            is_revoked=False,
+            mfa_verified=False,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1)
+        )
+        db.add_all([user, session])
+        await db.commit()
+
+    ticket = str(uuid.uuid4())
+    with TestClient(app) as client:
+        # Seed Redis on the same portal loop used by the WebSocket handshake.
+        client.portal.call(
+            redis_client.set_json_strict,
+            f"ws_ticket:{ticket}",
+            {"user_id": uid, "session_id": sid, "role": "admin"},
+            30
+        )
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}"):
+                pass
+        assert exc.value.code == 1008
 
 
 @pytest.mark.asyncio
@@ -211,8 +268,25 @@ async def test_ws_session_revocation_enforced():
         db.add_all([user, profile, session])
         await db.commit()
 
-    await redis_client.set(f"revoked_session:{sid}", "true", ex=300)
     token = create_jwt_token(user_id=uid, role="driver", session_id=sid, expires_delta=timedelta(hours=1))
+
+    # This endpoint does not require application startup. Avoid entering the
+    # full FastAPI lifespan here: its unrelated background workers share the
+    # test SQLite engine and can block TestClient shutdown across event loops.
+    # Seed Redis synchronously so the WebSocket portal can read the marker.
+    if redis_client.redis_url:
+        import redis as sync_redis
+        cache = sync_redis.Redis.from_url(
+            redis_client.redis_url,
+            encoding="utf-8",
+            decode_responses=True
+        )
+        try:
+            cache.set(f"revoked_session:{sid}", "true", ex=300)
+        finally:
+            cache.close()
+    else:
+        await redis_client.set(f"revoked_session:{sid}", "true", ex=300)
 
     client = TestClient(app)
     with pytest.raises(WebSocketDisconnect) as exc:

@@ -2296,7 +2296,7 @@
             updateAdminProfileBadge();
             initLeafletMap();
             loadInitialData();
-            initWebSocket();
+            // WebSocket starts only after an authenticated admin session is available.
             // Regular sync heartbeat every 5 seconds
             setInterval(syncHeartbeat, 5000);
         });
@@ -2405,6 +2405,16 @@
 
         async function logoutAdmin() {
             const token = STATE.adminToken;
+            if (_adminWsReconnectTimer) {
+                clearTimeout(_adminWsReconnectTimer);
+                _adminWsReconnectTimer = null;
+            }
+            if (STATE.ws) {
+                const activeSocket = STATE.ws;
+                STATE.ws = null;
+                activeSocket.onclose = null;
+                activeSocket.close(1000, 'Administrator signed out');
+            }
             clearAdminSessionState();
             if (token) {
                 try {
@@ -2861,6 +2871,9 @@
                     return;
                 }
             }
+
+            // Start real-time telemetry only after the admin session has been restored.
+            initWebSocket();
 
             // 2. Fetch Live Real-Time Mobility Feed from Supabase via FastAPI
             try {
@@ -3445,36 +3458,77 @@
             }
         }
 
-        // WebSocket Stream Initialization (/api/v1/ws/admin/telemetry)
-        function initWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/admin/telemetry`;
+        // Browser WebSockets cannot set Authorization headers. Obtain a short-lived,
+        // single-use ticket over the authenticated HTTPS API before every connection.
+        let _adminWsConnecting = false;
+        let _adminWsReconnectTimer = null;
+        async function initWebSocket() {
+            if (!STATE.adminToken || _adminWsConnecting) return;
+            if (STATE.ws && (STATE.ws.readyState === WebSocket.CONNECTING || STATE.ws.readyState === WebSocket.OPEN)) return;
 
+            _adminWsConnecting = true;
             try {
-                STATE.ws = new WebSocket(wsUrl);
+                const requestTicket = () => _nativeFetch('/api/v1/ws/ticket', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${STATE.adminToken}` }
+                });
+                let ticketRes = await requestTicket();
+                if (ticketRes.status === 401 && STATE.adminRefreshToken && await refreshAdminSession()) {
+                    ticketRes = await requestTicket();
+                }
+                if (!ticketRes.ok) {
+                    if (ticketRes.status === 401 || ticketRes.status === 403) {
+                        openAdminLoginModal();
+                    } else {
+                        console.warn('Admin WebSocket ticket unavailable; polling remains active.');
+                    }
+                    return;
+                }
 
-                STATE.ws.onopen = () => {
+                const ticketData = await ticketRes.json();
+                if (!ticketData.ticket || !STATE.adminToken) return;
+
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/admin/telemetry?ticket=${encodeURIComponent(ticketData.ticket)}`;
+                const socket = new WebSocket(wsUrl);
+                STATE.ws = socket;
+
+                socket.onopen = () => {
+                    if (STATE.ws !== socket) return;
                     document.getElementById('connection-label').innerText = 'LIVE WS (SUPABASE AWS)';
                     document.getElementById('connection-status-pill').className = 'flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-dim border border-emerald-glow/30 text-xs text-emerald-glow font-mono';
                 };
 
-                STATE.ws.onmessage = (event) => {
+                socket.onmessage = (event) => {
+                    if (STATE.ws !== socket) return;
                     try {
                         const payload = JSON.parse(event.data);
                         handleLiveWsTelemetry(payload);
                     } catch (e) { }
                 };
 
-                STATE.ws.onclose = () => {
-                    // Reconnect smoothly after 5s
-                    setTimeout(initWebSocket, 5000);
+                socket.onclose = (event) => {
+                    if (STATE.ws === socket) STATE.ws = null;
+                    // 1008 is an authorization/policy rejection; do not retry in a loop.
+                    if (event.code === 1008) {
+                        openAdminLoginModal();
+                        return;
+                    }
+                    if (STATE.adminToken && !_adminWsReconnectTimer) {
+                        _adminWsReconnectTimer = setTimeout(() => {
+                            _adminWsReconnectTimer = null;
+                            initWebSocket();
+                        }, 5000);
+                    }
                 };
 
-                STATE.ws.onerror = () => {
-                    // Fallback seamlessly to polling heartbeat
+                socket.onerror = () => {
+                    // Authenticated HTTP polling remains the fallback.
                 };
             } catch (e) {
-                console.log('WebSocket polling fallback active.');
+                console.warn('Admin WebSocket connection unavailable; polling remains active.', e);
+            } finally {
+                _adminWsConnecting = false;
             }
         }
 
@@ -3493,6 +3547,9 @@
         // Heartbeat Periodic Sync
         let heartbeatCounter = 0;
         async function syncHeartbeat() {
+            // Do not generate unauthenticated live-feed requests while the login
+            // modal is active or the administrator session has expired.
+            if (!STATE.adminToken) return;
             heartbeatCounter++;
             if (heartbeatCounter % 3 === 0) {
                 try {

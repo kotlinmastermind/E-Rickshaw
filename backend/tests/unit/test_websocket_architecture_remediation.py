@@ -7,7 +7,7 @@ from httpx import AsyncClient, ASGITransport
 
 from backend.main import app
 from backend.core.config import settings
-from backend.domain.models import User, DriverProfile, CustomerProfile, Session, Ride
+from backend.domain.models import User, DriverProfile, CustomerProfile, Session, Ride, AdminRole, AdminUserRole
 from backend.infrastructure.security.crypto import create_jwt_token, hash_secret
 from backend.infrastructure.database.session import async_session_maker
 
@@ -216,7 +216,8 @@ async def test_admin_telemetry_role_restriction(db_session):
         phone_number=f"+9194{suffix[:8]}",
         full_name="Admin User",
         role="admin",
-        is_active=True
+        is_active=True,
+        mfa_enabled=True
     )
     admin_sid = str(uuid.uuid4())
     admin_session = Session(
@@ -224,8 +225,10 @@ async def test_admin_telemetry_role_restriction(db_session):
         user_id=admin_uid,
         token_hash=hash_secret(str(uuid.uuid4())),
         is_revoked=False,
+        mfa_verified=True,
         expires_at=datetime.now(timezone.utc) + timedelta(days=1)
     )
+    admin_role = AdminRole(name=f"ws_arch_superuser_{suffix}", is_superuser=True)
 
     # Create non-admin customer
     customer_uid = str(uuid.uuid4())
@@ -246,7 +249,9 @@ async def test_admin_telemetry_role_restriction(db_session):
         expires_at=datetime.now(timezone.utc) + timedelta(days=1)
     )
 
-    db_session.add_all([admin_user, admin_session, customer_user, customer_session])
+    db_session.add_all([admin_user, admin_session, admin_role, customer_user, customer_session])
+    await db_session.flush()
+    db_session.add(AdminUserRole(user_id=admin_uid, role_id=admin_role.id))
     await db_session.commit()
 
     admin_token = create_jwt_token(user_id=admin_uid, role="admin", session_id=admin_sid, expires_delta=timedelta(hours=1))
