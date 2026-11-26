@@ -54,6 +54,9 @@ interface RiderApiService {
         @Part file: okhttp3.MultipartBody.Part
     ): Response<Map<String, Any>>
 
+    @DELETE("api/v1/customers/kyc/documents")
+    suspend fun withdrawCustomerKycDocuments(): Response<Map<String, Any>>
+
     @GET("api/v1/customers/profile")
     suspend fun getProfile(): Response<UserProfileDto>
 
