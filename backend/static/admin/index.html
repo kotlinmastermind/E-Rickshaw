@@ -724,6 +724,7 @@
                                 <th class="py-3.5 px-4">Lifetime Spend</th>
                                 <th class="py-3.5 px-4">Rating</th>
                                 <th class="py-3.5 px-4">Account Status</th>
+                                <th class="py-3.5 px-4">Customer KYC</th>
                                 <th class="py-3.5 px-4 text-right">Action</th>
                             </tr>
                         </thead>
@@ -1868,6 +1869,38 @@
         </div>
     </div>
 
+    <!-- Modal: Customer KYC document review -->
+    <div id="modal-customer-kyc-review"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden p-4">
+        <div class="glass-panel w-full max-w-lg rounded-2xl border border-border p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-border pb-3">
+                <h3 class="text-base font-bold text-white">Customer Identity Document Review</h3>
+                <button onclick="closeCustomerKycModal()" class="w-8 h-8 rounded-lg bg-surface border border-border text-slate-400 hover:text-white">×</button>
+            </div>
+            <div class="glass-card p-3 rounded-xl space-y-1 text-xs">
+                <p class="text-slate-400">Customer: <strong id="customer-kyc-name" class="text-white"></strong></p>
+                <p class="text-slate-400">Phone: <strong id="customer-kyc-phone" class="text-white font-mono"></strong></p>
+                <p class="text-slate-400">Document type: <strong id="customer-kyc-type" class="text-cyan-glow"></strong></p>
+                <p class="text-slate-400">Status: <strong id="customer-kyc-status" class="text-amber-glow"></strong></p>
+            </div>
+            <a id="customer-kyc-open-document" href="#" target="_blank" rel="noopener noreferrer"
+                class="inline-flex px-3 py-2 rounded-lg bg-surface border border-border text-cyan-glow text-xs font-bold">
+                Open private document (60-second link)
+            </a>
+            <div>
+                <label class="block text-[11px] text-slate-400 mb-1">Review note (required when rejecting)</label>
+                <textarea id="customer-kyc-review-reason" rows="3" maxlength="500"
+                    class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-glow/50"></textarea>
+            </div>
+            <div class="flex gap-3 pt-3 border-t border-border">
+                <button onclick="submitCustomerKycReview(true)"
+                    class="flex-1 py-2.5 rounded-xl bg-emerald-glow text-black font-extrabold text-xs">Approve document</button>
+                <button onclick="submitCustomerKycReview(false)"
+                    class="px-4 py-2.5 rounded-xl bg-crimson-dim text-crimson-glow border border-crimson-glow/30 font-bold text-xs">Reject</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Payout Settle (IMPS / UPI Bank Transfer Reference) -->
     <div id="modal-payout-settle"
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden p-4">
@@ -2229,6 +2262,7 @@
             riders: [],
             activeRides: [],
             customers: [],
+            customerKycDocuments: [],
             categories: [],
             payouts: [],
             welfare: [],
@@ -2245,6 +2279,7 @@
             routePolyline: null,
             markers: {},
             activeKycDriverId: null,
+            activeCustomerKycDocumentId: null,
             ws: null,
             stats: {
                 onlineDrivers: 0,
@@ -2887,6 +2922,13 @@
             renderMapMarkers();
             renderDriverTable();
             renderRidesTable();
+            try {
+                const kycResponse = await fetch("/api/v1/admin/customer-kyc/documents?limit=200");
+                if (kycResponse.ok) STATE.customerKycDocuments = await kycResponse.json();
+            } catch (e) {
+                console.warn("Unable to load customer KYC review queue.", e);
+            }
+
             renderCustomerTable();
             renderTariffCards();
         }
