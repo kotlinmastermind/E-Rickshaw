@@ -38,7 +38,7 @@ async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_a
     payload = b"%PDF-1.7\nprivate customer identity test document"
     response = await client.post(
         "/api/v1/customers/kyc/documents",
-        data={"document_type": "PAN_CARD"},
+        data={"document_type": "PAN_CARD", "consent_to_processing": "true"},
         files={"file": ("identity.pdf", payload, "application/pdf")},
         headers={"Authorization": f"Bearer {customer_token}"},
     )
@@ -133,7 +133,7 @@ async def test_customer_kyc_rejects_aadhaar_and_invalid_file_content(client, cus
     headers = {"Authorization": f"Bearer {customer_token}"}
     aadhaar = await client.post(
         "/api/v1/customers/kyc/documents",
-        data={"document_type": "AADHAAR_CARD"},
+        data={"document_type": "AADHAAR_CARD", "consent_to_processing": "true"},
         files={"file": ("aadhaar.pdf", b"%PDF-1.7 fake", "application/pdf")},
         headers=headers,
     )
@@ -141,7 +141,7 @@ async def test_customer_kyc_rejects_aadhaar_and_invalid_file_content(client, cus
 
     invalid = await client.post(
         "/api/v1/customers/kyc/documents",
-        data={"document_type": "PAN_CARD"},
+        data={"document_type": "PAN_CARD", "consent_to_processing": "true"},
         files={"file": ("identity.pdf", b"not a pdf", "application/pdf")},
         headers=headers,
     )
