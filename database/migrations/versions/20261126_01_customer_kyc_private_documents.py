@@ -55,6 +55,18 @@ def upgrade() -> None:
             ("ix_customer_kyc_status_submitted", ["status", "submitted_at"]),
         ],
     )
+    existing_document_indexes = {
+        item["name"] for item in sa.inspect(bind).get_indexes("customer_kyc_documents")
+    }
+    if "uq_customer_kyc_one_pending_document_type" not in existing_document_indexes:
+        op.create_index(
+            "uq_customer_kyc_one_pending_document_type",
+            "customer_kyc_documents",
+            ["user_id", "document_type"],
+            unique=True,
+            postgresql_where=sa.text("status = 'PENDING_REVIEW'"),
+            sqlite_where=sa.text("status = 'PENDING_REVIEW'"),
+        )
 
     existing_tables = set(sa.inspect(bind).get_table_names())
     if "customer_kyc_audit_logs" not in existing_tables:
