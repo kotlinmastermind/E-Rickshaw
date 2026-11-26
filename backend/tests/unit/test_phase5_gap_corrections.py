@@ -270,13 +270,29 @@ async def test_ws_session_revocation_enforced():
 
     token = create_jwt_token(user_id=uid, role="driver", session_id=sid, expires_delta=timedelta(hours=1))
 
-    with TestClient(app) as client:
-        # Seed the revocation marker on the same portal loop as the handshake.
-        client.portal.call(redis_client.set, f"revoked_session:{sid}", "true", 300)
-        with pytest.raises(WebSocketDisconnect) as exc:
-            with client.websocket_connect("/api/v1/ws/driver/dispatch", headers={"Authorization": f"Bearer {token}"}) as ws:
-                pass
-        assert exc.value.code == 1008
+    # This endpoint does not require application startup. Avoid entering the
+    # full FastAPI lifespan here: its unrelated background workers share the
+    # test SQLite engine and can block TestClient shutdown across event loops.
+    # Seed Redis synchronously so the WebSocket portal can read the marker.
+    if redis_client.redis_url:
+        import redis as sync_redis
+        cache = sync_redis.Redis.from_url(
+            redis_client.redis_url,
+            encoding="utf-8",
+            decode_responses=True
+        )
+        try:
+            cache.set(f"revoked_session:{sid}", "true", ex=300)
+        finally:
+            cache.close()
+    else:
+        await redis_client.set(f"revoked_session:{sid}", "true", ex=300)
+
+    client = TestClient(app)
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/api/v1/ws/driver/dispatch", headers={"Authorization": f"Bearer {token}"}) as ws:
+            pass
+    assert exc.value.code == 1008
 
 
 def test_android_and_web_clients_no_jwt_query_params():
