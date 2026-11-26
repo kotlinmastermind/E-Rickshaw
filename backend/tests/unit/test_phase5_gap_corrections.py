@@ -224,7 +224,7 @@ async def test_ws_admin_telemetry_rejects_admin_without_mfa_or_role_assignment()
             redis_client.set_json_strict,
             f"ws_ticket:{ticket}",
             {"user_id": uid, "session_id": sid, "role": "admin"},
-            ex=30
+            30
         )
         with pytest.raises(WebSocketDisconnect) as exc:
             with client.websocket_connect(f"/api/v1/ws/admin/telemetry?ticket={ticket}"):
@@ -272,7 +272,7 @@ async def test_ws_session_revocation_enforced():
 
     with TestClient(app) as client:
         # Seed the revocation marker on the same portal loop as the handshake.
-        client.portal.call(redis_client.set, f"revoked_session:{sid}", "true", ex=300)
+        client.portal.call(redis_client.set, f"revoked_session:{sid}", "true", 300)
         with pytest.raises(WebSocketDisconnect) as exc:
             with client.websocket_connect("/api/v1/ws/driver/dispatch", headers={"Authorization": f"Bearer {token}"}) as ws:
                 pass
