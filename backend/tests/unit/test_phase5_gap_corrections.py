@@ -212,7 +212,7 @@ async def test_ws_admin_telemetry_rejects_admin_without_mfa_or_role_assignment()
         await db.commit()
 
     ticket = str(uuid.uuid4())
-    await redis_client.set_json(
+    await redis_client.set_json_strict(
         f"ws_ticket:{ticket}",
         {"user_id": uid, "session_id": sid, "role": "admin"},
         ex=30
