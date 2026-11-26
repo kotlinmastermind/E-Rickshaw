@@ -88,10 +88,13 @@ async def update_customer_kyc(
     await db.commit()
     return {
         "message": "Customer profile saved. Government identity has not been submitted or verified.",
-        "user_id": current_user.id,
+        "id": current_user.id,
+        "phone_number": current_user.phone_number,
         "full_name": current_user.full_name,
         "email": current_user.email,
-        "is_verified": current_user.is_verified
+        "role": current_user.role,
+        "is_verified": current_user.is_verified,
+        "mfa_enabled": current_user.mfa_enabled
     }
 
 @router.put("/avatar")
