@@ -1,6 +1,12 @@
 package com.vaisentra.mobility.rider.data
 
 import android.graphics.Bitmap
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import okhttp3.MultipartBody
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -1313,6 +1319,68 @@ object RiderRepository {
             Result.failure(e)
         }
     }
+    suspend fun fetchCustomerKycStatus(): Result<String> {
+        return try {
+            val response = NetworkClient.apiService.getCustomerKycStatus()
+            if (response.isSuccessful) {
+                Result.success(response.body()?.get("kyc_status")?.toString() ?: "NOT_SUBMITTED")
+            } else {
+                Result.failure(Exception(parseApiErrorMessage(response.errorBody()?.string(), "Unable to load identity review status.")))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitCustomerKycDocument(
+        context: Context,
+        uri: Uri,
+        documentType: String
+    ): Result<String> {
+        return try {
+            val allowedTypes = setOf("PAN_CARD", "DRIVING_LICENSE", "PASSPORT", "VOTER_ID")
+            if (documentType !in allowedTypes) {
+                return Result.failure(IllegalArgumentException("Select a supported identity document type."))
+            }
+            val mimeType = context.contentResolver.getType(uri)
+            if (mimeType !in setOf("application/pdf", "image/jpeg", "image/png")) {
+                return Result.failure(IllegalArgumentException("Choose a PDF, JPEG, or PNG document."))
+            }
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return Result.failure(IllegalArgumentException("Unable to read the selected document."))
+            if (bytes.isEmpty() || bytes.size > 5 * 1024 * 1024) {
+                return Result.failure(IllegalArgumentException("The document must be non-empty and 5 MB or smaller."))
+            }
+            val displayName = context.contentResolver.query(
+                uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            } ?: "identity-document"
+            val documentTypeBody = documentType.toRequestBody("text/plain".toMediaType())
+            val fileBody = bytes.toRequestBody(mimeType.toMediaType())
+            val filePart = MultipartBody.Part.createFormData("file", displayName, fileBody)
+            val response = NetworkClient.apiService.submitCustomerKycDocument(documentTypeBody, filePart)
+            if (response.isSuccessful) {
+                Result.success(response.body()?.get("message")?.toString() ?: "Document submitted for manual review.")
+            } else {
+                Result.failure(
+                    Exception(
+                        parseApiErrorMessage(
+                            response.errorBody()?.string(),
+                            "Identity document upload failed (HTTP ${response.code()})."
+                        )
+                    )
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun resetForgotPassword(recoveryCode: String, newPassword: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.resetForgotPassword(
