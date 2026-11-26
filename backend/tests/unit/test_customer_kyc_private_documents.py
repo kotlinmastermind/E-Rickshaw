@@ -28,8 +28,12 @@ async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_a
         assert expires_in_seconds == 60
         return "https://storage.example.test/signed-document"
 
+    async def fake_delete(storage_path):
+        assert storage_path.startswith("private://customer-kyc-documents/")
+
     monkeypatch.setattr(customer_kyc_storage, "upload", fake_upload)
     monkeypatch.setattr(customer_kyc_storage, "create_signed_url", fake_signed_url)
+    monkeypatch.setattr(customer_kyc_storage, "delete", fake_delete)
 
     payload = b"%PDF-1.7\nprivate customer identity test document"
     response = await client.post(
@@ -110,6 +114,16 @@ async def test_customer_kyc_upload_is_private_owner_scoped_and_admin_review_is_a
             "DOCUMENT_SIGNED_URL_ISSUED",
             "DOCUMENT_APPROVED",
         }
+
+        withdrawn = await client.delete(
+            "/api/v1/customers/kyc/documents",
+            headers={"Authorization": f"Bearer {customer_token}"},
+        )
+        assert withdrawn.status_code == 200, withdrawn.text
+        assert withdrawn.json()["withdrawn_count"] == 1
+        await db_session.refresh(document)
+        assert document.status == "WITHDRAWN"
+        assert document.storage_path.startswith("purged://")
     finally:
         app.dependency_overrides.pop(get_current_admin, None)
 
