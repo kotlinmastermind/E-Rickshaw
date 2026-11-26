@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import select
@@ -171,7 +170,7 @@ async def test_customer_kyc_storage_fails_closed_without_service_role_configurat
 async def test_customer_kyc_upload_requires_authentication(client):
     response = await client.post(
         "/api/v1/customers/kyc/documents",
-        data={"document_type": "PAN_CARD"},
+        data={"document_type": "PAN_CARD", "consent_to_processing": "true"},
         files={"file": ("identity.pdf", b"%PDF-1.7 content", "application/pdf")},
     )
     assert response.status_code == 401
