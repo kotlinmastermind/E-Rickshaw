@@ -71,9 +71,27 @@ async def db_session():
 @pytest_asyncio.fixture(scope="function", loop_scope="function", autouse=True)
 async def flush_cache_isolation():
     from backend.infrastructure.cache.redis_client import redis_client
+
+    async def close_loop_bound_redis_client():
+        # pytest-asyncio gives each test a new event loop. redis.asyncio
+        # connection pools must not be reused across those loop boundaries.
+        client = redis_client._redis
+        if client is not None:
+            close = getattr(client, "aclose", None) or getattr(client, "close", None)
+            if close is not None:
+                result = close()
+                if hasattr(result, "__await__"):
+                    await result
+        redis_client._redis = None
+        redis_client.is_connected = False
+        redis_client._last_reconnect_attempt = 0.0
+        redis_client._reconnect_backoff = 1.0
+
+    await close_loop_bound_redis_client()
     await redis_client.flushdb()
     yield
     await redis_client.flushdb()
+    await close_loop_bound_redis_client()
 
 @pytest_asyncio.fixture(scope="function", loop_scope="function")
 async def client():
