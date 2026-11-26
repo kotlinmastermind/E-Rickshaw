@@ -331,13 +331,10 @@ fun PasswordResetScreen(onNavigate: (String) -> Unit) {
 
 @Composable
 fun CustomerKycScreen(
-    prefilledPhone: String = "",
     onNavigate: (String) -> Unit
 ) {
     var fullName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf(prefilledPhone) }
-    var govtIdNumber by remember { mutableStateOf("") }
     var isSaving by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -353,9 +350,6 @@ fun CustomerKycScreen(
             if (!me.email.isNullOrBlank()) {
                 email = me.email
             }
-            if (!me.phoneNumber.isNullOrBlank() && phone.isBlank()) {
-                phone = me.phoneNumber
-            }
         }
     }
 
@@ -367,8 +361,8 @@ fun CustomerKycScreen(
             .verticalScroll(rememberScrollState())
     ) {
         NeoHeader(
-            title = "Customer Profile & KYC",
-            subtitle = "Verified commuter account",
+            title = "Complete Your Profile",
+            subtitle = "Your mobile number was verified through OTP. No government ID is collected here.",
             onBack = { onNavigate("auth_phone") }
         )
         Spacer(modifier = Modifier.height(20.dp))
@@ -388,22 +382,9 @@ fun CustomerKycScreen(
                 label = "Email"
             )
             Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(
-                value = phone,
-                onValueChange = { phone = it },
-                placeholder = "+91 XXXXX XXXXX",
-                label = "Registered Mobile Number"
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(
-                value = govtIdNumber,
-                onValueChange = { govtIdNumber = it },
-                placeholder = "Enter 12-Digit Govt ID",
-                label = "Govt ID / Aadhaar"
-            )
             Spacer(modifier = Modifier.height(20.dp))
             NeoButton(
-                text = if (isSaving) "Syncing KYC..." else "Save KYC & Continue",
+                text = if (isSaving) "Saving Profile..." else "Save Profile & Continue",
                 onClick = {
                     if (fullName.trim().length < 2) {
                         DialogController.showToast("Please enter your full name")
@@ -415,14 +396,12 @@ fun CustomerKycScreen(
                     coroutineScope.launch(Dispatchers.IO) {
                         val result = RiderRepository.registerCustomerProfile(
                             name = fullName,
-                            email = email,
-                            phone = phone,
-                            govtId = govtIdNumber
+                            email = email
                         )
                         withContext(Dispatchers.Main) {
                             isSaving = false
                             result.onSuccess {
-                                DialogController.showToast("Profile and KYC synced with Supabase!")
+                                DialogController.showToast("Profile saved successfully.")
                                 onNavigate("auth_biometric")
                             }.onFailure { err ->
                                 DialogController.showToast(err.message ?: "KYC update failed!")
