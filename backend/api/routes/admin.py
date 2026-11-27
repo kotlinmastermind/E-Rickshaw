@@ -1,6 +1,7 @@
 import uuid
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, timedelta
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from sqlalchemy import select, desc, func, or_, update
@@ -124,15 +125,22 @@ async def get_live_mobility_feed(
         )
     ).scalar_one() or 0
 
+    now = datetime.now(timezone.utc)
+    india_now = now.astimezone(ZoneInfo("Asia/Kolkata"))
+    today_start_utc = india_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     gross_revenue_cents = (
         await db.execute(
             select(func.coalesce(func.sum(Ride.final_fare_cents), 0)).where(
                 Ride.status == "COMPLETED",
+                Ride.completed_at >= today_start_utc,
                 Ride.final_fare_cents.is_not(None),
             )
         )
     ).scalar_one() or 0
     gross_booking_inr = round(int(gross_revenue_cents) / 100.0, 2)
+    waiting_riders_count = (
+        await db.execute(select(func.count(Ride.id)).where(Ride.status == "REQUESTED"))
+    ).scalar_one() or 0
 
     online_drivers_count = (
         await db.execute(
@@ -282,7 +290,6 @@ async def get_live_mobility_feed(
             .limit(20)
         )
     ).scalars().all()
-    now = datetime.now(timezone.utc)
     formatted_riders = []
     for ride in requested_rides:
         customer_record = customers_by_profile_id.get(ride.customer_id)
@@ -374,7 +381,7 @@ async def get_live_mobility_feed(
         "stats": {
             "online_drivers": int(online_drivers_count),
             "active_rides": int(active_rides_count),
-            "waiting_riders": len(formatted_riders),
+            "waiting_riders": int(waiting_riders_count),
             "gross_booking_inr": gross_booking_inr,
             "pending_kyc": int(pending_kyc_count),
             "total_customers": int(total_customers_count),
