@@ -12,7 +12,7 @@ settings.REDIS_URL = os.getenv("REDIS_TEST_URL") or None
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from backend.domain.models import VehicleCategory, FareRule
+from backend.domain.models import VehicleCategory, FareRule, GeofenceZone
 from backend.infrastructure.database.session import async_session_maker, init_db
 
 import sqlite3
@@ -40,6 +40,13 @@ async def _seed_test_data(session):
             FareRule(category_id=sedan.id, city_code="MUMBAI", version=1, base_fare_cents=4000, per_km_cents=1400, per_minute_cents=150, minimum_fare_cents=4000, cancellation_fee_cents=2000, surge_multiplier=1.0, is_active=True),
         ]
         session.add_all(rules)
+        session.add_all([
+            GeofenceZone(name="Delhi NCR test operational area", city_code="DELHI_NCR", zone_type="SERVICE_AREA", coordinates_json=__import__("json").dumps([{"lat": 27.8, "lng": 76}, {"lat": 29.4, "lng": 76}, {"lat": 29.4, "lng": 78.2}, {"lat": 27.8, "lng": 78.2}]), is_active=True),
+            GeofenceZone(name="Patna test operational area", city_code="PATNA", zone_type="SERVICE_AREA", coordinates_json=__import__("json").dumps([{"lat": 24.9, "lng": 84.2}, {"lat": 26.2, "lng": 84.2}, {"lat": 26.2, "lng": 86.1}, {"lat": 24.9, "lng": 86.1}]), is_active=True),
+            GeofenceZone(name="Mumbai test operational area", city_code="MUMBAI", zone_type="SERVICE_AREA", coordinates_json=__import__("json").dumps([{"lat": 18, "lng": 72}, {"lat": 20, "lng": 72}, {"lat": 20, "lng": 74}, {"lat": 18, "lng": 74}]), is_active=True),
+            GeofenceZone(name="Lucknow test operational area", city_code="LUCKNOW", zone_type="SERVICE_AREA", coordinates_json=__import__("json").dumps([{"lat": 26, "lng": 80}, {"lat": 27.6, "lng": 80}, {"lat": 27.6, "lng": 82}, {"lat": 26, "lng": 82}]), is_active=True),
+            GeofenceZone(name="Bengaluru test operational area", city_code="BENGALURU", zone_type="SERVICE_AREA", coordinates_json=__import__("json").dumps([{"lat": 12, "lng": 76}, {"lat": 14, "lng": 76}, {"lat": 14, "lng": 79}, {"lat": 12, "lng": 79}]), is_active=True),
+        ])
         await session.commit()
 
 @pytest_asyncio.fixture(scope="function", loop_scope="function", autouse=True)
