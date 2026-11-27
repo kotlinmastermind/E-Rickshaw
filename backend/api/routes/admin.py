@@ -718,6 +718,10 @@ class CommissionRulePayload(BaseModel):
     fixed_cut_cents: int = 0
     reason: str = Field(..., min_length=12, max_length=1000)
 
+class CommissionRuleReviewPayload(BaseModel):
+    approve: bool
+    reason: str = Field(..., min_length=10, max_length=1000)
+
 class PayoutRejectPayload(BaseModel):
     rejection_reason: str = Field(..., min_length=3)
 
@@ -1120,6 +1124,22 @@ async def list_commission_rules(
     from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
     rules = await AdminFinanceSupportService(db).commission_rules()
     return [{**r, "commission_percentage": r["commission_percent"]} for r in rules]
+
+@router.post("/commissions/{rule_id}/review")
+async def review_commission_rule(
+    rule_id: str,
+    payload: CommissionRuleReviewPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    result = await AdminFinanceSupportService(db).approve_commission_rule(
+        admin.id,
+        rule_id,
+        payload.approve,
+        payload.reason,
+    )
+    return result
 
 # 8. Phase 3: Analytics Reports
 @router.get("/reports")
