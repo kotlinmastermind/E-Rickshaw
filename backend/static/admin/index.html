@@ -3746,7 +3746,7 @@
                     </td>
                     <td class="py-3.5 px-4 font-mono font-bold text-emerald-glow text-sm">₹${amtRupees}</td>
                     <td class="py-3.5 px-4 font-mono text-amber-glow">₹${((p.commission_settled_cents || 0) / 100).toFixed(2)}</td>
-                    <td class="py-3.5 px-4 font-mono text-slate-300">${p.bank_account_mask || p.bank_account_masked || '•••• 8920'}</td>
+                    <td class="py-3.5 px-4 font-mono text-slate-300">${p.bank_account_mask || p.bank_account_masked || 'Not provided'}</td>
                     <td class="py-3.5 px-4 text-slate-400 text-[11px] font-mono">${(p.requested_at || '').replace('T', ' ').slice(0, 19)}</td>
                     <td class="py-3.5 px-4">${statusBadge}</td>
                     <td class="py-3.5 px-4 text-right">${actionBtns}</td>
