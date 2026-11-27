@@ -878,7 +878,19 @@ class AdminGovernanceService:
     async def delete_geofence(self, admin_id: str, zone_id: str) -> Dict[str, Any]:
         zone = await self.db.get(GeofenceZone, zone_id)
         if not zone: raise HTTPException(404, "Service zone not found.")
-        previous = {"name": zone.name, "zone_type": zone.zone_type, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
+        if str(zone.zone_type or "").upper() == "SERVICE_AREA" and zone.is_active:
+            active_rides = (await self.db.execute(
+                select(func.count(Ride.id)).where(
+                    Ride.service_area_id == zone.id,
+                    Ride.status.in_(["REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED"]),
+                )
+            )).scalar_one() or 0
+            if active_rides:
+                raise HTTPException(
+                    409,
+                    f"Cannot deactivate service area while {active_rides} active rides are using it. Resolve or complete those rides first.",
+                )
+        previous = {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
         zone.is_active = False
         self.db.add(GeofenceZoneAudit(zone_id=zone.id, admin_user_id=admin_id, action="DEACTIVATED",
             previous_state_json=json.dumps(previous), new_state_json=json.dumps({**previous, "is_active": False})))
