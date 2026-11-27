@@ -13,7 +13,7 @@ from backend.domain.models import (
     Payment, DriverRating, Vehicle, DriverWallet
 )
 from backend.domain.state_machine.ride_state_machine import (
-    RideStateMachine, RideStatus, ActorRole, RideTransitionError
+    RideStateMachine, RideStatus, ActorRole, RideTransitionError, ACTIVE_RIDE_STATUSES
 )
 from backend.infrastructure.security.crypto import generate_secure_otp, verify_otp_constant_time
 from backend.integrations.notifications.provider import get_notification_provider
@@ -39,7 +39,9 @@ class RideService:
         is_scheduled: bool = False,
         scheduled_pickup_time: Optional[datetime] = None,
         promo_code: Optional[str] = None,
-        stops: Optional[List[Dict[str, Any]]] = None
+        stops: Optional[List[Dict[str, Any]]] = None,
+        booking_idempotency_key: Optional[str] = None,
+        booking_request_hash: Optional[str] = None
     ) -> Dict[str, Any]:
         # Fetch customer profile
         stmt = select(CustomerProfile).where(CustomerProfile.user_id == customer_user_id)
@@ -177,8 +179,7 @@ class RideService:
             Ride.status.in_([
                 RideStatus.REQUESTED.value,
                 RideStatus.ASSIGNED.value,
-                RideStatus.ARRIVED.value,
-                RideStatus.IN_PROGRESS.value
+                *ACTIVE_RIDE_STATUSES
             ])
         )
         existing_active = (await self.db.execute(active_ride_stmt)).scalars().first()
@@ -218,6 +219,8 @@ class RideService:
             destination_latitude=estimate.destination_latitude,
             destination_longitude=estimate.destination_longitude,
             start_otp=start_otp,
+            booking_idempotency_key=booking_idempotency_key,
+            booking_request_hash=booking_request_hash,
             estimated_distance_km=estimate.distance_km,
             estimated_duration_minutes=estimate.estimated_duration_minutes,
             estimated_fare_cents=estimate.estimated_fare_cents,

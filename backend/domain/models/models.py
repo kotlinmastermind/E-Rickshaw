@@ -428,6 +428,8 @@ class Ride(Base):
     destination_longitude: Mapped[float] = mapped_column(Float, nullable=False)
     
     start_otp: Mapped[str] = mapped_column(String(6), nullable=False)
+    booking_idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    booking_request_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     otp_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     
     # Scheduled ride support
@@ -567,6 +569,10 @@ class Ride(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("customer_id", "booking_idempotency_key", name="uq_rides_customer_booking_idempotency"),
+    )
 
     customer: Mapped["CustomerProfile"] = relationship(back_populates="rides")
     driver: Mapped[Optional["DriverProfile"]] = relationship(back_populates="assigned_rides")

@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
 import okhttp3.MultipartBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -518,9 +519,16 @@ object RiderRepository {
                 bookingMode = bookingMode,
                 businessCostCenter = businessCostCenter
             )
-            val response = NetworkClient.apiService.requestRide(request)
+            val bookingFingerprint = MessageDigest.getInstance("SHA-256")
+                .digest(request.toString().toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            val bookingIntentKey = "RIDE_BOOKING_${NetworkClient.currentUserId() ?: "unknown"}_$bookingFingerprint"
+            val idempotencyKey = NetworkClient.checkoutSessionStore
+                .getOrCreateScopedIdempotencyKey(bookingIntentKey, "ride_booking")
+            val response = NetworkClient.apiService.requestRide(request, idempotencyKey)
             if (response.isSuccessful && response.body() != null) {
                 val ride = response.body()!!
+                NetworkClient.checkoutSessionStore.clearScopedIdempotencyKey(bookingIntentKey)
                 _activeRide.value = ride
                 RiderWebSocketClient.connectRideTracking(ride.id)
                 startActiveRideSyncLoop(ride.id)
@@ -597,12 +605,11 @@ object RiderRepository {
         }
     }
 
-    fun updateDriverLiveLocation(lat: Double, lng: Double, speed: Double?) {
-        if (!lat.isFinite() || !lng.isFinite() || lat !in -90.0..90.0 || lng !in -180.0..180.0) return
+    fun updateDriverLiveLocation(lat: Double, lng: Double, speed: Double) {
         _activeRide.value = _activeRide.value?.copy(
             driverLat = lat,
             driverLng = lng,
-            speedKmh = speed?.takeIf { it.isFinite() && it >= 0.0 }
+            speedKmh = speed
         )
     }
 

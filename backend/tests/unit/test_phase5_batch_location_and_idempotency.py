@@ -175,6 +175,11 @@ async def test_ride_request_idempotency_key_replay():
         assert data2["ride_id"] == ride_id_1
         assert data2.get("idempotent_replay") is True
 
+        # Reusing a key for a different payload must never silently replay a different booking.
+        changed_payload = dict(payload, destination_address="Railway Station Gate 2")
+        conflict = await client.post("/api/v1/rides/request", json=changed_payload, headers=headers)
+        assert conflict.status_code == 409
+
     # Verify only ONE ride was created in database
     async with async_session_maker() as session:
         rides = (await session.execute(

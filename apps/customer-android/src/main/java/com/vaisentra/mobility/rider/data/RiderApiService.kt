@@ -79,7 +79,7 @@ interface RiderApiService {
 
     // --- Rides & Active Booking ---
     @POST("api/v1/rides/request")
-    suspend fun requestRide(@Body request: RideBookingRequest): Response<ActiveRideDto>
+    suspend fun requestRide(@Body request: RideBookingRequest, @Header("Idempotency-Key") idempotencyKey: String): Response<ActiveRideDto>
 
 
     @GET("api/v1/rides/active")
