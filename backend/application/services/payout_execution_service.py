@@ -31,7 +31,7 @@ logger = logging.getLogger("payout.execution")
 
 ALLOWED_PAYOUT_TRANSITIONS = {
     "REQUESTED": {"APPROVED", "REJECTED"},
-    "APPROVED": {"AWAITING_MANUAL_TRANSFER", "PROCESSING", "FAILED", "REJECTED"},
+    "APPROVED": {"AWAITING_MANUAL_TRANSFER", "PROCESSING", "PAID", "FAILED", "REJECTED"},
     "AWAITING_MANUAL_TRANSFER": {"PAID", "FAILED"},
     "PROCESSING": {"PAID", "FAILED"},
     "FAILED": {"APPROVED"},
@@ -272,6 +272,12 @@ class PayoutExecutionService:
         A separate authorized confirmation step is required before marking PAID.
         """
         clean_ref = (settlement_reference or "").strip()
+        clean_evidence = (evidence_notes or "").strip()
+        if len(clean_evidence) < 12:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Manual transfer evidence is required (bank statement/transfer confirmation reference).",
+            )
         if len(clean_ref) < 8 or clean_ref.lower() in {"placeholder", "test_utr", "utr12345"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -316,7 +322,7 @@ class PayoutExecutionService:
         metadata = {
             "mode": "MANUAL_TRANSFER",
             "masked_destination": dest["masked_destination"],
-            "evidence_notes": (evidence_notes or "").strip()[:240] or None,
+            "evidence_notes": clean_evidence[:240],
         }
         try:
             async with session.begin_nested():
@@ -382,6 +388,17 @@ class PayoutExecutionService:
             )
         if not (payout.settlement_reference or "").strip():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Cannot confirm transfer without recorded UTR/reference.")
+        if payout.manual_transfer_initiated_by == admin_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="A different authorized admin must independently confirm the manual transfer.",
+            )
+        clean_confirmation = (confirmation_notes or "").strip()
+        if len(clean_confirmation) < 12:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Independent bank-statement/transfer evidence confirmation is required.",
+            )
 
         now = datetime.now(timezone.utc)
         payout = await PayoutExecutionService._transition_status_atomic(
@@ -407,7 +424,7 @@ class PayoutExecutionService:
                 "settlement_reference": payout.settlement_reference,
                 "confirmed_by": admin_user_id,
                 "confirmed_at": now.isoformat(),
-                "confirmation_notes": (confirmation_notes or "").strip()[:240] or None,
+                "confirmation_notes": clean_confirmation[:240],
                 "amount_cents": payout.amount_cents,
             }),
         ))
@@ -456,6 +473,11 @@ class PayoutExecutionService:
             )
             if reconciled.status in {"PROCESSING", "PAID", "FAILED"}:
                 return reconciled
+            if (json.loads(reconciled.provider_metadata_json or "{}")).get("uncertain_outcome"):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Provider outcome remains unknown. No second transfer will be submitted; complete provider reconciliation first.",
+                )
 
         dest = await PayoutExecutionService.retrieve_destination_for_authorized_transfer(
             session, payout_request_id=payout.id, admin_user_id=admin_user_id
@@ -642,6 +664,9 @@ class PayoutExecutionService:
                 },
             )
         if prov_status in {"rejected", "reversed", "cancelled", "failed"}:
+            payout.provider_payout_id = item.get("id") or payout.provider_payout_id
+            payout.provider_metadata_json = _sanitize_provider_payload(item)
+            await session.flush()
             return await PayoutExecutionService.fail_payout(
                 session,
                 payout_id=payout.id,
@@ -688,6 +713,15 @@ class PayoutExecutionService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot mark payout FAILED from status {payout.status}.",
+            )
+
+        provider_meta = json.loads(payout.provider_metadata_json or "{}") if payout.provider_metadata_json else {}
+        if payout.execution_mode == "RAZORPAYX" and (
+            payout.status == "PROCESSING" or provider_meta.get("uncertain_outcome")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A provider payout cannot be failed or refunded by an admin while its outcome is uncertain. Reconcile with the provider first.",
             )
 
         now = datetime.now(timezone.utc)
@@ -943,6 +977,9 @@ class PayoutExecutionService:
                 )
         elif event_name in {"payout.failed", "payout.reversed", "payout.rejected"}:
             if payout.status in {"APPROVED", "PROCESSING"}:
+                payout.provider_payout_id = provider_payout_id or payout.provider_payout_id
+                payout.provider_metadata_json = _sanitize_provider_payload(entity)
+                await session.flush()
                 await PayoutExecutionService.fail_payout(
                     session,
                     payout_id=payout.id,
