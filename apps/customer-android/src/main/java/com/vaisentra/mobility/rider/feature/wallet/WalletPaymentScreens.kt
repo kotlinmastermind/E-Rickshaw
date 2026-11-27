@@ -83,6 +83,8 @@ fun PaymentMethodPickerScreen(onNavigate: (String) -> Unit) {
 @Composable
 fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
     val wallet by RiderRepository.wallet.collectAsState()
+    val walletLoadState by RiderRepository.walletLoadState.collectAsState()
+    val hasWalletBalance = wallet.walletId.isNotBlank()
     val topupState by RiderRepository.topupState.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = context as? android.app.Activity
@@ -107,13 +109,35 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
             Text(text = "Available Wallet Balance", color = TextMuted, fontSize = 12.sp)
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "₹${String.format(java.util.Locale.US, "%.2f", wallet.displayBalanceRupees)}",
+                text = when {
+                    hasWalletBalance -> "₹${String.format(java.util.Locale.US, "%.2f", wallet.displayBalanceRupees)}"
+                    walletLoadState is RiderRepository.WalletBalanceLoadState.Loading -> "Loading balance…"
+                    else -> "Balance unavailable"
+                },
                 color = ElectricCyan,
-                fontSize = 38.sp,
+                fontSize = if (hasWalletBalance) 38.sp else 20.sp,
                 fontWeight = FontWeight.ExtraBold
             )
             Spacer(modifier = Modifier.height(14.dp))
-            NeoBadge(text = "AUTHORITATIVE SUPABASE LEDGER", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+            NeoBadge(
+                text = when (walletLoadState) {
+                    is RiderRepository.WalletBalanceLoadState.Loaded -> "VERIFIED SERVER BALANCE"
+                    is RiderRepository.WalletBalanceLoadState.Loading -> "SYNCING WALLET"
+                    is RiderRepository.WalletBalanceLoadState.Error -> if (hasWalletBalance) "LAST CONFIRMED BALANCE" else "BALANCE UNAVAILABLE"
+                    else -> "AWAITING SERVER BALANCE"
+                },
+                backgroundColor = if (hasWalletBalance) EmeraldGlow else SurfaceElevated,
+                textColor = if (hasWalletBalance) EmeraldGreen else TextMuted
+            )
+            if (walletLoadState is RiderRepository.WalletBalanceLoadState.Error && !hasWalletBalance) {
+                Spacer(modifier = Modifier.height(10.dp))
+                NeoButton(
+                    text = "Retry Balance",
+                    onClick = { androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycleScope.launch { RiderRepository.fetchWalletBalance() } },
+                    backgroundColor = AmberGold,
+                    textColor = CanvasBlack
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
