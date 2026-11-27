@@ -222,6 +222,11 @@ async def test_part6_driver_and_vehicle_verification(db_session):
     assert v_res["registration_certificate_rc"] == f"DL-01-RC-2025-{u_suffix}"
     assert v_res["commercial_permit_number"] == f"DL-COMM-PVT-{u_suffix}"
     assert v_res["insurance_policy_number"] == f"POL-BAJAJ-ALL-{u_suffix}"
+    assert v_res["puc_certificate_status"] is None
+    assert v_res["puc_expiry_date"] is None
+    assert v_res["fitness_certificate_status"] is None
+    assert v_res["ev_battery_health"] is None
+    assert v_res["safety_equipment"] == []
 
 @pytest.mark.asyncio
 async def test_part6_route_anomaly_and_unexpected_stop(db_session):
