@@ -334,6 +334,37 @@ class AdminGovernanceService:
         if not user or not user.is_active:
             raise HTTPException(409, "The selected driver account is inactive.")
 
+        # Manual Admin assignment is still constrained by the same operational
+        # service-area boundary as automated dispatch.
+        from backend.application.services.service_area_service import ServiceAreaService
+        area_service = ServiceAreaService(self.db)
+        resolved_area = await area_service.resolve_trip(
+            ride.pickup_latitude,
+            ride.pickup_longitude,
+            ride.destination_latitude,
+            ride.destination_longitude,
+        )
+        if ride.service_area_id and ride.service_area_id != resolved_area.id:
+            raise HTTPException(409, "Ride service area is no longer valid; manual assignment is blocked.")
+        if not ride.service_area_id:
+            ride.service_area_id = resolved_area.id
+        from backend.application.services.live_location_service import LiveLocationService
+        live_locations = LiveLocationService(db=self.db)
+        if not await live_locations.is_driver_fresh(driver.id):
+            raise HTTPException(409, "Fresh driver GPS inside the ride service area is required for manual assignment.")
+        driver_location = await live_locations.get_driver_live_location(driver.id)
+        if (
+            not driver_location
+            or driver_location.get("latitude") is None
+            or driver_location.get("longitude") is None
+            or not await area_service.is_driver_inside(
+                ride.service_area_id,
+                driver_location.get("latitude"),
+                driver_location.get("longitude"),
+            )
+        ):
+            raise HTTPException(409, "Selected driver is outside this ride's active service area or inside a restricted zone.")
+
         # Re-validate that driver's active vehicle matches the ride's vehicle_category_id
         from backend.domain.models import DriverVehicleAssignment, Vehicle
         stmt_veh = (
