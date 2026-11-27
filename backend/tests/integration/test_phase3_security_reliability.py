@@ -137,24 +137,39 @@ async def test_redis_cache_and_in_memory_fallback():
     assert "latency_ms" in health
 
 @pytest.mark.asyncio
-async def test_telemetry_crash_reporting_and_test_crash_endpoint():
+async def test_operational_diagnostics_require_admin_authentication():
     transport = ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/health/test-crash")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "CRASH_CAPTURED"
-        assert "event_id" in data
-
-        # Check metrics endpoint
         metrics_resp = await client.get("/health/metrics")
-        assert metrics_resp.status_code == 200
-        metrics = metrics_resp.json()
-        assert "uptime_seconds" in metrics
-        assert "database" in metrics
-        assert "redis_cache" in metrics
-        assert "websockets" in metrics
-        assert metrics["telemetry"]["recent_crashes_count"] >= 1
+        crash_resp = await client.post("/health/test-crash")
+    assert metrics_resp.status_code in (401, 403)
+    assert crash_resp.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_telemetry_crash_reporting_and_test_crash_endpoint():
+    from backend.api.deps import get_current_admin
+
+    app.dependency_overrides[get_current_admin] = lambda: object()
+    try:
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/health/test-crash")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "CRASH_CAPTURED"
+            assert "event_id" in data
+
+            metrics_resp = await client.get("/health/metrics")
+            assert metrics_resp.status_code == 200
+            metrics = metrics_resp.json()
+            assert "uptime_seconds" in metrics
+            assert "database" in metrics
+            assert "redis_cache" in metrics
+            assert "websockets" in metrics
+            assert metrics["telemetry"]["recent_crashes_count"] >= 1
+    finally:
+        app.dependency_overrides.pop(get_current_admin, None)
 
 @pytest.mark.asyncio
 async def test_database_backup_and_isolated_restore_verification():
