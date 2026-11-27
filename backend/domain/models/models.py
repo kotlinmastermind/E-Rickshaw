@@ -1718,9 +1718,6 @@ class DriverCommissionSettlement(Base):
     driver: Mapped["DriverProfile"] = relationship()
     payout_request: Mapped["DriverPayoutRequest"] = relationship()
 
-    __table_args__ = (
-        UniqueConstraint("payout_request_id", name="uq_driver_commission_settlement_payout"),
-    )
 
 
 class DriverIncentiveProgress(Base):
