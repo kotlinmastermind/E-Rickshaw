@@ -70,6 +70,24 @@ class ServiceAreaService:
             )
         return zone
 
+    async def resolve_point(self, latitude: float, longitude: float) -> GeofenceZone:
+        zones = (await self.db.execute(
+            select(GeofenceZone).where(
+                GeofenceZone.is_active.is_(True),
+                GeofenceZone.zone_type == "SERVICE_AREA",
+            ).order_by(GeofenceZone.id)
+        )).scalars().all()
+        matches = []
+        for zone in zones:
+            polygon = self._polygon(zone)
+            if polygon and AdminAdvancedService.is_point_in_polygon(latitude, longitude, polygon):
+                matches.append(zone)
+        if not matches:
+            raise HTTPException(status_code=400, detail="Location is outside every active operational service area.")
+        if len(matches) > 1:
+            raise HTTPException(status_code=409, detail="Location falls inside overlapping active service areas.")
+        return matches[0]
+
     async def require_driver_assignment(self, driver_id: str, service_area_id: str) -> None:
         assignment = (await self.db.execute(
             select(DriverServiceAreaAssignment.id).where(
