@@ -57,7 +57,12 @@ class AdminFinanceSupportService:
                 exception = "Paid payout has no external settlement reference."
             output.append({"id": payout.id, "driver_id": driver.id, "driver_name": user.full_name,
                            "driver_email": user.email, "amount_cents": payout.amount_cents,
-                           "status": payout.status, "bank_account_masked": payout.bank_account_masked,
+                           "status": payout.status, "payout_account_id": payout.payout_account_id,
+                           "bank_account_masked": payout.bank_account_masked,
+                           "account_type": payout.account_type_snapshot,
+                           "bank_name": payout.bank_name_snapshot,
+                           "ifsc_code": payout.ifsc_code_snapshot,
+                           "beneficiary_name": payout.beneficiary_name_snapshot,
                            "requested_at": payout.created_at.isoformat(), "reviewed_at": payout.reviewed_at.isoformat() if payout.reviewed_at else None,
                            "reviewed_by": payout.reviewed_by, "rejection_reason": payout.rejection_reason,
                            "settlement_reference": payout.settlement_reference or payout.payout_reference,

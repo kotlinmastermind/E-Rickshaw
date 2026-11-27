@@ -1053,12 +1053,12 @@ class DriverFinancialService:
             account_type=acc_type,
             bank_name=inferred_bank,
             account_number_mask=acc_mask,
-            ifsc_code=ifsc or "UPI0000000",
+            ifsc_code=ifsc if acc_type == "BANK_ACCOUNT" else None,
             upi_vpa=upi if acc_type == "UPI" else None,
             beneficiary_name=holder,
-            verification_status="VERIFIED",
+            verification_status="PENDING_VERIFICATION",
             is_primary=is_first or data.get("is_primary", False),
-            penny_drop_reference=f"PENNY-{secrets.token_hex(4).upper()}"
+            penny_drop_reference=None,
         )
         if acc.is_primary:
             for ex in existing:
@@ -1075,7 +1075,7 @@ class DriverFinancialService:
             "bank_name": acc.bank_name,
             "verification_status": acc.verification_status,
             "is_primary": acc.is_primary,
-            "message": "Payout destination registered and verified via instant penny-drop validation."
+            "message": "Payout destination registered and pending verification."
         }
 
     async def set_primary_payout_account(self, user_id_or_driver_id: str, account_id: str) -> Dict[str, Any]:

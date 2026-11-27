@@ -948,16 +948,12 @@ fun InstantPayoutScreen(
         DriverRepository.fetchPayoutAccounts()
     }
 
-    val primaryAccount = accounts.firstOrNull { it.isPrimary } ?: accounts.firstOrNull()
-    val resolvedMask = if (payoutMethod == "UPI Direct") {
-        primaryAccount?.upiVpa?.takeIf { it.isNotBlank() } ?: primaryAccount?.accountNumberMask.orEmpty()
-    } else {
-        primaryAccount?.accountNumberMask.orEmpty()
-    }
-    val resolvedIfsc = if (payoutMethod == "UPI Direct") "UPI" else primaryAccount?.ifscCode.orEmpty()
-    val hasValidDestination = primaryAccount != null && resolvedMask.length >= 4 && resolvedIfsc.length >= 2
-    var attemptNonce by remember(withdrawAmount, resolvedMask, resolvedIfsc) { mutableStateOf(0) }
-    val pendingIdempotencyKey = remember(withdrawAmount, resolvedMask, resolvedIfsc, attemptNonce) {
+    val primaryAccount = accounts.firstOrNull { it.isPrimary && it.verificationStatus == "VERIFIED" }
+    val resolvedMask = primaryAccount?.upiVpa?.takeIf { it.isNotBlank() } ?: primaryAccount?.accountNumberMask.orEmpty()
+    val resolvedIfsc = primaryAccount?.ifscCode.orEmpty()
+    val hasValidDestination = primaryAccount != null && primaryAccount.id.isNotBlank()
+    var attemptNonce by remember(withdrawAmount, primaryAccount?.id) { mutableStateOf(0) }
+    val pendingIdempotencyKey = remember(withdrawAmount, primaryAccount?.id, attemptNonce) {
         "payout_${java.util.UUID.randomUUID()}"
     }
 
@@ -1047,8 +1043,7 @@ fun InstantPayoutScreen(
                     isSubmitting = true
                     DriverRepository.requestInstantWithdrawal(
                         amountRupees = amt,
-                        accountNumberMask = resolvedMask,
-                        ifsc = resolvedIfsc,
+                        payoutAccountId = primaryAccount?.id.orEmpty(),
                         idempotencyKey = pendingIdempotencyKey
                     ) { ok ->
                         isSubmitting = false

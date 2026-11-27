@@ -10,7 +10,7 @@ from backend.application.services.driver_service import DriverService
 from backend.application.services.admin_advanced_service import AdminAdvancedService
 from backend.domain.models import (
     DriverCommissionSettlement, DriverLedgerEntry,
-    DriverProfile, DriverWallet, User,
+    DriverPayoutAccount, DriverProfile, DriverWallet, User,
 )
 
 
@@ -33,13 +33,24 @@ async def _create_driver_with_wallet(db_session, balance_cents: int):
     await db_session.flush()
     wallet = DriverWallet(driver_id=driver.id, balance_cents=balance_cents, currency="INR")
     db_session.add(wallet)
+    account = DriverPayoutAccount(
+        driver_id=driver.id,
+        account_type="BANK_ACCOUNT",
+        bank_name="HDFC Bank",
+        account_number_mask="******1234",
+        ifsc_code="HDFC0001234",
+        beneficiary_name="Commission Settlement Driver",
+        verification_status="VERIFIED",
+        is_primary=True,
+    )
+    db_session.add(account)
     await db_session.flush()
-    return driver, wallet
+    return driver, wallet, account
 
 
 @pytest.mark.asyncio
 async def test_payout_settles_deferred_commission_before_holding_payout(db_session):
-    driver, wallet = await _create_driver_with_wallet(db_session, 100000)
+    driver, wallet, account = await _create_driver_with_wallet(db_session, 100000)
     db_session.add_all([
         DriverLedgerEntry(driver_id=driver.id, entry_type="DEBIT", category="COMMISSION_PAYABLE", amount_cents=-10000, balance_after_cents=100000, reference_id="ride-payable-1", description="Digital ride commission"),
         DriverLedgerEntry(driver_id=driver.id, entry_type="DEBIT", category="COMMISSION_RECEIVABLE", amount_cents=-5000, balance_after_cents=100000, reference_id="ride-receivable-1", description="Cash ride commission"),
@@ -56,7 +67,7 @@ async def test_payout_settles_deferred_commission_before_holding_payout(db_sessi
         session=db_session,
         driver_id_or_user_id=driver.id,
         amount_cents=80000,
-        bank_details={"account_number_mask": "BANK *******1234"},
+        payout_account_id=account.id,
         idempotency_key=f"commission-payout-{uuid.uuid4().hex[:16]}",
     )
     await db_session.refresh(wallet)
@@ -83,7 +94,7 @@ async def test_payout_settles_deferred_commission_before_holding_payout(db_sessi
     # Idempotent retry must not settle commission twice or create another payout hold.
     retry = await DispatchAdvancedService.request_payout(
         session=db_session, driver_id_or_user_id=driver.id, amount_cents=80000,
-        bank_details={"account_number_mask": "BANK *******1234"},
+        payout_account_id=account.id,
         idempotency_key=payout.idempotency_key,
     )
     await db_session.refresh(wallet)
@@ -108,7 +119,7 @@ async def test_payout_settles_deferred_commission_before_holding_payout(db_sessi
 
 @pytest.mark.asyncio
 async def test_payout_rejects_amount_above_balance_after_commission_reserve(db_session):
-    driver, wallet = await _create_driver_with_wallet(db_session, 100000)
+    driver, wallet, account = await _create_driver_with_wallet(db_session, 100000)
     db_session.add(DriverLedgerEntry(
         driver_id=driver.id, entry_type="DEBIT", category="COMMISSION_PAYABLE",
         amount_cents=-15000, balance_after_cents=100000, reference_id="ride-commission-reserve",
@@ -119,7 +130,7 @@ async def test_payout_rejects_amount_above_balance_after_commission_reserve(db_s
     with pytest.raises(HTTPException) as error:
         await DispatchAdvancedService.request_payout(
             session=db_session, driver_id_or_user_id=driver.id, amount_cents=86000,
-            bank_details={"account_number_mask": "BANK *******1234"},
+            payout_account_id=account.id,
             idempotency_key=f"commission-payout-reject-{uuid.uuid4().hex[:12]}",
         )
     assert error.value.status_code == 400

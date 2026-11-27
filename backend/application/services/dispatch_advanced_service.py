@@ -494,8 +494,9 @@ class DispatchAdvancedService:
         session: AsyncSession,
         driver_id_or_user_id: str,
         amount_cents: int,
-        bank_details: Dict[str, str],
-        idempotency_key: str
+        bank_details: Optional[Dict[str, str]] = None,
+        idempotency_key: str = "",
+        payout_account_id: Optional[str] = None,
     ) -> DriverPayoutRequest:
         if amount_cents < 10000:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Minimum payout request is ₹100 (10000 cents)")
@@ -503,9 +504,37 @@ class DispatchAdvancedService:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Client idempotency_key is required.")
         idempotency_key = str(idempotency_key).strip()
 
+        resolved_account_id = (payout_account_id or (bank_details or {}).get("payout_account_id") or "").strip()
+        if not resolved_account_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A verified primary payout_account_id is required.",
+            )
+
         driver_prof = await DispatchAdvancedService._resolve_driver_profile(session, driver_id_or_user_id)
         if not driver_prof:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found")
+
+        from backend.domain.models import DriverPayoutAccount
+        payout_account = (
+            await session.execute(
+                select(DriverPayoutAccount).where(DriverPayoutAccount.id == resolved_account_id)
+            )
+        ).scalar_one_or_none()
+        if not payout_account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout account not found.")
+        if payout_account.driver_id != driver_prof.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Payout account does not belong to this driver.")
+        if payout_account.verification_status != "VERIFIED":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Payout account is not verified (status: {payout_account.verification_status}).",
+            )
+        if not payout_account.is_primary:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only your primary verified payout account can be used for payouts.",
+            )
 
         # Idempotency Check: Query existing payout by unique idempotency_key
         existing_payout_stmt = select(DriverPayoutRequest).where(
@@ -550,7 +579,12 @@ class DispatchAdvancedService:
             driver_id=driver_prof.id,
             amount_cents=amount_cents,
             status="REQUESTED",
-            bank_account_masked=bank_details.get("account_number_mask") or "Not provided",
+            payout_account_id=payout_account.id,
+            bank_account_masked=payout_account.account_number_mask,
+            account_type_snapshot=payout_account.account_type,
+            bank_name_snapshot=payout_account.bank_name,
+            ifsc_code_snapshot=payout_account.ifsc_code,
+            beneficiary_name_snapshot=payout_account.beneficiary_name,
             idempotency_key=idempotency_key
         )
         try:

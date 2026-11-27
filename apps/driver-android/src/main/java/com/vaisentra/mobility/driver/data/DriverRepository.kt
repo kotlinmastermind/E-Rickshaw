@@ -1132,13 +1132,12 @@ object DriverRepository {
 
     fun requestInstantWithdrawal(
         amountRupees: Double,
-        accountNumberMask: String,
-        ifsc: String,
+        payoutAccountId: String,
         idempotencyKey: String? = null,
         onResult: (Boolean) -> Unit = {}
     ) {
         val amountCents = (amountRupees * 100).toLong()
-        if (amountCents <= 0L) {
+        if (amountCents <= 0L || payoutAccountId.isBlank()) {
             onResult(false)
             return
         }
@@ -1148,8 +1147,7 @@ object DriverRepository {
                 val res = DriverNetworkClient.apiService.requestInstantPayout(
                     PayoutRequestDto(
                         amountCents = amountCents,
-                        accountNumberMask = accountNumberMask,
-                        ifsc = ifsc,
+                        payoutAccountId = payoutAccountId,
                         idempotencyKey = resolvedKey
                     )
                 )

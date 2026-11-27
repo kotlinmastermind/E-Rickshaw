@@ -35,13 +35,13 @@ class DriverUpiContractTest {
     fun payoutRequest_preservesExplicitIdempotencyKeyAndIntegerPaiseAmount() {
         val dto = PayoutRequestDto(
             amountCents = 125000L,
-            accountNumberMask = "**** 4321",
-            ifsc = "HDFC0001234",
+            payoutAccountId = "acc_verified_001",
             idempotencyKey = "payout_driver_unique_001"
         )
         val encoded = gson.toJson(dto)
         val decoded = gson.fromJson(encoded, PayoutRequestDto::class.java)
         assertEquals(125000L, decoded.amountCents)
+        assertEquals("acc_verified_001", decoded.payoutAccountId)
         assertEquals("payout_driver_unique_001", decoded.idempotencyKey)
     }
 }

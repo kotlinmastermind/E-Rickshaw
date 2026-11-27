@@ -843,6 +843,11 @@ class DriverPayoutRequest(Base):
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="REQUESTED")  # REQUESTED, APPROVED, PAID, REJECTED
     bank_account_masked: Mapped[str] = mapped_column(String(32), default="Not provided")
+    payout_account_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("driver_payout_accounts.id", ondelete="RESTRICT"), nullable=True, index=True)
+    account_type_snapshot: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    bank_name_snapshot: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    ifsc_code_snapshot: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    beneficiary_name_snapshot: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     payout_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     reviewed_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -1659,10 +1664,10 @@ class DriverPayoutAccount(Base):
     account_type: Mapped[str] = mapped_column(String(20), default="BANK_ACCOUNT")  # BANK_ACCOUNT, UPI
     bank_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     account_number_mask: Mapped[str] = mapped_column(String(32), nullable=False)
-    ifsc_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    ifsc_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     upi_vpa: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     beneficiary_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    verification_status: Mapped[str] = mapped_column(String(30), default="VERIFIED")  # PENDING_VERIFICATION, VERIFIED, REJECTED
+    verification_status: Mapped[str] = mapped_column(String(30), default="PENDING_VERIFICATION")  # PENDING_VERIFICATION, VERIFIED, REJECTED
     rejection_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     penny_drop_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -1706,7 +1711,7 @@ class DriverCommissionSettlement(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     driver_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("driver_profiles.id", ondelete="CASCADE"), nullable=False, index=True
+        String(36), ForeignKey("driver_profiles.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     payout_request_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("driver_payout_requests.id", ondelete="RESTRICT"), nullable=False, unique=True
