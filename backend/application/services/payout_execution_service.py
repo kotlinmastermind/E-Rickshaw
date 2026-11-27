@@ -665,7 +665,9 @@ class PayoutExecutionService:
             )
         if prov_status in {"rejected", "reversed", "cancelled", "failed"}:
             payout.provider_payout_id = item.get("id") or payout.provider_payout_id
-            payout.provider_metadata_json = _sanitize_provider_payload(item)
+            confirmed_meta = json.loads(_sanitize_provider_payload(item))
+            confirmed_meta["provider_failure_confirmed"] = True
+            payout.provider_metadata_json = json.dumps(confirmed_meta)
             await session.flush()
             return await PayoutExecutionService.fail_payout(
                 session,
@@ -717,7 +719,8 @@ class PayoutExecutionService:
 
         provider_meta = json.loads(payout.provider_metadata_json or "{}") if payout.provider_metadata_json else {}
         if payout.execution_mode == "RAZORPAYX" and (
-            payout.status == "PROCESSING" or provider_meta.get("uncertain_outcome")
+            (payout.status == "PROCESSING" or provider_meta.get("uncertain_outcome"))
+            and not provider_meta.get("provider_failure_confirmed")
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -978,7 +981,9 @@ class PayoutExecutionService:
         elif event_name in {"payout.failed", "payout.reversed", "payout.rejected"}:
             if payout.status in {"APPROVED", "PROCESSING"}:
                 payout.provider_payout_id = provider_payout_id or payout.provider_payout_id
-                payout.provider_metadata_json = _sanitize_provider_payload(entity)
+                confirmed_meta = json.loads(_sanitize_provider_payload(entity))
+                confirmed_meta["provider_failure_confirmed"] = True
+                payout.provider_metadata_json = json.dumps(confirmed_meta)
                 await session.flush()
                 await PayoutExecutionService.fail_payout(
                     session,
