@@ -533,6 +533,97 @@ class AdminFinanceSupportService:
         await self.db.commit()
         return {"id": row.id, "status": row.status, "updated_at": row.updated_at.isoformat()}
 
+    # Finance: read-only customer wallet inspection. Never create a wallet during an admin read.
+    async def customer_wallet_overview(self, admin_id: str, user_id: str) -> Dict[str, Any]:
+        user = await self.db.get(User, user_id)
+        if not user or (user.role or "").lower() != "customer":
+            raise HTTPException(404, "Customer account not found.")
+
+        wallet = (await self.db.execute(
+            select(Wallet).where(Wallet.user_id == user_id)
+        )).scalar_one_or_none()
+        total_transactions = 0
+        wallet_data = None
+        if wallet:
+            total_transactions = (await self.db.execute(
+                select(func.count(WalletTransaction.id)).where(WalletTransaction.wallet_id == wallet.id)
+            )).scalar_one()
+            wallet_data = {
+                "id": wallet.id,
+                "balance_cents": int(wallet.balance_cents or 0),
+                "debt_cents": int(wallet.debt_cents or 0),
+                "currency": wallet.currency or "INR",
+                "updated_at": wallet.updated_at.isoformat() if wallet.updated_at else None,
+            }
+
+        self.audit(admin_id, "CUSTOMER_WALLET_VIEWED", "customer_wallets", user_id, {
+            "wallet_exists": wallet is not None,
+        })
+        await self.db.commit()
+        return {
+            "customer": {
+                "id": user.id,
+                "name": user.full_name,
+                "phone": user.phone_number,
+                "is_active": bool(user.is_active),
+            },
+            "wallet": wallet_data,
+            "wallet_exists": wallet is not None,
+            "transaction_count": int(total_transactions),
+        }
+
+    async def customer_wallet_transactions(
+        self, admin_id: str, user_id: str, limit: int = 50, offset: int = 0
+    ) -> Dict[str, Any]:
+        user = await self.db.get(User, user_id)
+        if not user or (user.role or "").lower() != "customer":
+            raise HTTPException(404, "Customer account not found.")
+
+        wallet = (await self.db.execute(
+            select(Wallet).where(Wallet.user_id == user_id)
+        )).scalar_one_or_none()
+        if not wallet:
+            rows = []
+            total = 0
+        else:
+            total = (await self.db.execute(
+                select(func.count(WalletTransaction.id)).where(WalletTransaction.wallet_id == wallet.id)
+            )).scalar_one()
+            rows = (await self.db.execute(
+                select(WalletTransaction)
+                .where(WalletTransaction.wallet_id == wallet.id)
+                .order_by(desc(WalletTransaction.created_at), desc(WalletTransaction.id))
+                .limit(limit)
+                .offset(offset)
+            )).scalars().all()
+
+        self.audit(admin_id, "CUSTOMER_WALLET_LEDGER_VIEWED", "customer_wallets", user_id, {
+            "limit": limit, "offset": offset, "returned": len(rows),
+        })
+        await self.db.commit()
+        return {
+            "wallet_exists": wallet is not None,
+            "total": int(total),
+            "limit": limit,
+            "offset": offset,
+            "transactions": [
+                {
+                    "id": tx.id,
+                    "transaction_type": tx.transaction_type,
+                    "source": tx.source,
+                    "amount_cents": int(tx.amount_cents),
+                    "amount_rupees": round(int(tx.amount_cents) / 100.0, 2),
+                    "balance_after_cents": int(tx.balance_after_cents),
+                    "balance_after_rupees": round(int(tx.balance_after_cents) / 100.0, 2),
+                    "currency": wallet.currency or "INR",
+                    "reference_id": tx.reference_id,
+                    "description": tx.description or "",
+                    "created_at": tx.created_at.isoformat() if tx.created_at else None,
+                }
+                for tx in rows
+            ],
+        }
+
     # Finance: wallet adjustment (two distinct approvers)
     async def create_wallet_adjustment(self, admin_id: str, user_id: str, amount: int, kind: str, reason: str) -> Dict[str, Any]:
         user = await self.db.get(User, user_id)
