@@ -49,7 +49,7 @@ async def test_part5_telemetry_and_confidence_range(db_session):
     assert telemetry["eta_confidence_percentage"] == 95
     assert telemetry["pickup_countdown_seconds"] > 0
     assert telemetry["freshness_status"] in ["FRESH_GPS", "SLIGHT_DELAY", "STALE_SIGNAL"]
-    assert telemetry["vehicle_plate_number"] is not None
+    assert telemetry["vehicle_plate_number"] is None  # No vehicle is assigned in this fixture; do not fabricate a plate.
     assert "8492" in telemetry["accessibility_announcement"]
     assert len(telemetry["timeline"]) == 5
     assert telemetry["masked_virtual_number"] == "+91 22 6900 4820"
