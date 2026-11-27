@@ -47,7 +47,7 @@ class PoolService:
         if seats_requested > category.capacity:
             raise HTTPException(status_code=400, detail=f"This vehicle category supports up to {category.capacity} passengers.")
 
-        rule = await self.fare_service.get_active_rule_for_category(category_id)
+        rule = await self.fare_service.get_active_rule_for_category(category_id, city_code=service_area.city_code)
         route = await self.maps_provider.get_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
 
         # Baseline private solo calculation in minor units (paise/cents)
@@ -136,6 +136,8 @@ class PoolService:
         category = await self.db.get(VehicleCategory, category_id)
         if not category or not category.is_active:
             raise HTTPException(status_code=404, detail="Shared-ride vehicle category is unavailable.")
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_area = await ServiceAreaService(self.db).resolve_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
         if seats_requested < 1 or seats_requested > category.capacity:
             raise HTTPException(status_code=400, detail=f"Requested seats exceed this category's passenger capacity ({category.capacity}).")
         stmt = select(PooledTrip).where(
