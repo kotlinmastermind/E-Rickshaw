@@ -27,12 +27,23 @@ import kotlinx.coroutines.launch
 @Composable
 fun PaymentMethodPickerScreen(onNavigate: (String) -> Unit) {
     var selectedMethod by remember { mutableStateOf("UPI") }
+    val wallet by RiderRepository.wallet.collectAsState()
+    val hasWalletBalance = wallet.walletId.isNotBlank()
 
+    LaunchedEffect(Unit) {
+        RiderRepository.fetchWalletBalance()
+    }
+
+    val walletLabel = if (hasWalletBalance) {
+        "RiderGo Cashless Wallet (₹${String.format(java.util.Locale.US, "%.2f", wallet.displayBalanceRupees)} available)"
+    } else {
+        "RiderGo Cashless Wallet (balance unavailable)"
+    }
     val methods = listOf(
         Triple("UPI", "Instant UPI (Google Pay, PhonePe, Paytm)", "⚡"),
-        Triple("WALLET", "RiderGo Cashless Wallet (₹485.00 Available)", "👛"),
-        Triple("CARD", "Credit / Debit Card (HDFC **** 4812)", "💳"),
-        Triple("CASH", "Cash to Pilot upon Arrival", "💵")
+        Triple("WALLET", walletLabel, "👛"),
+        Triple("CARD", "Credit / Debit Card (select at checkout)", "💳"),
+        Triple("CASH", "Cash to Driver", "💵")
     )
 
     Column(
@@ -85,6 +96,7 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
     val wallet by RiderRepository.wallet.collectAsState()
     val walletLoadState by RiderRepository.walletLoadState.collectAsState()
     val hasWalletBalance = wallet.walletId.isNotBlank()
+    val scope = rememberCoroutineScope()
     val topupState by RiderRepository.topupState.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = context as? android.app.Activity
@@ -133,7 +145,7 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
                 Spacer(modifier = Modifier.height(10.dp))
                 NeoButton(
                     text = "Retry Balance",
-                    onClick = { androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycleScope.launch { RiderRepository.fetchWalletBalance() } },
+                    onClick = { scope.launch { RiderRepository.fetchWalletBalance() } },
                     backgroundColor = AmberGold,
                     textColor = CanvasBlack
                 )
