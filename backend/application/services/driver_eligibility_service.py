@@ -81,7 +81,8 @@ class DriverEligibilityService:
         max_rings: int = 3,
         ride_id: Optional[str] = None,
         required_category_id: Optional[str] = None,
-        max_candidates: int = 20
+        max_candidates: int = 20,
+        required_service_area_id: Optional[str] = None,
     ) -> List[CandidateDriver]:
         """
         Discovers nearby eligible drivers using concentric H3 hexagonal rings:
@@ -94,6 +95,22 @@ class DriverEligibilityService:
         """
         if not h3_service.validate_coordinates(pickup_lat, pickup_lng):
             logger.warning(f"Invalid pickup coordinates: ({pickup_lat}, {pickup_lng})")
+            return []
+
+        area_service = None
+        service_polygon = None
+        restricted_polygons = []
+        if self.db:
+            from backend.application.services.service_area_service import ServiceAreaService
+            area_service = ServiceAreaService(self.db)
+            pickup_zone = await area_service.resolve_point(pickup_lat, pickup_lng)
+            if required_service_area_id and pickup_zone.id != required_service_area_id:
+                logger.warning("Dispatch service-area mismatch for pickup; refusing candidate discovery.")
+                return []
+            required_service_area_id = pickup_zone.id
+            _, service_polygon, restricted_polygons = await area_service.load_area_boundary(required_service_area_id)
+        elif required_service_area_id:
+            # A service-area-scoped search cannot be verified without the authoritative database.
             return []
 
         pickup_cell = h3_service.get_h3_cell(pickup_lat, pickup_lng)
@@ -148,6 +165,10 @@ class DriverEligibilityService:
                 lat = loc.get("latitude")
                 lng = loc.get("longitude")
                 if lat is None or lng is None:
+                    continue
+                if service_polygon is not None and not area_service.location_is_inside_boundary(
+                    lat, lng, service_polygon, restricted_polygons
+                ):
                     continue
 
                 h_dist = h3_service.haversine_distance_km(pickup_lat, pickup_lng, lat, lng)

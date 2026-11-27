@@ -89,7 +89,7 @@ class AdminAdvancedService:
             poly = [(pt["lat"], pt["lng"]) for pt in coords]
             if AdminAdvancedService.is_point_in_polygon(lat, lng, poly):
                 matched_zones.append(z.name)
-                if z.zone_type == "RESTRICTED":
+                if str(z.zone_type or "").upper() in ("RESTRICTED", "RESTRICTED_ZONE"):
                     is_restricted = True
                 if z.surge_multiplier > highest_surge:
                     highest_surge = z.surge_multiplier

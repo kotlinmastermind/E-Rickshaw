@@ -1335,11 +1335,18 @@
                                 <label class="block text-[11px] text-slate-400 mb-1">Zone Policy Type</label>
                                 <select id="geo-type"
                                     class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-glow/50 font-mono">
+                                    <option value="SERVICE_AREA">SERVICE_AREA (Booking & Dispatch Coverage)</option>
                                     <option value="AIRPORT_ZONE">AIRPORT_ZONE (Priority Queue)</option>
                                     <option value="HIGH_DENSITY_CORRIDOR">HIGH_DENSITY_CORRIDOR (Auto-Surge)</option>
-                                    <option value="RESTRICTED_ZONE">RESTRICTED_ZONE (No-Go VIP/Hold)</option>
+                                    <option value="RESTRICTED">RESTRICTED (No-Go Zone)</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">City / Service Area Code (required for SERVICE_AREA)</label>
+                            <input type="text" id="geo-city-code" maxlength="32" placeholder="e.g. PATNA"
+                                class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white font-mono uppercase focus:outline-none focus:border-cyan-glow/50">
                         </div>
 
                         <div>
@@ -1437,6 +1444,7 @@
                             <tr>
                                 <th class="py-3 px-4">Zone Name</th>
                                 <th class="py-3 px-4">Zone Type</th>
+                                <th class="py-3 px-4">City Code</th>
                                 <th class="py-3 px-4">Surge Multiplier</th>
                                 <th class="py-3 px-4">Polygon Vertices</th>
                                 <th class="py-3 px-4">Status</th>
@@ -1445,7 +1453,7 @@
                         </thead>
                         <tbody id="geofences-table-body" class="divide-y divide-border text-slate-300">
                             <tr>
-                                <td colspan="6" class="py-6 text-center text-slate-500 font-mono">Loading geofences from
+                                <td colspan="7" class="py-6 text-center text-slate-500 font-mono">Loading geofences from
                                     database...</td>
                             </tr>
                         </tbody>
@@ -5009,7 +5017,7 @@
             const list = STATE.geofences || [];
             tbody.innerHTML = '';
             if (list.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-500 font-mono">No geofence boundaries configured yet.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-slate-500 font-mono">No geofence boundaries configured yet.</td></tr>`;
                 return;
             }
             list.forEach(z => {
@@ -5030,6 +5038,7 @@
                         </div>
                     </td>
                     <td class="py-3 px-4 text-cyan-glow font-mono text-xs">${z.zone_type}</td>
+                    <td class="py-3 px-4 text-slate-300 font-mono text-xs">${z.city_code || "—"}</td>
                     <td class="py-3 px-4 font-mono font-bold text-amber-glow">${(z.surge_multiplier || 1.0).toFixed(1)}x</td>
                     <td class="py-3 px-4 font-mono text-slate-300">${coordsCount} Vertices</td>
                     <td class="py-3 px-4">
@@ -5038,9 +5047,12 @@
                         </span>
                     </td>
                     <td class="py-3 px-4 text-right">
-                        <button onclick="switchTab('map'); showToast('Previewing ${z.name} boundary on live map')" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
-                            View Map
-                        </button>
+                        <div class="inline-flex gap-1.5">
+                            <button onclick="switchTab('map'); showToast('Previewing ${z.name} boundary on live map')" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
+                                View Map
+                            </button>
+                            ${z.is_active ? `<button onclick="deactivateGeofence('${z.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim border border-crimson-glow/30 text-crimson-glow text-[11px]">Deactivate</button>` : ''}
+                        </div>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -5051,11 +5063,16 @@
         async function submitCreateGeofence() {
             const name = document.getElementById('geo-name').value.trim();
             const zoneType = document.getElementById('geo-type').value;
+            const cityCode = document.getElementById('geo-city-code').value.trim().toUpperCase();
             const surge = parseFloat(document.getElementById('geo-surge').value) || 1.0;
             const coordsText = document.getElementById('geo-coords').value.trim();
 
             if (!name) {
                 showToast('Please enter a zone identifier name', 'error');
+                return;
+            }
+            if (zoneType === 'SERVICE_AREA' && !/^[A-Z0-9_-]{2,32}$/.test(cityCode)) {
+                showToast('Enter a valid City / Service Area Code for SERVICE_AREA zones', 'error');
                 return;
             }
             let coords = [];
@@ -5080,6 +5097,7 @@
                     body: JSON.stringify({
                         name: name,
                         zone_type: zoneType,
+                        city_code: cityCode || null,
                         surge_multiplier: surge,
                         coordinates: coords
                     })
@@ -5087,6 +5105,7 @@
                 if (res.ok) {
                     showToast(`Geofence "${name}" successfully deployed and active!`);
                     document.getElementById('geo-name').value = '';
+                    document.getElementById('geo-city-code').value = '';
                     document.getElementById('geo-coords').value = '';
                     await loadGeofencesData();
                 } else {
@@ -5095,6 +5114,27 @@
                 }
             } catch (err) {
                 showToast('Network error while deploying geofence', 'error');
+            }
+        }
+
+        async function deactivateGeofence(zoneId) {
+            if (!confirm('Deactivate this geofence? New bookings and dispatches will no longer use this active coverage zone.')) return;
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/geofences/${encodeURIComponent(zoneId)}`, {
+                    method: 'DELETE',
+                    headers
+                });
+                if (res.ok) {
+                    showToast('Geofence deactivated. New bookings and dispatches will revalidate coverage.');
+                    await loadGeofencesData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Geofence deactivation failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error while deactivating geofence', 'error');
             }
         }
 

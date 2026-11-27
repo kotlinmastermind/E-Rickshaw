@@ -1304,99 +1304,51 @@ async def test_concurrent_cash_collection_prevents_double_commission(db_session:
 
 
 @pytest.mark.asyncio
-async def test_comprehensive_city_boundary_and_resolver_cases(db_session: AsyncSession):
-    """
-    Mandatory Project Owner Directive: Comprehensive City Boundary Automated Tests
-    Covers:
-    1. Inside city (Connaught Place, Delhi -> DELHI_NCR; Marine Drive, Mumbai -> MUMBAI; Brigade Rd, Bengaluru -> BENGALURU)
-    2. Outside city (Shimla, Jaipur, Ocean -> HTTP 400)
-    3. Boundary edge (Inside 75km Delhi perimeter -> DELHI_NCR; Outside 75km -> HTTP 400)
-    4. Two service areas midpoint/overlap (Closer city strictly wins)
-    5. Missing GPS coordinates (None lat or lng -> HTTP 400)
-    6. Invalid coordinates (lat > 90, lng > 180, non-numeric strings -> HTTP 400)
-    7. Client forged city_code (pickup in Bengaluru with claimed city_code='DELHI_NCR' -> HTTP 400)
-    """
+async def test_service_area_resolution_uses_admin_polygons_not_hardcoded_city_radii(db_session: AsyncSession):
     fare_service = FareService(db_session)
 
-    # 1. Inside city
-    assert fare_service.resolve_city_code_from_coords(28.6139, 77.2090) == "DELHI_NCR"
-    assert fare_service.resolve_city_code_from_coords(18.9217, 72.8332) == "MUMBAI"
-    assert fare_service.resolve_city_code_from_coords(12.9716, 77.5946) == "BENGALURU"
-    assert fare_service.resolve_city_code_from_coords(25.5941, 85.1376) == "PATNA"
-    assert fare_service.resolve_city_code_from_coords(26.8467, 80.9462) == "LUCKNOW"
+    assert await fare_service.resolve_operating_city(None, 28.6139, 77.2090) == "DELHI_NCR"
+    assert await fare_service.resolve_operating_city(None, 18.9217, 72.8332) == "MUMBAI"
+    assert await fare_service.resolve_operating_city(None, 12.9716, 77.5946) == "BENGALURU"
+    assert await fare_service.resolve_operating_city(None, 25.5941, 85.1376) == "PATNA"
+    assert await fare_service.resolve_operating_city(None, 26.8467, 80.9462) == "LUCKNOW"
 
-    # 2. Outside city
-    with pytest.raises(HTTPException) as exc_shimla:
-        fare_service.resolve_city_code_from_coords(31.1048, 77.1734)  # Shimla (~280km from Delhi)
-    assert exc_shimla.value.status_code == 400
-    assert "outside our operational service area" in exc_shimla.value.detail
+    # Points outside every configured polygon are rejected even if near a known city.
+    with pytest.raises(HTTPException) as exc_outside:
+        await fare_service.resolve_operating_city(None, 31.1048, 77.1734)
+    assert exc_outside.value.status_code == 400
+    assert "outside all active service areas" in exc_outside.value.detail
 
-    with pytest.raises(HTTPException) as exc_jaipur:
-        fare_service.resolve_city_code_from_coords(26.9124, 75.7873)  # Jaipur (~240km from Delhi)
-    assert exc_jaipur.value.status_code == 400
-    assert "outside our operational service area" in exc_jaipur.value.detail
-
-    with pytest.raises(HTTPException) as exc_ocean:
-        fare_service.resolve_city_code_from_coords(15.0, 68.0)  # Arabian Sea
-    assert exc_ocean.value.status_code == 400
-    assert "outside our operational service area" in exc_ocean.value.detail
-
-    # 3. Boundary edge cases
-    # Point ~40km from Delhi center (Greater Noida/Ghaziabad border): inside 75km limit
-    assert fare_service.resolve_city_code_from_coords(28.4744, 77.5040) == "DELHI_NCR"
-    # Point ~110km from Delhi center: outside 75km limit
-    with pytest.raises(HTTPException) as exc_edge_out:
-        fare_service.resolve_city_code_from_coords(29.6000, 77.2090)
-    assert exc_edge_out.value.status_code == 400
-    assert "outside our operational service area" in exc_edge_out.value.detail
-
-    # 4. Overlap / Midpoint resolution between cities
-    # A coordinate closer to Lucknow (e.g. Ayodhya area, ~125km from Lucknow, ~380km from Patna)
-    # Testing midpoint distance resolution: between Lucknow (26.8467, 80.9462) and Patna (25.5941, 85.1376)
-    # A point within Lucknow's operational radius:
-    assert fare_service.resolve_city_code_from_coords(26.8000, 81.0000) == "LUCKNOW"
-    # A point within Patna's operational radius:
-    assert fare_service.resolve_city_code_from_coords(25.6000, 85.1000) == "PATNA"
-
-    # 5. Missing GPS coordinates
-    with pytest.raises(HTTPException) as exc_none_lat:
-        fare_service.resolve_city_code_from_coords(None, 77.2090)
-    assert exc_none_lat.value.status_code == 400
-    assert "strictly required" in exc_none_lat.value.detail
-
-    with pytest.raises(HTTPException) as exc_none_lng:
-        fare_service.resolve_city_code_from_coords(28.6139, None)
-    assert exc_none_lng.value.status_code == 400
-    assert "strictly required" in exc_none_lng.value.detail
-
-    # 6. Invalid coordinates
-    with pytest.raises(HTTPException) as exc_lat_range:
-        fare_service.resolve_city_code_from_coords(95.0, 77.2090)
-    assert exc_lat_range.value.status_code == 400
-    assert "out of valid range" in exc_lat_range.value.detail
-
-    with pytest.raises(HTTPException) as exc_lng_range:
-        fare_service.resolve_city_code_from_coords(28.6139, 210.0)
-    assert exc_lng_range.value.status_code == 400
-    assert "out of valid range" in exc_lng_range.value.detail
-
-    with pytest.raises(HTTPException) as exc_non_num:
-        fare_service.resolve_city_code_from_coords("invalid_lat", 77.2090)
-    assert exc_non_num.value.status_code == 400
-    assert "valid floating point" in exc_non_num.value.detail
-
-    # 7. Client forged city_code
+    # Client-supplied city codes cannot override polygon-derived service-area identity.
     with pytest.raises(HTTPException) as exc_forged:
-        await fare_service.resolve_operating_city(
-            city_code="DELHI_NCR",  # Forged: claiming Delhi
-            lat=12.9716,            # But coordinates are in Bengaluru
-            lng=77.5946
-        )
+        await fare_service.resolve_operating_city("DELHI_NCR", 12.9716, 77.5946)
     assert exc_forged.value.status_code == 400
-    assert "Cross-city fare spoofing is prohibited" in exc_forged.value.detail
+    assert "Cross-area fare spoofing is prohibited" in exc_forged.value.detail
 
+    # A trip cannot start in one configured service area and end in another.
+    with pytest.raises(HTTPException) as exc_cross_area:
+        await fare_service.resolve_operating_city(
+            None, 28.6139, 77.2090, 25.5941, 85.1376
+        )
+    assert exc_cross_area.value.status_code == 400
+    assert "same active service area" in exc_cross_area.value.detail
 
+    with pytest.raises(HTTPException) as exc_missing:
+        await fare_service.resolve_operating_city(None, None, 77.2090)
+    assert exc_missing.value.status_code == 400
 
+    with pytest.raises(HTTPException) as exc_invalid:
+        await fare_service.resolve_operating_city(None, 95.0, 77.2090)
+    assert exc_invalid.value.status_code == 400
 
-
-
+    # Missing operational configuration is fail-closed, not treated as nationwide coverage.
+    from backend.domain.models import GeofenceZone
+    areas = (await db_session.execute(
+        select(GeofenceZone).where(GeofenceZone.zone_type == "SERVICE_AREA")
+    )).scalars().all()
+    for area in areas:
+        area.is_active = False
+    await db_session.flush()
+    with pytest.raises(HTTPException) as exc_unconfigured:
+        await fare_service.resolve_operating_city(None, 28.6139, 77.2090)
+    assert exc_unconfigured.value.status_code == 503

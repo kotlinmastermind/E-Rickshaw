@@ -167,6 +167,53 @@ class RideService:
             stmt_est = select(FareEstimate).where(FareEstimate.id == est_data["estimate_id"])
             estimate = (await self.db.execute(stmt_est)).scalar_one()
 
+        # Re-resolve the complete route at booking time. A stale estimate/price lock
+        # cannot bypass a deactivated or changed service-area boundary.
+        from backend.application.services.service_area_service import ServiceAreaService
+        area_service = ServiceAreaService(self.db)
+        service_area = await area_service.resolve_trip(
+            estimate.pickup_latitude,
+            estimate.pickup_longitude,
+            estimate.destination_latitude,
+            estimate.destination_longitude,
+        )
+        fare_rule = (await self.db.execute(
+            select(FareRule).where(FareRule.id == estimate.fare_rule_id)
+        )).scalars().first()
+        if not fare_rule:
+            raise HTTPException(status_code=400, detail="Fare configuration for this estimate is no longer available.")
+        if fare_rule.city_code and fare_rule.city_code.strip().upper() != service_area.city_code.strip().upper():
+            raise HTTPException(
+                status_code=400,
+                detail="Fare estimate tariff does not belong to the resolved service area. Please recalculate the fare.",
+            )
+        for stop_data in stops or []:
+            stop_lat = stop_data.get("latitude")
+            stop_lng = stop_data.get("longitude")
+            if stop_lat is None or stop_lng is None:
+                raise HTTPException(status_code=400, detail="Every intermediate stop must include valid GPS coordinates.")
+            stop_area = await area_service.resolve_point(stop_lat, stop_lng)
+            if stop_area.id != service_area.id:
+                raise HTTPException(status_code=400, detail="All intermediate stops must remain inside the ride's service area.")
+
+        # Do not accept a booking in an area/category with no real eligible driver.
+        # Candidate discovery enforces approval, online/non-busy state, fresh GPS,
+        # assigned vehicle category, and the same service-area polygon.
+        from backend.application.services.driver_eligibility_service import DriverEligibilityService
+        eligible_drivers = await DriverEligibilityService(db=self.db).discover_eligible_candidates(
+            pickup_lat=estimate.pickup_latitude,
+            pickup_lng=estimate.pickup_longitude,
+            max_rings=5,
+            required_category_id=estimate.category_id,
+            max_candidates=1,
+            required_service_area_id=service_area.id,
+        )
+        if not eligible_drivers:
+            raise HTTPException(
+                status_code=409,
+                detail="No eligible online driver with a matching vehicle is currently available in this service area. Booking was not created.",
+            )
+
         now = datetime.now(timezone.utc)
 
         expires_at = estimate.expires_at if estimate.expires_at.tzinfo else estimate.expires_at.replace(tzinfo=timezone.utc)
@@ -207,6 +254,7 @@ class RideService:
             customer_id=customer.id,
             vehicle_category_id=estimate.category_id,
             fare_rule_id=estimate.fare_rule_id,
+            service_area_id=service_area.id,
             status=RideStatus.REQUESTED.value,
             pickup_address=pickup_address,
             pickup_latitude=estimate.pickup_latitude,
@@ -305,6 +353,7 @@ class RideService:
             "ride_id": ride.id,
             "status": ride.status,
             "category_id": ride.vehicle_category_id,
+            "service_area_id": ride.service_area_id,
             "start_otp": ride.start_otp,
             "estimated_fare_cents": ride.estimated_fare_cents,
             "pickup_address": ride.pickup_address,
@@ -346,6 +395,20 @@ class RideService:
         ride_obj = ride_res.scalar_one_or_none()
         if not ride_obj:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+        from backend.application.services.service_area_service import ServiceAreaService
+        area_service = ServiceAreaService(self.db)
+        resolved_area = await area_service.resolve_trip(
+            ride_obj.pickup_latitude,
+            ride_obj.pickup_longitude,
+            ride_obj.destination_latitude,
+            ride_obj.destination_longitude,
+        )
+        if ride_obj.service_area_id and ride_obj.service_area_id != resolved_area.id:
+            raise HTTPException(status_code=409, detail="Ride service area is no longer valid. Driver acceptance is blocked.")
+        if not ride_obj.service_area_id:
+            ride_obj.service_area_id = resolved_area.id
+            await self.db.flush()
 
         from backend.domain.models import DriverVehicleAssignment, Vehicle
         stmt_veh = (
@@ -391,6 +454,28 @@ class RideService:
             offer = offer_result.scalar_one_or_none()
             if offer is None:
                 raise HTTPException(status_code=409, detail="This dispatch offer expired or is no longer assigned to you.")
+
+            # Recheck fresh GPS at acceptance; a driver cannot cross into another
+            # service area after receiving an offer and still accept the ride.
+            from backend.application.services.live_location_service import LiveLocationService
+            live_locations = LiveLocationService(db=self.db)
+            if not await live_locations.is_driver_fresh(driver.id):
+                raise HTTPException(status_code=409, detail="Fresh driver GPS is required to accept this offer.")
+            driver_location = await live_locations.get_driver_live_location(driver.id)
+            if (
+                not driver_location
+                or driver_location.get("latitude") is None
+                or driver_location.get("longitude") is None
+                or not await area_service.is_driver_inside(
+                    ride_obj.service_area_id,
+                    driver_location.get("latitude"),
+                    driver_location.get("longitude"),
+                )
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Driver is outside this ride's active service area or inside a restricted zone.",
+                )
 
             # Atomic conditional update
             update_stmt = (

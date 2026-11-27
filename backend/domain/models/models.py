@@ -320,7 +320,7 @@ class FareRule(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     category_id: Mapped[str] = mapped_column(String(36), ForeignKey("vehicle_categories.id"), nullable=False)
-    city_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default="DELHI_NCR", index=True)
+    city_code: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     base_fare_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     per_km_cents: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -416,6 +416,7 @@ class Ride(Base):
     vehicle_category_id: Mapped[str] = mapped_column(String(36), ForeignKey("vehicle_categories.id"), nullable=False)
     vehicle_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("vehicles.id"), nullable=True)
     fare_rule_id: Mapped[str] = mapped_column(String(36), ForeignKey("fare_rules.id"), nullable=False)
+    service_area_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("geofence_zones.id"), nullable=True, index=True)
     
     # States: REQUESTED, ASSIGNED, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED, EXPIRED
     status: Mapped[str] = mapped_column(String(30), default="REQUESTED", index=True)

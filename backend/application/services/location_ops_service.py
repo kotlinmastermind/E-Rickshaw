@@ -621,7 +621,7 @@ class LocationOpsService:
                 continue
             if zone.zone_type == "SERVICE_AREA":
                 service_zones.append((zone, points))
-            if zone.zone_type == "RESTRICTED":
+            if str(zone.zone_type or "").upper() in ("RESTRICTED", "RESTRICTED_ZONE"):
                 restricted_zones.append((zone, points))
 
         points_to_check = [("pickup", latitude, longitude)]
@@ -657,9 +657,31 @@ class LocationOpsService:
                     f"To proceed, please set pickup within licensed zones or coordinate a cross-border dispatch via concierge."
                 )
         else:
-            eligible = not restricted
+            # Missing coverage polygons must never be interpreted as serviceable.
+            eligible = False
             status = "NOT_CONFIGURED" if not restricted else "RESTRICTED"
             explanation = "Service boundaries are not configured; coverage cannot be verified yet."
+
+        # Booking, fare and discovery share the same authoritative polygon resolver.
+        # Keep this advisory endpoint consistent with the enforced booking decision.
+        try:
+            from backend.application.services.service_area_service import ServiceAreaService
+            service_area_service = ServiceAreaService(self.db)
+            if dest_latitude is not None and dest_longitude is not None:
+                await service_area_service.resolve_trip(
+                    latitude, longitude, dest_latitude, dest_longitude
+                )
+            else:
+                await service_area_service.resolve_point(latitude, longitude)
+        except HTTPException as exc:
+            eligible = False
+            status = (
+                "NOT_CONFIGURED" if exc.status_code == 503
+                else "BOUNDARY_CONFLICT" if exc.status_code == 409
+                else "RESTRICTED" if restricted
+                else "OUT_OF_ZONE"
+            )
+            explanation = str(exc.detail)
 
         # 439. Zone-Specific Vehicle Availability
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)

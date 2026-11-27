@@ -220,6 +220,23 @@ class CascadingDispatchService:
             logger.info(f"Ride {ride_id} status is {ride.status} (assigned={ride.assigned_driver_id}). Skipping cascade.")
             return None
 
+        # Legacy fallback must not bypass the modern service-area boundary.
+        from backend.application.services.service_area_service import ServiceAreaService
+        area_service = ServiceAreaService(self.db)
+        resolved_area = await area_service.resolve_trip(
+            ride.pickup_latitude,
+            ride.pickup_longitude,
+            ride.destination_latitude,
+            ride.destination_longitude,
+        )
+        if ride.service_area_id and ride.service_area_id != resolved_area.id:
+            logger.error("Cascading fallback blocked: ride service area no longer matches active geofence.")
+            return None
+        if not ride.service_area_id:
+            ride.service_area_id = resolved_area.id
+            await self.db.flush()
+        _, service_polygon, restricted_polygons = await area_service.load_area_boundary(ride.service_area_id)
+
         now = utc_now()
 
         # Check if an active offer already exists for this ride
@@ -271,7 +288,22 @@ class CascadingDispatchService:
                 if await self.is_driver_on_cooldown(candidate_driver.id, ride_id):
                     continue
 
-                # 3. Check driver preferences
+                # 3. Require an active vehicle assigned to this exact ride category.
+                from backend.domain.models import DriverVehicleAssignment, Vehicle
+                matching_vehicle = (await self.db.execute(
+                    select(Vehicle)
+                    .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+                    .where(
+                        DriverVehicleAssignment.driver_id == candidate_driver.id,
+                        DriverVehicleAssignment.is_active.is_(True),
+                        Vehicle.is_active.is_(True),
+                        Vehicle.category_id == ride.vehicle_category_id,
+                    )
+                )).scalars().first()
+                if not matching_vehicle:
+                    continue
+
+                # 4. Check driver preferences
                 pref = await self._driver_preferences(candidate_driver.id)
                 if fare_cents is not None and fare_cents < pref.minimum_fare_cents:
                     continue
@@ -285,15 +317,21 @@ class CascadingDispatchService:
 
                 # 4. Proximity & radius check
                 loc = await self._latest_location(candidate_driver.id)
+                if not loc or not loc.recorded_at:
+                    continue
+                loc_at = loc.recorded_at if loc.recorded_at.tzinfo else loc.recorded_at.replace(tzinfo=timezone.utc)
+                if loc_at < now - timedelta(seconds=60):
+                    continue
+                if not area_service.location_is_inside_boundary(
+                    loc.latitude, loc.longitude, service_polygon, restricted_polygons
+                ):
+                    continue
                 candidate_dist: Optional[float] = None
-                if loc and ride.pickup_latitude is not None and ride.pickup_longitude is not None:
+                if ride.pickup_latitude is not None and ride.pickup_longitude is not None:
                     candidate_dist = distance_km(
                         loc.latitude, loc.longitude,
                         ride.pickup_latitude, ride.pickup_longitude
                     )
-                else:
-                    # Nominal distance for drivers without fresh telemetry in test/local
-                    candidate_dist = 1.0
 
                 if candidate_dist is not None:
                     if candidate_dist > pref.maximum_pickup_distance_km:

@@ -230,6 +230,9 @@ async def test_driver_ride_acceptance_race_condition_prevention(db_session):
     db_session.add_all([off1, off2])
     await db_session.commit()
 
+    from backend.application.services.live_location_service import LiveLocationService
+    await LiveLocationService(db=db_session).ingest_driver_location(d1_prof.id, 28.60, 77.20, is_online=True)
+
     service = RideService(db_session)
 
     # First driver accepts -> SUCCESS

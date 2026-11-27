@@ -87,6 +87,23 @@ class SmartDispatchService:
             logger.info(f"Ride {ride_id} is in status {ride.status} (assigned={ride.assigned_driver_id}). Skipping dispatch.")
             return None
 
+        # Resolve both endpoints from active Admin geofences before looking for drivers.
+        from backend.application.services.service_area_service import ServiceAreaService
+        area = await ServiceAreaService(self.db).resolve_trip(
+            ride.pickup_latitude,
+            ride.pickup_longitude,
+            ride.destination_latitude,
+            ride.destination_longitude,
+        )
+        if ride.service_area_id and ride.service_area_id != area.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ride service area changed or is no longer active. Dispatch is blocked; revalidate the booking.",
+            )
+        if not ride.service_area_id:
+            ride.service_area_id = area.id
+            await self.db.flush()
+
         now = utc_now()
 
         # 2. Check if an active unexpired offer already exists in flight
@@ -113,7 +130,8 @@ class SmartDispatchService:
             max_rings=max_rings,
             ride_id=ride_id,
             required_category_id=ride.vehicle_category_id,
-            max_candidates=15
+            max_candidates=15,
+            required_service_area_id=ride.service_area_id
         )
 
         # Exclude drivers who already received an offer for this ride
@@ -348,6 +366,52 @@ class SmartDispatchService:
 
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+        if driver.approval_status != "APPROVED":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver approval is required to accept this offer.")
+
+        from backend.domain.models import DriverVehicleAssignment, Vehicle
+        driver_vehicle = (await self.db.execute(
+            select(Vehicle)
+            .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+            .where(
+                DriverVehicleAssignment.driver_id == driver.id,
+                DriverVehicleAssignment.is_active.is_(True),
+                Vehicle.is_active.is_(True),
+                Vehicle.category_id == ride.vehicle_category_id,
+            )
+        )).scalars().first()
+        if not driver_vehicle:
+            raise HTTPException(status_code=409, detail="Driver has no active assigned vehicle matching this ride category.")
+
+        # Dispatch offer acceptance is a separate API path from RideService; repeat
+        # the authoritative area and fresh-location checks here as well.
+        from backend.application.services.service_area_service import ServiceAreaService
+        area_service = ServiceAreaService(self.db)
+        resolved_area = await area_service.resolve_trip(
+            ride.pickup_latitude,
+            ride.pickup_longitude,
+            ride.destination_latitude,
+            ride.destination_longitude,
+        )
+        if ride.service_area_id and ride.service_area_id != resolved_area.id:
+            raise HTTPException(status_code=409, detail="Ride service area is no longer valid. Driver acceptance is blocked.")
+        if not ride.service_area_id:
+            ride.service_area_id = resolved_area.id
+        if not await self.live_loc.is_driver_fresh(driver.id):
+            raise HTTPException(status_code=409, detail="Fresh driver GPS is required to accept this offer.")
+        driver_location = await self.live_loc.get_driver_live_location(driver.id)
+        if (
+            not driver_location
+            or driver_location.get("latitude") is None
+            or driver_location.get("longitude") is None
+            or not await area_service.is_driver_inside(
+                ride.service_area_id,
+                driver_location.get("latitude"),
+                driver_location.get("longitude"),
+            )
+        ):
+            raise HTTPException(status_code=403, detail="Driver is outside this ride's active service area or inside a restricted zone.")
 
         # Validate state transition via authoritative state machine
         RideStateMachine.validate_transition(ride.status, RideStatus.ASSIGNED.value, ActorRole.DRIVER.value)

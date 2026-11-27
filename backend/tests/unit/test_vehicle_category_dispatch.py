@@ -73,6 +73,43 @@ async def test_ride_request_preserves_selected_category_in_db(db_session):
     db_session.add(c_prof)
     await db_session.flush()
 
+    # Booking is permitted only when a real approved, online, category-matched
+    # driver with fresh GPS exists inside the pickup service area.
+    d_user = User(
+        phone_number=f"+91990{suffix}11",
+        full_name="Available Auto Pilot",
+        role="driver",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(d_user)
+    await db_session.flush()
+    d_profile = DriverProfile(
+        id=f"dp_auto_book_{suffix}",
+        user_id=d_user.id,
+        license_number=f"DL-AUTO-BOOK-{suffix}",
+        approval_status="APPROVED",
+    )
+    d_vehicle = Vehicle(
+        id=f"v_auto_book_{suffix}",
+        category_id=cat_auto.id,
+        make="Bajaj",
+        model="RE E-Auto",
+        year=2025,
+        license_plate=f"DL-AUTO-{suffix}",
+        is_active=True,
+    )
+    db_session.add_all([d_profile, d_vehicle])
+    await db_session.flush()
+    db_session.add_all([
+        DriverAvailability(driver_id=d_profile.id, is_online=True, is_busy=False),
+        DriverVehicleAssignment(driver_id=d_profile.id, vehicle_id=d_vehicle.id, is_active=True),
+    ])
+    await db_session.commit()
+    await LiveLocationService(db=db_session).ingest_driver_location(
+        d_profile.id, 28.6475, 77.3150, is_online=True
+    )
+
     # Customer books ride choosing cat_auto.id with mock/fallback estimate
     ride_svc = RideService(db_session)
     res = await ride_svc.create_ride_request(
@@ -95,6 +132,7 @@ async def test_ride_request_preserves_selected_category_in_db(db_session):
     db_ride = (await db_session.execute(select(Ride).where(Ride.id == res["ride_id"]))).scalar_one()
     assert db_ride.vehicle_category_id == cat_auto.id
     assert db_ride.vehicle_category_id != cat_rickshaw.id
+    assert db_ride.service_area_id is not None
 
 
 @pytest.mark.asyncio
@@ -774,6 +812,9 @@ async def test_accept_ride_atomic_validates_category_match(db_session):
     )
     db_session.add(offer2)
     await db_session.commit()
+
+    # The driver must have fresh GPS within the ride service area before acceptance.
+    await LiveLocationService(db=db_session).ingest_driver_location(d_prof2.id, 28.6140, 77.2090, is_online=True)
 
     # 2. Driver 2 (Cab) accepts Cab ride -> SUCCEEDS
     res = await ride_svc.accept_ride_atomic(d_user2.id, ride.id)

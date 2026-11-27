@@ -334,6 +334,37 @@ class AdminGovernanceService:
         if not user or not user.is_active:
             raise HTTPException(409, "The selected driver account is inactive.")
 
+        # Manual Admin assignment is still constrained by the same operational
+        # service-area boundary as automated dispatch.
+        from backend.application.services.service_area_service import ServiceAreaService
+        area_service = ServiceAreaService(self.db)
+        resolved_area = await area_service.resolve_trip(
+            ride.pickup_latitude,
+            ride.pickup_longitude,
+            ride.destination_latitude,
+            ride.destination_longitude,
+        )
+        if ride.service_area_id and ride.service_area_id != resolved_area.id:
+            raise HTTPException(409, "Ride service area is no longer valid; manual assignment is blocked.")
+        if not ride.service_area_id:
+            ride.service_area_id = resolved_area.id
+        from backend.application.services.live_location_service import LiveLocationService
+        live_locations = LiveLocationService(db=self.db)
+        if not await live_locations.is_driver_fresh(driver.id):
+            raise HTTPException(409, "Fresh driver GPS inside the ride service area is required for manual assignment.")
+        driver_location = await live_locations.get_driver_live_location(driver.id)
+        if (
+            not driver_location
+            or driver_location.get("latitude") is None
+            or driver_location.get("longitude") is None
+            or not await area_service.is_driver_inside(
+                ride.service_area_id,
+                driver_location.get("latitude"),
+                driver_location.get("longitude"),
+            )
+        ):
+            raise HTTPException(409, "Selected driver is outside this ride's active service area or inside a restricted zone.")
+
         # Re-validate that driver's active vehicle matches the ride's vehicle_category_id
         from backend.domain.models import DriverVehicleAssignment, Vehicle
         stmt_veh = (
@@ -808,6 +839,10 @@ class AdminGovernanceService:
 
     async def save_geofence(self, admin_id: str, zone_id: Optional[str], values: Dict[str, Any], commit: bool = True) -> Dict[str, Any]:
         points = values["coordinates"]
+        zone_type = str(values.get("zone_type") or "RESTRICTED").strip().upper()
+        city_code = str(values.get("city_code") or "").strip().upper() or None
+        if zone_type == "SERVICE_AREA" and not city_code:
+            raise HTTPException(422, "A city/service-area code is required for every SERVICE_AREA geofence.")
         if len(points) < 3 or len(points) > 200:
             raise HTTPException(422, "A service boundary requires 3 to 200 vertices.")
         try:
@@ -817,29 +852,45 @@ class AdminGovernanceService:
         if any(not -90 <= p["lat"] <= 90 or not -180 <= p["lng"] <= 180 for p in points) or len({(p["lat"], p["lng"]) for p in points}) < 3:
             raise HTTPException(422, "Boundary vertices must be valid geographic coordinates with at least three distinct points.")
         overlaps = await self.geofence_preview(points, zone_id)
+        if zone_type == "SERVICE_AREA":
+            service_area_overlaps = [item for item in overlaps if str(item.get("zone_type") or "").upper() == "SERVICE_AREA"]
+            if service_area_overlaps:
+                raise HTTPException(409, "Service-area polygons must not overlap. Resolve existing active service-area boundaries before saving this zone.")
         zone = await self.db.get(GeofenceZone, zone_id) if zone_id else None
         if zone_id and not zone: raise HTTPException(404, "Service zone not found.")
-        previous = None if not zone else {"name": zone.name, "zone_type": zone.zone_type, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
+        previous = None if not zone else {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
         if not zone:
-            zone = GeofenceZone(name=values["name"].strip(), zone_type=values["zone_type"], coordinates_json=json.dumps(points), surge_multiplier=values["surge_multiplier"], is_active=values["is_active"])
+            zone = GeofenceZone(name=values["name"].strip(), zone_type=zone_type, city_code=city_code, coordinates_json=json.dumps(points), surge_multiplier=values["surge_multiplier"], is_active=values["is_active"])
             self.db.add(zone)
         else:
-            zone.name, zone.zone_type, zone.coordinates_json = values["name"].strip(), values["zone_type"], json.dumps(points)
+            zone.name, zone.zone_type, zone.city_code, zone.coordinates_json = values["name"].strip(), zone_type, city_code, json.dumps(points)
             zone.surge_multiplier, zone.is_active = values["surge_multiplier"], values["is_active"]
         await self.db.flush()
-        current = {"name": zone.name, "zone_type": zone.zone_type, "coordinates": points, "is_active": zone.is_active}
+        current = {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "coordinates": points, "is_active": zone.is_active}
         action = "CREATED" if previous is None else ("ACTIVATED" if not previous["is_active"] and zone.is_active else "DEACTIVATED" if previous["is_active"] and not zone.is_active else "UPDATED")
         self.db.add(GeofenceZoneAudit(zone_id=zone.id, admin_user_id=admin_id, action=action,
             previous_state_json=json.dumps(previous) if previous else None, new_state_json=json.dumps(current)))
         self.audit(admin_id, "SERVICE_ZONE_SAVED", "geofence_zones", zone.id, {"name": zone.name, "zone_type": zone.zone_type, "overlap_warning_count": len(overlaps)})
         if commit:
             await self.db.commit()
-        return {"id": zone.id, "name": zone.name, "zone_type": zone.zone_type, "is_active": zone.is_active, "overlap_warnings": overlaps}
+        return {"id": zone.id, "name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "is_active": zone.is_active, "overlap_warnings": overlaps}
 
     async def delete_geofence(self, admin_id: str, zone_id: str) -> Dict[str, Any]:
         zone = await self.db.get(GeofenceZone, zone_id)
         if not zone: raise HTTPException(404, "Service zone not found.")
-        previous = {"name": zone.name, "zone_type": zone.zone_type, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
+        if str(zone.zone_type or "").upper() == "SERVICE_AREA" and zone.is_active:
+            active_rides = (await self.db.execute(
+                select(func.count(Ride.id)).where(
+                    Ride.service_area_id == zone.id,
+                    Ride.status.in_(["REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED"]),
+                )
+            )).scalar_one() or 0
+            if active_rides:
+                raise HTTPException(
+                    409,
+                    f"Cannot deactivate service area while {active_rides} active rides are using it. Resolve or complete those rides first.",
+                )
+        previous = {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
         zone.is_active = False
         self.db.add(GeofenceZoneAudit(zone_id=zone.id, admin_user_id=admin_id, action="DEACTIVATED",
             previous_state_json=json.dumps(previous), new_state_json=json.dumps({**previous, "is_active": False})))
