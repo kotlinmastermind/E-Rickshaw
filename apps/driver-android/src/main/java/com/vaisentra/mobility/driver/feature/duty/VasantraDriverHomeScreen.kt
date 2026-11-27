@@ -299,7 +299,7 @@ fun VasantraDriverHomeScreen(
 
                     VasantraQuickActionsGrid(
                         modifier = Modifier.fillMaxWidth(),
-                        walletBalanceText = "₹${"%.0f".format(earnings.walletBalanceRupees)}",
+                        walletBalanceText = "₹${"%.0f".format(earnings.withdrawableBalanceRupees)}",
                         onActionClick = { route -> onNavigate(route) }
                     )
 
