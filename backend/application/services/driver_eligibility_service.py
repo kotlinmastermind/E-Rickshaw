@@ -97,6 +97,18 @@ class DriverEligibilityService:
             logger.warning(f"Invalid pickup coordinates: ({pickup_lat}, {pickup_lng})")
             return []
 
+        area_boundary = None
+        if self.db and required_service_area_id:
+            from backend.application.services.service_area_service import ServiceAreaService
+            area_service = ServiceAreaService(self.db)
+            _, service_polygon, restricted_polygons = await area_service.load_area_boundary(required_service_area_id)
+            if not area_service.location_is_inside_boundary(
+                pickup_lat, pickup_lng, service_polygon, restricted_polygons
+            ):
+                logger.warning("Dispatch pickup is outside its active service area or inside a restricted zone.")
+                return []
+            area_boundary = (service_polygon, restricted_polygons)
+
         pickup_cell = h3_service.get_h3_cell(pickup_lat, pickup_lng)
         search_rings = h3_service.get_progressive_search_rings(pickup_cell, max_rings=max_rings)
 
@@ -156,6 +168,12 @@ class DriverEligibilityService:
                 lng = loc.get("longitude")
                 if lat is None or lng is None:
                     continue
+                if area_boundary:
+                    from backend.application.services.service_area_service import ServiceAreaService
+                    if not ServiceAreaService.location_is_inside_boundary(
+                        lat, lng, area_boundary[0], area_boundary[1]
+                    ):
+                        continue
 
                 h_dist = h3_service.haversine_distance_km(pickup_lat, pickup_lng, lat, lng)
 
