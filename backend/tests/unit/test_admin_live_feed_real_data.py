@@ -40,7 +40,8 @@ async def test_admin_live_feed_reports_only_persisted_location_and_vehicle(db_se
     assigned = ride(f"feed-assigned-{suffix}", "IN_PROGRESS", assigned=driver.id)
     waiting = ride(f"feed-waiting-{suffix}", "REQUESTED")
     completed = ride(f"feed-completed-{suffix}", "COMPLETED", final_fare=12345)
-    db_session.add_all([assigned, waiting, completed])
+    completed_without_final_fare = ride(f"feed-completed-no-fare-{suffix}", "COMPLETED", final_fare=None)
+    db_session.add_all([assigned, waiting, completed, completed_without_final_fare])
     await db_session.commit()
     feed = await get_live_mobility_feed(admin=None, db=db_session)
     assert feed["stats"]["online_drivers"] == 1
@@ -57,7 +58,7 @@ async def test_admin_live_feed_reports_only_persisted_location_and_vehicle(db_se
     assert actual_ride["plate"] == vehicle.license_plate
     assert len(feed["riders"]) == 1 and feed["riders"][0]["ride_id"] == waiting.id
     actual_customer = next(item for item in feed["customers"] if item["id"] == customer_user.id)
-    assert actual_customer["rides"] == 1
+    assert actual_customer["rides"] == 2
     assert actual_customer["spend"] == "₹123.45"
     assert actual_customer["rating"] is None
 
