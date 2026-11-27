@@ -66,13 +66,8 @@ def upgrade() -> None:
             "WHERE execution_mode IS NULL AND status IN ('APPROVED', 'PAID')"
         )
     )
-    op.execute(
-        sa.text(
-            "UPDATE driver_payout_requests "
-            "SET paid_at = COALESCE(reviewed_at, updated_at) "
-            "WHERE status = 'PAID' AND paid_at IS NULL"
-        )
-    )
+    # Do not synthesize historical payment timestamps from approval/update timestamps.
+    # Legacy PAID rows without provider/manual confirmation evidence intentionally keep paid_at NULL.
 
 
 def downgrade() -> None:
