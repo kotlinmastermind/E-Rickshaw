@@ -125,7 +125,7 @@ async def test_phase2_customer_and_admin_workflows(db_session):
         try:
             # 6. Admin Geofence CRUD & Point Verification
             geo_resp = await client.post("/api/v1/admin/geofences", json={
-                "name": "South Mumbai VIP Corridor",
+                "name": "Jaipur Test Service Corridor",
                 "city_code": "MUMBAI",
                 "zone_type": "SERVICE_AREA",
                 "coordinates": [
@@ -149,7 +149,7 @@ async def test_phase2_customer_and_admin_workflows(db_session):
 
             # 7. Admin Surge Rules & Commission Rules
             surge_resp = await client.post("/api/v1/admin/surge/rules", json={
-                "zone_name": "South Mumbai VIP Corridor",
+                "zone_name": "Jaipur Test Service Corridor",
                 "multiplier": 1.4,
                 "reason": "Late night high-demand gala"
             }, headers=admin_headers)
