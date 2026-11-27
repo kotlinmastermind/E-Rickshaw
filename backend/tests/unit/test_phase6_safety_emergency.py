@@ -156,6 +156,7 @@ async def test_part6_driver_and_vehicle_verification(db_session):
         user_id=driver_user.id,
         license_number=f"DL01-{u_suffix}",
         rating_average=4.99,
+        rating_count=25,
         total_trips=1680,
         security_badge_id="GC-SEC-9901",
         background_check_status="VERIFIED",
@@ -209,6 +210,11 @@ async def test_part6_driver_and_vehicle_verification(db_session):
     assert d_res["security_badge_id"] == "GC-SEC-9901"
     assert d_res["background_check_status"] == "VERIFIED"
     assert d_res["academy_level"] == "MASTER_CHAUFFEUR"
+    assert d_res["rating"] == 4.99
+    assert d_res["rating_count"] == 25
+    assert d_res["total_trips"] == 1680
+    assert "experience_years" not in d_res
+    assert "languages" not in d_res
 
     # Feature 132: Vehicle registration verification display
     v_res = await service.get_vehicle_credentials(ride.id)
@@ -216,6 +222,11 @@ async def test_part6_driver_and_vehicle_verification(db_session):
     assert v_res["registration_certificate_rc"] == f"DL-01-RC-2025-{u_suffix}"
     assert v_res["commercial_permit_number"] == f"DL-COMM-PVT-{u_suffix}"
     assert v_res["insurance_policy_number"] == f"POL-BAJAJ-ALL-{u_suffix}"
+    assert v_res["puc_certificate_status"] is None
+    assert v_res["puc_expiry_date"] is None
+    assert v_res["fitness_certificate_status"] is None
+    assert v_res["ev_battery_health"] is None
+    assert v_res["safety_equipment"] == []
 
 @pytest.mark.asyncio
 async def test_part6_route_anomaly_and_unexpected_stop(db_session):

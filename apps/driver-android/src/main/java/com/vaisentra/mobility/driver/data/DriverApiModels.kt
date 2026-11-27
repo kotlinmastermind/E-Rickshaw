@@ -104,7 +104,7 @@ data class DriverProfileDto(
     @SerializedName("email") val email: String = "",
     @SerializedName("license_number") val licenseNumber: String = "",
     @SerializedName("approval_status") val approvalStatus: String = "PENDING",
-    @SerializedName("rating_average", alternate = ["rating"]) val rating: Double = 0.0,
+    @SerializedName("rating_average", alternate = ["rating"]) val rating: Double? = null,
     @SerializedName("rating_count") val ratingCount: Int = 0,
     @SerializedName("total_trips", alternate = ["completed_trips"]) val completedTrips: Int = 0,
     @SerializedName("wallet_balance_cents") val walletBalanceCents: Long = 0L,

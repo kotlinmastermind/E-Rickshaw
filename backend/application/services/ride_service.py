@@ -877,8 +877,10 @@ class RideService:
         res_drv = await self.db.execute(stmt_drv)
         driver = res_drv.scalar_one_or_none()
         if driver:
-            new_count = driver.rating_count + 1
-            new_avg = ((driver.rating_average * driver.rating_count) + rating) / new_count
+            previous_count = int(driver.rating_count or 0)
+            previous_average = float(driver.rating_average) if driver.rating_average is not None else 0.0
+            new_count = previous_count + 1
+            new_avg = ((previous_average * previous_count) + rating) / new_count
             driver.rating_count = new_count
             driver.rating_average = round(new_avg, 2)
 

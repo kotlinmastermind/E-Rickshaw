@@ -30,7 +30,7 @@ class CandidateDriver:
     h3_cell: str
     ring_index: int
     haversine_distance_km: float
-    rating_average: float
+    rating_average: Optional[float]
     total_trips: int
     wallet_balance_cents: int
     vehicle_category_id: Optional[str] = None
@@ -164,7 +164,7 @@ class DriverEligibilityService:
                     h3_cell=loc.get("h3_cell") or h3_service.get_h3_cell(lat, lng),
                     ring_index=ring_idx,
                     haversine_distance_km=round(h_dist, 3),
-                    rating_average=prof.get("rating_average", 5.0),
+                    rating_average=prof.get("rating_average"),
                     total_trips=prof.get("total_trips", 0),
                     wallet_balance_cents=prof.get("wallet_balance_cents", 0),
                     vehicle_category_id=prof.get("vehicle_category_id")
@@ -197,6 +197,7 @@ class DriverEligibilityService:
                 DriverProfile.user_id,
                 DriverProfile.approval_status,
                 DriverProfile.rating_average,
+                DriverProfile.rating_count,
                 DriverProfile.total_trips,
                 func.coalesce(DriverWallet.balance_cents, 0).label("wallet_balance_cents"),
                 DriverAvailability.is_online,
@@ -243,7 +244,11 @@ class DriverEligibilityService:
         for r in rows:
             profile_map[r.id] = {
                 "user_id": r.user_id,
-                "rating_average": float(r.rating_average or 5.0),
+                "rating_average": (
+                    float(r.rating_average)
+                    if int(r.rating_count or 0) > 0 and r.rating_average is not None
+                    else None
+                ),
                 "total_trips": int(r.total_trips or 0),
                 "wallet_balance_cents": int(r.wallet_balance_cents or 0),
                 "vehicle_category_id": r.vehicle_category_id

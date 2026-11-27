@@ -73,15 +73,15 @@ class TrackingAdvancedService:
         eta_max = base_eta + 2
         countdown_seconds = max(0, base_eta * 60)
 
-        # Feature 116: Vehicle & Plate Confirmation details
-        vehicle_model = ride.vehicle_model_override or "Mercedes-Benz E-Class 220d Exclusive"
-        vehicle_plate = ride.vehicle_plate_override or "MH 01 DX 4921"
-        vehicle_color = ride.vehicle_color_override or "Obsidian Metallic Black"
+        # Feature 116: Vehicle & Plate Confirmation details are sourced only from the ride or assigned vehicle.
+        vehicle_model = ride.vehicle_model_override or None
+        vehicle_plate = ride.vehicle_plate_override or None
+        vehicle_color = ride.vehicle_color_override or None
 
         if ride.vehicle_id:
             veh = await self.db.get(Vehicle, ride.vehicle_id)
             if veh:
-                vehicle_model = f"{veh.model} ({veh.year})"
+                vehicle_model = f"{veh.make} {veh.model} ({veh.year})".strip()
                 vehicle_plate = veh.license_plate
                 vehicle_color = veh.color
 
@@ -90,14 +90,25 @@ class TrackingAdvancedService:
             driver_profile = await self.db.get(DriverProfile, ride.assigned_driver_id)
             if driver_profile:
                 d_user = await self.db.get(User, driver_profile.user_id)
+                has_rating = int(driver_profile.rating_count or 0) > 0 and driver_profile.rating_average is not None
+                driver_name = (
+                    d_user.full_name.strip()
+                    if d_user and d_user.full_name and d_user.full_name.strip()
+                    and d_user.full_name.strip().casefold() != "distinguished guest"
+                    else None
+                )
                 driver_info = {
                     "driver_id": driver_profile.id,
-                    "name": d_user.full_name if d_user else "Master Chauffeur",
+                    "name": driver_name,
                     "license_number": driver_profile.license_number,
-                    "rating": round(driver_profile.rating_average, 2),
-                    "total_trips": driver_profile.total_trips,
-                    "phone": d_user.phone_number if d_user else "+91 98200 12345"
+                    "rating": round(float(driver_profile.rating_average), 2) if has_rating else None,
+                    "rating_count": int(driver_profile.rating_count or 0),
+                    "total_trips": int(driver_profile.total_trips or 0),
+                    "phone": d_user.phone_number if d_user else None
                 }
+
+        vehicle_label = vehicle_model or "Vehicle details unavailable"
+        plate_label = vehicle_plate or "Plate not available"
 
         # Feature 122: Trip status timeline
         timeline_events = [
@@ -113,7 +124,7 @@ class TrackingAdvancedService:
                 "label": "Chauffeur Assigned",
                 "completed": ride.status in ["ASSIGNED", "ARRIVED", "IN_PROGRESS", "COMPLETED"],
                 "timestamp": ride.assigned_at.isoformat() if ride.assigned_at else None,
-                "description": f"{vehicle_model} en route with precision navigation"
+                "description": f"{vehicle_label} en route with precision navigation"
             },
             {
                 "step": "CHAUFFEUR_ARRIVED",
@@ -144,9 +155,9 @@ class TrackingAdvancedService:
         traffic_note = "Minor congestion on Senapati Bapat Marg (+2 mins adjusted)"
 
         # Feature 121: Accessibility Announcement text
-        announcement = f"Chauffeur is {base_eta} minutes away. Plate {vehicle_plate}. OTP passcode is {ride.start_otp}."
+        announcement = f"Driver is {base_eta} minutes away. {plate_label}. OTP passcode is {ride.start_otp}."
         if ride.status == "ARRIVED":
-            announcement = f"Your chauffeur has arrived at {ride.pickup_address}. Vehicle {vehicle_model}, Plate {vehicle_plate}."
+            announcement = f"Your driver has arrived at {ride.pickup_address}. {vehicle_label}, {plate_label}."
         elif ride.status == "IN_PROGRESS":
             announcement = f"Journey in progress to {ride.destination_address}. ETA is {base_eta} minutes."
 
@@ -492,20 +503,26 @@ class TrackingAdvancedService:
             base_rupees = min(subtotal, 25.0)
             distance_rupees = round(max(0.0, subtotal - base_rupees), 2)
 
-        driver_name = "Assigned Pilot"
-        vehicle_model = "Electric Auto / E-Rickshaw"
-        license_plate = "DL-EV-PILOT"
+        driver_name = None
+        vehicle_model = ride.vehicle_model_override or None
+        license_plate = ride.vehicle_plate_override or None
 
         if ride.assigned_driver_id:
             driver_prof = await self.db.get(DriverProfile, ride.assigned_driver_id)
             if driver_prof:
                 driver_user = await self.db.get(User, driver_prof.user_id) if driver_prof.user_id else None
-                driver_name = (driver_user.full_name or driver_user.phone_number) if driver_user else "Assigned Pilot"
+                if (
+                    driver_user and driver_user.full_name and driver_user.full_name.strip()
+                    and driver_user.full_name.strip().casefold() != "distinguished guest"
+                ):
+                    driver_name = driver_user.full_name.strip()
+                elif driver_user and driver_user.phone_number:
+                    driver_name = None
         if ride.vehicle_id:
             veh = await self.db.get(Vehicle, ride.vehicle_id)
             if veh:
-                vehicle_model = f"{veh.make} {veh.model}".strip() if (veh.make or veh.model) else "Electric Vehicle"
-                license_plate = veh.license_plate or license_plate
+                vehicle_model = f"{veh.make} {veh.model}".strip() if (veh.make or veh.model) else None
+                license_plate = veh.license_plate or None
 
         invoice_num = ride.invoice_number or f"INV-VR-2026-{ride.id[:6].upper()}"
 

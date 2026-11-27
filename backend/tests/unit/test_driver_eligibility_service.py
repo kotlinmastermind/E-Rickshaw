@@ -104,3 +104,42 @@ async def test_discover_eligible_candidates_concentric_rings():
     assert driver_r1 in filtered_ids
     await redis_client.delete(f"dispatch:lock:{driver_r0}")
 
+
+
+
+@pytest.mark.asyncio
+async def test_profile_lookup_does_not_treat_default_five_stars_as_a_real_rating():
+    from types import SimpleNamespace
+
+    class FakeResult:
+        def all(self):
+            return [
+                SimpleNamespace(
+                    id="unrated-driver",
+                    user_id="user-unrated",
+                    rating_average=5.0,
+                    rating_count=0,
+                    total_trips=0,
+                    wallet_balance_cents=0,
+                    vehicle_category_id="category-a",
+                ),
+                SimpleNamespace(
+                    id="rated-driver",
+                    user_id="user-rated",
+                    rating_average=4.6,
+                    rating_count=12,
+                    total_trips=12,
+                    wallet_balance_cents=0,
+                    vehicle_category_id="category-a",
+                ),
+            ]
+
+    class FakeDb:
+        async def execute(self, _statement):
+            return FakeResult()
+
+    service = DriverEligibilityService(db=FakeDb(), live_loc_service=LiveLocationService(db=None))
+    profiles = await service._batch_fetch_driver_profiles(["unrated-driver", "rated-driver"])
+
+    assert profiles["unrated-driver"]["rating_average"] is None
+    assert profiles["rated-driver"]["rating_average"] == 4.6

@@ -434,20 +434,20 @@ data class FareRuleDto(
 
 data class NearbyVehicleDto(
     @SerializedName("id") val id: String,
-    @SerializedName("driver_name") val driverName: String,
-    @SerializedName("driver_phone") val driverPhone: String?,
-    @SerializedName("rating") val rating: Double = 4.9,
-    @SerializedName("category_code") val categoryCode: String,
-    @SerializedName("vehicle_type_name") val vehicleTypeName: String,
-    @SerializedName("model_name") val modelName: String,
-    @SerializedName("license_plate") val licensePlate: String,
-    @SerializedName("icon_type") val iconType: String,
+    @SerializedName("driver_name") val driverName: String? = null,
+    @SerializedName("driver_phone") val driverPhone: String? = null,
+    @SerializedName("rating") val rating: Double? = null,
+    @SerializedName("category_code") val categoryCode: String? = null,
+    @SerializedName("vehicle_type_name") val vehicleTypeName: String? = null,
+    @SerializedName("model_name") val modelName: String? = null,
+    @SerializedName("license_plate") val licensePlate: String? = null,
+    @SerializedName("icon_type") val iconType: String? = null,
     @SerializedName("latitude") val latitude: Double,
     @SerializedName("longitude") val longitude: Double,
-    @SerializedName("bearing") val bearing: Double = 0.0,
-    @SerializedName("battery_level") val batteryLevel: Int = 90,
-    @SerializedName("distance_km") val distanceKm: Double = 0.5,
-    @SerializedName("eta_minutes") val etaMinutes: Int = 3
+    @SerializedName("bearing") val bearing: Double? = null,
+    @SerializedName("battery_level") val batteryLevel: Int? = null,
+    @SerializedName("distance_km") val distanceKm: Double? = null,
+    @SerializedName("eta_minutes") val etaMinutes: Int? = null
 )
 
 data class NearbyVehiclesResponse(

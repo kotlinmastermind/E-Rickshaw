@@ -577,21 +577,28 @@ class SafetyAdvancedService:
 
         driver_user = await self.db.get(User, driver_profile.user_id)
 
+        has_rating = int(driver_profile.rating_count or 0) > 0 and driver_profile.rating_average is not None
+        full_name = (
+            driver_user.full_name.strip()
+            if driver_user and driver_user.full_name and driver_user.full_name.strip()
+            and driver_user.full_name.strip().casefold() != "distinguished guest"
+            else None
+        )
         return {
             "driver_id": driver_profile.id,
-            "full_name": driver_user.full_name if driver_user else "Master Chauffeur",
-            "photo_url": driver_user.avatar_url if driver_user and driver_user.avatar_url else "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d",
-            "security_badge_id": driver_profile.security_badge_id or "GC-SEC-8821",
-            "background_check_status": driver_profile.background_check_status or "VERIFIED",
-            "background_check_authority": "Global Law Enforcement & Security Verification Bureau",
-            "background_check_date": driver_profile.background_check_date.strftime("%B %Y") if driver_profile.background_check_date else "January 2026",
-            "academy_certified": driver_profile.academy_certified,
-            "academy_level": driver_profile.academy_level or "MASTER_CHAUFFEUR",
-            "rating": getattr(driver_profile, "rating_average", 4.98) or 4.98,
-            "total_trips": driver_profile.total_trips or 1420,
-            "experience_years": 8,
-            "languages": ["English", "Hindi", "French (Conversational)"],
-            "confidentiality_clearance": "VIP Executive Non-Disclosure Agreement Active"
+            "full_name": full_name,
+            "photo_url": driver_user.avatar_url if driver_user and driver_user.avatar_url else None,
+            "security_badge_id": driver_profile.security_badge_id or None,
+            "background_check_status": driver_profile.background_check_status or None,
+            "background_check_date": (
+                driver_profile.background_check_date.isoformat()
+                if driver_profile.background_check_date else None
+            ),
+            "academy_certified": bool(driver_profile.academy_certified),
+            "academy_level": driver_profile.academy_level or None,
+            "rating": round(float(driver_profile.rating_average), 2) if has_rating else None,
+            "rating_count": int(driver_profile.rating_count or 0),
+            "total_trips": int(driver_profile.total_trips or 0),
         }
 
     # -------------------------------------------------------------------------
@@ -602,34 +609,37 @@ class SafetyAdvancedService:
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
 
-        # If vehicle_id is not assigned, return standard registered fleet credentials
-        vehicle = None
-        if ride.vehicle_id:
-            vehicle = await self.db.get(Vehicle, ride.vehicle_id)
+        vehicle = await self.db.get(Vehicle, ride.vehicle_id) if ride.vehicle_id else None
+        now = datetime.now(timezone.utc)
 
-        rc_no = vehicle.rc_number if vehicle and vehicle.rc_number else "DL-01-RC-2024-9912"
-        permit_no = vehicle.permit_number if vehicle and vehicle.permit_number else "DL-COMM-PVT-09882"
-        insurance_no = vehicle.insurance_policy_number if vehicle and vehicle.insurance_policy_number else "POL-BAJAJ-ALL-88912"
-        plate = ride.vehicle_plate_override or (vehicle.license_plate if vehicle else "DL 1V AA 0001")
-        model = ride.vehicle_model_override or (f"{vehicle.make} {vehicle.model}" if vehicle else "Mercedes-Benz EQS 580")
-        color = ride.vehicle_color_override or (vehicle.color if vehicle else "Obsidian Black")
+        def expiry_status(value):
+            if value is None:
+                return None
+            normalized = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+            return "VALID" if normalized >= now else "EXPIRED"
+
+        model = ride.vehicle_model_override or (
+            " ".join(part for part in (vehicle.make, vehicle.model) if part) if vehicle else None
+        )
+        plate = ride.vehicle_plate_override or (vehicle.license_plate if vehicle else None)
+        color = ride.vehicle_color_override or (vehicle.color if vehicle else None)
 
         return {
-            "vehicle_id": vehicle.id if vehicle else "v-luxury-eqs",
+            "vehicle_id": vehicle.id if vehicle else None,
             "model": model,
             "license_plate": plate,
             "color": color,
-            "registration_certificate_rc": rc_no,
-            "commercial_permit_number": permit_no,
-            "permit_type": "All India Tourist Luxury Cab (Form 47)",
-            "puc_certificate_status": "VALID",
-            "puc_expiry_date": (datetime.now(timezone.utc) + timedelta(days=240)).strftime("%d %b %Y"),
-            "fitness_certificate_status": "CERTIFIED",
-            "fitness_expiry_date": (datetime.now(timezone.utc) + timedelta(days=580)).strftime("%d %b %Y"),
-            "insurance_policy_number": insurance_no,
-            "insurance_provider": "Bajaj Allianz Comprehensive Commercial Fleet Cover",
-            "ev_battery_health": "98% Optimal",
-            "safety_equipment": ["Executive First Aid Kit", "ISOFIX Child Anchorage", "Emergency Glass Breaker", "Dry Chemical Fire Extinguisher"]
+            "registration_certificate_rc": vehicle.rc_number if vehicle else None,
+            "commercial_permit_number": vehicle.permit_number if vehicle else None,
+            "permit_type": None,
+            "puc_certificate_status": expiry_status(vehicle.puc_expiry_date) if vehicle else None,
+            "puc_expiry_date": vehicle.puc_expiry_date.isoformat() if vehicle and vehicle.puc_expiry_date else None,
+            "fitness_certificate_status": expiry_status(vehicle.fitness_expiry_date) if vehicle else None,
+            "fitness_expiry_date": vehicle.fitness_expiry_date.isoformat() if vehicle and vehicle.fitness_expiry_date else None,
+            "insurance_policy_number": vehicle.insurance_policy_number if vehicle else None,
+            "insurance_provider": None,
+            "ev_battery_health": None,
+            "safety_equipment": []
         }
 
     # -------------------------------------------------------------------------

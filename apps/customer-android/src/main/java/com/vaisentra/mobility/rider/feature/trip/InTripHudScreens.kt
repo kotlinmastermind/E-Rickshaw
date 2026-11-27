@@ -212,16 +212,25 @@ fun PilotAssignedScreen(onNavigate: (String) -> Unit) {
     }
 
     val isDriverAssigned = !activeRide?.driverName.isNullOrBlank() || activeRide?.driver != null
-    val driverDisplayName = if (isDriverAssigned) (activeRide?.driverName ?: activeRide?.driver?.name ?: "Verified EV Pilot") else "No Driver Assigned"
+    val driverDisplayName = if (isDriverAssigned) {
+        activeRide?.driverName?.takeIf { it.isNotBlank() }
+            ?: activeRide?.driver?.name?.takeIf { it.isNotBlank() }
+            ?: "Driver details unavailable"
+    } else "No Driver Assigned"
     val driverSubtitle = if (isDriverAssigned) {
-        val rating = activeRide?.driverRating ?: activeRide?.driver?.rating ?: 4.9
-        "$rating ★ • Verified Pilot"
+        val rating = activeRide?.driverRating ?: activeRide?.driver?.rating
+        if (rating != null) "$rating ★" else "Rating not available"
     } else {
-        "Searching for nearby available pilots..."
+        "Searching for nearby available drivers..."
     }
-    val vehicleModel = if (isDriverAssigned) (activeRide?.vehicleModel ?: "Electric Rickshaw") else "Awaiting Pilot Acceptance"
-    val vehiclePlate = if (isDriverAssigned) (activeRide?.vehiclePlate ?: activeRide?.driver?.licenseNumber ?: "Verified EV") else "PENDING"
-    val headerSubtitle = if (isDriverAssigned) "Pilot En-Route • ETA ~3 Mins" else "Dispatch Matching in Progress"
+    val vehicleModel = if (isDriverAssigned) {
+        activeRide?.vehicleModel?.takeIf { it.isNotBlank() } ?: "Vehicle details unavailable"
+    } else "Awaiting Driver Acceptance"
+    val vehiclePlate = if (isDriverAssigned) {
+        activeRide?.vehiclePlate?.takeIf { it.isNotBlank() }
+            ?: "Plate not available"
+    } else "PENDING"
+    val headerSubtitle = if (isDriverAssigned) "Driver assigned" else "Dispatch Matching in Progress"
 
     Column(
         modifier = Modifier

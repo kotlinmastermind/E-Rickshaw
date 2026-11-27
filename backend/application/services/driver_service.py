@@ -895,7 +895,7 @@ class DriverService:
             "commission_outstanding_cents": commission_outstanding_cents,
             "withdrawable_balance_cents": withdrawable_balance_cents,
             "withdrawable_balance_rupees": round(withdrawable_balance_cents / 100.0, 2),
-            "rating_average": float(driver.rating_average or 0.0) if driver.rating_count else 0.0,
+            "rating_average": float(driver.rating_average) if driver.rating_count and driver.rating_average is not None else None,
             "rating_count": int(driver.rating_count or 0),
             "recent_trips": recent_trips
         }
@@ -914,7 +914,11 @@ class DriverService:
             avg_cleanliness = round(sum(clean_scores) / len(clean_scores), 2) if clean_scores else 5.0
             rating_count = len(ratings)
         else:
-            avg_rating = round(driver.rating_average, 2) if (driver.rating_count and driver.rating_count > 0) else 0.0
+            avg_rating = (
+                round(float(driver.rating_average), 2)
+                if driver.rating_count and driver.rating_count > 0 and driver.rating_average is not None
+                else 0.0
+            )
             avg_cleanliness = 0.0
             rating_count = driver.rating_count or 0
 

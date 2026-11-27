@@ -94,17 +94,25 @@ class LoyaltyFeedbackService:
             )
             self.db.add(rating_record)
 
-        # Update Driver Profile average rating if driver exists
+        # Reconcile the profile aggregate from persisted rating rows; never seed it with a default score.
         if ride.assigned_driver_id:
             stmt_drv = select(DriverProfile).where(DriverProfile.id == ride.assigned_driver_id)
             res_drv = await self.db.execute(stmt_drv)
             driver = res_drv.scalar_one_or_none()
             if driver:
-                new_cnt = (driver.rating_count or 0) + (1 if not existing_rating else 0)
-                cur_avg = getattr(driver, "rating_average", 5.0) or 5.0
-                new_avg = ((cur_avg * max(1, new_cnt - 1)) + overall_rating) / max(1, new_cnt)
-                driver.rating_count = new_cnt
-                driver.rating_average = round(new_avg, 2)
+                await self.db.flush()
+                rating_stats = await self.db.execute(
+                    select(func.count(DriverRating.id), func.avg(DriverRating.rating)).where(
+                        DriverRating.driver_id == ride.assigned_driver_id
+                    )
+                )
+                rating_count, rating_average = rating_stats.one()
+                driver.rating_count = int(rating_count or 0)
+                driver.rating_average = (
+                    round(float(rating_average), 2)
+                    if rating_count and rating_average is not None
+                    else None
+                )
 
         # Process tip if provided at rating time
         tip_info = None

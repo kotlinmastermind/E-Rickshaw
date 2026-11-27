@@ -13,7 +13,7 @@ def create_dummy_candidate(
     haversine_km: float,
     road_eta_min: float,
     road_dist_km: float,
-    rating: float = 4.8,
+    rating: float | None = 4.8,
     heading: float = 0.0,
     speed_mps: float = 5.0,
     ring_idx: int = 0
@@ -115,3 +115,32 @@ def test_heading_alignment_scoring():
     assert score_north >= 0.95
     assert score_south <= 0.45
 
+
+
+
+def test_unrated_candidate_does_not_receive_synthetic_rating_bonus():
+    service = IntelligentMatchingService()
+    pickup_lat, pickup_lng = 28.6139, 77.2090
+    candidate = create_dummy_candidate(
+        driver_id="unrated_driver",
+        lat=28.6150,
+        lng=77.2100,
+        haversine_km=0.5,
+        road_eta_min=2.0,
+        road_dist_km=0.6,
+        rating=None,
+    )
+
+    scored = service.score_candidate(candidate, pickup_lat, pickup_lng, current_time_epoch=100.0)
+
+    assert scored.score_breakdown["rating_score"] is None
+    assert "Rating: unrated" in scored.explanation
+    assert 0.0 <= scored.total_score <= 1.0
+    # With no rating evidence, the remaining factors are reweighted to a full score.
+    expected = (
+        service.w_eta * scored.score_breakdown["eta_score"]
+        + service.w_dist * scored.score_breakdown["distance_score"]
+        + service.w_fresh * scored.score_breakdown["freshness_score"]
+        + service.w_heading * scored.score_breakdown["heading_score"]
+    ) / (service.w_eta + service.w_dist + service.w_fresh + service.w_heading)
+    assert scored.total_score == round(expected, 4)

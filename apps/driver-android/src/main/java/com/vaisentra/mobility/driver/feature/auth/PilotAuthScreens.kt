@@ -753,10 +753,10 @@ fun PilotProfileScreen(onNavigate: (String) -> Unit) {
                     )
                 }
 
-                if (profile.rating > 0.0) {
+                profile.rating?.takeIf { profile.ratingCount > 0 }?.let { rating ->
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "★ ${"%.2f".format(profile.rating)} (${profile.ratingCount} reviews)",
+                        text = "★ ${"%.2f".format(rating)} (${profile.ratingCount} reviews)",
                         color = PilotAmber,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
