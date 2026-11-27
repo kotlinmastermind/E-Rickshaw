@@ -29,7 +29,7 @@ MAX_TELEMETRY_AGE_SECONDS: float = 60.0
 class ScoredCandidate:
     candidate: CandidateDriver
     total_score: float
-    score_breakdown: Dict[str, float] = field(default_factory=dict)
+    score_breakdown: Dict[str, Optional[float]] = field(default_factory=dict)
     explanation: str = ""
 
 
@@ -121,9 +121,13 @@ class IntelligentMatchingService:
             age_s = max(0.0, epoch_now - float(last_seen))
         freshness_score = max(0.0, min(1.0, 1.0 - (age_s / MAX_TELEMETRY_AGE_SECONDS)))
 
-        # 4. Rating score (scale 3.0 to 5.0 -> 0.0 to 1.0)
-        rating = getattr(candidate, "rating_average", 5.0) or 5.0
-        rating_score = max(0.0, min(1.0, (rating - 3.0) / 2.0))
+        # 4. Rating is evidence-based. Unrated drivers do not receive a synthetic 5-star score.
+        rating = candidate.rating_average
+        rating_score = (
+            max(0.0, min(1.0, (rating - 3.0) / 2.0))
+            if rating is not None
+            else None
+        )
 
         # 5. Heading alignment score
         heading_score = self.calculate_heading_score(
@@ -135,13 +139,16 @@ class IntelligentMatchingService:
             pickup_lng=pickup_lng
         )
 
-        total = (
-            self.w_eta * eta_score +
-            self.w_dist * dist_score +
-            self.w_fresh * freshness_score +
-            self.w_rating * rating_score +
-            self.w_heading * heading_score
-        )
+        weighted_components = [
+            (self.w_eta, eta_score),
+            (self.w_dist, dist_score),
+            (self.w_fresh, freshness_score),
+            (self.w_heading, heading_score),
+        ]
+        if rating_score is not None:
+            weighted_components.append((self.w_rating, rating_score))
+        active_weight = sum(weight for weight, _ in weighted_components)
+        total = sum(weight * score for weight, score in weighted_components) / active_weight
         total_score = round(max(0.0, min(1.0, total)), 4)
 
         breakdown = {
@@ -154,7 +161,8 @@ class IntelligentMatchingService:
 
         explanation = (
             f"Score: {total_score:.3f} | ETA: {road_eta_min:.1f}m | "
-            f"Dist: {road_dist_km:.2f}km | Rating: {rating:.1f}★ | Ring: {candidate.ring_index}"
+            f"Dist: {road_dist_km:.2f}km | "
+            f"Rating: {f'{rating:.1f}★' if rating is not None else 'unrated'} | Ring: {candidate.ring_index}"
         )
 
         return ScoredCandidate(
