@@ -55,17 +55,21 @@ object RiderRepository {
     private val _rideHistory = MutableStateFlow<List<ActiveRideDto>>(emptyList())
     val rideHistory: StateFlow<List<ActiveRideDto>> = _rideHistory.asStateFlow()
 
-    private val _wallet = MutableStateFlow<WalletBalanceDto>(
+    private val _wallet = MutableStateFlow(
         WalletBalanceDto(
-            walletId = "w-default",
-            balanceCents = 48500,
-            balanceRupees = 485.00,
-            autoTopupEnabled = true,
-            autoTopupThreshold = 100.0,
-            autoTopupAmount = 500.0
+            walletId = "",
+            balanceCents = 0,
+            balanceRupees = 0.0,
+            autoTopupEnabled = false,
+            autoTopupThreshold = 0.0,
+            autoTopupAmount = 0.0
         )
     )
     val wallet: StateFlow<WalletBalanceDto> = _wallet.asStateFlow()
+    private val _walletLoaded = MutableStateFlow(false)
+    val walletLoaded: StateFlow<Boolean> = _walletLoaded.asStateFlow()
+    private val _walletError = MutableStateFlow<String?>(null)
+    val walletError: StateFlow<String?> = _walletError.asStateFlow()
 
     private val _loyalty = MutableStateFlow(LoyaltySummaryDto())
     val loyalty: StateFlow<LoyaltySummaryDto> = _loyalty.asStateFlow()
@@ -616,17 +620,27 @@ object RiderRepository {
     suspend fun fetchWalletBalance(): Result<WalletBalanceDto> {
         return try {
             val response = NetworkClient.apiService.getWalletBalance()
-            if (response.isSuccessful && response.body() != null) {
-                val bal = response.body()!!
-                val computedRupees = if (bal.balanceRupees > 0.0) bal.balanceRupees else (bal.balanceCents / 100.0)
-                val synced = bal.copy(balanceRupees = computedRupees)
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                val synced = body.copy(balanceRupees = body.balanceCents / 100.0)
                 _wallet.value = synced
+                _walletLoaded.value = true
+                _walletError.value = null
                 Result.success(synced)
             } else {
-                Result.success(_wallet.value)
+                val message = parseApiErrorMessage(
+                    response.errorBody()?.string(),
+                    "Wallet balance could not be verified (HTTP ${response.code()})."
+                )
+                _walletError.value = message
+                Result.failure(IllegalStateException(message))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Result.success(_wallet.value)
+            val message = e.message ?: "Wallet balance could not be verified."
+            _walletError.value = message
+            Result.failure(e)
         }
     }
 
