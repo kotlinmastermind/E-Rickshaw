@@ -73,15 +73,15 @@ class TrackingAdvancedService:
         eta_max = base_eta + 2
         countdown_seconds = max(0, base_eta * 60)
 
-        # Feature 116: Vehicle & Plate Confirmation details
-        vehicle_model = ride.vehicle_model_override or "Mercedes-Benz E-Class 220d Exclusive"
-        vehicle_plate = ride.vehicle_plate_override or "MH 01 DX 4921"
-        vehicle_color = ride.vehicle_color_override or "Obsidian Metallic Black"
+        # Feature 116: Vehicle & Plate Confirmation details are sourced only from the ride or assigned vehicle.
+        vehicle_model = ride.vehicle_model_override or None
+        vehicle_plate = ride.vehicle_plate_override or None
+        vehicle_color = ride.vehicle_color_override or None
 
         if ride.vehicle_id:
             veh = await self.db.get(Vehicle, ride.vehicle_id)
             if veh:
-                vehicle_model = f"{veh.model} ({veh.year})"
+                vehicle_model = f"{veh.make} {veh.model} ({veh.year})".strip()
                 vehicle_plate = veh.license_plate
                 vehicle_color = veh.color
 
@@ -90,13 +90,21 @@ class TrackingAdvancedService:
             driver_profile = await self.db.get(DriverProfile, ride.assigned_driver_id)
             if driver_profile:
                 d_user = await self.db.get(User, driver_profile.user_id)
+                has_rating = int(driver_profile.rating_count or 0) > 0 and driver_profile.rating_average is not None
+                driver_name = (
+                    d_user.full_name.strip()
+                    if d_user and d_user.full_name and d_user.full_name.strip()
+                    and d_user.full_name.strip().casefold() != "distinguished guest"
+                    else None
+                )
                 driver_info = {
                     "driver_id": driver_profile.id,
-                    "name": d_user.full_name if d_user else "Master Chauffeur",
+                    "name": driver_name,
                     "license_number": driver_profile.license_number,
-                    "rating": round(driver_profile.rating_average, 2),
-                    "total_trips": driver_profile.total_trips,
-                    "phone": d_user.phone_number if d_user else "+91 98200 12345"
+                    "rating": round(float(driver_profile.rating_average), 2) if has_rating else None,
+                    "rating_count": int(driver_profile.rating_count or 0),
+                    "total_trips": int(driver_profile.total_trips or 0),
+                    "phone": d_user.phone_number if d_user else None
                 }
 
         # Feature 122: Trip status timeline
