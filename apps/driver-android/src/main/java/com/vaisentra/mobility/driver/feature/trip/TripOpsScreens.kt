@@ -102,7 +102,7 @@ fun IncomingOfferScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("ESTIMATED NET PAY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("ESTIMATED GROSS EARNINGS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Text("₹${"%.2f".format(offer.estimatedDriverEarningsRupees)}", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
                         }
                         Column(horizontalAlignment = Alignment.End) {
