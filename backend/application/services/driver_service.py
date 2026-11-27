@@ -914,7 +914,11 @@ class DriverService:
             avg_cleanliness = round(sum(clean_scores) / len(clean_scores), 2) if clean_scores else 5.0
             rating_count = len(ratings)
         else:
-            avg_rating = round(driver.rating_average, 2) if (driver.rating_count and driver.rating_count > 0) else 0.0
+            avg_rating = (
+                round(float(driver.rating_average), 2)
+                if driver.rating_count and driver.rating_count > 0 and driver.rating_average is not None
+                else 0.0
+            )
             avg_cleanliness = 0.0
             rating_count = driver.rating_count or 0
 
