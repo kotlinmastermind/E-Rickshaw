@@ -55,17 +55,19 @@ object RiderRepository {
     private val _rideHistory = MutableStateFlow<List<ActiveRideDto>>(emptyList())
     val rideHistory: StateFlow<List<ActiveRideDto>> = _rideHistory.asStateFlow()
 
-    private val _wallet = MutableStateFlow<WalletBalanceDto>(
-        WalletBalanceDto(
-            walletId = "w-default",
-            balanceCents = 48500,
-            balanceRupees = 485.00,
-            autoTopupEnabled = true,
-            autoTopupThreshold = 100.0,
-            autoTopupAmount = 500.0
-        )
+    sealed class WalletBalanceLoadState {
+        object NotLoaded : WalletBalanceLoadState()
+        object Loading : WalletBalanceLoadState()
+        object Loaded : WalletBalanceLoadState()
+        data class Error(val message: String) : WalletBalanceLoadState()
+    }
+
+    private val _wallet = MutableStateFlow(
+        WalletBalanceDto(walletId = "", balanceCents = 0, balanceRupees = 0.0)
     )
     val wallet: StateFlow<WalletBalanceDto> = _wallet.asStateFlow()
+    private val _walletLoadState = MutableStateFlow<WalletBalanceLoadState>(WalletBalanceLoadState.NotLoaded)
+    val walletLoadState: StateFlow<WalletBalanceLoadState> = _walletLoadState.asStateFlow()
 
     private val _loyalty = MutableStateFlow(LoyaltySummaryDto())
     val loyalty: StateFlow<LoyaltySummaryDto> = _loyalty.asStateFlow()
@@ -614,19 +616,27 @@ object RiderRepository {
     }
 
     suspend fun fetchWalletBalance(): Result<WalletBalanceDto> {
+        _walletLoadState.value = WalletBalanceLoadState.Loading
         return try {
             val response = NetworkClient.apiService.getWalletBalance()
             if (response.isSuccessful && response.body() != null) {
                 val bal = response.body()!!
-                val computedRupees = if (bal.balanceRupees > 0.0) bal.balanceRupees else (bal.balanceCents / 100.0)
-                val synced = bal.copy(balanceRupees = computedRupees)
+                // Backend cents are authoritative; never substitute a local/demo balance.
+                val synced = bal.copy(balanceRupees = bal.balanceCents / 100.0)
                 _wallet.value = synced
+                _walletLoadState.value = WalletBalanceLoadState.Loaded
                 Result.success(synced)
             } else {
-                Result.success(_wallet.value)
+                val message = response.errorBody()?.string()
+                    ?: "Wallet balance unavailable (HTTP ${response.code()})"
+                _walletLoadState.value = WalletBalanceLoadState.Error(message)
+                Result.failure(Exception(message))
             }
         } catch (e: Exception) {
-            Result.success(_wallet.value)
+            _walletLoadState.value = WalletBalanceLoadState.Error(
+                e.message ?: "Unable to load wallet balance"
+            )
+            Result.failure(e)
         }
     }
 
