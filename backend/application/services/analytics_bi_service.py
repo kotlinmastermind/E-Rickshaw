@@ -331,320 +331,252 @@ class AnalyticsBiService:
     # 381. Fare Estimate Accuracy Report
     # -------------------------------------------------------------------------
     async def get_fare_estimate_accuracy_report(self, days: int = 30) -> Dict[str, Any]:
-        # Compares upfront quoted fare vs final reconciled billed fare
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        rides = (await self.db.execute(
+            select(Ride).where(
+                Ride.requested_at >= since, Ride.status == "COMPLETED",
+                Ride.final_fare_cents.is_not(None)
+            )
+        )).scalars().all()
+        compared = [
+            ride for ride in rides
+            if ride.estimated_fare_cents is not None and int(ride.estimated_fare_cents) > 0
+        ]
+        exact = sum(1 for ride in compared if int(ride.final_fare_cents) == int(ride.estimated_fare_cents))
+        minor = sum(
+            1 for ride in compared
+            if 0 < (int(ride.final_fare_cents) - int(ride.estimated_fare_cents)) / int(ride.estimated_fare_cents) <= 0.10
+        )
+        significant = sum(
+            1 for ride in compared
+            if (int(ride.final_fare_cents) - int(ride.estimated_fare_cents)) / int(ride.estimated_fare_cents) > 0.10
+        )
+        reduced = sum(1 for ride in compared if int(ride.final_fare_cents) < int(ride.estimated_fare_cents))
+        count = len(compared)
+        avg_estimate = sum(int(ride.estimated_fare_cents) for ride in compared) / count if count else None
+        avg_final = sum(int(ride.final_fare_cents) for ride in compared) / count if count else None
+        avg_abs_pct = (
+            sum(abs(int(ride.final_fare_cents) - int(ride.estimated_fare_cents)) / int(ride.estimated_fare_cents) * 100 for ride in compared) / count
+            if count else None
+        )
+        def pct(value: int) -> float:
+            return round(value / count * 100, 1) if count else 0.0
         return {
             "period_days": days,
-            "total_completed_trips": 1380,
-            "exact_match_rate_pct": 88.4,
-            "mean_fare_discrepancy_pct": 2.1,
+            "total_completed_trips": len(rides),
+            "compared_trips": count,
+            "exact_match_rate_pct": pct(exact) if count else None,
+            "mean_fare_discrepancy_pct": round(avg_abs_pct, 2) if avg_abs_pct is not None else None,
             "variance_categories": [
-                {"category": "Exact Match (0% difference)", "count": 1220, "pct": 88.4, "note": "Predictive routing held exact"},
-                {"category": "Minor Addition (< 10% higher)", "count": 114, "pct": 8.3, "note": "Extended guest waiting or route detour"},
-                {"category": "Significant Addition (> 10% higher)", "count": 28, "pct": 2.0, "note": "Multiple unannounced stop additions"},
-                {"category": "Fare Reduction (Lower than quote)", "count": 18, "pct": 1.3, "note": "Early termination requested by guest"}
+                {"category": "Exact Match (0% difference)", "count": exact, "pct": pct(exact)},
+                {"category": "Minor Addition (0-10% higher)", "count": minor, "pct": pct(minor)},
+                {"category": "Significant Addition (>10% higher)", "count": significant, "pct": pct(significant)},
+                {"category": "Fare Reduction", "count": reduced, "pct": pct(reduced)},
             ],
-            "average_upfront_estimate_inr": 2850.0,
-            "average_final_charged_inr": 2894.0,
-            "net_platform_variance_inr": 44.0
+            "average_upfront_estimate_inr": round(avg_estimate / 100, 2) if avg_estimate is not None else None,
+            "average_final_charged_inr": round(avg_final / 100, 2) if avg_final is not None else None,
+            "net_platform_variance_inr": round((avg_final - avg_estimate) / 100, 2) if avg_final is not None and avg_estimate is not None else None,
         }
 
     # -------------------------------------------------------------------------
     # 382. Demand Forecast by Zone
     # -------------------------------------------------------------------------
     async def get_demand_forecast_by_zone(self) -> Dict[str, Any]:
-        # Predictive volume forecast for next 24 hours & 7 days
+        # No trained/validated demand forecasting model or persisted forecast runs exist.
+        # Historical demand is not a forecast; do not fabricate hourly predictions.
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "model_version": "V3_BAYESIAN_TIME_SERIES",
-            "forecast_horizon": "24_HOURS_AHEAD",
-            "zones": [
-                {
-                    "zone_id": "zone-bkc-01",
-                    "zone_name": "Bandra Kurla Complex (BKC)",
-                    "expected_hourly_demand": [14, 8, 4, 2, 12, 45, 95, 120, 85, 60, 55, 75, 90, 80, 110, 140, 160, 130, 95, 70, 50, 35, 25, 18],
-                    "peak_demand_window": "17:00 - 19:30",
-                    "projected_24h_total_requests": 1580,
-                    "confidence_score_pct": 94.5
-                },
-                {
-                    "zone_id": "zone-csmia-02",
-                    "zone_name": "CSMIA T2 International Airport",
-                    "expected_hourly_demand": [65, 80, 90, 75, 50, 45, 60, 55, 40, 45, 50, 60, 70, 75, 80, 85, 95, 110, 125, 130, 115, 95, 85, 70],
-                    "peak_demand_window": "20:00 - 02:00",
-                    "projected_24h_total_requests": 1845,
-                    "confidence_score_pct": 96.2
-                },
-                {
-                    "zone_id": "zone-sobo-03",
-                    "zone_name": "South Mumbai (Colaba & Nariman Point)",
-                    "expected_hourly_demand": [10, 5, 2, 1, 8, 30, 65, 80, 70, 50, 45, 55, 65, 60, 75, 95, 110, 105, 90, 65, 45, 30, 20, 15],
-                    "peak_demand_window": "18:00 - 20:30",
-                    "projected_24h_total_requests": 1156,
-                    "confidence_score_pct": 92.8
-                }
-            ]
+            "model_version": None,
+            "forecast_horizon": None,
+            "zones": [],
+            "data_available": False,
+            "message": "Demand forecasting is unavailable until a validated forecast model is configured.",
         }
 
     # -------------------------------------------------------------------------
     # 383. Supply Forecast by Zone
     # -------------------------------------------------------------------------
     async def get_supply_forecast_by_zone(self) -> Dict[str, Any]:
-        # Predictive chauffeur availability and surplus/deficit metrics
+        total_drivers = int((await self.db.execute(
+            select(func.count(DriverProfile.id))
+        )).scalar_one() or 0)
+        active_drivers = int((await self.db.execute(
+            select(func.count(DriverProfile.id)).where(DriverProfile.approval_status == "APPROVED")
+        )).scalar_one() or 0)
+        online_drivers = int((await self.db.execute(
+            select(func.count(func.distinct(DriverAvailability.driver_id))).where(
+                DriverAvailability.is_online.is_(True),
+                DriverAvailability.is_busy.is_(False),
+            )
+        )).scalar_one() or 0)
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "fleet_status": {
-                "total_registered_chauffeurs": 240,
-                "projected_active_today": 185,
-                "scheduled_on_duty": 160
+                "total_registered_chauffeurs": total_drivers,
+                "projected_active_today": None,
+                "scheduled_on_duty": online_drivers,
+                "approved_drivers": active_drivers,
             },
-            "zone_balances": [
-                {
-                    "zone_name": "Bandra Kurla Complex (BKC)",
-                    "projected_demand_rides": 1580,
-                    "projected_supply_rides": 1420,
-                    "balance_status": "DEFICIT",
-                    "net_deficit_count": 160,
-                    "surge_recommendation": "1.3x evening rush surge",
-                    "rebalance_action": "Reposition 15 chauffeurs from North Suburbs at 16:30"
-                },
-                {
-                    "zone_name": "CSMIA T2 International Airport",
-                    "projected_demand_rides": 1845,
-                    "projected_supply_rides": 1920,
-                    "balance_status": "SURPLUS",
-                    "net_deficit_count": -75,
-                    "surge_recommendation": "1.0x baseline pricing",
-                    "rebalance_action": "Maintain dedicated VIP holding bay staging"
-                },
-                {
-                    "zone_name": "South Mumbai (Colaba & Nariman Point)",
-                    "projected_demand_rides": 1156,
-                    "projected_supply_rides": 1140,
-                    "balance_status": "BALANCED",
-                    "net_deficit_count": 16,
-                    "surge_recommendation": "1.1x slight evening buffer",
-                    "rebalance_action": "Standard dispatch pacing"
-                }
-            ]
+            "zone_balances": [],
+            "forecast_available": False,
+            "message": "Current fleet counts are database-backed; zone-level supply forecasts are not configured.",
         }
 
     # -------------------------------------------------------------------------
     # 384. Shared Ride Matching Performance Report
     # -------------------------------------------------------------------------
     async def get_shared_ride_matching_performance(self, days: int = 30) -> Dict[str, Any]:
-        # Analytics for pooled ride efficiency, detours, and emissions
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        requested = int((await self.db.execute(
+            select(func.count(Ride.id)).where(Ride.requested_at >= since, Ride.is_shared.is_(True))
+        )).scalar_one() or 0)
+        completed = int((await self.db.execute(
+            select(func.count(Ride.id)).where(
+                Ride.requested_at >= since, Ride.is_shared.is_(True), Ride.status == "COMPLETED"
+            )
+        )).scalar_one() or 0)
+        saved_cents = int((await self.db.execute(
+            select(func.coalesce(func.sum(Ride.discount_cents), 0)).where(
+                Ride.requested_at >= since, Ride.is_shared.is_(True), Ride.status == "COMPLETED"
+            )
+        )).scalar_one() or 0)
         return {
             "period_days": days,
-            "total_shared_ride_requests": 480,
-            "successfully_paired_requests": 422,
-            "shared_match_rate_pct": 87.9,
-            "average_detour_delay_minutes": 4.2,
-            "max_allowed_detour_minutes": 10.0,
-            "detour_sla_compliance_pct": 98.1,
-            "capacity_utilization_pct": 74.5,
-            "environmental_impact": {
-                "co2_saved_kg": 3840.0,
-                "fuel_saved_liters": 1650.0,
-                "equivalent_trees_planted": 174
-            },
+            "total_shared_ride_requests": requested,
+            "successfully_paired_requests": completed,
+            "shared_match_rate_pct": round(completed / requested * 100, 1) if requested else 0.0,
+            "average_detour_delay_minutes": None,
+            "max_allowed_detour_minutes": None,
+            "detour_sla_compliance_pct": None,
+            "capacity_utilization_pct": None,
+            "environmental_impact": None,
             "financial_savings": {
-                "total_passenger_savings_cents": 12500000,
-                "total_passenger_savings_inr": 125000.0,
-                "average_savings_per_seat_inr": 296.0
-            }
+                "total_passenger_savings_cents": saved_cents,
+                "total_passenger_savings_inr": round(saved_cents / 100, 2),
+                "average_savings_per_seat_inr": None,
+            },
         }
 
     # -------------------------------------------------------------------------
     # 385. Customer Retention Cohorts
     # -------------------------------------------------------------------------
     async def get_customer_retention_cohorts(self) -> Dict[str, Any]:
-        # M0 - M6 monthly customer retention cohorts
+        # Cohort retention requires a stable customer activity definition and monthly
+        # cohort query; return no synthetic cohort curves until that definition is implemented.
+        total_customers = int((await self.db.execute(
+            select(func.count(CustomerProfile.id))
+        )).scalar_one() or 0)
         return {
-            "cohort_period": "Monthly Registrations 2026",
-            "cohorts": [
-                {
-                    "cohort_month": "2026-04",
-                    "new_customers": 420,
-                    "retention_curve": [100.0, 68.4, 58.2, 52.1, 49.3, 47.8, 46.2],
-                    "average_ltv_inr": 48500.0
-                },
-                {
-                    "cohort_month": "2026-05",
-                    "new_customers": 510,
-                    "retention_curve": [100.0, 71.2, 61.5, 55.4, 52.8, 50.1],
-                    "average_ltv_inr": 42800.0
-                },
-                {
-                    "cohort_month": "2026-06",
-                    "new_customers": 630,
-                    "retention_curve": [100.0, 73.5, 64.1, 58.9, 55.2],
-                    "average_ltv_inr": 38200.0
-                },
-                {
-                    "cohort_month": "2026-07",
-                    "new_customers": 720,
-                    "retention_curve": [100.0, 74.8, 66.2, 61.4],
-                    "average_ltv_inr": 31400.0
-                },
-                {
-                    "cohort_month": "2026-08",
-                    "new_customers": 840,
-                    "retention_curve": [100.0, 76.5, 68.0],
-                    "average_ltv_inr": 24600.0
-                },
-                {
-                    "cohort_month": "2026-09",
-                    "new_customers": 950,
-                    "retention_curve": [100.0, 78.2],
-                    "average_ltv_inr": 18200.0
-                },
-                {
-                    "cohort_month": "2026-10",
-                    "new_customers": 1080,
-                    "retention_curve": [100.0],
-                    "average_ltv_inr": 9500.0
-                }
-            ],
-            "benchmark_analysis": "Top decile retention observed in VIP airport concierge segment"
+            "cohort_period": "Monthly customer registration cohorts",
+            "cohorts": [],
+            "total_customers": total_customers,
+            "data_available": False,
+            "message": "Retention cohorts are not yet computed from customer activity records.",
         }
 
     # -------------------------------------------------------------------------
     # 386. Driver Retention Cohorts
     # -------------------------------------------------------------------------
     async def get_driver_retention_cohorts(self) -> Dict[str, Any]:
-        # Chauffeur onboarding retention across M0 - M12
+        total_drivers = int((await self.db.execute(
+            select(func.count(DriverProfile.id))
+        )).scalar_one() or 0)
+        approved_drivers = int((await self.db.execute(
+            select(func.count(DriverProfile.id)).where(DriverProfile.approval_status == "APPROVED")
+        )).scalar_one() or 0)
         return {
-            "cohort_period": "Chauffeur Onboarding Batches 2026",
-            "cohorts": [
-                {
-                    "cohort_month": "2026-01",
-                    "onboarded_chauffeurs": 25,
-                    "active_curve_pct": [100.0, 96.0, 92.0, 92.0, 88.0, 88.0, 84.0, 84.0, 84.0, 80.0],
-                    "churn_velocity": "LOW"
-                },
-                {
-                    "cohort_month": "2026-04",
-                    "onboarded_chauffeurs": 32,
-                    "active_curve_pct": [100.0, 96.8, 93.7, 90.6, 90.6, 87.5, 87.5],
-                    "churn_velocity": "LOW"
-                },
-                {
-                    "cohort_month": "2026-07",
-                    "onboarded_chauffeurs": 40,
-                    "active_curve_pct": [100.0, 97.5, 95.0, 92.5],
-                    "churn_velocity": "LOW"
-                }
-            ],
-            "annual_chauffeur_retention_rate_pct": 84.2,
-            "primary_retention_drivers": [
-                "Guaranteed weekly payouts with instant UPI withdrawal",
-                "High guest tipping rate (avg ₹350 per trip)",
-                "Transparent commission caps and fuel subsidies"
-            ]
+            "cohort_period": "Driver onboarding cohorts",
+            "cohorts": [],
+            "total_registered_drivers": total_drivers,
+            "currently_approved_drivers": approved_drivers,
+            "annual_chauffeur_retention_rate_pct": None,
+            "primary_retention_drivers": [],
+            "data_available": False,
+            "message": "Driver retention cohorts are not yet computed from longitudinal activity records.",
         }
 
     # -------------------------------------------------------------------------
     # 387. Promo Campaign Effectiveness
     # -------------------------------------------------------------------------
     async def get_promo_campaign_effectiveness(self) -> Dict[str, Any]:
-        # ROI and conversion impact of promotional campaigns
+        promos = (await self.db.execute(select(PromoCode))).scalars().all()
+        redemptions = (await self.db.execute(select(PromoRedemption))).scalars().all()
+        redemption_counts: Dict[str, int] = {}
+        for redemption in redemptions:
+            promo_id = getattr(redemption, "promo_code_id", None)
+            if promo_id:
+                redemption_counts[promo_id] = redemption_counts.get(promo_id, 0) + 1
+        campaigns = [
+            {
+                "promo_id": promo.id,
+                "code": promo.code,
+                "title": getattr(promo, "description", None) or promo.code,
+                "redemptions": redemption_counts.get(promo.id, 0),
+                "status": "ACTIVE" if getattr(promo, "is_active", False) else "INACTIVE",
+                "discount_spend_inr": None,
+                "gross_bookings_generated_inr": None,
+                "net_roi_multiple": None,
+                "subsequent_unsubsidized_trips": None,
+            }
+            for promo in promos
+        ]
         return {
-            "active_campaigns_count": 4,
-            "campaigns": [
-                {
-                    "code": "SOVEREIGN_DEBUT",
-                    "title": "New Member Sanctuary Ride",
-                    "redemptions": 642,
-                    "discount_spend_inr": 321000.0,
-                    "gross_bookings_generated_inr": 2182000.0,
-                    "net_roi_multiple": 6.8,
-                    "subsequent_unsubsidized_trips": 1840,
-                    "status": "ACTIVE"
-                },
-                {
-                    "code": "AIRPORT_VELOCITY_500",
-                    "title": "CSMIA VIP Transfer Perk",
-                    "redemptions": 380,
-                    "discount_spend_inr": 190000.0,
-                    "gross_bookings_generated_inr": 1520000.0,
-                    "net_roi_multiple": 8.0,
-                    "subsequent_unsubsidized_trips": 1120,
-                    "status": "ACTIVE"
-                },
-                {
-                    "code": "WEEKEND_ROYALTY",
-                    "title": "South Mumbai Dining & Gala",
-                    "redemptions": 210,
-                    "discount_spend_inr": 105000.0,
-                    "gross_bookings_generated_inr": 630000.0,
-                    "net_roi_multiple": 6.0,
-                    "subsequent_unsubsidized_trips": 490,
-                    "status": "ACTIVE"
-                }
-            ],
-            "total_discount_spend_inr": 616000.0,
-            "total_gross_generated_inr": 4332000.0,
-            "aggregate_roi_multiple": 7.03
+            "active_campaigns_count": sum(1 for promo in promos if getattr(promo, "is_active", False)),
+            "campaigns": campaigns,
+            "total_discount_spend_inr": None,
+            "total_gross_generated_inr": None,
+            "aggregate_roi_multiple": None,
+            "data_available": True,
         }
 
     # -------------------------------------------------------------------------
     # 388. Referral Fraud Analytics
     # -------------------------------------------------------------------------
     async def get_referral_fraud_analytics(self) -> Dict[str, Any]:
-        # Detects device ID collisions, IP clustering, and self-referral rings
+        referrals = (await self.db.execute(select(ReferralRecord))).scalars().all()
+        # Referral records do not persist device/IP evidence or a reviewed fraud decision.
         return {
-            "total_referrals_screened": 1240,
-            "flagged_suspicious_referrals": 18,
-            "fraud_prevention_savings_inr": 90000.0,
-            "detection_heuristics": [
-                {"rule": "Same Device Fingerprint Collision", "weight": "HIGH", "detections": 8},
-                {"rule": "Subnet / IP Address Clustering (< 15 mins apart)", "weight": "MEDIUM", "detections": 6},
-                {"rule": "Immediate Promo Redemption with Single Instant Cancel", "weight": "HIGH", "detections": 4}
-            ],
-            "suspicious_clusters": [
-                {
-                    "cluster_id": "RING-2026-081",
-                    "referrer_user_id": "usr_99812",
-                    "flagged_accounts_count": 4,
-                    "common_device_model": "OnePlus 11 5G (Android 14)",
-                    "ring_score": 94,
-                    "status": "AUTO_BLOCKED",
-                    "notes": "4 accounts created sequentially from identical MAC address and hardware ID."
-                },
-                {
-                    "cluster_id": "RING-2026-094",
-                    "referrer_user_id": "usr_77215",
-                    "flagged_accounts_count": 3,
-                    "common_device_model": "iPhone 15 Pro Max (iOS 18)",
-                    "ring_score": 82,
-                    "status": "FLAGGED_FOR_MANUAL_REVIEW",
-                    "notes": "Shared IP 49.36.128.44 with rapid referral link clicking."
-                }
-            ]
+            "total_referrals_screened": len(referrals),
+            "flagged_suspicious_referrals": None,
+            "fraud_prevention_savings_inr": None,
+            "detection_heuristics": [],
+            "suspicious_clusters": [],
+            "fraud_detection_available": False,
+            "message": "Referral records exist, but device/IP evidence and adjudicated fraud outcomes are not stored.",
         }
 
     # -------------------------------------------------------------------------
     # 389. Payment Success Rate Dashboard
     # -------------------------------------------------------------------------
     async def get_payment_success_rate_dashboard(self, days: int = 30) -> Dict[str, Any]:
-        # Evaluates success % across UPI, Card, Wallet and Corporate Billing
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        payments = (await self.db.execute(
+            select(Payment).where(Payment.created_at >= since)
+        )).scalars().all()
+        successful_statuses = {"PAID", "CAPTURED", "SUCCESS"}
+        failed_statuses = {"FAILED"}
+        successful = [item for item in payments if (item.status or "").upper() in successful_statuses]
+        failed = [item for item in payments if (item.status or "").upper() in failed_statuses]
+        by_method: Dict[str, Dict[str, int]] = {}
+        for item in payments:
+            method = (item.payment_method or "UNKNOWN").upper()
+            bucket = by_method.setdefault(method, {"attempted": 0, "successful": 0, "amount_cents": 0})
+            bucket["attempted"] += 1
+            if (item.status or "").upper() in successful_statuses:
+                bucket["successful"] += 1
+                bucket["amount_cents"] += int(item.amount_cents or 0)
         return {
             "period_days": days,
-            "overall_payment_success_rate_pct": 98.4,
-            "total_transactions_attempted": 2450,
-            "total_successful": 2410,
-            "total_failed": 40,
+            "overall_payment_success_rate_pct": round(len(successful) / len(payments) * 100, 2) if payments else 0.0,
+            "total_transactions_attempted": len(payments),
+            "total_successful": len(successful),
+            "total_failed": len(failed),
             "channel_performance": [
-                {"channel": "UPI (GooglePay / PhonePe / BHIM)", "success_rate_pct": 99.1, "volume_inr": 3480000.0, "avg_settlement_sec": 2.4},
-                {"channel": "Credit Cards (Visa / Mastercard / Amex)", "success_rate_pct": 97.8, "volume_inr": 2840000.0, "avg_settlement_sec": 3.8},
-                {"channel": "In-App Sovereign Wallet", "success_rate_pct": 99.9, "volume_inr": 920000.0, "avg_settlement_sec": 0.5},
-                {"channel": "Corporate Direct Invoice", "success_rate_pct": 100.0, "volume_inr": 1250000.0, "avg_settlement_sec": 1.0}
+                {"channel": method, "success_rate_pct": round(values["successful"] / values["attempted"] * 100, 2) if values["attempted"] else 0.0,
+                 "volume_inr": round(values["amount_cents"] / 100, 2), "avg_settlement_sec": None}
+                for method, values in sorted(by_method.items())
             ],
-            "top_gateway_error_reasons": [
-                {"code": "BANK_SERVER_TIMEOUT", "count": 16, "pct": 40.0, "recommendation": "Auto-switch to secondary payment gateway route"},
-                {"code": "INSUFFICIENT_FUNDS_OR_LIMIT", "count": 14, "pct": 35.0, "recommendation": "Prompt guest for secondary saved card"},
-                {"code": "USER_ABORTED_OTP", "count": 10, "pct": 25.0, "recommendation": "Show frictionless 1-click UPI intent"}
-            ]
+            "top_gateway_error_reasons": [],
         }
 
     # -------------------------------------------------------------------------
