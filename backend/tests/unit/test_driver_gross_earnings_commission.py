@@ -46,6 +46,7 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
         )
 
     digital_ride = make_ride(f"digital-{suffix}", "RAZORPAY", 10000, now)
+    digital_ride.tip_cents = 300
     cash_ride = make_ride(f"cash-{suffix}", "CASH", 5000, now - timedelta(minutes=1))
     legacy_ride = make_ride(f"legacy-{suffix}", "RAZORPAY", 2000, now - timedelta(minutes=2))
     db_session.add_all([digital_ride, cash_ride, legacy_ride])
@@ -82,6 +83,18 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
     assert summary["commission_outstanding_cents"] == 2250
     assert summary["withdrawable_balance_cents"] == 7750
     assert "today_net_cents" not in summary
+
+    # The detailed dashboard must apply the same deferred-commission rule:
+    # gross earnings stay gross, while accrued commission remains a separate figure.
+    dashboard = await DriverFinancialService(db_session).get_earnings_dashboard(driver_user.id)
+    assert dashboard["this_week"]["gross_earnings_cents"] == 17000
+    assert dashboard["this_week"]["commission_accrued_cents"] == 2250
+    assert dashboard["this_week"]["gross_earnings_including_tips_cents"] == 17300
+    assert dashboard["this_week"]["net_earnings_cents"] == 17300
+    assert dashboard["weekly_history"][0]["gross_earnings_cents"] == 17000
+    assert dashboard["weekly_history"][0]["commission_accrued_cents"] == 2250
+    assert dashboard["weekly_history"][0]["net_earnings_cents"] == 17300
+
     legacy_trip = next(item for item in summary["recent_trips"] if item["ride_id"] == legacy_ride.id)
     assert legacy_trip["gross_fare_cents"] == 2000
     assert legacy_trip["commission_cents"] is None
