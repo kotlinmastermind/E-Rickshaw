@@ -285,13 +285,11 @@ async def create_ride_request(
         )
     except IntegrityError:
         await db.rollback()
-        replay = await find_existing_booking()
-        if replay is not None:
-            return replay
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A booking with this Idempotency-Key is already being processed. Retry with the same key."
-        )
+        if clean_key:
+            replay = await find_existing_booking()
+            if replay is not None:
+                return replay
+        raise
 
 @router.post("/schedule")
 async def schedule_ride(

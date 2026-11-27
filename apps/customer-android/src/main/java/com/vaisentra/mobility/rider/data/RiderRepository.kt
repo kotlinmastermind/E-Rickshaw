@@ -546,7 +546,7 @@ object RiderRepository {
     private fun startActiveRideSyncLoop(rideId: String) {
         scope.launch {
             while (_activeRide.value != null &&
-                _activeRide.value?.status !in listOf("COMPLETED", "CANCELLED")
+                _activeRide.value?.status !in listOf("COMPLETED", "CANCELLED", "EXPIRED")
             ) {
                 kotlinx.coroutines.delay(4000L)
                 try {
@@ -560,7 +560,7 @@ object RiderRepository {
                             driverRating = updated.driver?.rating ?: updated.driverRating,
                             vehiclePlate = updated.driver?.licenseNumber ?: updated.vehiclePlate
                         )
-                    } else if (res.isSuccessful && (updated == null || updated.status in listOf("COMPLETED", "CANCELLED"))) {
+                    } else if (res.isSuccessful && (updated == null || updated.status in listOf("COMPLETED", "CANCELLED", "EXPIRED"))) {
                         _activeRide.value = null
                     }
                 } catch (_: Exception) {
@@ -574,7 +574,7 @@ object RiderRepository {
             val res = NetworkClient.apiService.getActiveRide()
             if (res.isSuccessful) {
                 val ride = res.body()?.activeRide
-                if (ride != null && ride.status !in listOf("COMPLETED", "CANCELLED")) {
+                if (ride != null && ride.status !in listOf("COMPLETED", "CANCELLED", "EXPIRED")) {
                     val resolved = ride.copy(
                         driverName = ride.driver?.name ?: ride.driverName,
                         driverPhone = ride.driver?.phone ?: ride.driverPhone,
@@ -600,7 +600,7 @@ object RiderRepository {
 
     fun updateActiveRideStatus(newStatus: String) {
         _activeRide.value = _activeRide.value?.copy(status = newStatus)
-        if (newStatus == "COMPLETED" || newStatus == "CANCELLED") {
+        if (newStatus == "COMPLETED" || newStatus == "CANCELLED" || newStatus == "EXPIRED") {
             RiderWebSocketClient.disconnect()
         }
     }
