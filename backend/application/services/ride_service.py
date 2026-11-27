@@ -167,6 +167,14 @@ class RideService:
             stmt_est = select(FareEstimate).where(FareEstimate.id == est_data["estimate_id"])
             estimate = (await self.db.execute(stmt_est)).scalar_one()
 
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_area = await ServiceAreaService(self.db).resolve_route(
+            pickup_lat=estimate.pickup_latitude,
+            pickup_lng=estimate.pickup_longitude,
+            destination_lat=estimate.destination_latitude,
+            destination_lng=estimate.destination_longitude,
+        )
+
         now = datetime.now(timezone.utc)
 
         expires_at = estimate.expires_at if estimate.expires_at.tzinfo else estimate.expires_at.replace(tzinfo=timezone.utc)
@@ -207,6 +215,7 @@ class RideService:
             customer_id=customer.id,
             vehicle_category_id=estimate.category_id,
             fare_rule_id=estimate.fare_rule_id,
+            service_area_id=service_area.id,
             status=RideStatus.REQUESTED.value,
             pickup_address=pickup_address,
             pickup_latitude=estimate.pickup_latitude,
