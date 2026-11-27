@@ -7,6 +7,7 @@ import pytest
 from backend.application.services.commission_service import CommissionService
 from backend.application.services.driver_service import DriverService
 from backend.application.services.driver_financial_service import DriverFinancialService
+from backend.api.routes.admin import list_driver_earnings
 from backend.domain.models import (
     CustomerProfile, DriverLedgerEntry, DriverProfile, DriverWallet, FareRule, Ride, User, VehicleCategory,
 )
@@ -94,6 +95,13 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
     assert dashboard["weekly_history"][0]["gross_earnings_cents"] == 17000
     assert dashboard["weekly_history"][0]["commission_accrued_cents"] == 2250
     assert dashboard["weekly_history"][0]["net_earnings_cents"] == 17300
+
+    admin_earnings = await list_driver_earnings(limit=50, offset=0, admin=driver_user, db=db_session)
+    driver_row = next(item for item in admin_earnings["items"] if item["driver_id"] == driver.id)
+    assert driver_row["gross_earnings_cents"] == summary["total_gross_earnings_cents"]
+    assert driver_row["commission_accrued_cents"] == summary["commission_accrued_cents"]
+    assert driver_row["commission_outstanding_cents"] == summary["commission_outstanding_cents"]
+    assert driver_row["withdrawable_balance_cents"] == summary["withdrawable_balance_cents"]
 
     legacy_trip = next(item for item in summary["recent_trips"] if item["ride_id"] == legacy_ride.id)
     assert legacy_trip["gross_fare_cents"] == 2000
