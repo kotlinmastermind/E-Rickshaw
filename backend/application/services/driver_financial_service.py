@@ -174,7 +174,8 @@ class DriverFinancialService:
         week_gross_cents = sum(r.final_fare_cents or 0 for r in week_rides)
         week_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in week_rides)
         week_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in week_rides)
-        week_net_cents = (week_gross_cents - week_commission_cents) + week_tips_cents
+        # Commission is deferred and reported separately; never subtract it from gross driver earnings.
+        week_net_cents = week_gross_cents + week_tips_cents
 
         # Daily breakdown (past `days` days)
         daily_breakdown = []
@@ -227,6 +228,8 @@ class DriverFinancialService:
                 "trips_count": len(w_matching),
                 "gross_earnings_cents": wg,
                 "gross_earnings_rupees": round(wg / 100, 2),
+                "commission_accrued_cents": wc,
+                "gross_earnings_including_tips_cents": wg + wt,
                 "net_earnings_cents": wn,
                 "net_earnings_rupees": round(wn / 100, 2),
                 "commission_cents": wc,
@@ -271,8 +274,12 @@ class DriverFinancialService:
             "this_week": {
                 "trips_count": len(week_rides),
                 "gross_fare_cents": week_gross_cents,
+                "gross_earnings_cents": week_gross_cents,
+                "gross_earnings_rupees": round(week_gross_cents / 100, 2),
                 "commission_cents": week_commission_cents,
+                "commission_accrued_cents": week_commission_cents,
                 "tips_cents": week_tips_cents,
+                "gross_earnings_including_tips_cents": week_gross_cents + week_tips_cents,
                 "net_earnings_cents": week_net_cents,
                 "net_earnings_rupees": round(week_net_cents / 100, 2)
             },
