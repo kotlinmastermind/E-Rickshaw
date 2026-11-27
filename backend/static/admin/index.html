@@ -682,7 +682,7 @@
                                 <th class="py-3.5 px-4">Fare (INR)</th>
                                 <th class="py-3.5 px-4">Payment</th>
                                 <th class="py-3.5 px-4">Status</th>
-                                <th class="py-3.5 px-4 text-right">Actions</th>
+                                
                             </tr>
                         </thead>
                         <tbody id="rides-table-body" class="divide-y divide-border text-slate-300">
@@ -2918,7 +2918,12 @@
             const tbody = document.getElementById('rides-table-body');
             const filter = document.getElementById('ride-status-filter')?.value || 'ALL';
             tbody.innerHTML = '';
-            (STATE.activeRides || []).forEach(ride => {
+            const rides = STATE.activeRides || [];
+            if (rides.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-500 font-mono text-xs">No ride records returned by the backend.</td></tr>';
+                return;
+            }
+            rides.forEach(ride => {
                 const status = ride.status || 'UNKNOWN';
                 if (filter !== 'ALL' && status !== filter) return;
                 let statusBadge = `<span class="px-2 py-0.5 rounded-md bg-slate-700 text-slate-300 font-mono text-[10px] font-bold">${escapeHtml(status)}</span>`;
