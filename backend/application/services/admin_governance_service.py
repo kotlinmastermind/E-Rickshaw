@@ -457,7 +457,10 @@ class AdminGovernanceService:
         if not category:
             raise HTTPException(404, f"Vehicle category '{category_identifier}' not found.")
 
-        city_code = (values.get("city_code") or "DELHI_NCR").strip().upper()
+        raw_city_code = values.get("city_code")
+        if not raw_city_code or not str(raw_city_code).strip():
+            raise HTTPException(status_code=400, detail="A configured service-area city_code is required.")
+        city_code = str(raw_city_code).strip().upper()
 
         # Find existing active rule for this specific city & category
         current_stmt = select(FareRule).where(
