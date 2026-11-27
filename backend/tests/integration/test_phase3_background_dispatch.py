@@ -18,6 +18,7 @@ from backend.domain.models import (
 )
 from backend.application.services.cascading_dispatch_service import CascadingDispatchService
 from backend.application.services.ride_service import RideService
+from backend.application.services.live_location_service import LiveLocationService
 from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
 from backend.api.routes.ws import ws_manager
 
@@ -142,6 +143,10 @@ async def setup_dispatch_environment(db_session):
     db_session.add_all([session1, session2])
 
     await db_session.commit()
+
+    live_locations = LiveLocationService(db=db_session)
+    await live_locations.ingest_driver_location(driver1_profile.id, 12.9822, 77.5875, is_online=True)
+    await live_locations.ingest_driver_location(driver2_profile.id, 12.9822, 77.5875, is_online=True)
 
     return {
         "category": cat,
