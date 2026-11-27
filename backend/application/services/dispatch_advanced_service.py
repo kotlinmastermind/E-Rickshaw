@@ -374,8 +374,10 @@ class DispatchAdvancedService:
         if not driver_profile:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found")
 
-        new_count = driver_profile.rating_count + 1
-        new_avg = round(((driver_profile.rating_average * driver_profile.rating_count) + rating) / new_count, 2)
+        previous_count = int(driver_profile.rating_count or 0)
+        previous_average = float(driver_profile.rating_average) if driver_profile.rating_average is not None else 0.0
+        new_count = previous_count + 1
+        new_avg = round(((previous_average * previous_count) + rating) / new_count, 2)
         driver_profile.rating_count = new_count
         driver_profile.rating_average = new_avg
 
