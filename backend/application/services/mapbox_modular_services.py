@@ -122,7 +122,16 @@ class DriverLocationService:
         spoof_score = 0.0
         now = datetime.now(timezone.utc)
         if last_loc:
-            dt = (now - last_loc.recorded_at).total_seconds()
+            # SQLite test databases may return a naive datetime even though the
+            # column is timezone-aware. DriverLocation timestamps are written
+            # in UTC, so interpret naive values as UTC before comparing them.
+            last_recorded_at = last_loc.recorded_at
+            if last_recorded_at.tzinfo is None:
+                last_recorded_at = last_recorded_at.replace(tzinfo=timezone.utc)
+            else:
+                last_recorded_at = last_recorded_at.astimezone(timezone.utc)
+
+            dt = (now - last_recorded_at).total_seconds()
             if dt > 0:
                 dist_km = haversine_km(last_loc.latitude, last_loc.longitude, latitude, longitude)
                 calculated_speed = (dist_km / (dt / 3600.0))
