@@ -384,6 +384,26 @@ class RedisManager:
             raise RuntimeError("Redis did not confirm the security-sensitive write.")
         return True
 
+    async def set_nx_strict(self, key: str, value: str, ex: int) -> bool:
+        """Atomically reserve a key with a TTL without using a multi-worker-unsafe fallback."""
+        client = await self._get_redis()
+        if client is None:
+            if os.getenv("TESTING") == "1" or (getattr(settings, "ENVIRONMENT", "development") or "").lower() == "development":
+                return await self._fallback.set(key, value, ex=ex, nx=True)
+            raise ConnectionError("Redis is required for distributed security-sensitive reservations.")
+        self.stats.record_set()
+        return bool(await client.set(key, value, ex=ex, nx=True))
+
+    async def delete_strict(self, key: str) -> bool:
+        """Delete a reservation only from its authoritative Redis store."""
+        client = await self._get_redis()
+        if client is None:
+            if os.getenv("TESTING") == "1" or (getattr(settings, "ENVIRONMENT", "development") or "").lower() == "development":
+                return await self._fallback.delete(key)
+            raise ConnectionError("Redis is required to release a distributed security-sensitive reservation.")
+        await client.delete(key)
+        return True
+
     async def set_json(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
         return await self.set(key, json.dumps(value), ex=ex)
 
