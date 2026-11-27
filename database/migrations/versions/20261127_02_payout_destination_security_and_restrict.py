@@ -33,6 +33,15 @@ def upgrade() -> None:
                 existing_type=sa.String(length=30),
                 server_default=sa.text("'PENDING_VERIFICATION'"),
             )
+        # Demote legacy fake-verified accounts (PENNY-* or missing provider reference)
+        op.execute(
+            sa.text(
+                "UPDATE driver_payout_accounts "
+                "SET verification_status = 'PENDING_VERIFICATION', penny_drop_reference = NULL "
+                "WHERE verification_status = 'VERIFIED' "
+                "AND (penny_drop_reference IS NULL OR penny_drop_reference LIKE 'PENNY-%')"
+            )
+        )
 
     if "driver_payout_requests" in existing_tables:
         cols = {c["name"] for c in inspector.get_columns("driver_payout_requests")}
@@ -93,6 +102,8 @@ def downgrade() -> None:
 
     if "driver_payout_requests" in existing_tables:
         cols = {c["name"] for c in inspector.get_columns("driver_payout_requests")}
+        fks = inspector.get_foreign_keys("driver_payout_requests")
+        idxs = {i["name"] for i in inspector.get_indexes("driver_payout_requests")}
         with op.batch_alter_table("driver_payout_requests") as batch_op:
             for col in (
                 "beneficiary_name_snapshot",
@@ -103,6 +114,9 @@ def downgrade() -> None:
                 if col in cols:
                     batch_op.drop_column(col)
             if "payout_account_id" in cols:
-                batch_op.drop_constraint("fk_driver_payout_requests_payout_account_id", type_="foreignkey")
-                batch_op.drop_index("ix_driver_payout_requests_payout_account_id")
+                for fk in fks:
+                    if fk.get("constrained_columns") == ["payout_account_id"] and fk.get("name"):
+                        batch_op.drop_constraint(fk["name"], type_="foreignkey")
+                if "ix_driver_payout_requests_payout_account_id" in idxs:
+                    batch_op.drop_index("ix_driver_payout_requests_payout_account_id")
                 batch_op.drop_column("payout_account_id")

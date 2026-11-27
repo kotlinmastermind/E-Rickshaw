@@ -346,3 +346,95 @@ class AdminAdvancedService:
         stmt = select(BroadcastNotification).order_by(BroadcastNotification.created_at.desc())
         res = await session.execute(stmt)
         return list(res.scalars().all())
+
+
+    @staticmethod
+    async def verify_payout_account(
+        session: AsyncSession,
+        account_id: str,
+        admin_user_id: str,
+        verification_reference: str,
+    ):
+        from backend.domain.models import DriverPayoutAccount
+        clean_ref = (verification_reference or "").strip()
+        if len(clean_ref) < 4:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A valid verification_reference (at least 4 characters) is required.",
+            )
+        stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.id == account_id).with_for_update()
+        account = (await session.execute(stmt)).scalar_one_or_none()
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout account not found.")
+
+        now = datetime.now(timezone.utc)
+        account.verification_status = "VERIFIED"
+        account.rejection_reason = None
+        account.penny_drop_reference = clean_ref
+        account.updated_at = now
+
+        existing_primary = (
+            await session.execute(
+                select(DriverPayoutAccount).where(
+                    DriverPayoutAccount.driver_id == account.driver_id,
+                    DriverPayoutAccount.is_primary.is_(True),
+                    DriverPayoutAccount.verification_status == "VERIFIED",
+                    DriverPayoutAccount.id != account.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not existing_primary:
+            account.is_primary = True
+
+        session.add(AdministrativeAuditLog(
+            admin_user_id=admin_user_id,
+            action="PAYOUT_ACCOUNT_VERIFIED",
+            target_resource="driver_payout_accounts",
+            target_id=account.id,
+            changes_json=json.dumps({
+                "driver_id": account.driver_id,
+                "verification_reference": clean_ref,
+                "verified_at": now.isoformat(),
+            }),
+        ))
+        await session.flush()
+        return account
+
+    @staticmethod
+    async def reject_payout_account(
+        session: AsyncSession,
+        account_id: str,
+        admin_user_id: str,
+        rejection_reason: str,
+    ):
+        from backend.domain.models import DriverPayoutAccount
+        clean_reason = (rejection_reason or "").strip()
+        if len(clean_reason) < 4:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A valid rejection_reason (at least 4 characters) is required.",
+            )
+        stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.id == account_id).with_for_update()
+        account = (await session.execute(stmt)).scalar_one_or_none()
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout account not found.")
+
+        now = datetime.now(timezone.utc)
+        account.verification_status = "REJECTED"
+        account.rejection_reason = clean_reason
+        account.is_primary = False
+        account.updated_at = now
+
+        session.add(AdministrativeAuditLog(
+            admin_user_id=admin_user_id,
+            action="PAYOUT_ACCOUNT_REJECTED",
+            target_resource="driver_payout_accounts",
+            target_id=account.id,
+            changes_json=json.dumps({
+                "driver_id": account.driver_id,
+                "rejection_reason": clean_reason,
+                "rejected_at": now.isoformat(),
+            }),
+        ))
+        await session.flush()
+        return account

@@ -1057,12 +1057,9 @@ class DriverFinancialService:
             upi_vpa=upi if acc_type == "UPI" else None,
             beneficiary_name=holder,
             verification_status="PENDING_VERIFICATION",
-            is_primary=is_first or data.get("is_primary", False),
+            is_primary=False,
             penny_drop_reference=None,
         )
-        if acc.is_primary:
-            for ex in existing:
-                ex.is_primary = False
 
         self.db.add(acc)
         await self.db.commit()
@@ -1089,6 +1086,11 @@ class DriverFinancialService:
         target = next((a for a in accounts if a.id == account_id), None)
         if not target:
             raise HTTPException(status_code=404, detail="Account not found.")
+        if target.verification_status != "VERIFIED":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only a verified payout account can be set as primary (current status: {target.verification_status}).",
+            )
 
         for a in accounts:
             a.is_primary = (a.id == account_id)

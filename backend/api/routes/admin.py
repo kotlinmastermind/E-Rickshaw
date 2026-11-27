@@ -1827,3 +1827,91 @@ async def admin_review_customer_kyc_document(
         "reviewed_at": now.isoformat(),
         "message": "Customer document review saved. Account-wide verification status was not changed.",
     }
+
+
+
+class AdminPayoutAccountVerifyPayload(BaseModel):
+    verification_reference: str = Field(..., min_length=4, max_length=64)
+
+
+class AdminPayoutAccountRejectPayload(BaseModel):
+    rejection_reason: str = Field(..., min_length=4, max_length=255)
+
+
+@router.get("/payout-accounts")
+async def admin_list_payout_accounts(
+    status_filter: Optional[str] = None,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.domain.models import DriverPayoutAccount
+    stmt = select(DriverPayoutAccount).order_by(DriverPayoutAccount.created_at.desc()).limit(200)
+    if status_filter:
+        stmt = stmt.where(DriverPayoutAccount.verification_status == status_filter.strip().upper())
+    accounts = (await db.execute(stmt)).scalars().all()
+    return [
+        {
+            "id": a.id,
+            "driver_id": a.driver_id,
+            "account_type": a.account_type,
+            "bank_name": a.bank_name,
+            "account_number_mask": a.account_number_mask,
+            "ifsc_code": a.ifsc_code,
+            "upi_vpa": a.upi_vpa,
+            "beneficiary_name": a.beneficiary_name,
+            "verification_status": a.verification_status,
+            "rejection_reason": a.rejection_reason,
+            "is_primary": a.is_primary,
+            "verification_reference": a.penny_drop_reference,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in accounts
+    ]
+
+
+@router.post("/payout-accounts/{account_id}/verify")
+async def admin_verify_payout_account(
+    account_id: str,
+    payload: AdminPayoutAccountVerifyPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_advanced_service import AdminAdvancedService
+    account = await AdminAdvancedService.verify_payout_account(
+        session=db,
+        account_id=account_id,
+        admin_user_id=admin.id,
+        verification_reference=payload.verification_reference,
+    )
+    await db.commit()
+    return {
+        "id": account.id,
+        "driver_id": account.driver_id,
+        "verification_status": account.verification_status,
+        "is_primary": account.is_primary,
+        "verification_reference": account.penny_drop_reference,
+    }
+
+
+@router.post("/payout-accounts/{account_id}/reject")
+async def admin_reject_payout_account(
+    account_id: str,
+    payload: AdminPayoutAccountRejectPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_advanced_service import AdminAdvancedService
+    account = await AdminAdvancedService.reject_payout_account(
+        session=db,
+        account_id=account_id,
+        admin_user_id=admin.id,
+        rejection_reason=payload.rejection_reason,
+    )
+    await db.commit()
+    return {
+        "id": account.id,
+        "driver_id": account.driver_id,
+        "verification_status": account.verification_status,
+        "is_primary": account.is_primary,
+        "rejection_reason": account.rejection_reason,
+    }
