@@ -1,5 +1,6 @@
 import pytest
 import os
+import re
 from httpx import AsyncClient, ASGITransport
 from backend.main import app, STATIC_ADMIN_DIR
 from backend.infrastructure.security.crypto import create_jwt_token
@@ -79,8 +80,8 @@ async def test_admin_console_does_not_advertise_unverified_live_state():
         html = source.read()
 
     # Live badges start empty and only show counts after the authenticated feed responds.
-    assert '>2</span>' not in html
-    assert '>8</span>' not in html
+    assert re.search(r'id="badge-pending-kyc"[^>]*>\s*</span>', html)
+    assert re.search(r'id="badge-active-rides-tab"[^>]*>\s*</span>', html)
     assert "SUPABASE LIVE (AWS)" not in html
     assert "CONNECTING TO ADMIN API" in html
     assert "if (!response.ok)" in html
