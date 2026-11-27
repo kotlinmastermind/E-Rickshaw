@@ -950,11 +950,12 @@ fun InstantPayoutScreen(
 
     val primaryAccount = accounts.firstOrNull { it.isPrimary } ?: accounts.firstOrNull()
     val resolvedMask = if (payoutMethod == "UPI Direct") {
-        primaryAccount?.upiVpa ?: primaryAccount?.accountNumberMask ?: ""
+        primaryAccount?.upiVpa?.takeIf { it.isNotBlank() } ?: primaryAccount?.accountNumberMask.orEmpty()
     } else {
-        primaryAccount?.accountNumberMask ?: ""
+        primaryAccount?.accountNumberMask.orEmpty()
     }
-    val resolvedIfsc = if (payoutMethod == "UPI Direct") "UPI" else (primaryAccount?.ifscCode ?: "")
+    val resolvedIfsc = if (payoutMethod == "UPI Direct") "UPI" else primaryAccount?.ifscCode.orEmpty()
+    val hasValidDestination = primaryAccount != null && resolvedMask.length >= 4 && resolvedIfsc.length >= 2
     var attemptNonce by remember(withdrawAmount, resolvedMask, resolvedIfsc) { mutableStateOf(0) }
     val pendingIdempotencyKey = remember(withdrawAmount, resolvedMask, resolvedIfsc, attemptNonce) {
         "payout_${java.util.UUID.randomUUID()}"
@@ -989,7 +990,7 @@ fun InstantPayoutScreen(
                             Text("MAX WITHDRAWABLE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Text("₹${"%.2f".format(earnings.withdrawableBalanceRupees)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         }
-                        CockpitBadge(if (primaryAccount != null) "ACCOUNT LINKED" else "ACCOUNT REQUIRED", if (primaryAccount != null) ElectricCyan else AmberWarning)
+                        CockpitBadge(if (hasValidDestination) "ACCOUNT LINKED" else "ACCOUNT REQUIRED", if (hasValidDestination) ElectricCyan else AmberWarning)
                     }
                 }
 
@@ -1029,7 +1030,7 @@ fun InstantPayoutScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            if (primaryAccount != null) "Destination: $resolvedMask ($resolvedIfsc)" else "Add a verified payout account before requesting a payout",
+                            if (hasValidDestination) "Destination: $resolvedMask ($resolvedIfsc)" else "Add a verified payout account before requesting a payout",
                             color = CockpitTextSecondary,
                             fontSize = 11.sp
                         )
@@ -1040,7 +1041,7 @@ fun InstantPayoutScreen(
 
             CockpitButton(
                 text = if (isSubmitting) "PROCESSING..." else "CONFIRM WITHDRAWAL OF ₹${withdrawAmount.ifBlank { "0" }}",
-                enabled = !isSubmitting && primaryAccount != null && (withdrawAmount.toDoubleOrNull() ?: 0.0) >= 100.0 && (withdrawAmount.toDoubleOrNull() ?: 0.0) * 100.0 <= earnings.withdrawableBalanceCents.toDouble(),
+                enabled = !isSubmitting && hasValidDestination && (withdrawAmount.toDoubleOrNull() ?: 0.0) >= 100.0 && (withdrawAmount.toDoubleOrNull() ?: 0.0) * 100.0 <= earnings.withdrawableBalanceCents.toDouble(),
                 onClick = {
                     val amt = withdrawAmount.toDoubleOrNull() ?: 0.0
                     isSubmitting = true
