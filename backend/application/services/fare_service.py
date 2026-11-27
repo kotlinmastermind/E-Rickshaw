@@ -12,103 +12,28 @@ class FareService:
         self.db = db
         self.maps_provider = get_maps_provider()
 
-    @staticmethod
-    def resolve_city_code_from_coords(lat: float, lng: float) -> str:
-        """
-        Authoritative GPS resolution with rigorous boundary checks:
-        1. Validates coordinate existence, numeric types, and coordinate ranges.
-        2. Applies city-specific metropolitan operational radii:
-           - DELHI_NCR: 75 km (Delhi, Gurgaon, Noida, Ghaziabad, Faridabad)
-           - PATNA: 35 km (Patna Municipal Corp, Danapur, Phulwari Sharif, Hajipur)
-           - MUMBAI: 60 km (Mumbai Island, Suburban, Thane, Navi Mumbai, Mira-Bhayandar)
-           - LUCKNOW: 40 km (Lucknow Urban Agglomeration, Gomti Nagar, Alambagh)
-           - BENGALURU: 50 km (BBMP limits, Electronic City, Whitefield, Yelahanka)
-        3. At border/overlap coordinates, resolves strictly to the nearest city center.
-        4. Rejects out-of-bounds coordinates with HTTP 400.
-        """
-        if lat is None or lng is None:
+    async def resolve_operating_city(
+        self,
+        city_code: Optional[str],
+        lat: float,
+        lng: float,
+        dest_lat: Optional[float] = None,
+        dest_lng: Optional[float] = None,
+    ) -> str:
+        """Resolve coverage from Admin-managed active polygons, never city-center radii."""
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_areas = ServiceAreaService(self.db)
+        if (dest_lat is None) != (dest_lng is None):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Pickup GPS coordinates (latitude and longitude) are strictly required for city resolution."
+                detail="Both destination GPS coordinates are required for service-area validation.",
             )
-        try:
-            lat = float(lat)
-            lng = float(lng)
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid GPS coordinates: latitude and longitude must be valid floating point numbers."
-            )
-
-        if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lng <= 180.0):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"GPS coordinates out of valid range: lat={lat}, lng={lng}. Must be within [-90, 90] and [-180, 180]."
-            )
-
-        import math
-        city_configs = {
-            "DELHI_NCR": {"center": (28.6139, 77.2090), "max_radius_km": 75.0},
-            "PATNA": {"center": (25.5941, 85.1376), "max_radius_km": 35.0},
-            "MUMBAI": {"center": (19.0760, 72.8777), "max_radius_km": 60.0},
-            "LUCKNOW": {"center": (26.8467, 80.9462), "max_radius_km": 40.0},
-            "BENGALURU": {"center": (12.9716, 77.5946), "max_radius_km": 50.0},
-        }
-        closest_city = None
-        min_dist_km = float("inf")
-        candidate_matches = []
-
-        for city, cfg in city_configs.items():
-            c_lat, c_lng = cfg["center"]
-            d_lat = math.radians(lat - c_lat)
-            d_lng = math.radians(lng - c_lng)
-            a = math.sin(d_lat / 2)**2 + math.cos(math.radians(c_lat)) * math.cos(math.radians(lat)) * math.sin(d_lng / 2)**2
-            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-            dist_km = 6371.0 * c
-
-            if dist_km < min_dist_km:
-                min_dist_km = dist_km
-                closest_city = city
-
-            if dist_km <= cfg["max_radius_km"]:
-                candidate_matches.append((dist_km, city))
-
-        # If location falls within one or multiple city radii, pick the closest matching one
-        if candidate_matches:
-            candidate_matches.sort(key=lambda x: x[0])
-            return candidate_matches[0][1]
-
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Pickup location ({lat:.4f}, {lng:.4f}) is outside our operational service area (nearest active city '{closest_city}' is {min_dist_km:.1f}km away). Operating coverage is currently available in Delhi NCR, Patna, Mumbai, Lucknow, and Bengaluru."
-        )
-
-    async def resolve_operating_city(self, city_code: Optional[str], lat: float, lng: float) -> str:
-        # 1. Authoritative resolution from physical GPS coordinates
-        coords_city = self.resolve_city_code_from_coords(lat, lng)
-
-        # 2. If client supplied a city_code, verify it does not contradict physical coordinates
-        if city_code and city_code.strip():
-            clean_city = city_code.strip().upper()
-            if clean_city != coords_city:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"City mismatch: Specified city '{clean_city}' does not match coordinates-resolved city '{coords_city}'. Cross-city fare spoofing is prohibited."
-                )
-
-        from backend.domain.models import MultiCityOperatingConfig
-        cfg = (await self.db.execute(
-            select(MultiCityOperatingConfig).where(
-                MultiCityOperatingConfig.city_code == coords_city
-            )
-        )).scalars().first()
-        if cfg and cfg.is_active is False:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Operating city '{coords_city}' is currently paused or inactive."
-            )
-        return coords_city
-
+        if dest_lat is not None and dest_lng is not None:
+            zone = await service_areas.resolve_trip(lat, lng, dest_lat, dest_lng, city_code)
+        else:
+            zone = await service_areas.resolve_point(lat, lng, city_code)
+        return zone.city_code.strip().upper()
+    
     async def get_active_rule_for_category(self, category_id: str, city_code: Optional[str] = None) -> FareRule:
         now = datetime.now(timezone.utc)
         base_filters = [
