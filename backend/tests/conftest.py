@@ -1,4 +1,5 @@
 import os
+import json
 os.environ["TESTING"] = "1"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=shared&uri=true"
 os.environ["REDIS_URL"] = os.getenv("REDIS_TEST_URL", "")
@@ -41,7 +42,7 @@ async def _seed_test_data(session):
         ]
         session.add_all(rules)
         session.add_all([
-            GeofenceZone(name="Delhi NCR test operational area", city_code="DELHI_NCR", zone_type="SERVICE_AREA", coordinates_json=__import__("json").dumps([{"lat": 27.8, "lng": 76}, {"lat": 29.4, "lng": 76}, {"lat": 29.4, "lng": 78.2}, {"lat": 27.8, "lng": 78.2}]), is_active=True),
+            GeofenceZone(name="Delhi NCR test operational area", city_code="DELHI_NCR", zone_type="SERVICE_AREA", coordinates_json=json.dumps([{"lat": 27.8, "lng": 76}, {"lat": 29.4, "lng": 76}, {"lat": 29.4, "lng": 78.2}, {"lat": 27.8, "lng": 78.2}]), is_active=True),
             GeofenceZone(name="Patna test operational area", city_code="PATNA", zone_type="SERVICE_AREA", coordinates_json=__import__("json").dumps([{"lat": 24.9, "lng": 84.2}, {"lat": 26.2, "lng": 84.2}, {"lat": 26.2, "lng": 86.1}, {"lat": 24.9, "lng": 86.1}]), is_active=True),
             GeofenceZone(name="Mumbai test operational area", city_code="MUMBAI", zone_type="SERVICE_AREA", coordinates_json=__import__("json").dumps([{"lat": 18, "lng": 72}, {"lat": 20, "lng": 72}, {"lat": 20, "lng": 74}, {"lat": 18, "lng": 74}]), is_active=True),
             GeofenceZone(name="Lucknow test operational area", city_code="LUCKNOW", zone_type="SERVICE_AREA", coordinates_json=__import__("json").dumps([{"lat": 26, "lng": 80}, {"lat": 27.6, "lng": 80}, {"lat": 27.6, "lng": 82}, {"lat": 26, "lng": 82}]), is_active=True),
