@@ -2,11 +2,13 @@ import pytest
 import uuid
 import json
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import select
 from backend.application.services.cascading_dispatch_service import CascadingDispatchService
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
     DriverLocation, VehicleCategory,
-    Ride, RideAssignment, RideStatusEvent, Vehicle, DriverVehicleAssignment
+    Ride, RideAssignment, RideStatusEvent, Vehicle, DriverVehicleAssignment,
+    GeofenceZone, DriverServiceAreaAssignment
 )
 from backend.infrastructure.cache.redis_client import redis_client
 
@@ -24,6 +26,9 @@ async def test_driver_timeout_cascades_to_driver_b(db_session):
 
     service = CascadingDispatchService(db_session)
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "MUMBAI", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
 
     # Category specific to this test
     cat = VehicleCategory(
@@ -79,6 +84,11 @@ async def test_driver_timeout_cascades_to_driver_b(db_session):
     )
     db_session.add_all([driver_a, driver_b])
     await db_session.flush()
+    db_session.add_all([
+        DriverServiceAreaAssignment(driver_id=driver_a.id, service_area_id=service_area.id, assigned_by_user_id=None),
+        DriverServiceAreaAssignment(driver_id=driver_b.id, service_area_id=service_area.id, assigned_by_user_id=None),
+    ])
+    await db_session.flush()
 
     avail_a = DriverAvailability(driver_id=driver_a.id, is_online=True, is_busy=False)
     avail_b = DriverAvailability(driver_id=driver_b.id, is_online=True, is_busy=False)
@@ -102,6 +112,7 @@ async def test_driver_timeout_cascades_to_driver_b(db_session):
 
     # 3. Create requested Ride
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=customer_profile.id,
         vehicle_category_id=cat.id,
         fare_rule_id="1461db09-f2da-4799-b25c-c0c0e967c48b",
@@ -170,6 +181,9 @@ async def test_redis_cooldown_prevents_driver_reselection_in_cycle(db_session):
 
     service = CascadingDispatchService(db_session)
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "MUMBAI", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
 
     cat = VehicleCategory(
         id=str(uuid.uuid4()),
@@ -192,12 +206,15 @@ async def test_redis_cooldown_prevents_driver_reselection_in_cycle(db_session):
     driver = DriverProfile(user_id=driver_user.id, license_number=f"DL-{suffix}-S", approval_status="APPROVED")
     db_session.add(driver)
     await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=driver.id, service_area_id=service_area.id))
+    await db_session.flush()
 
     avail = DriverAvailability(driver_id=driver.id, is_online=True, is_busy=False)
     loc = DriverLocation(driver_id=driver.id, latitude=19.0765, longitude=72.8775)
     db_session.add_all([avail, loc])
 
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=customer_profile.id,
         vehicle_category_id=cat.id,
         fare_rule_id="1461db09-f2da-4799-b25c-c0c0e967c48b",
@@ -240,6 +257,9 @@ async def test_all_drivers_rejecting_leads_to_expired_lifecycle(db_session):
 
     service = CascadingDispatchService(db_session)
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "MUMBAI", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
 
     cat = VehicleCategory(
         id=str(uuid.uuid4()),
@@ -262,6 +282,8 @@ async def test_all_drivers_rejecting_leads_to_expired_lifecycle(db_session):
     driver = DriverProfile(user_id=driver_user.id, license_number=f"DL-{suffix}-EXP", approval_status="APPROVED")
     db_session.add(driver)
     await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=driver.id, service_area_id=service_area.id))
+    await db_session.flush()
 
     avail = DriverAvailability(driver_id=driver.id, is_online=True, is_busy=False)
     loc = DriverLocation(driver_id=driver.id, latitude=19.0760, longitude=72.8777)
@@ -278,6 +300,7 @@ async def test_all_drivers_rejecting_leads_to_expired_lifecycle(db_session):
     db_session.add(DriverVehicleAssignment(driver_id=driver.id, vehicle_id=veh.id, is_active=True))
 
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=customer_profile.id,
         vehicle_category_id=cat.id,
         fare_rule_id="1461db09-f2da-4799-b25c-c0c0e967c48b",
@@ -343,6 +366,9 @@ async def test_server_authoritative_safety_fallback_execution(db_session):
 
     service = CascadingDispatchService(db_session)
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "MUMBAI", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
 
     cat = VehicleCategory(
         id=str(uuid.uuid4()),
@@ -365,6 +391,8 @@ async def test_server_authoritative_safety_fallback_execution(db_session):
     driver = DriverProfile(user_id=driver_user.id, license_number=f"DL-{suffix}-AFK", approval_status="APPROVED")
     db_session.add(driver)
     await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=driver.id, service_area_id=service_area.id))
+    await db_session.flush()
 
     avail = DriverAvailability(driver_id=driver.id, is_online=True, is_busy=False)
     loc = DriverLocation(driver_id=driver.id, latitude=19.0760, longitude=72.8777)
@@ -381,6 +409,7 @@ async def test_server_authoritative_safety_fallback_execution(db_session):
     db_session.add(DriverVehicleAssignment(driver_id=driver.id, vehicle_id=veh.id, is_active=True))
 
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=customer_profile.id,
         vehicle_category_id=cat.id,
         fare_rule_id="1461db09-f2da-4799-b25c-c0c0e967c48b",
