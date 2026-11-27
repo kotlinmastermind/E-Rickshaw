@@ -1,6 +1,4 @@
 import json
-import uuid
-from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -11,7 +9,6 @@ from backend.scripts.recover_admin_mfa import (
     RecoverySafetyError,
     rotate_admin_mfa,
 )
-from backend.scripts.recover_admin_password import normalize_email
 from backend.tests.unit.test_admin_password_recovery import make_admin
 
 
@@ -24,11 +21,11 @@ async def test_admin_mfa_recovery_rotates_secret_keeps_mfa_enabled_and_revokes_s
     await db_session.commit()
     old_secret = user.mfa_secret
 
-    async def fake_revoke_user_cache(user_id):
-        assert user_id == user.id
+    async def fake_revoke_session_cache(session_ids):
+        assert session.id in session_ids
 
     monkeypatch.setattr(
-        "backend.scripts.recover_admin_mfa.revoke_user_cache",
+        "backend.scripts.recover_admin_mfa.revoke_session_cache",
         fake_revoke_user_cache,
     )
 
@@ -76,7 +73,7 @@ async def test_admin_mfa_recovery_rejects_wrong_password_without_mutation(
     await db_session.commit()
     old_secret = user.mfa_secret
 
-    async def unexpected_cache_revoke(user_id):
+    async def unexpected_cache_revoke(session_ids):
         pytest.fail("Cache revocation must not run for invalid credentials.")
 
     monkeypatch.setattr(
