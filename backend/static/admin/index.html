@@ -1077,6 +1077,7 @@
                                     <th class="py-3.5 px-4">Payout ID</th>
                                     <th class="py-3.5 px-4">Driver Profile</th>
                                     <th class="py-3.5 px-4">Amount (₹)</th>
+                                    <th class="py-3.5 px-4">Commission Settled (₹)</th>
                                     <th class="py-3.5 px-4">Bank Account / VPA</th>
                                     <th class="py-3.5 px-4">Requested At</th>
                                     <th class="py-3.5 px-4">Status</th>
@@ -3703,7 +3704,7 @@
             tbody.innerHTML = '';
             const filtered = payouts.filter(p => filter === 'ALL' || p.status === filter || (filter === 'PAID' && p.status === 'SETTLED'));
             if (filtered.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-slate-500 font-mono">No payout requests matching filter [${filter}].</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8" class="py-6 text-center text-slate-500 font-mono">No payout requests matching filter [${filter}].</td></tr>`;
                 return;
             }
             filtered.forEach(p => {
@@ -3744,6 +3745,7 @@
                         <span class="text-[10px] text-slate-500 font-mono">${p.driver_id || ''}</span>
                     </td>
                     <td class="py-3.5 px-4 font-mono font-bold text-emerald-glow text-sm">₹${amtRupees}</td>
+                    <td class="py-3.5 px-4 font-mono text-amber-glow">₹${((p.commission_settled_cents || 0) / 100).toFixed(2)}</td>
                     <td class="py-3.5 px-4 font-mono text-slate-300">${p.bank_account_mask || p.bank_account_masked || '•••• 8920'}</td>
                     <td class="py-3.5 px-4 text-slate-400 text-[11px] font-mono">${(p.requested_at || '').replace('T', ' ').slice(0, 19)}</td>
                     <td class="py-3.5 px-4">${statusBadge}</td>
