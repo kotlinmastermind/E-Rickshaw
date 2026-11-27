@@ -296,8 +296,8 @@ class RouteOptPayload(BaseModel):
 
 class PayoutRequestPayload(BaseModel):
     amount_cents: int = Field(..., gt=0, json_schema_extra={"example": 1000000})
-    account_number_mask: str = Field("**** 9988", json_schema_extra={"example": "**** 9988"})
-    ifsc: str = Field("HDFC0001234", json_schema_extra={"example": "HDFC0001234"})
+    account_number_mask: str = Field(..., min_length=4, max_length=32, json_schema_extra={"example": "BANK *******1234"})
+    ifsc: str = Field(..., min_length=2, max_length=20, json_schema_extra={"example": "ABCD0123456 or UPI"})
     idempotency_key: str = Field(..., min_length=16, max_length=64, json_schema_extra={"example": "payout_req_12345678abcdef"})
 
 @router.get("/heat-map")
