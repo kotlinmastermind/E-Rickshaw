@@ -13,6 +13,7 @@ from backend.infrastructure.cache.redis_client import RedisManager
 async def test_strict_nx_reservation_is_atomic_with_local_test_store(monkeypatch):
     monkeypatch.setenv("TESTING", "1")
     manager = RedisManager()
+    manager.redis_url = None  # Exercise one shared in-process fallback, not a mixed Redis/fallback race.
     results = await asyncio.gather(
         *(manager.set_nx_strict("otp_cooldown:test", "1", ex=60) for _ in range(20))
     )
