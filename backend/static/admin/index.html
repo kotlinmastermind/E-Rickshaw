@@ -326,13 +326,10 @@
                             <i data-lucide="truck" class="w-5 h-5"></i>
                         </div>
                         <div>
-                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Available Drivers
+                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Online Drivers
                             </p>
-                            <h3 id="stat-online-drivers" class="text-xl font-extrabold text-white font-mono">24</h3>
-                            <p class="text-[10px] text-emerald-glow font-medium flex items-center gap-1">
-                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-glow animate-ping"></span> 100% Feeder
-                                Ready
-                            </p>
+                            <h3 id="stat-online-drivers" class="text-xl font-extrabold text-white font-mono">0</h3>
+                            <p class="text-[10px] text-emerald-glow font-medium">Approved drivers currently online</p>
                         </div>
                     </div>
 
@@ -343,9 +340,9 @@
                             <i data-lucide="navigation-2" class="w-5 h-5"></i>
                         </div>
                         <div>
-                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Running Rides</p>
-                            <h3 id="stat-active-rides" class="text-xl font-extrabold text-white font-mono">8</h3>
-                            <p class="text-[10px] text-cyan-glow font-medium">In-Trip Navigation</p>
+                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Active Rides</p>
+                            <h3 id="stat-active-rides" class="text-xl font-extrabold text-white font-mono">0</h3>
+                            <p class="text-[10px] text-cyan-glow font-medium">Persisted active ride records</p>
                         </div>
                     </div>
 
@@ -358,8 +355,8 @@
                         <div>
                             <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Waiting Riders
                             </p>
-                            <h3 id="stat-waiting-riders" class="text-xl font-extrabold text-white font-mono">5</h3>
-                            <p class="text-[10px] text-amber-glow font-medium">Avg Pickup: 2.4 min</p>
+                            <h3 id="stat-waiting-riders" class="text-xl font-extrabold text-white font-mono">0</h3>
+                            <p class="text-[10px] text-amber-glow font-medium">Open ride requests</p>
                         </div>
                     </div>
 
@@ -371,10 +368,10 @@
                             <i data-lucide="indian-rupee" class="w-5 h-5"></i>
                         </div>
                         <div>
-                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Today's Revenue
+                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Completed Ride Fares
                             </p>
-                            <h3 id="stat-revenue" class="text-xl font-extrabold text-white font-mono">₹48,250</h3>
-                            <p class="text-[10px] text-emerald-glow font-medium">+18.4% vs Yesterday</p>
+                            <h3 id="stat-revenue" class="text-xl font-extrabold text-white font-mono">₹0</h3>
+                            <p class="text-[10px] text-emerald-glow font-medium">Finalized fares from completed rides</p>
                         </div>
                     </div>
 
@@ -388,8 +385,8 @@
                         <div>
                             <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Peak Multiplier
                             </p>
-                            <h3 id="stat-surge" class="text-xl font-extrabold text-white font-mono">1.8x</h3>
-                            <p class="text-[10px] text-purple-400 font-medium">Anand Vihar ISBT</p>
+                            <h3 id="stat-surge" class="text-xl font-extrabold text-white font-mono">N/A</h3>
+                            <p class="text-[10px] text-purple-400 font-medium">No live surge data</p>
                         </div>
                     </div>
 
@@ -401,7 +398,7 @@
                         </div>
                         <div>
                             <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Pending KYC</p>
-                            <h3 id="stat-pending-kyc" class="text-xl font-extrabold text-white font-mono">2</h3>
+                            <h3 id="stat-pending-kyc" class="text-xl font-extrabold text-white font-mono">0</h3>
                             <p class="text-[10px] text-amber-glow font-medium">Action Required</p>
                         </div>
                     </div>
@@ -421,15 +418,15 @@
 
                 <button onclick="filterMap('all')" id="filter-all"
                     class="map-filter-btn px-3 py-1 rounded-xl text-xs font-semibold bg-cyan-glow text-black font-mono shadow-sm">
-                    All (37)
+                    All
                 </button>
                 <button onclick="filterMap('available')" id="filter-available"
                     class="map-filter-btn px-3 py-1 rounded-xl text-xs font-semibold bg-surface hover:bg-card text-emerald-glow border border-emerald-glow/30 font-mono">
-                    🟢 Available (24)
+                    🟢 Available
                 </button>
                 <button onclick="filterMap('busy')" id="filter-busy"
                     class="map-filter-btn px-3 py-1 rounded-xl text-xs font-semibold bg-surface hover:bg-card text-cyan-glow border border-cyan-glow/30 font-mono">
-                    🔵 In-Trip (8)
+                    🔵 In-Trip
                 </button>
                 <button onclick="filterMap('riders')" id="filter-riders"
                     class="map-filter-btn px-3 py-1 rounded-xl text-xs font-semibold bg-surface hover:bg-card text-amber-glow border border-amber-glow/30 font-mono">
@@ -721,7 +718,7 @@
                                 <th class="py-3.5 px-4">User ID & Name</th>
                                 <th class="py-3.5 px-4">Mobile Number</th>
                                 <th class="py-3.5 px-4">Completed Trips</th>
-                                <th class="py-3.5 px-4">Lifetime Spend</th>
+                                <th class="py-3.5 px-4">Completed Ride Fares</th>
                                 <th class="py-3.5 px-4">Rating</th>
                                 <th class="py-3.5 px-4">Account Status</th>
                                 <th class="py-3.5 px-4">Customer KYC</th>
@@ -2257,6 +2254,7 @@
             mfaSetupToken: null,
             currentTab: 'map',
             map: null,
+            mapHasFitLiveEntities: false,
             mapFilter: 'all',
             drivers: [],
             riders: [],
@@ -2593,48 +2591,19 @@
 
         // Initialize Leaflet Map with CartoDB Dark Tiles
         function initLeafletMap() {
-            // Centered on East Delhi - Anand Vihar / Connaught Place corridor
+            // India-wide default view; actual live points determine the first operational viewport.
             STATE.map = L.map('command-map', {
                 zoomControl: false,
                 attributionControl: false
-            }).setView([28.6304, 77.2600], 13);
+            }).setView([22.9734, 78.6569], 5);
 
-            // Add High-End Dark Tiles
             L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                 maxZoom: 19,
                 subdomains: 'abcd'
             }).addTo(STATE.map);
 
-            // Zoom control on bottom right
             L.control.zoom({ position: 'bottomright' }).addTo(STATE.map);
-
-            // Seed Simulated Live Fleet Entities for Demo & Visual Real-time Feel
-            seedFleetEntities();
             renderMapMarkers();
-        }
-
-        function seedFleetEntities() {
-            STATE.drivers = [
-                { id: 'drv-1', name: 'Ramesh Kumar', phone: '+91 98112 34567', plate: 'DL-1ER-4921', category: 'Standard E-Rickshaw', model: 'Mahindra Treo', status: 'AVAILABLE', lat: 28.6475, lng: 28.6475 ? 77.3150 : 77.3150, battery: 86, speed: 0, rating: 4.95, trips: 2420, dl: 'DL-0420190082910' },
-                { id: 'drv-2', name: 'Mohammad Tariq', phone: '+91 98711 55441', plate: 'DL-1ER-8812', category: 'Shared Eco-Pool', model: 'Piaggio Ape E-City', status: 'IN_TRIP', lat: 28.6350, lng: 77.2910, battery: 72, speed: 26, rating: 4.91, trips: 1840, dl: 'DL-0420200033101', tripId: 'TRP-9812', pickup: 'Anand Vihar ISBT Gate 2', drop: 'Preet Vihar Metro Gate 3', fare: '₹74.25', riderName: 'Ankit Verma' },
-                { id: 'drv-3', name: 'Sohan Lal', phone: '+91 99100 88210', plate: 'DL-1EA-5531', category: 'High-Speed Electric Auto', model: 'Bajaj RE E-Auto', status: 'AVAILABLE', lat: 28.6300, lng: 77.2180, battery: 94, speed: 18, rating: 4.98, trips: 3100, dl: 'DL-0420180011928' },
-                { id: 'drv-4', name: 'Deepak Verma', phone: '+91 98101 22345', plate: 'DL-1EC-9011', category: 'E-Loader Cargo', model: 'Euler HiLoad EV', status: 'IN_TRIP', lat: 28.6280, lng: 77.3680, battery: 64, speed: 28, rating: 4.88, trips: 920, dl: 'DL-0420210099412', tripId: 'TRP-9799', pickup: 'Noida Sec 62 B2B Depot', drop: 'Indirapuram Market', fare: '₹140.00', riderName: 'Merchant Logistics Ltd' },
-                { id: 'drv-5', name: 'Ajay Sharma', phone: '+91 98710 44321', plate: 'DL-1ER-3420', category: 'Standard E-Rickshaw', model: 'Saarthi Shavak EV', status: 'AVAILABLE', lat: 28.6085, lng: 77.2995, battery: 52, speed: 12, rating: 4.92, trips: 1450, dl: 'DL-0420200077881' },
-                { id: 'drv-6', name: 'Mukesh Singh', phone: '+91 99990 12340', plate: 'DL-1ER-2201', category: 'Shared Eco-Pool', model: 'Mahindra Treo', status: 'ALERT', lat: 28.6380, lng: 77.2820, battery: 14, speed: 8, rating: 4.78, trips: 890, dl: 'DL-0420220055112' }
-            ];
-
-            STATE.riders = [
-                { id: 'rdr-1', name: 'Priya Sharma', phone: '+91 98110 99881', lat: 28.6465, lng: 77.3180, status: 'WAITING', pickup: 'Anand Vihar Footover Bridge', targetDrop: 'Karkardooma Court', waitMins: 3.2, rating: 4.9 },
-                { id: 'rdr-2', name: 'Vikram Malhotra', phone: '+91 98712 11223', lat: 28.6315, lng: 77.2210, status: 'WAITING', pickup: 'Connaught Place Inner Circle', targetDrop: 'Barakhamba Road Metro', waitMins: 1.5, rating: 5.0 },
-                { id: 'rdr-3', name: 'Neha Gupta', phone: '+91 99114 44556', lat: 28.6110, lng: 77.3020, status: 'WAITING', pickup: 'Mayur Vihar Ph-1 Gate 1', targetDrop: 'Pocket 2 Market', waitMins: 4.0, rating: 4.8 }
-            ];
-
-            STATE.activeRides = [
-                { id: 'TRP-9812', rider: 'Ankit Verma', driver: 'Mohammad Tariq', plate: 'DL-1ER-8812', pickup: 'Anand Vihar ISBT Gate 2', drop: 'Preet Vihar Metro Gate 3', fare: '₹74.25', payment: 'UPI Autopay', status: 'IN_PROGRESS' },
-                { id: 'TRP-9799', rider: 'Merchant Logistics Ltd', driver: 'Deepak Verma', plate: 'DL-1EC-9011', pickup: 'Noida Sec 62 B2B Depot', drop: 'Indirapuram Market', fare: '₹140.00', payment: 'Razorpay QR', status: 'IN_PROGRESS' },
-                { id: 'TRP-9780', rider: 'Kavita Sundaram', driver: 'Sohan Lal', plate: 'DL-1EA-5531', pickup: 'CP Palika Bazaar', drop: 'ITO Flyover', fare: '₹62.00', payment: 'Cash Due', status: 'ASSIGNED' },
-                { id: 'TRP-9766', rider: 'Rohit Joshi', driver: 'Ajay Sharma', plate: 'DL-1ER-3420', pickup: 'Mayur Vihar Ph-1', drop: 'Nirman Vihar', fare: '₹45.00', payment: 'UPI Digital', status: 'COMPLETED' }
-            ];
         }
 
         // Render Professional Custom Markers on Leaflet
@@ -2645,14 +2614,19 @@
 
             // 1. Render Drivers
             STATE.drivers.forEach(driver => {
+                if (driver.lat == null || driver.lng == null ||
+                    !Number.isFinite(Number(driver.lat)) || !Number.isFinite(Number(driver.lng))) return;
                 if (STATE.mapFilter === 'available' && driver.status !== 'AVAILABLE') return;
                 if (STATE.mapFilter === 'busy' && driver.status !== 'IN_TRIP') return;
                 if (STATE.mapFilter === 'riders') return;
 
-                let color = '#10B981'; // Emerald
-                let badge = 'AVAILABLE';
+                let color = '#64748B';
+                let badge = driver.status || 'UNKNOWN';
+                if (driver.status === 'AVAILABLE') { color = '#10B981'; badge = 'AVAILABLE'; }
                 if (driver.status === 'IN_TRIP') { color = '#00F2FE'; badge = 'IN TRIP'; }
-                if (driver.status === 'ALERT') { color = '#EF4444'; badge = 'LOW BATTERY'; }
+                if (driver.status === 'PENDING') { color = '#F59E0B'; badge = 'PENDING'; }
+                if (driver.status === 'REJECTED' || driver.status === 'SUSPENDED') { color = '#EF4444'; }
+                if (driver.location_is_stale) { color = '#64748B'; badge = 'LAST KNOWN LOCATION'; }
 
                 const customHtml = `
                     <div class="driver-marker-pulse flex items-center justify-center w-8 h-8 rounded-full shadow-xl cursor-pointer" style="background-color: ${color}; box-shadow: 0 0 15px ${color};">
@@ -2670,7 +2644,7 @@
                     iconAnchor: [16, 16]
                 });
 
-                const marker = L.marker([driver.lat, driver.lng], { icon })
+                const marker = L.marker([driver.lat, driver.lng], { icon, title: `${driver.name || 'Driver'} · ${badge}` })
                     .addTo(STATE.map)
                     .on('click', () => openDriverInspector(driver));
 
@@ -2704,12 +2678,25 @@
             });
         }
 
+        function fitMapToLiveEntities() {
+            if (!STATE.map || STATE.mapHasFitLiveEntities) return;
+            const points = [...STATE.drivers, ...STATE.riders]
+                .filter(entity => entity.lat != null && entity.lng != null &&
+                    Number.isFinite(Number(entity.lat)) && Number.isFinite(Number(entity.lng)))
+                .map(entity => [Number(entity.lat), Number(entity.lng)]);
+            if (!points.length) return;
+            const bounds = L.latLngBounds(points);
+            if (!bounds.isValid()) return;
+            STATE.map.fitBounds(bounds.pad(0.15), { maxZoom: 14 });
+            STATE.mapHasFitLiveEntities = true;
+        }
+
         // Open Inspector Drawer for Driver
         function openDriverInspector(driver) {
             STATE.selectedEntity = { type: 'driver', data: driver };
             document.getElementById('drawer-avatar').innerText = '👨‍✈️';
             document.getElementById('drawer-title').innerText = driver.name;
-            document.getElementById('drawer-subtitle').innerText = `${driver.plate} • ${driver.model}`;
+            document.getElementById('drawer-subtitle').innerText = `${driver.plate || 'Vehicle not assigned'} • ${driver.model || 'Model not recorded'}`;
 
             const dot = document.getElementById('drawer-status-dot');
             const statusText = document.getElementById('drawer-status-text');
@@ -2722,18 +2709,18 @@
                 statusText.className = 'text-xs font-bold text-cyan-glow';
                 statusText.innerText = 'IN-TRIP NAVIGATION';
             } else {
-                dot.className = 'w-2.5 h-2.5 rounded-full bg-crimson-glow animate-pulse';
-                statusText.className = 'text-xs font-bold text-crimson-glow';
-                statusText.innerText = 'ALERT: BATTERY RESERVE LOW';
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-400';
+                statusText.className = 'text-xs font-bold text-slate-400';
+                statusText.innerText = driver.status === 'PENDING' ? 'PENDING APPROVAL' : (driver.status === 'REJECTED' ? 'REJECTED' : (driver.status === 'SUSPENDED' ? 'SUSPENDED' : 'OFFLINE'));
             }
 
-            document.getElementById('drawer-battery').innerText = `${driver.battery}% (~${Math.round(driver.battery * 0.5)} km)`;
-            document.getElementById('drawer-speed').innerText = `${driver.speed} km/h`;
-            document.getElementById('drawer-rating').innerText = `${driver.rating} ★`;
+            document.getElementById('drawer-battery').innerText = driver.battery == null ? 'Not reported' : `${driver.battery}%`;
+            document.getElementById('drawer-speed').innerText = driver.speed == null ? 'Not reported' : `${driver.speed} km/h`;
+            document.getElementById('drawer-rating').innerText = driver.rating == null ? 'Not rated' : `${driver.rating} ★`;
             document.getElementById('drawer-trips').innerText = driver.trips.toLocaleString();
-            document.getElementById('drawer-phone').innerText = driver.phone;
-            document.getElementById('drawer-dl').innerText = driver.dl;
-            document.getElementById('drawer-category').innerText = driver.category;
+            document.getElementById('drawer-phone').innerText = driver.phone || 'Not provided';
+            document.getElementById('drawer-dl').innerText = driver.dl || 'Not recorded';
+            document.getElementById('drawer-category').innerText = driver.category || 'Not assigned';
 
             const tripCard = document.getElementById('drawer-trip-card');
             if (driver.status === 'IN_TRIP' && driver.tripId) {
@@ -2752,7 +2739,7 @@
             }
 
             document.getElementById('inspector-drawer').classList.remove('translate-x-[110%]');
-            STATE.map.panTo([driver.lat, driver.lng]);
+            if (driver.lat != null && driver.lng != null && Number.isFinite(Number(driver.lat)) && Number.isFinite(Number(driver.lng))) STATE.map.panTo([driver.lat, driver.lng]);
             lucide.createIcons();
         }
 
@@ -2761,33 +2748,33 @@
             STATE.selectedEntity = { type: 'rider', data: rider };
             document.getElementById('drawer-avatar').innerText = '🚶';
             document.getElementById('drawer-title').innerText = rider.name;
-            document.getElementById('drawer-subtitle').innerText = `Commuter • Waiting for Feeder Cab`;
+            document.getElementById('drawer-subtitle').innerText = `Customer • Requested ride`;
 
             const dot = document.getElementById('drawer-status-dot');
             const statusText = document.getElementById('drawer-status-text');
             dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-glow animate-ping';
             statusText.className = 'text-xs font-bold text-amber-glow';
-            statusText.innerText = `WAITING (${rider.waitMins} MINS)`;
+            statusText.innerText = rider.waitMins == null ? 'WAITING FOR DRIVER' : `WAITING (${rider.waitMins} MINS)`;
 
             document.getElementById('drawer-battery').innerText = 'N/A (Pedestrian)';
-            document.getElementById('drawer-speed').innerText = '0 km/h';
-            document.getElementById('drawer-rating').innerText = `${rider.rating} ★`;
-            document.getElementById('drawer-trips').innerText = '14';
-            document.getElementById('drawer-phone').innerText = rider.phone;
-            document.getElementById('drawer-dl').innerText = 'Verified Commuter';
-            document.getElementById('drawer-category').innerText = 'Eco-Feeder Pool';
+            document.getElementById('drawer-speed').innerText = 'Not applicable';
+            document.getElementById('drawer-rating').innerText = rider.rating == null ? 'Not rated' : `${rider.rating} ★`;
+            document.getElementById('drawer-trips').innerText = rider.trips == null ? 'Not available' : rider.trips.toLocaleString();
+            document.getElementById('drawer-phone').innerText = rider.phone || 'Not provided';
+            document.getElementById('drawer-dl').innerText = 'Customer record';
+            document.getElementById('drawer-category').innerText = 'Ride request';
 
             const tripCard = document.getElementById('drawer-trip-card');
             tripCard.classList.remove('hidden');
-            document.getElementById('drawer-trip-id').innerText = 'DISPATCH MATCHING';
+            document.getElementById('drawer-trip-id').innerText = `#${rider.ride_id || rider.id}`;
             document.getElementById('drawer-pickup').innerText = rider.pickup;
             document.getElementById('drawer-drop').innerText = rider.targetDrop;
-            document.getElementById('drawer-fare').innerText = 'Est. ₹35.00';
+            document.getElementById('drawer-fare').innerText = rider.fare || 'Not available';
             document.getElementById('drawer-passenger').innerText = rider.name;
 
             clearRoute();
             document.getElementById('inspector-drawer').classList.remove('translate-x-[110%]');
-            STATE.map.panTo([rider.lat, rider.lng]);
+            if (rider.lat != null && rider.lng != null && Number.isFinite(Number(rider.lat)) && Number.isFinite(Number(rider.lng))) STATE.map.panTo([rider.lat, rider.lng]);
             lucide.createIcons();
         }
 
@@ -2880,6 +2867,7 @@
                 const headers = {};
                 if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
                 const res = await fetch('/api/v1/admin/live-feed', { headers });
+                if (!res.ok) throw new Error(`Live feed request failed (${res.status})`);
 
                 if (res.ok) {
                     const data = await res.json();
@@ -2901,35 +2889,29 @@
                         const elBadge = document.getElementById('badge-pending-kyc');
                         if (elBadge) elBadge.innerText = data.stats.pending_kyc || 0;
 
-                        const elWaiting = document.getElementById('stat-waiting-commuters');
+                        const elWaiting = document.getElementById('stat-waiting-riders');
                         if (elWaiting) elWaiting.innerText = data.stats.waiting_riders || 0;
 
                         const elConn = document.getElementById('connection-label');
-                        if (elConn) elConn.innerText = 'LIVE SUPABASE (AWS-AP-SOUTHEAST-2)';
+                        if (elConn) elConn.innerText = 'LIVE DATABASE FEED';
                     }
 
-                    if (Array.isArray(data.drivers) && data.drivers.length > 0) {
-                        STATE.drivers = data.drivers;
-                    }
-
-                    if (Array.isArray(data.riders) && data.riders.length > 0) {
-                        STATE.riders = data.riders;
-                    }
-
-                    if (Array.isArray(data.active_rides) && data.active_rides.length > 0) {
-                        STATE.activeRides = data.active_rides;
-                    }
-
-                    if (Array.isArray(data.customers) && data.customers.length > 0) {
-                        STATE.customers = data.customers;
-                    }
-
-                    if (Array.isArray(data.tariffs) && data.tariffs.length > 0) {
-                        STATE.categories = data.tariffs;
-                    }
+                    STATE.drivers = Array.isArray(data.drivers) ? data.drivers : [];
+                    STATE.riders = Array.isArray(data.riders) ? data.riders : [];
+                    STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];
+                    STATE.customers = Array.isArray(data.customers) ? data.customers : [];
+                    STATE.categories = Array.isArray(data.tariffs) ? data.tariffs : [];
+                    fitMapToLiveEntities();
                 }
             } catch (e) {
-                console.log('Error fetching live Supabase feed:', e);
+                console.error('Admin live feed unavailable:', e);
+                STATE.drivers = [];
+                STATE.riders = [];
+                STATE.activeRides = [];
+                STATE.customers = [];
+                STATE.categories = [];
+                const connectionLabel = document.getElementById('connection-label');
+                if (connectionLabel) connectionLabel.innerText = 'LIVE DATA UNAVAILABLE';
             }
 
             renderMapMarkers();
@@ -2955,9 +2937,15 @@
             const driversList = STATE.drivers || [];
 
             tbody.innerHTML = '';
+            if (driversList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500">No driver records available.</td></tr>';
+                return;
+            }
             driversList.forEach(driver => {
                 if (filterStatus !== 'ALL' && driver.status !== filterStatus) return;
-                if (searchTerm && !driver.name.toLowerCase().includes(searchTerm) && !driver.phone.includes(searchTerm) && !driver.plate.toLowerCase().includes(searchTerm)) return;
+                if (searchTerm && !String(driver.name || '').toLowerCase().includes(searchTerm) &&
+                    !String(driver.phone || '').includes(searchTerm) &&
+                    !String(driver.plate || '').toLowerCase().includes(searchTerm)) return;
 
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-surface/50 transition-colors';
@@ -2974,6 +2962,7 @@
                 if (driver.status === 'OFFLINE') dutyBadge = '<span class="text-slate-400 font-mono">⚪ OFFLINE</span>';
                 if (driver.status === 'PENDING') dutyBadge = '<span class="text-amber-glow font-mono">🟡 PENDING REVIEW</span>';
                 if (driver.status === 'REJECTED') dutyBadge = '<span class="text-crimson-glow font-mono">🔴 REJECTED</span>';
+                if (driver.status === 'SUSPENDED') dutyBadge = '<span class="text-crimson-glow font-mono">⛔ SUSPENDED</span>';
 
                 tr.innerHTML = `
                     <td class="py-3.5 px-4 font-semibold text-white flex items-center gap-2.5">
@@ -2988,10 +2977,10 @@
                         <span class="text-[10px] text-slate-500">${driver.dl}</span>
                     </td>
                     <td class="py-3.5 px-4">
-                        <span class="font-mono font-bold text-white">${driver.plate}</span>
-                        <div class="text-[10px] text-slate-400">${driver.model}</div>
+                        <span class="font-mono font-bold text-white">${driver.plate || 'Not assigned'}</span>
+                        <div class="text-[10px] text-slate-400">${driver.model || 'Not recorded'}</div>
                     </td>
-                    <td class="py-3.5 px-4 text-cyan-glow">${driver.category}</td>
+                    <td class="py-3.5 px-4 text-cyan-glow">${driver.category || 'Not assigned'}</td>
                     <td class="py-3.5 px-4">${dutyBadge}</td>
                     <td class="py-3.5 px-4">${kycBadge}</td>
                     <td class="py-3.5 px-4 text-right">
@@ -3021,6 +3010,10 @@
             tbody.innerHTML = '';
 
             const rides = STATE.activeRides || [];
+            if (rides.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500">No active ride records available.</td></tr>';
+                return;
+            }
             rides.forEach(ride => {
                 if (filter !== 'ALL' && ride.status !== filter) return;
 
@@ -3063,8 +3056,12 @@
             const documents = STATE.customerKycDocuments || [];
 
             tbody.innerHTML = '';
+            if (customers.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500">No customer records available.</td></tr>';
+                return;
+            }
             customers.forEach(user => {
-                if (search && !user.name.toLowerCase().includes(search) && !user.phone.includes(search)) return;
+                if (search && !String(user.name || '').toLowerCase().includes(search) && !String(user.phone || '').includes(search)) return;
 
                 const customerDocs = documents.filter(doc => doc.customer_id === user.id);
                 const pendingDoc = customerDocs.find(doc => doc.status === 'PENDING_REVIEW');
@@ -3086,7 +3083,7 @@
                     <td class="py-3.5 px-4 font-mono text-slate-300">${user.phone}</td>
                     <td class="py-3.5 px-4 font-mono text-white">${user.rides}</td>
                     <td class="py-3.5 px-4 font-mono font-bold text-emerald-glow">${user.spend}</td>
-                    <td class="py-3.5 px-4 text-amber-glow font-mono">${user.rating} ★</td>
+                    <td class="py-3.5 px-4 text-amber-glow font-mono">${user.rating == null ? 'Not rated' : `${user.rating} ★`}</td>
                     <td class="py-3.5 px-4">
                         <span class="px-2 py-0.5 rounded-md ${user.active ? 'bg-emerald-dim text-emerald-glow' : 'bg-crimson-dim text-crimson-glow'} font-mono text-[10px] font-bold">
                             ${user.active ? 'ACTIVE' : 'SUSPENDED'}
@@ -3547,15 +3544,23 @@
         }
 
         function handleLiveWsTelemetry(payload) {
-            if (payload.type === 'DRIVER_LOCATION_UPDATE') {
-                const driver = STATE.drivers.find(d => d.id === payload.driver_id);
-                if (driver) {
-                    driver.lat = payload.latitude;
-                    driver.lng = payload.longitude;
-                    driver.speed = payload.speed_kmh || driver.speed;
-                    renderMapMarkers();
-                }
+            const eventType = payload?.event_type || payload?.type || payload?.event;
+            const eventPayload = payload?.payload && typeof payload.payload === 'object' ? payload.payload : payload;
+            if (eventType !== 'DRIVER_LOCATION_UPDATE') return;
+            const driver = STATE.drivers.find(d => d.id === String(eventPayload.driver_id || ''));
+            if (!driver) return;
+            const latitude = Number(eventPayload.latitude);
+            const longitude = Number(eventPayload.longitude);
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+            driver.lat = latitude;
+            driver.lng = longitude;
+            if (eventPayload.speed_kmh != null && Number.isFinite(Number(eventPayload.speed_kmh))) {
+                driver.speed = Number(eventPayload.speed_kmh);
+            } else if (eventPayload.speed_mps != null && Number.isFinite(Number(eventPayload.speed_mps))) {
+                driver.speed = Number(eventPayload.speed_mps) * 3.6;
             }
+            driver.location_recorded_at = eventPayload.recorded_at || new Date().toISOString();
+            renderMapMarkers();
         }
 
         // Heartbeat Periodic Sync
@@ -3575,28 +3580,34 @@
                         if (data.stats) {
                             STATE.stats = data.stats;
                             const elOnline = document.getElementById('stat-online-drivers');
-                            if (elOnline) elOnline.innerText = data.stats.online_drivers || 0;
+                            if (elOnline) elOnline.innerText = data.stats.online_drivers ?? 0;
                             const elRides = document.getElementById('stat-active-rides');
-                            if (elRides) elRides.innerText = data.stats.active_rides || 0;
+                            if (elRides) elRides.innerText = data.stats.active_rides ?? 0;
                             const elRev = document.getElementById('stat-revenue');
-                            if (elRev) elRev.innerText = `₹${(data.stats.gross_booking_inr || 0).toLocaleString()}`;
+                            if (elRev) elRev.innerText = `₹${Number(data.stats.gross_booking_inr ?? 0).toLocaleString()}`;
+                            const elWaiting = document.getElementById('stat-waiting-riders');
+                            if (elWaiting) elWaiting.innerText = data.stats.waiting_riders ?? 0;
                             const elPending = document.getElementById('stat-pending-kyc');
-                            if (elPending) elPending.innerText = data.stats.pending_kyc || 0;
+                            if (elPending) elPending.innerText = data.stats.pending_kyc ?? 0;
                             const elBadge = document.getElementById('badge-pending-kyc');
-                            if (elBadge) elBadge.innerText = data.stats.pending_kyc || 0;
+                            if (elBadge) elBadge.innerText = data.stats.pending_kyc ?? 0;
                         }
+                        STATE.drivers = Array.isArray(data.drivers) ? data.drivers : [];
+                        STATE.riders = Array.isArray(data.riders) ? data.riders : [];
+                        STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];
+                        STATE.customers = Array.isArray(data.customers) ? data.customers : [];
+                        STATE.categories = Array.isArray(data.tariffs) ? data.tariffs : [];
+                        fitMapToLiveEntities();
+                        renderMapMarkers();
+                        renderDriverTable();
+                        renderRidesTable();
+                        renderCustomerTable();
+                        renderTariffCards();
                     }
                 } catch (e) { }
             }
 
-            // Keep simulated vehicle movement micro-animations active for real mobility experience
-            STATE.drivers.forEach(d => {
-                if (d.status === 'IN_TRIP') {
-                    d.lat += (Math.random() - 0.48) * 0.0004;
-                    d.lng += (Math.random() - 0.48) * 0.0004;
-                    d.speed = Math.floor(20 + Math.random() * 12);
-                }
-            });
+            // Map positions are updated only by persisted GPS telemetry.
             renderMapMarkers();
         }
 
