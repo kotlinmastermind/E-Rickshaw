@@ -1131,6 +1131,32 @@ async def list_geofences(
         for z in zones
     ]
 
+@router.put("/geofences/{zone_id}")
+async def update_geofence(
+    zone_id: str,
+    payload: GeofencePayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    return await AdminGovernanceService(db).save_geofence(admin.id, zone_id, {
+        "name": payload.name,
+        "zone_type": payload.zone_type,
+        "city_code": payload.city_code,
+        "coordinates": payload.coordinates,
+        "surge_multiplier": payload.surge_multiplier,
+        "is_active": True,
+    })
+
+
+@router.delete("/geofences/{zone_id}")
+async def deactivate_geofence(
+    zone_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    return await AdminGovernanceService(db).delete_geofence(admin.id, zone_id)
+
+
 @router.post("/geofences/verify-point")
 async def verify_point_in_geofence(
     payload: VerifyPointPayload,
