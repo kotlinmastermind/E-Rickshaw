@@ -60,3 +60,42 @@ async def test_admin_live_feed_reports_only_persisted_location_and_vehicle(db_se
     assert actual_customer["rides"] == 1
     assert actual_customer["spend"] == "₹123.45"
     assert actual_customer["rating"] is None
+
+
+@pytest.mark.asyncio
+async def test_admin_live_feed_does_not_count_stale_online_driver_or_fabricate_location(db_session):
+    suffix = uuid.uuid4().hex[:8]
+    user = User(
+        email=f"stale-feed-{suffix}@example.com",
+        full_name="Stale Driver",
+        role="driver",
+        phone_number=f"+9199{suffix[:8]}",
+        is_active=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    driver = DriverProfile(
+        user_id=user.id,
+        license_number=f"DL-STALE-{suffix}",
+        approval_status="APPROVED",
+    )
+    db_session.add(driver)
+    await db_session.flush()
+    stale = datetime.now(timezone.utc) - timedelta(minutes=30)
+    db_session.add(DriverAvailability(
+        driver_id=driver.id,
+        is_online=True,
+        is_busy=False,
+        last_heartbeat=stale,
+        updated_at=stale,
+    ))
+    await db_session.commit()
+
+    feed = await get_live_mobility_feed(admin=None, db=db_session)
+    record = next(item for item in feed["drivers"] if item["id"] == driver.id)
+    assert feed["stats"]["online_drivers"] == 0
+    assert record["status"] == "OFFLINE"
+    assert record["lat"] is None
+    assert record["lng"] is None
+    assert record["battery"] is None
+    assert record["plate"] == ""
