@@ -110,7 +110,7 @@ class DriverProfile(Base):
     license_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     approval_status: Mapped[str] = mapped_column(String(20), default="PENDING")  # PENDING, APPROVED, REJECTED, SUSPENDED
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    rating_average: Mapped[float] = mapped_column(Float, default=5.0)
+    rating_average: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
     rating_count: Mapped[int] = mapped_column(Integer, default=0)
     total_trips: Mapped[int] = mapped_column(Integer, default=0)
     
@@ -255,11 +255,11 @@ class Vehicle(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Part 6 Commercial Registration & Compliance Credentials (Feature 132)
-    rc_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default="MH-01-2024-RC98214")
-    permit_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default="AITP-LUX-2026-08492")
+    rc_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default=None)
+    permit_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default=None)
     puc_expiry_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     fitness_expiry_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    insurance_policy_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default="NIC-COMM-LUX-849201")
+    insurance_policy_number: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
