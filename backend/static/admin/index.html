@@ -326,7 +326,7 @@
                             <i data-lucide="truck" class="w-5 h-5"></i>
                         </div>
                         <div>
-                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Available Drivers
+                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Online Drivers
                             </p>
                             <h3 id="stat-online-drivers" class="text-xl font-extrabold text-white font-mono">0</h3>
                             <p class="text-[10px] text-emerald-glow font-medium">Approved drivers currently online</p>
@@ -340,7 +340,7 @@
                             <i data-lucide="navigation-2" class="w-5 h-5"></i>
                         </div>
                         <div>
-                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Running Rides</p>
+                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Active Rides</p>
                             <h3 id="stat-active-rides" class="text-xl font-extrabold text-white font-mono">0</h3>
                             <p class="text-[10px] text-cyan-glow font-medium">Persisted active ride records</p>
                         </div>
@@ -2648,10 +2648,12 @@
                 if (STATE.mapFilter === 'busy' && driver.status !== 'IN_TRIP') return;
                 if (STATE.mapFilter === 'riders') return;
 
-                let color = '#10B981'; // Emerald
-                let badge = 'AVAILABLE';
+                let color = '#64748B';
+                let badge = driver.status || 'UNKNOWN';
+                if (driver.status === 'AVAILABLE') { color = '#10B981'; badge = 'AVAILABLE'; }
                 if (driver.status === 'IN_TRIP') { color = '#00F2FE'; badge = 'IN TRIP'; }
-                if (driver.status === 'ALERT') { color = '#EF4444'; badge = 'LOW BATTERY'; }
+                if (driver.status === 'PENDING') { color = '#F59E0B'; badge = 'PENDING'; }
+                if (driver.status === 'REJECTED' || driver.status === 'SUSPENDED') { color = '#EF4444'; }
 
                 const customHtml = `
                     <div class="driver-marker-pulse flex items-center justify-center w-8 h-8 rounded-full shadow-xl cursor-pointer" style="background-color: ${color}; box-shadow: 0 0 15px ${color};">
@@ -2669,7 +2671,7 @@
                     iconAnchor: [16, 16]
                 });
 
-                const marker = L.marker([driver.lat, driver.lng], { icon })
+                const marker = L.marker([driver.lat, driver.lng], { icon, title: `${driver.name || 'Driver'} · ${badge}` })
                     .addTo(STATE.map)
                     .on('click', () => openDriverInspector(driver));
 
@@ -2879,6 +2881,7 @@
                 const headers = {};
                 if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
                 const res = await fetch('/api/v1/admin/live-feed', { headers });
+                if (!res.ok) throw new Error(`Live feed request failed (${res.status})`);
 
                 if (res.ok) {
                     const data = await res.json();
@@ -2972,6 +2975,7 @@
                 if (driver.status === 'OFFLINE') dutyBadge = '<span class="text-slate-400 font-mono">⚪ OFFLINE</span>';
                 if (driver.status === 'PENDING') dutyBadge = '<span class="text-amber-glow font-mono">🟡 PENDING REVIEW</span>';
                 if (driver.status === 'REJECTED') dutyBadge = '<span class="text-crimson-glow font-mono">🔴 REJECTED</span>';
+                if (driver.status === 'SUSPENDED') dutyBadge = '<span class="text-crimson-glow font-mono">⛔ SUSPENDED</span>';
 
                 tr.innerHTML = `
                     <td class="py-3.5 px-4 font-semibold text-white flex items-center gap-2.5">
