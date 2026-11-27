@@ -266,10 +266,29 @@ async def test_manual_transfer_two_step_workflow_and_illegal_transitions(client,
         assert mt_res.status_code == 200
         assert mt_res.json()["status"] == "AWAITING_MANUAL_TRANSFER"
 
-        # Separate authorized confirmation (AWAITING_MANUAL_TRANSFER -> PAID)
+        # The initiating admin cannot self-confirm a manual transfer.
+        self_confirm = await client.post(
+            f"/api/v1/admin/payouts/{payout_id}/confirm-manual-transfer",
+            json={"confirmation_notes": "Bank statement independently checked"},
+        )
+        assert self_confirm.status_code == 403
+
+        # A different active admin must independently confirm the transfer.
+        confirmer = User(
+            id=str(uuid.uuid4()),
+            phone_number=f"+9193{uuid.uuid4().int % 10**8:08d}",
+            email=f"confirm_{uuid.uuid4().hex[:8]}@example.test",
+            full_name="Independent payout confirmer",
+            role="admin",
+            is_active=True,
+            is_verified=True,
+        )
+        db_session.add(confirmer)
+        await db_session.commit()
+        app.dependency_overrides[get_current_admin] = lambda: confirmer
         conf_res = await client.post(
             f"/api/v1/admin/payouts/{payout_id}/confirm-manual-transfer",
-            json={"confirmation_notes": "Bank statement cleared"},
+            json={"confirmation_notes": "Bank statement independently verified"},
         )
         assert conf_res.status_code == 200
         assert conf_res.json()["status"] == "PAID"
@@ -337,6 +356,31 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
 
     await db_session.refresh(wallet)
     assert wallet.balance_cents == 40000
+
+    # An operator must not fail/reverse an ambiguous provider transfer.
+    with pytest.raises(HTTPException) as uncertain_fail:
+        await PayoutExecutionService.fail_payout(
+            db_session,
+            payout_id=payout.id,
+            actor_user_id=admin_user.id,
+            failure_reason="Admin attempted failure before reconciliation",
+        )
+    assert uncertain_fail.value.status_code == 409
+    await db_session.rollback()
+    await db_session.refresh(wallet)
+    assert wallet.balance_cents == 40000
+
+    # If provider lookup has no result yet, do not submit a second POST.
+    empty_lookup = MagicMock(status_code=200)
+    empty_lookup.json.return_value = {"items": []}
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=empty_lookup)), \\
+         patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=AssertionError("Must not re-POST while outcome is unknown!"))):
+        with pytest.raises(HTTPException) as still_unknown:
+            await PayoutExecutionService.execute_provider_payout(
+                db_session, payout_id=payout.id, admin_user_id=admin_user.id
+            )
+        assert still_unknown.value.status_code == 409
+        await db_session.rollback()
 
     # 2. Re-executing after timeout reconciles uncertain outcome first (no duplicate POST)
     reconcile_resp = MagicMock(status_code=200)
