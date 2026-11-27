@@ -376,7 +376,8 @@ async def verify_inflight_driver_authorization(
                 return await _check_db(db)
     except Exception as db_err:
         logger.warning(f"Database error during in-flight re-authorization check: {db_err}")
-        return True
+        # Authorization must fail closed when account/approval state cannot be verified.
+        return False
 
 
 async def record_offer_acknowledgement(driver_id: str, ride_id: str, received_at: Optional[str] = None):
