@@ -18,15 +18,6 @@ def upgrade() -> None:
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names())
 
-    if "pooled_trips" in tables:
-        columns = {column["name"] for column in inspector.get_columns("pooled_trips")}
-        if "service_area_id" in columns:
-            # DROP COLUMN on PostgreSQL automatically removes any dependent indexes
-            # and foreign keys. Do not assume historical constraint names: existing
-            # databases may have been created from ORM metadata or older migrations.
-            with op.batch_alter_table("pooled_trips") as batch_op:
-                batch_op.drop_column("service_area_id")
-            inspector.clear_cache()
     if "rides" in tables:
         columns = {column["name"] for column in inspector.get_columns("rides")}
         if "service_area_id" not in columns:
