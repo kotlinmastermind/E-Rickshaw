@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
 from backend.infrastructure.database.session import get_db
+from backend.api.deps import get_current_admin
 from backend.domain.models import VehicleCategory
 
 router = APIRouter(prefix="/vehicles", tags=["Vehicles & Categories"])
@@ -272,6 +273,7 @@ class CategoryUpdatePayload(BaseModel):
 @router.post("/categories")
 async def create_vehicle_category(
     payload: CategoryCreatePayload,
+    admin=Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
     cat = VehicleCategory(
@@ -294,6 +296,7 @@ async def create_vehicle_category(
 async def update_vehicle_category(
     category_id: str,
     payload: CategoryUpdatePayload,
+    admin=Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
     stmt = select(VehicleCategory).where(VehicleCategory.id == category_id)
@@ -330,6 +333,7 @@ async def update_vehicle_category(
 @router.delete("/categories/{category_id}")
 async def delete_vehicle_category(
     category_id: str,
+    admin=Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
     stmt = select(VehicleCategory).where(VehicleCategory.id == category_id)
