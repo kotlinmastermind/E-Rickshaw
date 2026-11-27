@@ -2766,10 +2766,10 @@
             const statusText = document.getElementById('drawer-status-text');
             dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-glow animate-ping';
             statusText.className = 'text-xs font-bold text-amber-glow';
-            statusText.innerText = `WAITING (${rider.waitMins} MINS)`;
+            statusText.innerText = rider.waitMins == null ? 'WAITING FOR DRIVER' : `WAITING (${rider.waitMins} MINS)`;
 
             document.getElementById('drawer-battery').innerText = 'N/A (Pedestrian)';
-            document.getElementById('drawer-speed').innerText = '0 km/h';
+            document.getElementById('drawer-speed').innerText = 'Not applicable';
             document.getElementById('drawer-rating').innerText = rider.rating == null ? 'Not rated' : `${rider.rating} ★`;
             document.getElementById('drawer-trips').innerText = rider.trips == null ? 'Not available' : rider.trips.toLocaleString();
             document.getElementById('drawer-phone').innerText = rider.phone || 'Not provided';
@@ -2781,7 +2781,7 @@
             document.getElementById('drawer-trip-id').innerText = `#${rider.ride_id || rider.id}`;
             document.getElementById('drawer-pickup').innerText = rider.pickup;
             document.getElementById('drawer-drop').innerText = rider.targetDrop;
-            document.getElementById('drawer-fare').innerText = 'Not available';
+            document.getElementById('drawer-fare').innerText = rider.fare || 'Not available';
             document.getElementById('drawer-passenger').innerText = rider.name;
 
             clearRoute();
@@ -2900,7 +2900,7 @@
                         const elBadge = document.getElementById('badge-pending-kyc');
                         if (elBadge) elBadge.innerText = data.stats.pending_kyc || 0;
 
-                        const elWaiting = document.getElementById('stat-waiting-commuters');
+                        const elWaiting = document.getElementById('stat-waiting-riders');
                         if (elWaiting) elWaiting.innerText = data.stats.waiting_riders || 0;
 
                         const elConn = document.getElementById('connection-label');
@@ -3594,6 +3594,8 @@
                             if (elRides) elRides.innerText = data.stats.active_rides ?? 0;
                             const elRev = document.getElementById('stat-revenue');
                             if (elRev) elRev.innerText = `₹${Number(data.stats.gross_booking_inr ?? 0).toLocaleString()}`;
+                            const elWaiting = document.getElementById('stat-waiting-riders');
+                            if (elWaiting) elWaiting.innerText = data.stats.waiting_riders ?? 0;
                             const elPending = document.getElementById('stat-pending-kyc');
                             if (elPending) elPending.innerText = data.stats.pending_kyc ?? 0;
                             const elBadge = document.getElementById('badge-pending-kyc');
