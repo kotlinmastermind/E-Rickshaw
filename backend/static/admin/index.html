@@ -202,7 +202,7 @@
                             CENTER</span>
                     </h1>
                 </div>
-                <p class="text-xs text-slate-400">Enterprise Mobility Operating Command • Delhi NCR Corridor</p>
+                <p class="text-xs text-slate-400">Enterprise Mobility Operating Command • India-wide Operations</p>
             </div>
         </div>
 
@@ -819,7 +819,7 @@
                             <i data-lucide="smartphone" class="w-4 h-4 text-emerald-glow"></i> Commuter & Pilot Screen
                             Preview
                         </h3>
-                        <p class="text-xs text-slate-400 mb-6">Real-time simulation of Android notification tray alert
+                        <p class="text-xs text-slate-400 mb-6">Static preview of the Driver notification card (not a live delivery status)
                         </p>
 
                         <!-- Simulated Mobile Notification Card -->
@@ -2596,7 +2596,7 @@
 
         // Initialize Leaflet Map with CartoDB Dark Tiles
         function initLeafletMap() {
-            // Centered on East Delhi - Anand Vihar / Connaught Place corridor
+            // Start at India-wide view; auto-fit only when actual live coordinates arrive.
             STATE.map = L.map('command-map', {
                 zoomControl: false,
                 attributionControl: false
