@@ -95,6 +95,7 @@ async def test_ride_request_preserves_selected_category_in_db(db_session):
     db_ride = (await db_session.execute(select(Ride).where(Ride.id == res["ride_id"]))).scalar_one()
     assert db_ride.vehicle_category_id == cat_auto.id
     assert db_ride.vehicle_category_id != cat_rickshaw.id
+    assert db_ride.service_area_id is not None
 
 
 @pytest.mark.asyncio
