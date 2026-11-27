@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import select
 from fastapi import HTTPException
 
 from backend.application.services.service_area_service import ServiceAreaService
@@ -24,7 +25,7 @@ async def test_driver_must_have_explicit_active_service_area_assignment(db_sessi
     await db_session.flush()
 
     area = (await db_session.execute(
-        __import__("sqlalchemy").select(GeofenceZone).where(
+        select(GeofenceZone).where(
             GeofenceZone.zone_type == "SERVICE_AREA",
             GeofenceZone.city_code == "DELHI_NCR",
         )
