@@ -140,7 +140,7 @@ private fun IncomingOfferModal() {
         }
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "NET EARNING: ₹${"%.2f".format(currentOffer.estimatedDriverEarningsRupees)}",
+            text = "GROSS FARE ESTIMATE: ₹${"%.2f".format(currentOffer.estimatedDriverEarningsRupees)}",
             color = PilotElectricCyan,
             fontSize = 28.sp,
             fontWeight = FontWeight.ExtraBold
