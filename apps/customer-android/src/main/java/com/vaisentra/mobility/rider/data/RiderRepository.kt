@@ -605,11 +605,12 @@ object RiderRepository {
         }
     }
 
-    fun updateDriverLiveLocation(lat: Double, lng: Double, speed: Double) {
+    fun updateDriverLiveLocation(lat: Double, lng: Double, speed: Double?) {
+        if (!lat.isFinite() || !lng.isFinite() || lat !in -90.0..90.0 || lng !in -180.0..180.0) return
         _activeRide.value = _activeRide.value?.copy(
             driverLat = lat,
             driverLng = lng,
-            speedKmh = speed
+            speedKmh = speed?.takeIf { it.isFinite() && it >= 0.0 }
         )
     }
 

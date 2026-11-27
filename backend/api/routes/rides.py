@@ -14,6 +14,7 @@ from backend.application.services.ride_service import RideService
 from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
 from backend.application.services.booking_advanced_service import BookingAdvancedService
 from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
+from backend.domain.state_machine.ride_state_machine import ACTIVE_RIDE_STATUSES
 
 router = APIRouter(prefix="/rides", tags=["Ride Lifecycle & Booking"])
 
@@ -718,7 +719,7 @@ async def get_current_active_ride(
     from sqlalchemy import and_, desc
     from sqlalchemy.orm import joinedload
 
-    active_statuses = ["REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS"]
+    active_statuses = ACTIVE_RIDE_STATUSES
 
     if user.role == "driver":
         stmt = (
@@ -766,7 +767,7 @@ async def get_current_active_ride(
         u = drv.user
         driver_info = {
             "driver_id": drv.id,
-            "name": u.full_name if (u and u.full_name) else "Executive Chauffeur",
+            "name": u.full_name if (u and u.full_name) else None,
             "phone": u.phone_number if (u and u.phone_number) else "",
             "license_number": drv.license_number,
             "rating": drv.rating_average,
@@ -779,9 +780,9 @@ async def get_current_active_ride(
         u_cust = cust_profile.user
         passenger_info = {
             "customer_id": cust_profile.id,
-            "name": u_cust.full_name if (u_cust and u_cust.full_name) else "Commuter",
+            "name": u_cust.full_name if (u_cust and u_cust.full_name) else None,
             "phone": u_cust.phone_number if (u_cust and u_cust.phone_number) else "",
-            "rating": cust_profile.rating_average or 5.0
+            "rating": cust_profile.rating_average if cust_profile.rating_count else None
         }
 
     return {
@@ -795,7 +796,7 @@ async def get_current_active_ride(
             "destination_address": ride.destination_address,
             "destination_latitude": ride.destination_latitude,
             "destination_longitude": ride.destination_longitude,
-            "start_otp": ride.start_otp,
+            "start_otp": ride.start_otp if user.role == "customer" else None,
             "otp_verified": ride.otp_verified,
             "estimated_fare_cents": ride.estimated_fare_cents,
             "final_fare_cents": ride.final_fare_cents,
@@ -848,11 +849,11 @@ async def get_ride_history(
 
         if r.driver:
             drv = r.driver
-            driver_rating = drv.rating_average or 5.0
+            driver_rating = drv.rating_average if drv.rating_count else None
             vehicle_plate = drv.license_number or None
             u_driver = drv.user
             if u_driver:
-                driver_name = u_driver.full_name or "Verified Pilot"
+                driver_name = u_driver.full_name or None
                 driver_phone = u_driver.phone_number or None
 
         items.append({
@@ -861,7 +862,7 @@ async def get_ride_history(
             "pickup_address": r.pickup_address,
             "destination_address": r.destination_address,
             "total_fare_cents": r.final_fare_cents or r.estimated_fare_cents,
-            "otp_code": r.start_otp,
+            "otp_code": r.start_otp if user.role == "customer" else None,
             "driver_name": driver_name,
             "driver_phone": driver_phone,
             "driver_rating": driver_rating,
@@ -869,7 +870,7 @@ async def get_ride_history(
             "vehicle_model": vehicle_model,
             "driver_lat": r.pickup_latitude,
             "driver_lng": r.pickup_longitude,
-            "speed_kmh": 0.0,
+            "speed_kmh": None,
             "created_at": r.requested_at.isoformat() if r.requested_at else None
         })
     return items
@@ -900,7 +901,7 @@ async def get_ride_details(
         u = drv.user
         driver_info = {
             "driver_id": drv.id,
-            "name": u.full_name if (u and u.full_name) else "Executive Chauffeur",
+            "name": u.full_name if (u and u.full_name) else None,
             "phone": u.phone_number if (u and u.phone_number) else "",
             "license_number": drv.license_number,
             "rating": drv.rating_average,
@@ -919,7 +920,7 @@ async def get_ride_details(
         "estimated_fare_cents": ride.estimated_fare_cents,
         "final_fare_cents": ride.final_fare_cents,
         "payment_method": ride.payment_method,
-        "start_otp": ride.start_otp if (user.role == "customer" or user.role == "admin") else None,
+        "start_otp": ride.start_otp if user.role == "customer" else None,
         "driver": driver_info,
         "requested_at": ride.requested_at.isoformat(),
         "assigned_at": ride.assigned_at.isoformat() if ride.assigned_at else None,
