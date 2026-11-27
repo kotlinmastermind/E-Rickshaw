@@ -801,6 +801,19 @@ async def test_accept_ride_atomic_validates_category_match(db_session):
     db_session.add(offer2)
     await db_session.commit()
 
+    # Neither acceptance API may accept an offer without fresh in-area GPS.
+    with pytest.raises(Exception) as stale_smart_gps_error:
+        await SmartDispatchService(db_session).accept_offer(d_user2.id, ride.id)
+    assert "Fresh driver GPS" in str(stale_smart_gps_error.value.detail)
+    with pytest.raises(Exception) as stale_gps_error:
+        await ride_svc.accept_ride_atomic(d_user2.id, ride.id)
+    assert "Fresh driver GPS" in str(stale_gps_error.value.detail)
+
+    # Fresh GPS must be inside the ride's active service polygon.
+    await LiveLocationService(db=db_session).ingest_driver_location(
+        d_prof2.id, 28.6140, 77.2090, is_online=True
+    )
+
     # 2. Driver 2 (Cab) accepts Cab ride -> SUCCEEDS
     res = await ride_svc.accept_ride_atomic(d_user2.id, ride.id)
     assert res["status"] in ["CONFIRMED", "ACCEPTED", "SCHEDULED", "ASSIGNED"]
@@ -852,3 +865,31 @@ async def test_fare_estimate_id_is_full_valid_uuid(db_session):
     parsed_uuid = uuid.UUID(est.id)
     assert str(parsed_uuid) == est.id
 
+
+
+@pytest.mark.asyncio
+async def test_service_area_candidate_guard_excludes_restricted_and_outside_locations(db_session):
+    service_area = (await db_session.execute(
+        select(GeofenceZone).where(
+            GeofenceZone.city_code == "DELHI_NCR",
+            GeofenceZone.zone_type == "SERVICE_AREA",
+            GeofenceZone.is_active.is_(True),
+        )
+    )).scalars().one()
+    restricted = GeofenceZone(
+        name="Synthetic restricted dispatch test zone",
+        zone_type="RESTRICTED",
+        city_code=None,
+        coordinates_json='[{"lat":28.60,"lng":77.20},{"lat":28.60,"lng":77.22},{"lat":28.62,"lng":77.22},{"lat":28.62,"lng":77.20}]',
+        is_active=True,
+    )
+    db_session.add(restricted)
+    await db_session.flush()
+
+    from backend.application.services.service_area_service import ServiceAreaService
+    service = ServiceAreaService(db_session)
+    _, service_polygon, restricted_polygons = await service.load_area_boundary(service_area.id)
+
+    assert service.location_is_inside_boundary(28.70, 77.30, service_polygon, restricted_polygons)
+    assert not service.location_is_inside_boundary(28.61, 77.21, service_polygon, restricted_polygons)
+    assert not service.location_is_inside_boundary(30.00, 80.00, service_polygon, restricted_polygons)

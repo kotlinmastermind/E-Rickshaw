@@ -6,6 +6,7 @@ import httpx
 from httpx import ASGITransport
 from backend.main import app
 from backend.domain.models import GeofenceZone, DriverServiceAreaAssignment
+from backend.application.services.live_location_service import LiveLocationService
 from backend.core.config import settings
 
 @pytest.mark.asyncio
@@ -228,6 +229,10 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
                 RideAssignment(ride_id=ride_id, driver_id=drv2_prof.id, status="OFFERED", expires_at=datetime.now(timezone.utc) + timedelta(minutes=10)),
             ])
             await db_session.commit()
+
+            live_locations = LiveLocationService(db=db_session)
+            await live_locations.ingest_driver_location(drv1_prof.id, 18.9217, 72.8332, is_online=True)
+            await live_locations.ingest_driver_location(drv2_prof.id, 18.9217, 72.8332, is_online=True)
 
             # 6. ATOMIC CONCURRENCY TEST: Two drivers attempt to accept simultaneously
             accept_resp1 = await client.post(f"/api/v1/rides/{ride_id}/accept", headers=drv1_headers)

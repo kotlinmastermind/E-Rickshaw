@@ -399,6 +399,8 @@ class RideService:
                 detail=f"Driver vehicle category mismatch. Expected category '{ride_obj.vehicle_category_id}', but driver vehicle is '{driver_veh.category_id}'."
             )
 
+        await service_areas.require_fresh_driver_inside(driver.id, ride_obj.service_area_id)
+
         now = datetime.now(timezone.utc)
         now_naive = now.replace(tzinfo=None)
 

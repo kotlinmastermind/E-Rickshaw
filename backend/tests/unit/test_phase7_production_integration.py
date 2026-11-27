@@ -9,6 +9,7 @@ from backend.domain.models import (
     VehicleCategory, Vehicle, DriverVehicleAssignment, GeofenceZone, DriverServiceAreaAssignment
 )
 from backend.infrastructure.security.crypto import hash_password
+from backend.application.services.live_location_service import LiveLocationService
 
 @pytest.mark.asyncio
 async def test_production_ride_booking_with_coordinates(db_session):
@@ -173,6 +174,9 @@ async def test_end_to_end_ride_lifecycle_and_trip_breadcrumbs(db_session):
         )
         assert d_login.status_code == 200, d_login.text
         driver_token = d_login.json()["access_token"]
+
+        live_locations = LiveLocationService(db=db_session)
+        await live_locations.ingest_driver_location(driver_prof.id, 28.6250, 77.2185, is_online=True)
 
         # 1. Customer creates ride with mandatory category_id
         req_resp = await client.post(

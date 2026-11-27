@@ -18,6 +18,7 @@ from backend.infrastructure.security.crypto import (
 from backend.application.services.auth_service import AuthService
 from backend.application.services.ride_service import RideService
 from backend.application.services.driver_onboarding_service import DriverOnboardingService
+from backend.application.services.live_location_service import LiveLocationService
 
 
 @pytest.mark.asyncio
@@ -240,6 +241,10 @@ async def test_driver_ride_acceptance_race_condition_prevention(db_session):
     off2 = RideAssignment(ride_id=ride.id, driver_id=d2_prof.id, status="OFFERED", expires_at=now + timedelta(seconds=30))
     db_session.add_all([off1, off2])
     await db_session.commit()
+
+    live_locations = LiveLocationService(db=db_session)
+    await live_locations.ingest_driver_location(d1_prof.id, 28.60, 77.20, is_online=True)
+    await live_locations.ingest_driver_location(d2_prof.id, 28.60, 77.20, is_online=True)
 
     service = RideService(db_session)
 

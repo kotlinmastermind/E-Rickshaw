@@ -171,6 +171,10 @@ async def test_ride_cannot_have_multiple_accepted_drivers(db_session):
     db_session.add(assign1)
     await db_session.commit()
 
+    live_locations = LiveLocationService(db=db_session)
+    await live_locations.ingest_driver_location(d_prof1.id, 28.6139, 77.2090, is_online=True)
+    await live_locations.ingest_driver_location(d_prof2.id, 28.6139, 77.2090, is_online=True)
+
     # Driver 1 accepts
     svc = SmartDispatchService(db_session)
     res1 = await svc.accept_offer(driver_user_id=d_user1.id, ride_id=ride.id)

@@ -344,6 +344,7 @@ class AdminGovernanceService:
         if resolved_area.id != ride.service_area_id:
             raise HTTPException(409, "Ride service area no longer matches its route.")
         await service_areas.require_driver_assignment(driver.id, ride.service_area_id)
+        await service_areas.require_fresh_driver_inside(driver.id, ride.service_area_id)
 
         # Re-validate that driver's active vehicle matches the ride's vehicle_category_id
         from backend.domain.models import DriverVehicleAssignment, Vehicle
