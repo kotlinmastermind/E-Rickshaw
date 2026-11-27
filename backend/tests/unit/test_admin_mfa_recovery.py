@@ -106,11 +106,11 @@ async def test_admin_mfa_recovery_rejects_confirmation_and_production_without_mu
     await db_session.commit()
     old_secret = user.mfa_secret
 
-    async def unexpected_cache_revoke(user_id):
+    async def unexpected_cache_revoke(session_ids):
         pytest.fail("Cache revocation must not run before confirmation checks.")
 
     monkeypatch.setattr(
-        "backend.scripts.recover_admin_mfa.revoke_user_cache",
+        "backend.scripts.recover_admin_mfa.revoke_session_cache",
         unexpected_cache_revoke,
     )
 
