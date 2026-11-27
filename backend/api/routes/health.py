@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from backend.infrastructure.database.session import get_db
+from backend.api.deps import get_current_admin
+from backend.core.config import settings
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.infrastructure.telemetry.crash_reporter import crash_reporter
 from backend.api.routes.ws import ws_manager
@@ -67,7 +69,7 @@ async def readiness(db: AsyncSession = Depends(get_db)):
     return response_data
 
 @router.get("/health/metrics")
-async def operational_metrics(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+async def operational_metrics(admin=Depends(get_current_admin), db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
     """
     Detailed operational diagnostics endpoint for internal SRE monitoring and Admin System Health.
     """
@@ -119,10 +121,12 @@ async def operational_metrics(db: AsyncSession = Depends(get_db)) -> Dict[str, A
     }
 
 @router.post("/health/test-crash")
-async def trigger_test_crash():
+async def trigger_test_crash(admin=Depends(get_current_admin)):
     """
     Synthetic crash endpoint to verify crash reporting and exception telemetry pipeline.
     """
+    if settings.ENVIRONMENT not in {"development", "test"}:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
     event_id = crash_reporter.trigger_test_crash("Diagnostic validation of Phase 3 crash telemetry")
     return {
         "status": "CRASH_CAPTURED",
