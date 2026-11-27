@@ -109,6 +109,11 @@ fun TripCompletedFareScreen(
                             color = if (driverGross != null) CockpitTextSecondary else PilotAmber,
                             fontSize = 12.sp
                         )
+                        Text(
+                            text = breakdown?.commissionCents?.let { amount -> "Commission tracked: ₹${"%.2f".format(amount / 100.0)}${breakdown.commissionPercentage?.let { " (${it}%)" } ?: ""}" } ?: "Commission snapshot unavailable",
+                            color = CockpitTextMuted,
+                            fontSize = 11.sp
+                        )
                     }
                 }
             }
