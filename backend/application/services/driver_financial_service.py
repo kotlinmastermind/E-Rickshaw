@@ -120,7 +120,6 @@ class DriverFinancialService:
         res = await self.db.execute(stmt)
         rides = res.scalars().all()
 
-        from backend.application.services.commission_service import CommissionService
         from backend.domain.models.extended_models import RideCommissionSnapshot
 
         ride_ids = [r.id for r in rides]
@@ -160,11 +159,7 @@ class DriverFinancialService:
         today_effective_pct = (
             round((today_commission_cents / today_gross_cents) * 100.0, 2)
             if today_gross_cents > 0
-            else (
-                round(sum(ride_pct_map.values()) / len(ride_pct_map), 2)
-                if ride_pct_map
-                else 0.0
-            )
+            else 0.0
         )
 
         # Calculate this week's figures (Monday to Sunday) in India Standard Time.
@@ -246,6 +241,10 @@ class DriverFinancialService:
         return {
             "driver_id": driver.id,
             "currency": currency_code,
+            "gross_earnings_cents": total_gross_cents,
+            "gross_earnings_rupees": round(total_gross_cents / 100, 2),
+            "commission_accrued_cents": total_commission_cents,
+            "commission_snapshot_missing_count": missing_snapshot_count,
             "wallet_balance_cents": current_balance,
             "wallet_balance_rupees": round(current_balance / 100, 2),
             "today": {
@@ -286,28 +285,30 @@ class DriverFinancialService:
     async def get_ride_earnings_breakdown(self, user_id_or_driver_id: str, ride_id: str) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
         ride = await self.db.get(Ride, ride_id)
-        if not ride or (ride.assigned_driver_id != driver.id and getattr(ride, "driver_id", None) != driver.id):
+        if not ride or ride.assigned_driver_id != driver.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found or access denied.")
 
-        fare_cents = ride.final_fare_cents or ride.estimated_fare_cents or 150000
-        # Breakdown formulas
-        base_fare_cents = round(fare_cents * 0.25)
-        dist_fare_cents = round(fare_cents * 0.50)
-        time_fare_cents = round(fare_cents * 0.15)
-        amenities_cents = fare_cents - (base_fare_cents + dist_fare_cents + time_fare_cents)
-        from backend.application.services.commission_service import CommissionService
-        snap = await CommissionService.calculate_for_ride(
-            self.db,
-            gross_cents=fare_cents,
-            category_id=getattr(ride, "vehicle_category_id", None),
-            effective_at=getattr(ride, "completed_at", None) or getattr(ride, "requested_at", None),
-            calculation_basis="RIDE_BREAKDOWN",
-        )
-        commission_cents = snap.commission_cents
-        tip_cents = getattr(ride, "tip_cents", 0) or 0
-        recorded_toll_cents = getattr(ride, "toll_cents", 0) or 0
-        toll_cents = recorded_toll_cents if recorded_toll_cents > 0 else (15000 if "Airport" in (ride.destination_address or "") or "Airport" in (ride.pickup_address or "") else 0)
-        net_cents = (fare_cents - commission_cents) + tip_cents + toll_cents
+        fare_cents = ride.final_fare_cents
+        if fare_cents is None:
+            fare_cents = ride.estimated_fare_cents
+        if fare_cents is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ride fare has not been finalized or estimated."
+            )
+
+        from backend.domain.models.extended_models import RideCommissionSnapshot
+        snapshot = (
+            await self.db.execute(
+                select(RideCommissionSnapshot).where(RideCommissionSnapshot.ride_id == ride.id)
+            )
+        ).scalar_one_or_none()
+
+        commission_cents = int(snapshot.commission_cents) if snapshot else None
+        commission_percentage = float(snapshot.commission_percentage) if snapshot else None
+        tip_cents = int(getattr(ride, "tip_cents", 0) or 0)
+        toll_cents = int(getattr(ride, "toll_cents", 0) or 0)
+        driver_gross_cents = int(fare_cents) + tip_cents + toll_cents
 
         return {
             "ride_id": ride.id,
@@ -315,27 +316,32 @@ class DriverFinancialService:
             "pickup_address": ride.pickup_address,
             "destination_address": ride.destination_address,
             "completed_at": ride.completed_at.isoformat() if ride.completed_at else None,
-            "distance_km": ride.actual_distance_km or ride.estimated_distance_km or 12.5,
-            "duration_minutes": ride.actual_duration_minutes or ride.estimated_duration_minutes or 28.0,
+            "distance_km": ride.actual_distance_km if ride.actual_distance_km is not None else ride.estimated_distance_km,
+            "duration_minutes": ride.actual_duration_minutes if ride.actual_duration_minutes is not None else ride.estimated_duration_minutes,
             "fare_breakdown": {
-                "base_fare_cents": base_fare_cents,
-                "distance_fare_cents": dist_fare_cents,
-                "time_fare_cents": time_fare_cents,
-                "amenities_concierge_cents": amenities_cents,
-                "gross_fare_cents": fare_cents,
-                "gross_fare_rupees": round(fare_cents / 100, 2)
+                "components_available": False,
+                "base_fare_cents": None,
+                "distance_fare_cents": None,
+                "time_fare_cents": None,
+                "amenities_concierge_cents": None,
+                "gross_fare_cents": int(fare_cents),
+                "gross_fare_rupees": round(int(fare_cents) / 100, 2)
             },
             "deductions_and_supplements": {
                 "platform_commission_cents": commission_cents,
-                "platform_commission_percentage": snap.percentage,
+                "platform_commission_percentage": commission_percentage,
+                "commission_classification": snapshot.commission_classification if snapshot else None,
+                "commission_snapshot_available": snapshot is not None,
                 "customer_tip_cents": tip_cents,
                 "customer_tip_rupees": round(tip_cents / 100, 2),
                 "toll_reimbursement_cents": toll_cents,
                 "toll_reimbursement_rupees": round(toll_cents / 100, 2)
             },
-            "net_driver_earnings_cents": net_cents,
-            "net_driver_earnings_rupees": round(net_cents / 100, 2),
-            "settlement_status": "CREDITED_TO_WALLET"
+            "driver_gross_earnings_cents": driver_gross_cents,
+            "driver_gross_earnings_rupees": round(driver_gross_cents / 100, 2),
+            "net_driver_earnings_cents": driver_gross_cents,
+            "net_driver_earnings_rupees": round(driver_gross_cents / 100, 2),
+            "settlement_status": "COMMISSION_TRACKED_DEFERRED" if snapshot else "COMMISSION_SNAPSHOT_UNAVAILABLE"
         }
 
     # -------------------------------------------------------------------------
