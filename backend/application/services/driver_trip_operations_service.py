@@ -167,7 +167,25 @@ class DriverTripOperationsService:
             trip_eta = round(ride.estimated_duration_minutes) if ride.estimated_duration_minutes else max(2, round((ride.estimated_distance_km / 22.0) * 60))
             dest_parts = [part.strip() for part in (ride.destination_address or "").split(",") if part.strip()]
             fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents
-            earnings_cents = round(fare_cents * 0.8) if fare_cents is not None else 0
+            # Driver offer earnings are shown as gross; commission is an estimate only
+            # and the immutable commission snapshot is recorded at ride completion.
+            earnings_cents = int(fare_cents) if fare_cents is not None else 0
+            estimated_commission_cents = None
+            estimated_commission_percentage = None
+            if fare_cents is not None:
+                from backend.application.services.commission_service import CommissionService
+                effective_at = ride.requested_at or utc_now()
+                rule = await CommissionService.resolve_rule(
+                    self.db,
+                    category_id=ride.vehicle_category_id,
+                    effective_at=effective_at
+                )
+                if rule and rule.platform_commission_percentage is not None:
+                    estimated_commission_percentage = float(rule.platform_commission_percentage)
+                    estimated_commission_cents = CommissionService.compute_commission_cents(
+                        int(fare_cents),
+                        estimated_commission_percentage
+                    )
 
             response.append({
                 "ride_id": ride.id,
@@ -177,6 +195,9 @@ class DriverTripOperationsService:
                 "vehicle_category": category_cache[ride.vehicle_category_id],
                 "estimated_fare_cents": fare_cents,
                 "estimated_driver_earnings_cents": earnings_cents,
+                "estimated_commission_cents": estimated_commission_cents,
+                "estimated_commission_percentage": estimated_commission_percentage,
+                "commission_classification": "RECEIVABLE" if (ride.payment_method or "").upper() == "CASH" else "PAYABLE",
                 "pickup_distance_km": round(this_distance, 1) if this_distance is not None else None,
                 "pickup_duration_minutes": pickup_eta,
                 "estimated_trip_distance_km": ride.estimated_distance_km,
