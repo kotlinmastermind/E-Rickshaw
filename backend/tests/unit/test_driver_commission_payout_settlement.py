@@ -9,7 +9,7 @@ from backend.application.services.dispatch_advanced_service import DispatchAdvan
 from backend.application.services.driver_service import DriverService
 from backend.application.services.admin_advanced_service import AdminAdvancedService
 from backend.domain.models import (
-    DriverCommissionSettlement, DriverLedgerEntry, DriverPayoutRequest,
+    DriverCommissionSettlement, DriverLedgerEntry,
     DriverProfile, DriverWallet, User,
 )
 
