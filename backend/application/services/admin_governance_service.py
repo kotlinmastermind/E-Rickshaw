@@ -821,6 +821,10 @@ class AdminGovernanceService:
         if any(not -90 <= p["lat"] <= 90 or not -180 <= p["lng"] <= 180 for p in points) or len({(p["lat"], p["lng"]) for p in points}) < 3:
             raise HTTPException(422, "Boundary vertices must be valid geographic coordinates with at least three distinct points.")
         overlaps = await self.geofence_preview(points, zone_id)
+        if zone_type == "SERVICE_AREA":
+            service_area_overlaps = [item for item in overlaps if str(item.get("zone_type") or "").upper() == "SERVICE_AREA"]
+            if service_area_overlaps:
+                raise HTTPException(409, "Service-area polygons must not overlap. Resolve existing active service-area boundaries before saving this zone.")
         zone = await self.db.get(GeofenceZone, zone_id) if zone_id else None
         if zone_id and not zone: raise HTTPException(404, "Service zone not found.")
         previous = None if not zone else {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
