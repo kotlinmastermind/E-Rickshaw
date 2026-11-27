@@ -57,7 +57,6 @@ object RiderWebSocketClient {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d(TAG, "WebSocket message received: $text")
                 try {
                     val json = JSONObject(text)
                     val eventType = json.optString("type", "")
