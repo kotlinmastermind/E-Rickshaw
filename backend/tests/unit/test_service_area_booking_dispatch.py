@@ -253,3 +253,64 @@ async def test_booking_rejects_pickup_and_destination_in_different_service_areas
         )
     assert exc.value.status_code == 400
     assert "same active service area" in exc.value.detail
+
+@pytest.mark.asyncio
+async def test_booking_is_not_created_when_no_eligible_driver_is_available(db_session):
+    from backend.domain.models import VehicleCategory
+
+    category = (await db_session.execute(
+        select(VehicleCategory).where(VehicleCategory.code == "E_RICKSHAW_STANDARD")
+    )).scalars().first()
+    assert category is not None
+    fare_rule = (await db_session.execute(
+        select(FareRule).where(
+            FareRule.category_id == category.id,
+            FareRule.city_code == "DELHI_NCR",
+            FareRule.is_active.is_(True),
+        )
+    )).scalars().first()
+    assert fare_rule is not None
+
+    phone_suffix = str(uuid.uuid4().int % 100000000).zfill(8)
+    customer_user = User(
+        phone_number=f"+9194{phone_suffix}",
+        full_name="No Driver Booking Customer",
+        role="customer",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(customer_user)
+    await db_session.flush()
+    customer = CustomerProfile(user_id=customer_user.id)
+    db_session.add(customer)
+    await db_session.flush()
+
+    estimate = FareEstimate(
+        id=str(uuid.uuid4()),
+        category_id=category.id,
+        fare_rule_id=fare_rule.id,
+        pickup_latitude=28.6139,
+        pickup_longitude=77.2090,
+        destination_latitude=28.6150,
+        destination_longitude=77.2150,
+        distance_km=1.0,
+        estimated_duration_minutes=5.0,
+        estimated_fare_cents=2500,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
+    )
+    db_session.add(estimate)
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        await RideService(db_session).create_ride_request(
+            customer_user_id=customer_user.id,
+            estimate_id=estimate.id,
+            category_id=category.id,
+        )
+    assert exc.value.status_code == 409
+    assert "No eligible online driver" in exc.value.detail
+
+    created = (await db_session.execute(
+        select(Ride).where(Ride.customer_id == customer.id)
+    )).scalars().all()
+    assert created == []
