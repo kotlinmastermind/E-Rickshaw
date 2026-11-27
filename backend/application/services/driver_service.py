@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import json
 import os
 import uuid
@@ -747,59 +748,155 @@ class DriverService:
         return radius * 2 * math.atan2(math.sqrt(a), math.sqrt(max(0, 1-a)))
 
     async def get_earnings_summary(self, user_id: str) -> Dict[str, Any]:
+        """Return gross ride earnings and immutable commission snapshots separately."""
+        from backend.domain.models.extended_models import RideCommissionSnapshot
+
         driver = await self.get_or_create_profile(user_id)
-        stmt = select(Ride).where(Ride.assigned_driver_id == driver.id, Ride.status == "COMPLETED").order_by(Ride.completed_at.desc())
-        res = await self.db.execute(stmt)
-        rides = res.scalars().all()
+        rides = (
+            await self.db.execute(
+                select(Ride)
+                .where(
+                    Ride.assigned_driver_id == driver.id,
+                    Ride.status == "COMPLETED"
+                )
+                .order_by(Ride.completed_at.desc())
+            )
+        ).scalars().all()
 
-        total_earnings_cents = sum(round(((r.final_fare_cents if (r.final_fare_cents and r.final_fare_cents > 0) else (r.estimated_fare_cents or 0)) or 0) * 0.8) for r in rides)
-        trips_count = len(rides)
+        ride_ids = [ride.id for ride in rides]
+        snapshots_by_ride = {}
+        if ride_ids:
+            snapshots = (
+                await self.db.execute(
+                    select(RideCommissionSnapshot).where(
+                        RideCommissionSnapshot.ride_id.in_(ride_ids)
+                    )
+                )
+            ).scalars().all()
+            snapshots_by_ride = {snapshot.ride_id: snapshot for snapshot in snapshots}
 
-        now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        def completed_at_utc(ride: Ride):
+            completed_at = ride.completed_at
+            if completed_at is None:
+                return None
+            return completed_at if completed_at.tzinfo else completed_at.replace(tzinfo=timezone.utc)
+
+        india_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        today_start_local = india_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = today_start_local.astimezone(timezone.utc)
+        week_start = (today_start_local - timedelta(days=india_now.weekday())).astimezone(timezone.utc)
+        next_week_start = week_start + timedelta(days=7)
+
         today_rides = [
-            r for r in rides
-            if r.completed_at and (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) >= today_start
+            ride for ride in rides
+            if completed_at_utc(ride) is not None and completed_at_utc(ride) >= today_start
         ]
-        today_earnings_cents = sum(round(((r.final_fare_cents if (r.final_fare_cents and r.final_fare_cents > 0) else (r.estimated_fare_cents or 0)) or 0) * 0.8) for r in today_rides)
-        today_completed_trips = len(today_rides)
+        week_rides = [
+            ride for ride in rides
+            if completed_at_utc(ride) is not None
+            and week_start <= completed_at_utc(ride) < next_week_start
+        ]
+
+        def gross_fare(ride: Ride) -> int:
+            # A completed ride earns only its finalized fare; estimates are not earnings.
+            return max(0, int(ride.final_fare_cents or 0))
+
+        def commission_for(ride: Ride) -> int:
+            snapshot = snapshots_by_ride.get(ride.id)
+            return max(0, int(snapshot.commission_cents)) if snapshot else 0
+
+        total_gross_cents = sum(gross_fare(ride) for ride in rides)
+        today_gross_cents = sum(gross_fare(ride) for ride in today_rides)
+        week_gross_cents = sum(gross_fare(ride) for ride in week_rides)
+
+        total_commission_cents = sum(commission_for(ride) for ride in rides)
+        today_commission_cents = sum(commission_for(ride) for ride in today_rides)
+        week_commission_cents = sum(commission_for(ride) for ride in week_rides)
+
+        commission_payable_cents = 0
+        commission_receivable_cents = 0
+        for ride in rides:
+            snapshot = snapshots_by_ride.get(ride.id)
+            if snapshot is None:
+                continue
+            classification = (snapshot.commission_classification or "").upper()
+            if classification == "RECEIVABLE":
+                commission_receivable_cents += max(0, int(snapshot.commission_cents))
+            else:
+                commission_payable_cents += max(0, int(snapshot.commission_cents))
+
         today_distance_km = round(
-            sum((r.actual_distance_km if r.actual_distance_km is not None else (r.estimated_distance_km or 0.0)) for r in today_rides),
+            sum(
+                ride.actual_distance_km
+                if ride.actual_distance_km is not None
+                else (ride.estimated_distance_km or 0.0)
+                for ride in today_rides
+            ),
             1
         )
-        weekly_earnings_cents = total_earnings_cents
 
         recent_trips = []
-        for r in rides[:15]:
-            fare = (r.final_fare_cents if (r.final_fare_cents and r.final_fare_cents > 0) else (r.estimated_fare_cents or 0)) or 0
+        for ride in rides[:15]:
+            snapshot = snapshots_by_ride.get(ride.id)
             recent_trips.append({
-                "ride_id": r.id,
-                "date": r.completed_at.strftime("%b %d, %I:%M %p") if r.completed_at else "Recently",
-                "fare_rupees": round(fare * 0.8 / 100),
-                "pickup": r.pickup_address,
-                "destination": r.destination_address
+                "ride_id": ride.id,
+                "date": ride.completed_at.isoformat() if ride.completed_at else None,
+                "gross_fare_cents": gross_fare(ride),
+                "gross_fare_rupees": round(gross_fare(ride) / 100.0, 2),
+                "fare_rupees": round(gross_fare(ride) / 100.0, 2),
+                "commission_cents": max(0, int(snapshot.commission_cents)) if snapshot else None,
+                "commission_percentage": float(snapshot.commission_percentage) if snapshot else None,
+                "commission_classification": snapshot.commission_classification if snapshot else None,
+                "commission_snapshot_available": snapshot is not None,
+                "pickup": ride.pickup_address,
+                "destination": ride.destination_address
             })
 
-        w_stmt = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
-        w_res = await self.db.execute(w_stmt)
-        dw = w_res.scalar_one_or_none()
-        current_balance = dw.balance_cents if dw else driver.wallet_balance_cents
-        currency_code = dw.currency if dw else "INR"
+        wallet = (
+            await self.db.execute(
+                select(DriverWallet).where(DriverWallet.driver_id == driver.id)
+            )
+        ).scalar_one_or_none()
+        wallet_balance_cents = int(wallet.balance_cents) if wallet else 0
+        currency_code = wallet.currency if wallet else "INR"
+        from backend.application.services.commission_service import CommissionService
+        commission_outstanding_cents = await CommissionService.get_driver_commission_outstanding_cents(
+            self.db,
+            driver.id,
+        )
+        withdrawable_balance_cents = max(0, wallet_balance_cents - commission_outstanding_cents)
+
+        missing_snapshot_count = sum(
+            1 for ride in rides if ride.id not in snapshots_by_ride
+        )
 
         return {
-            "total_earnings_cents": total_earnings_cents,
-            "today_earnings_cents": today_earnings_cents,
-            "today_net_cents": today_earnings_cents,
-            "today_net_rupees": round(today_earnings_cents / 100, 2),
-            "weekly_earnings_cents": weekly_earnings_cents,
+            "total_earnings_cents": total_gross_cents,
+            "total_gross_earnings_cents": total_gross_cents,
+            "total_gross_earnings_rupees": round(total_gross_cents / 100.0, 2),
+            "today_earnings_cents": today_gross_cents,
+            "today_gross_earnings_cents": today_gross_cents,
+            "today_gross_rupees": round(today_gross_cents / 100.0, 2),
+            "weekly_earnings_cents": week_gross_cents,
+            "weekly_gross_earnings_cents": week_gross_cents,
+            "weekly_gross_rupees": round(week_gross_cents / 100.0, 2),
+            "commission_accrued_cents": total_commission_cents,
+            "today_commission_cents": today_commission_cents,
+            "weekly_commission_cents": week_commission_cents,
+            "commission_payable_cents": commission_payable_cents,
+            "commission_receivable_cents": commission_receivable_cents,
+            "commission_snapshot_missing_count": missing_snapshot_count,
             "currency": currency_code,
-            "completed_trips": trips_count,
-            "today_completed_trips": today_completed_trips,
+            "completed_trips": len(rides),
+            "today_completed_trips": len(today_rides),
             "today_distance_km": today_distance_km,
-            "wallet_balance_cents": current_balance,
-            "wallet_balance_rupees": round(current_balance / 100, 2),
-            "rating_average": driver.rating_average,
-            "rating_count": driver.rating_count,
+            "wallet_balance_cents": wallet_balance_cents,
+            "wallet_balance_rupees": round(wallet_balance_cents / 100.0, 2),
+            "commission_outstanding_cents": commission_outstanding_cents,
+            "withdrawable_balance_cents": withdrawable_balance_cents,
+            "withdrawable_balance_rupees": round(withdrawable_balance_cents / 100.0, 2),
+            "rating_average": float(driver.rating_average or 0.0) if driver.rating_count else 0.0,
+            "rating_count": int(driver.rating_count or 0),
             "recent_trips": recent_trips
         }
 

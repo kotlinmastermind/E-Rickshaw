@@ -194,19 +194,32 @@ class AdminAdvancedService:
         if len(holds) != 1 or holds[0].amount_cents != payout.amount_cents:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payout hold is missing or does not match ledger.")
 
-        payout.status = "APPROVED"
-        payout.reviewed_by = admin_user_id
-        payout.reviewed_at = datetime.now(timezone.utc)
+        from backend.application.services.payout_execution_service import PayoutExecutionService
+        now = datetime.now(timezone.utc)
+        mode = PayoutExecutionService.get_execution_mode()
+        payout = await PayoutExecutionService._transition_status_atomic(
+            session,
+            payout=payout,
+            expected_status="REQUESTED",
+            target_status="APPROVED",
+            updates={
+                "execution_mode": mode,
+                "reviewed_by": admin_user_id,
+                "reviewed_at": now,
+                "updated_at": now,
+            },
+        )
         session.add(AdministrativeAuditLog(
             admin_user_id=admin_user_id, action="PAYOUT_APPROVED",
             target_resource="driver_payout_requests", target_id=payout.id,
-            changes_json=json.dumps({"amount_cents": payout.amount_cents})
+            changes_json=json.dumps({"amount_cents": payout.amount_cents, "execution_mode": mode})
         ))
         await session.flush()
         return payout
 
     @staticmethod
     async def reject_payout(session: AsyncSession, payout_id: str, admin_user_id: str, rejection_reason: str) -> DriverPayoutRequest:
+        from backend.application.services.payout_execution_service import PayoutExecutionService
         stmt = select(DriverPayoutRequest).where(DriverPayoutRequest.id == payout_id).with_for_update()
         payout = (await session.execute(stmt)).scalar_one_or_none()
         if not payout:
@@ -215,40 +228,22 @@ class AdminAdvancedService:
         if payout.status not in ["REQUESTED", "APPROVED"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot reject payout in status {payout.status}")
 
-        # Lock Driver Wallet
-        w_stmt = select(DriverWallet).where(DriverWallet.driver_id == payout.driver_id).with_for_update()
-        d_wallet = (await session.execute(w_stmt)).scalar_one_or_none()
-        if not d_wallet:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Driver wallet missing during reversal.")
-
-        # Idempotent Reversal Check: Prevent duplicate reversal ledger credits
-        existing_rev = (await session.execute(select(DriverLedgerEntry).where(
-            DriverLedgerEntry.driver_id == payout.driver_id,
-            DriverLedgerEntry.category == "PAYOUT_REVERSAL",
-            DriverLedgerEntry.reference_id == payout.id
-        ))).scalar_one_or_none()
-
-        if not existing_rev:
-            d_wallet.balance_cents += payout.amount_cents
-            d_wallet.updated_at = datetime.now(timezone.utc)
-
-            rev_entry = DriverLedgerEntry(
-                id=str(uuid.uuid4()),
-                driver_id=payout.driver_id,
-                entry_type="CREDIT",
-                category="PAYOUT_REVERSAL",
-                amount_cents=payout.amount_cents,
-                balance_after_cents=d_wallet.balance_cents,
-                reference_id=payout.id,
-                description=f"Refund for rejected payout: {rejection_reason}",
-                created_at=datetime.now(timezone.utc)
-            )
-            session.add(rev_entry)
-
-        payout.status = "REJECTED"
-        payout.rejection_reason = rejection_reason
-        payout.reviewed_by = admin_user_id
-        payout.reviewed_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        payout = await PayoutExecutionService._transition_status_atomic(
+            session,
+            payout=payout,
+            expected_status=payout.status,
+            target_status="REJECTED",
+            updates={
+                "rejection_reason": rejection_reason,
+                "reviewed_by": admin_user_id,
+                "reviewed_at": now,
+                "updated_at": now,
+            },
+        )
+        await PayoutExecutionService._reverse_payout_hold_once(
+            session, payout=payout, reason=rejection_reason, now=now
+        )
         session.add(AdministrativeAuditLog(
             admin_user_id=admin_user_id, action="PAYOUT_REJECTED",
             target_resource="driver_payout_requests", target_id=payout.id,
@@ -259,50 +254,25 @@ class AdminAdvancedService:
 
     @staticmethod
     async def mark_payout_paid(session: AsyncSession, payout_id: str, admin_user_id: str, settlement_ref: str) -> DriverPayoutRequest:
-        if not settlement_ref or len(settlement_ref.strip()) < 8:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid banking settlement reference (UTR/RRN) required.")
-        clean_ref = settlement_ref.strip()
-
+        from backend.application.services.payout_execution_service import PayoutExecutionService
         stmt = select(DriverPayoutRequest).where(DriverPayoutRequest.id == payout_id).with_for_update()
         payout = (await session.execute(stmt)).scalar_one_or_none()
         if not payout:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout request not found")
-
-        if payout.status != "APPROVED":
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only approved payouts can be marked as paid")
-
-        # Enforce unique banking settlement reference
-        dup_check = (await session.execute(
-            select(DriverPayoutRequest).where(DriverPayoutRequest.settlement_reference == clean_ref)
-        )).scalar_one_or_none()
-        if dup_check and dup_check.id != payout.id:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Settlement reference {clean_ref} already used for payout {dup_check.id}.")
-
-        payout.status = "PAID"
-        payout.payout_reference = clean_ref
-        payout.settlement_reference = clean_ref
-        payout.reviewed_by = admin_user_id
-        payout.updated_at = datetime.now(timezone.utc)
-        payout.reviewed_at = payout.updated_at
-
-        session.add(AdministrativeAuditLog(
-            admin_user_id=admin_user_id, action="PAYOUT_SETTLED_MANUAL",
-            target_resource="driver_payout_requests", target_id=payout.id,
-            changes_json=json.dumps({
-                "settlement_reference": clean_ref,
-                "settlement_mode": "MANUAL_BANK_UTR",
-                "amount_cents": payout.amount_cents,
-            })
-        ))
-        try:
-            async with session.begin_nested():
-                await session.flush()
-        except IntegrityError:
+        if payout.status != "AWAITING_MANUAL_TRANSFER":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Manual transfer reference must be recorded first (status AWAITING_MANUAL_TRANSFER required before confirmation).",
+            )
+        clean_ref = (settlement_ref or "").strip()
+        if clean_ref and payout.settlement_reference and clean_ref != payout.settlement_reference:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Settlement reference {clean_ref} is already assigned to another payout."
+                detail="Confirmation reference does not match recorded manual transfer reference.",
             )
-        return payout
+        return await PayoutExecutionService.confirm_manual_transfer(
+            session, payout_id=payout.id, admin_user_id=admin_user_id
+        )
     # ---------------- BROADCAST NOTIFICATIONS ----------------
     @staticmethod
     async def send_broadcast(
@@ -346,3 +316,115 @@ class AdminAdvancedService:
         stmt = select(BroadcastNotification).order_by(BroadcastNotification.created_at.desc())
         res = await session.execute(stmt)
         return list(res.scalars().all())
+
+
+    @staticmethod
+    async def verify_payout_account(
+        session: AsyncSession,
+        account_id: str,
+        admin_user_id: str,
+        verification_reference: str,
+        verification_notes: Optional[str] = None,
+    ):
+        from backend.domain.models import DriverPayoutAccount
+        clean_ref = (verification_reference or "").strip()
+        clean_notes = (verification_notes or "").strip() or None
+        if len(clean_ref) < 6 or clean_ref.upper().startswith("PENNY-") or clean_ref.lower() in {"verified", "test", "manual", "approved"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A valid external/manual verification evidence reference (min 6 chars, non-placeholder) is required.",
+            )
+        stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.id == account_id).with_for_update()
+        account = (await session.execute(stmt)).scalar_one_or_none()
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout account not found.")
+        if account.verification_status == "VERIFIED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Payout account is already verified.",
+            )
+
+        now = datetime.now(timezone.utc)
+        account.verification_status = "VERIFIED"
+        account.verification_method = "MANUAL_ADMIN_REVIEW"
+        account.verified_by = admin_user_id
+        account.verified_at = now
+        account.verification_notes = clean_notes
+        account.rejection_reason = None
+        account.penny_drop_reference = clean_ref
+        account.updated_at = now
+
+        existing_primary = (
+            await session.execute(
+                select(DriverPayoutAccount).where(
+                    DriverPayoutAccount.driver_id == account.driver_id,
+                    DriverPayoutAccount.is_primary.is_(True),
+                    DriverPayoutAccount.verification_status == "VERIFIED",
+                    DriverPayoutAccount.id != account.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not existing_primary:
+            account.is_primary = True
+
+        session.add(AdministrativeAuditLog(
+            admin_user_id=admin_user_id,
+            action="PAYOUT_ACCOUNT_MANUAL_VERIFIED",
+            target_resource="driver_payout_accounts",
+            target_id=account.id,
+            changes_json=json.dumps({
+                "driver_id": account.driver_id,
+                "verification_method": "MANUAL_ADMIN_REVIEW",
+                "verification_reference": clean_ref,
+                "verification_notes": clean_notes,
+                "verified_by": admin_user_id,
+                "verified_at": now.isoformat(),
+            }),
+        ))
+        await session.flush()
+        return account
+
+    @staticmethod
+    async def reject_payout_account(
+        session: AsyncSession,
+        account_id: str,
+        admin_user_id: str,
+        rejection_reason: str,
+    ):
+        from backend.domain.models import DriverPayoutAccount
+        clean_reason = (rejection_reason or "").strip()
+        if len(clean_reason) < 6:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A valid rejection_reason (at least 6 characters) is required.",
+            )
+        stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.id == account_id).with_for_update()
+        account = (await session.execute(stmt)).scalar_one_or_none()
+        if not account:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout account not found.")
+
+        now = datetime.now(timezone.utc)
+        account.verification_status = "REJECTED"
+        account.verification_method = "MANUAL_ADMIN_REVIEW"
+        account.verified_by = admin_user_id
+        account.verified_at = now
+        account.rejection_reason = clean_reason
+        account.penny_drop_reference = None
+        account.is_primary = False
+        account.updated_at = now
+
+        session.add(AdministrativeAuditLog(
+            admin_user_id=admin_user_id,
+            action="PAYOUT_ACCOUNT_MANUAL_REJECTED",
+            target_resource="driver_payout_accounts",
+            target_id=account.id,
+            changes_json=json.dumps({
+                "driver_id": account.driver_id,
+                "verification_method": "MANUAL_ADMIN_REVIEW",
+                "rejection_reason": clean_reason,
+                "reviewed_by": admin_user_id,
+                "reviewed_at": now.isoformat(),
+            }),
+        ))
+        await session.flush()
+        return account

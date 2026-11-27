@@ -69,10 +69,9 @@ fun TripCompletedFareScreen(
     val totalFare = breakdown?.fareBreakdown?.grossFareRupees
         ?.takeIf { it > 0.0 }
         ?: offer?.estimatedFareRupees?.takeIf { it > 0.0 }
-    val netPay = breakdown?.netDriverEarningsRupees
+    val driverGross = breakdown?.driverGrossEarningsRupees
         ?.takeIf { it > 0.0 }
         ?: offer?.estimatedDriverEarningsRupees?.takeIf { it > 0.0 }
-        ?: totalFare?.let { it * 0.85 }
 
     Column(
         modifier = Modifier
@@ -106,9 +105,14 @@ fun TripCompletedFareScreen(
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = if (netPay != null) "Pilot Net Pay: ₹${"%.2f".format(netPay)}" else "Net Pay: Pending Calculation",
-                            color = if (netPay != null) CockpitTextSecondary else PilotAmber,
+                            text = if (driverGross != null) "Pilot Gross Earnings: ₹${"%.2f".format(driverGross)}" else "Gross Earnings: Pending Calculation",
+                            color = if (driverGross != null) CockpitTextSecondary else PilotAmber,
                             fontSize = 12.sp
+                        )
+                        Text(
+                            text = breakdown?.commissionCents?.let { amount -> "Commission tracked: ₹${"%.2f".format(amount / 100.0)}${breakdown?.commissionPercentage?.let { " (${it}%)" } ?: ""}" } ?: "Commission snapshot unavailable",
+                            color = CockpitTextMuted,
+                            fontSize = 11.sp
                         )
                     }
                 }

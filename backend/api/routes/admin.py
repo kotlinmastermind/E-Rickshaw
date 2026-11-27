@@ -1,4 +1,5 @@
 import uuid
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
@@ -808,11 +809,26 @@ class CommissionRulePayload(BaseModel):
     fixed_cut_cents: int = 0
     reason: str = Field(..., min_length=12, max_length=1000)
 
+class CommissionRuleReviewPayload(BaseModel):
+    approve: bool
+    reason: str = Field(..., min_length=10, max_length=1000)
+
 class PayoutRejectPayload(BaseModel):
     rejection_reason: str = Field(..., min_length=3)
 
 class PayoutSettlePayload(BaseModel):
-    settlement_reference: str = Field(..., min_length=3)
+    settlement_reference: Optional[str] = Field(None, min_length=3)
+    confirmation_notes: Optional[str] = Field(None, max_length=240)
+
+class PayoutManualTransferPayload(BaseModel):
+    settlement_reference: str = Field(..., min_length=8, max_length=128)
+    evidence_notes: Optional[str] = Field(None, max_length=240)
+
+class PayoutConfirmManualTransferPayload(BaseModel):
+    confirmation_notes: Optional[str] = Field(None, max_length=240)
+
+class PayoutFailPayload(BaseModel):
+    failure_reason: str = Field(..., min_length=4, max_length=500)
 
 # 1. Support Tickets
 @router.get("/support/tickets")
@@ -1128,17 +1144,43 @@ async def list_payouts(
     db: AsyncSession = Depends(get_db)
 ):
     payouts = await AdminAdvancedService.list_payout_requests(db, status_filter=status)
+    from backend.domain.models import DriverCommissionSettlement
+    settlements_by_payout = {}
+    if payouts:
+        settlements = (
+            await db.execute(
+                select(DriverCommissionSettlement).where(
+                    DriverCommissionSettlement.payout_request_id.in_([p.id for p in payouts])
+                )
+            )
+        ).scalars().all()
+        settlements_by_payout = {item.payout_request_id: item for item in settlements}
     return [
         {
             "id": p.id,
             "driver_id": p.driver_id,
             "amount_cents": p.amount_cents,
+            "commission_settled_cents": settlements_by_payout[p.id].amount_cents if p.id in settlements_by_payout else 0,
+            "commission_settled_rupees": round(settlements_by_payout[p.id].amount_cents / 100.0, 2) if p.id in settlements_by_payout else 0.0,
             "status": p.status,
+            "execution_mode": p.execution_mode,
+            "account_type": p.account_type_snapshot,
+            "bank_name": p.bank_name_snapshot,
+            "ifsc_code": p.ifsc_code_snapshot,
+            "beneficiary_name": p.beneficiary_name_snapshot,
             "bank_account_mask": p.bank_account_masked,
             "bank_account_masked": p.bank_account_masked,
             "requested_at": p.created_at.isoformat(),
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
+            "manual_transfer_initiated_at": p.manual_transfer_initiated_at.isoformat() if p.manual_transfer_initiated_at else None,
+            "confirmed_at": p.confirmed_at.isoformat() if p.confirmed_at else None,
+            "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+            "failed_at": p.failed_at.isoformat() if p.failed_at else None,
+            "failure_reason": p.failure_reason,
+            "retry_count": p.retry_count or 0,
             "rejection_reason": p.rejection_reason,
+            "provider_name": p.provider_name,
+            "provider_payout_id": p.provider_payout_id,
             "payout_reference": p.payout_reference or p.settlement_reference,
             "settlement_reference": p.settlement_reference or p.payout_reference
         }
@@ -1153,7 +1195,7 @@ async def approve_payout(
 ):
     payout = await AdminAdvancedService.approve_payout(db, payout_id, admin.id)
     await db.commit()
-    return {"status": "APPROVED", "payout_id": payout.id}
+    return {"status": payout.status, "payout_id": payout.id, "execution_mode": payout.execution_mode}
 
 @router.post("/payouts/{payout_id}/reject")
 async def reject_payout(
@@ -1164,7 +1206,115 @@ async def reject_payout(
 ):
     payout = await AdminAdvancedService.reject_payout(db, payout_id, admin.id, payload.rejection_reason)
     await db.commit()
-    return {"status": "REJECTED", "payout_id": payout.id}
+    return {"status": payout.status, "payout_id": payout.id}
+
+@router.post("/payouts/{payout_id}/manual-transfer")
+async def initiate_manual_transfer(
+    payout_id: str,
+    payload: PayoutManualTransferPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.initiate_manual_transfer(
+        db,
+        payout_id=payout_id,
+        admin_user_id=admin.id,
+        settlement_reference=payload.settlement_reference,
+        evidence_notes=payload.evidence_notes,
+    )
+    await db.commit()
+    return {
+        "status": payout.status,
+        "payout_id": payout.id,
+        "execution_mode": payout.execution_mode,
+        "settlement_reference": payout.settlement_reference,
+    }
+
+@router.post("/payouts/{payout_id}/confirm-manual-transfer")
+async def confirm_manual_transfer(
+    payout_id: str,
+    payload: Optional[PayoutConfirmManualTransferPayload] = None,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.confirm_manual_transfer(
+        db,
+        payout_id=payout_id,
+        admin_user_id=admin.id,
+        confirmation_notes=payload.confirmation_notes if payload else None,
+    )
+    await db.commit()
+    return {
+        "status": payout.status,
+        "payout_id": payout.id,
+        "settlement_reference": payout.settlement_reference,
+        "paid_at": payout.paid_at.isoformat() if payout.paid_at else None,
+    }
+
+@router.post("/payouts/{payout_id}/execute")
+async def execute_provider_payout(
+    payout_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.execute_provider_payout(
+        db, payout_id=payout_id, admin_user_id=admin.id
+    )
+    await db.commit()
+    return {
+        "status": payout.status,
+        "payout_id": payout.id,
+        "execution_mode": payout.execution_mode,
+        "provider_payout_id": payout.provider_payout_id,
+    }
+
+@router.post("/payouts/{payout_id}/reconcile")
+async def reconcile_provider_payout(
+    payout_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.reconcile_provider_payout(
+        db, payout_id=payout_id, admin_user_id=admin.id
+    )
+    await db.commit()
+    return {
+        "status": payout.status,
+        "payout_id": payout.id,
+        "provider_payout_id": payout.provider_payout_id,
+        "settlement_reference": payout.settlement_reference,
+    }
+
+@router.post("/payouts/{payout_id}/fail")
+async def fail_payout(
+    payout_id: str,
+    payload: PayoutFailPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.fail_payout(
+        db, payout_id=payout_id, actor_user_id=admin.id, failure_reason=payload.failure_reason
+    )
+    await db.commit()
+    return {"status": payout.status, "payout_id": payout.id, "failure_reason": payout.failure_reason}
+
+@router.post("/payouts/{payout_id}/retry")
+async def retry_payout(
+    payout_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.retry_failed_payout(
+        db, payout_id=payout_id, admin_user_id=admin.id
+    )
+    await db.commit()
+    return {"status": payout.status, "payout_id": payout.id, "retry_count": payout.retry_count}
 
 @router.post("/payouts/{payout_id}/settle")
 async def settle_payout(
@@ -1173,9 +1323,9 @@ async def settle_payout(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    payout = await AdminAdvancedService.mark_payout_paid(db, payout_id, admin.id, payload.settlement_reference)
+    payout = await AdminAdvancedService.mark_payout_paid(db, payout_id, admin.id, payload.settlement_reference or "")
     await db.commit()
-    return {"status": "PAID", "payout_id": payout.id, "settlement_reference": payout.payout_reference}
+    return {"status": payout.status, "payout_id": payout.id, "settlement_reference": payout.payout_reference}
 
 # 7. Commission Settings
 @router.post("/commissions")
@@ -1197,6 +1347,22 @@ async def list_commission_rules(
     from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
     rules = await AdminFinanceSupportService(db).commission_rules()
     return [{**r, "commission_percentage": r["commission_percent"]} for r in rules]
+
+@router.post("/commissions/{rule_id}/review")
+async def review_commission_rule(
+    rule_id: str,
+    payload: CommissionRuleReviewPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    result = await AdminFinanceSupportService(db).approve_commission_rule(
+        admin.id,
+        rule_id,
+        payload.approve,
+        payload.reason,
+    )
+    return result
 
 # 8. Phase 3: Analytics Reports
 @router.get("/reports")
@@ -1915,4 +2081,156 @@ async def admin_review_customer_kyc_document(
         "status": document.status,
         "reviewed_at": now.isoformat(),
         "message": "Customer document review saved. Account-wide verification status was not changed.",
+    }
+
+
+
+class AdminPayoutAccountVerifyPayload(BaseModel):
+    verification_reference: str = Field(..., min_length=6, max_length=64)
+    verification_notes: Optional[str] = Field(None, max_length=255)
+
+
+class AdminPayoutAccountRejectPayload(BaseModel):
+    rejection_reason: str = Field(..., min_length=6, max_length=255)
+
+
+@router.get("/payout-accounts")
+async def admin_list_payout_accounts(
+    status_filter: Optional[str] = None,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.domain.models import DriverPayoutAccount, DriverProfile
+    stmt = (
+        select(DriverPayoutAccount, DriverProfile, User)
+        .join(DriverProfile, DriverProfile.id == DriverPayoutAccount.driver_id)
+        .join(User, User.id == DriverProfile.user_id)
+        .order_by(DriverPayoutAccount.created_at.desc())
+        .limit(200)
+    )
+    if status_filter and status_filter.strip().upper() != "ALL":
+        stmt = stmt.where(DriverPayoutAccount.verification_status == status_filter.strip().upper())
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "id": a.id,
+            "driver_id": a.driver_id,
+            "driver_name": u.full_name,
+            "driver_email": u.email,
+            "account_type": a.account_type,
+            "bank_name": a.bank_name,
+            "account_number_mask": a.account_number_mask,
+            "ifsc_code": a.ifsc_code,
+            "upi_vpa": a.account_number_mask if a.account_type == "UPI" else None,
+            "beneficiary_name": a.beneficiary_name,
+            "verification_status": a.verification_status,
+            "verification_method": a.verification_method,
+            "verified_by": a.verified_by,
+            "verified_at": a.verified_at.isoformat() if a.verified_at else None,
+            "verification_notes": a.verification_notes,
+            "rejection_reason": a.rejection_reason,
+            "is_primary": a.is_primary,
+            "verification_reference": a.penny_drop_reference,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a, _driver, u in rows
+    ]
+
+
+@router.get("/payout-accounts/{account_id}/details")
+async def admin_reveal_payout_account_details(
+    account_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reveal sensitive payout destination only to an authenticated admin; every reveal is audited."""
+    from backend.domain.models import DriverPayoutAccount
+    from backend.infrastructure.security.payout_encryption import decrypt_payout_destination
+    account = await db.get(DriverPayoutAccount, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Payout account not found.")
+    encrypted = account.account_number_encrypted if account.account_type == "BANK_ACCOUNT" else account.upi_vpa_encrypted
+    if not encrypted:
+        raise HTTPException(status_code=409, detail="This legacy payout destination has no encrypted full details. Ask the driver to re-register it.")
+    try:
+        destination = decrypt_payout_destination(encrypted)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="Payout destination cannot be decrypted. Verify the configured encryption key.") from exc
+    db.add(AdministrativeAuditLog(
+        admin_user_id=admin.id,
+        action="PAYOUT_DESTINATION_DETAILS_REVEALED",
+        target_resource="driver_payout_accounts",
+        target_id=account.id,
+        changes_json=json.dumps({
+            "account_type": account.account_type,
+            "account_number_mask": account.account_number_mask,
+            "reason": "Admin on-demand payout destination review",
+        }),
+    ))
+    await db.commit()
+    return {
+        "id": account.id,
+        "account_type": account.account_type,
+        "bank_name": account.bank_name,
+        "account_number": destination if account.account_type == "BANK_ACCOUNT" else None,
+        "upi_vpa": destination if account.account_type == "UPI" else None,
+        "ifsc_code": account.ifsc_code,
+        "beneficiary_name": account.beneficiary_name,
+        "verification_status": account.verification_status,
+    }
+
+
+@router.post("/payout-accounts/{account_id}/verify")
+async def admin_verify_payout_account(
+    account_id: str,
+    payload: AdminPayoutAccountVerifyPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_advanced_service import AdminAdvancedService
+    account = await AdminAdvancedService.verify_payout_account(
+        session=db,
+        account_id=account_id,
+        admin_user_id=admin.id,
+        verification_reference=payload.verification_reference,
+        verification_notes=payload.verification_notes,
+    )
+    await db.commit()
+    return {
+        "id": account.id,
+        "driver_id": account.driver_id,
+        "verification_status": account.verification_status,
+        "verification_method": account.verification_method,
+        "verified_by": account.verified_by,
+        "verified_at": account.verified_at.isoformat() if account.verified_at else None,
+        "verification_notes": account.verification_notes,
+        "is_primary": account.is_primary,
+        "verification_reference": account.penny_drop_reference,
+    }
+
+
+@router.post("/payout-accounts/{account_id}/reject")
+async def admin_reject_payout_account(
+    account_id: str,
+    payload: AdminPayoutAccountRejectPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.admin_advanced_service import AdminAdvancedService
+    account = await AdminAdvancedService.reject_payout_account(
+        session=db,
+        account_id=account_id,
+        admin_user_id=admin.id,
+        rejection_reason=payload.rejection_reason,
+    )
+    await db.commit()
+    return {
+        "id": account.id,
+        "driver_id": account.driver_id,
+        "verification_status": account.verification_status,
+        "verification_method": account.verification_method,
+        "verified_by": account.verified_by,
+        "verified_at": account.verified_at.isoformat() if account.verified_at else None,
+        "is_primary": account.is_primary,
+        "rejection_reason": account.rejection_reason,
     }

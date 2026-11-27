@@ -140,10 +140,16 @@ private fun IncomingOfferModal() {
         }
         Spacer(modifier = Modifier.height(12.dp))
         Text(
-            text = "NET EARNING: ₹${"%.2f".format(currentOffer.estimatedDriverEarningsRupees)}",
+            text = "GROSS FARE ESTIMATE: ₹${"%.2f".format(currentOffer.estimatedDriverEarningsRupees)}",
             color = PilotElectricCyan,
             fontSize = 28.sp,
             fontWeight = FontWeight.ExtraBold
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = currentOffer.estimatedCommissionCents?.let { amount -> "Estimated commission: ₹${"%.2f".format(amount / 100.0)}${currentOffer.estimatedCommissionPercentage?.let { " (${it}%)" } ?: ""}" } ?: "Commission estimate unavailable",
+            color = PilotTextMuted,
+            fontSize = 11.sp
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(

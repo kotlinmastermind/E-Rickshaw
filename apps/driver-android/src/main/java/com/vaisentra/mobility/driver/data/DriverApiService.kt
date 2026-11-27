@@ -182,6 +182,9 @@ interface DriverApiService {
     @POST("api/v1/drivers/payouts/request")
     suspend fun requestInstantPayout(@Body request: PayoutRequestDto): Response<Map<String, Any>>
 
+    @GET("api/v1/drivers/payouts/history")
+    suspend fun getPayoutHistory(): Response<List<PayoutHistoryItemDto>>
+
     @GET("api/v1/drivers/financials/ledger")
     suspend fun getAccountLedger(): Response<DriverLedgerResponseDto>
 

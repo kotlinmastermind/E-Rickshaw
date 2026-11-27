@@ -97,7 +97,7 @@ async def get_earnings_dashboard(
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
 ):
-    """Features 251 & 253: Earnings dashboard by day and week, net earnings after commission."""
+    """Features 251 & 253: Gross earnings and immutable commission snapshots by day and week."""
     return await DriverFinancialService(db).get_earnings_dashboard(user.id, days=days)
 
 

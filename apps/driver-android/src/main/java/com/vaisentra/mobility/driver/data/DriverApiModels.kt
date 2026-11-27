@@ -240,6 +240,10 @@ data class DispatchOfferDto(
     @SerializedName("trip_duration_minutes", alternate = ["estimated_duration_minutes"]) val tripDurationMinutes: Int? = null,
     @SerializedName("estimated_fare_cents") val estimatedFareCents: Long = 0L,
     @SerializedName("estimated_driver_earnings_cents") val estimatedDriverEarningsCents: Long = 0L,
+    @SerializedName("estimated_commission_cents") val estimatedCommissionCents: Long? = null,
+    @SerializedName("estimated_commission_percentage") val estimatedCommissionPercentage: Double? = null,
+    @SerializedName("commission_classification") val commissionClassification: String? = null,
+    @SerializedName("commission_estimate_available") val commissionEstimateAvailable: Boolean = false,
     @SerializedName("payment_mode") val paymentMode: String = "UPI",
     @SerializedName("expires_at") val expiresAt: String? = null,
     @SerializedName("escalation_level") val escalationLevel: Int = 0,
@@ -274,33 +278,85 @@ data class CashCollectRequest(
 // --- Financials, Payouts & Ledger ---
 data class DriverEarningsSummaryDto(
     @SerializedName("total_earnings_cents") val totalEarningsCents: Long = 0L,
-    @SerializedName("today_earnings_cents", alternate = ["today_net_cents", "today_earnings"]) val todayEarningsCents: Long = 0L,
-    @SerializedName("today_net_rupees", alternate = ["today_earnings_rupees"]) val directTodayNetRupees: Double? = null,
-    @SerializedName("weekly_earnings_cents", alternate = ["weekly_net_cents", "weekly_earnings"]) val weeklyEarningsCents: Long = 0L,
+    @SerializedName("today_earnings_cents") val todayEarningsCents: Long = 0L,
+    @SerializedName("today_gross_rupees") val directTodayGrossRupees: Double? = null,
+    @SerializedName("weekly_earnings_cents") val weeklyEarningsCents: Long = 0L,
     @SerializedName("currency") val currency: String = "INR",
-    @SerializedName("completed_trips") val completedTripsToday: Int = 0,
-    @SerializedName("today_completed_trips", alternate = ["today_trips", "trips_today"]) val todayCompletedTrips: Int = 0,
-    @SerializedName("today_distance_km", alternate = ["today_km", "distance_today_km"]) val todayDistanceKm: Double = 0.0,
-    @SerializedName("wallet_balance_cents", alternate = ["wallet_balance"]) val walletBalanceCents: Long = 0L,
+    @SerializedName("completed_trips") val totalCompletedTrips: Int = 0,
+    @SerializedName("today_completed_trips") val todayCompletedTrips: Int = 0,
+    @SerializedName("today_distance_km") val todayDistanceKm: Double = 0.0,
+    @SerializedName("wallet_balance_cents") val walletBalanceCents: Long = 0L,
     @SerializedName("wallet_balance_rupees") val directWalletBalanceRupees: Double? = null,
+    @SerializedName("commission_outstanding_cents") val commissionOutstandingCents: Long = 0L,
+    @SerializedName("withdrawable_balance_cents") val withdrawableBalanceCents: Long = 0L,
+    @SerializedName("withdrawable_balance_rupees") val directWithdrawableBalanceRupees: Double? = null,
     @SerializedName("rating_average") val ratingAverage: Double = 0.0,
     @SerializedName("rating_count") val ratingCount: Int = 0,
+    @SerializedName("commission_accrued_cents") val commissionAccruedCents: Long = 0L,
+    @SerializedName("today_commission_cents") val todayCommissionCents: Long = 0L,
+    @SerializedName("weekly_commission_cents") val weeklyCommissionCents: Long = 0L,
+    @SerializedName("commission_payable_cents") val commissionPayableCents: Long = 0L,
+    @SerializedName("commission_receivable_cents") val commissionReceivableCents: Long = 0L,
+    @SerializedName("commission_snapshot_missing_count") val commissionSnapshotMissingCount: Int = 0,
+    @SerializedName("recent_trips") val recentTrips: List<DriverRecentTripEarningDto> = emptyList(),
     val onlineHoursToday: Double = 0.0,
     val pendingPayoutRupees: Double = 0.0
 ) {
-    val todayGrossRupees: Double get() = directTodayNetRupees ?: (todayEarningsCents / 100.0)
-    val todayNetRupees: Double get() = directTodayNetRupees ?: (todayEarningsCents / 100.0)
+    val todayGrossRupees: Double get() = directTodayGrossRupees ?: (todayEarningsCents / 100.0)
+    @Deprecated("Driver earnings are shown as gross; commission is reported separately.")
+    val todayNetRupees: Double get() = todayGrossRupees
     val weeklyRupees: Double get() = weeklyEarningsCents / 100.0
+    val totalGrossRupees: Double get() = totalEarningsCents / 100.0
+    val commissionAccruedRupees: Double get() = commissionAccruedCents / 100.0
+    val todayCommissionRupees: Double get() = todayCommissionCents / 100.0
+    val commissionPayableRupees: Double get() = commissionPayableCents / 100.0
+    val commissionReceivableRupees: Double get() = commissionReceivableCents / 100.0
     val walletBalanceRupees: Double get() = directWalletBalanceRupees ?: (walletBalanceCents / 100.0)
-    val displayTodayNetRupees: Double get() = todayNetRupees
+    val commissionOutstandingRupees: Double get() = commissionOutstandingCents / 100.0
+    val withdrawableBalanceRupees: Double get() = directWithdrawableBalanceRupees ?: (withdrawableBalanceCents / 100.0)
+    val displayTodayNetRupees: Double get() = todayGrossRupees
     val displayWalletBalanceRupees: Double get() = walletBalanceRupees
+    val displayWithdrawableBalanceRupees: Double get() = withdrawableBalanceRupees
+    val completedTripsToday: Int get() = totalCompletedTrips
 }
+
+data class DriverRecentTripEarningDto(
+    @SerializedName("ride_id") val rideId: String = "",
+    @SerializedName("date") val completedAt: String? = null,
+    @SerializedName("gross_fare_cents") val grossFareCents: Long = 0L,
+    @SerializedName("gross_fare_rupees") val grossFareRupees: Double = 0.0,
+    @SerializedName("commission_cents") val commissionCents: Long? = null,
+    @SerializedName("commission_percentage") val commissionPercentage: Double? = null,
+    @SerializedName("commission_classification") val commissionClassification: String? = null,
+    @SerializedName("commission_snapshot_available") val commissionSnapshotAvailable: Boolean = false,
+    @SerializedName("pickup") val pickup: String = "",
+    @SerializedName("destination") val destination: String = ""
+)
 
 data class PayoutRequestDto(
     @SerializedName("amount_cents") val amountCents: Long,
-    @SerializedName("account_number_mask") val accountNumberMask: String = "**** 9988",
-    @SerializedName("ifsc") val ifsc: String = "HDFC0001234",
+    @SerializedName("payout_account_id") val payoutAccountId: String,
     @SerializedName("idempotency_key") val idempotencyKey: String
+)
+
+data class PayoutHistoryItemDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("amount_cents") val amountCents: Long = 0L,
+    @SerializedName("status") val status: String = "REQUESTED",
+    @SerializedName("execution_mode") val executionMode: String? = null,
+    @SerializedName("bank_account_mask") val bankAccountMask: String = "",
+    @SerializedName("account_type") val accountType: String? = null,
+    @SerializedName("bank_name") val bankName: String? = null,
+    @SerializedName("ifsc_code") val ifscCode: String? = null,
+    @SerializedName("payout_reference") val payoutReference: String? = null,
+    @SerializedName("settlement_reference") val settlementReference: String? = null,
+    @SerializedName("requested_at") val requestedAt: String = "",
+    @SerializedName("reviewed_at") val reviewedAt: String? = null,
+    @SerializedName("paid_at") val paidAt: String? = null,
+    @SerializedName("failed_at") val failedAt: String? = null,
+    @SerializedName("failure_reason") val failureReason: String? = null,
+    @SerializedName("retry_count") val retryCount: Int = 0,
+    @SerializedName("rejection_reason") val rejectionReason: String? = null
 )
 
 data class LedgerItemDto(
@@ -604,7 +660,10 @@ data class PayoutAccountDto(
     @SerializedName("ifsc_code") val ifscCode: String? = null,
     @SerializedName("upi_vpa") val upiVpa: String? = null,
     @SerializedName("beneficiary_name") val beneficiaryName: String? = null,
-    @SerializedName("verification_status") val verificationStatus: String = "PENDING",
+    @SerializedName("verification_status") val verificationStatus: String = "PENDING_VERIFICATION",
+    @SerializedName("verification_method") val verificationMethod: String? = null,
+    @SerializedName("verified_at") val verifiedAt: String? = null,
+    @SerializedName("rejection_reason") val rejectionReason: String? = null,
     @SerializedName("is_primary") val isPrimary: Boolean = false
 )
 
@@ -636,13 +695,19 @@ data class IncentiveOverviewDto(
 )
 
 data class FareBreakdownInnerDto(
-    @SerializedName("gross_fare_rupees") val grossFareRupees: Double = 0.0
+    @SerializedName("gross_fare_rupees") val grossFareRupees: Double = 0.0,
+    @SerializedName("components_available") val componentsAvailable: Boolean = false
 )
 
 data class RideBreakdownDto(
     @SerializedName("ride_id") val rideId: String = "",
     @SerializedName("status") val status: String = "",
     @SerializedName("fare_breakdown") val fareBreakdown: FareBreakdownInnerDto? = null,
+    @SerializedName("driver_gross_earnings_rupees") val driverGrossEarningsRupees: Double? = null,
+    @SerializedName("commission_cents") val commissionCents: Long? = null,
+    @SerializedName("commission_percentage") val commissionPercentage: Double? = null,
+    @SerializedName("commission_classification") val commissionClassification: String? = null,
+    @SerializedName("commission_snapshot_available") val commissionSnapshotAvailable: Boolean = false,
     @SerializedName("net_driver_earnings_rupees") val netDriverEarningsRupees: Double = 0.0
 )
 

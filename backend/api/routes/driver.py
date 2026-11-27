@@ -276,9 +276,11 @@ async def get_wallet(user: User = Depends(get_current_driver), db: AsyncSession 
     summary = await service.get_earnings_summary(user.id)
     return {
         "wallet_balance_cents": summary["wallet_balance_cents"],
-        "currency": "INR",
-        "pending_settlement_cents": 0,
-        "available_for_payout": True
+        "commission_outstanding_cents": summary["commission_outstanding_cents"],
+        "pending_settlement_cents": summary["commission_outstanding_cents"],
+        "withdrawable_balance_cents": summary["withdrawable_balance_cents"],
+        "currency": summary["currency"],
+        "available_for_payout": summary["withdrawable_balance_cents"] >= 10000
     }
 
 from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
@@ -296,8 +298,7 @@ class RouteOptPayload(BaseModel):
 
 class PayoutRequestPayload(BaseModel):
     amount_cents: int = Field(..., gt=0, json_schema_extra={"example": 1000000})
-    account_number_mask: str = Field("**** 9988", json_schema_extra={"example": "**** 9988"})
-    ifsc: str = Field("HDFC0001234", json_schema_extra={"example": "HDFC0001234"})
+    payout_account_id: str = Field(..., min_length=1, max_length=36, json_schema_extra={"example": "acc_12345678"})
     idempotency_key: str = Field(..., min_length=16, max_length=64, json_schema_extra={"example": "payout_req_12345678abcdef"})
 
 @router.get("/heat-map")
@@ -385,7 +386,7 @@ async def request_payout(
         session=db,
         driver_id_or_user_id=user.id,
         amount_cents=payload.amount_cents,
-        bank_details={"account_number_mask": payload.account_number_mask, "ifsc": payload.ifsc},
+        payout_account_id=payload.payout_account_id,
         idempotency_key=payload.idempotency_key
     )
     await db.commit()
@@ -394,6 +395,7 @@ async def request_payout(
         "payout_id": payout.id,
         "amount_cents": payout.amount_cents,
         "bank_account_mask": payout.bank_account_masked,
+        "execution_mode": payout.execution_mode,
         "requested_at": payout.created_at.isoformat()
     }
 
@@ -419,10 +421,19 @@ async def get_payout_history(
             "id": p.id,
             "amount_cents": p.amount_cents,
             "status": p.status,
+            "execution_mode": p.execution_mode,
             "bank_account_mask": getattr(p, "bank_account_masked", getattr(p, "bank_account_mask", "")),
+            "account_type": p.account_type_snapshot,
+            "bank_name": p.bank_name_snapshot,
+            "ifsc_code": p.ifsc_code_snapshot,
+            "payout_reference": p.payout_reference or p.settlement_reference,
+            "settlement_reference": p.settlement_reference or p.payout_reference,
             "requested_at": p.created_at.isoformat(),
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
-            "paid_at": p.updated_at.isoformat() if p.status == "PAID" and p.updated_at else None,
+            "paid_at": p.paid_at.isoformat() if p.paid_at else (p.updated_at.isoformat() if p.status == "PAID" and p.updated_at else None),
+            "failed_at": p.failed_at.isoformat() if p.failed_at else None,
+            "failure_reason": p.failure_reason,
+            "retry_count": p.retry_count or 0,
             "rejection_reason": p.rejection_reason
         }
         for p in payouts

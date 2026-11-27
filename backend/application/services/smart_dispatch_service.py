@@ -242,8 +242,10 @@ class SmartDispatchService:
         timeout_seconds: int
     ) -> None:
         """Sends real-time WebSocket payloads to passenger and driver."""
-        fare_cents = ride.final_fare_cents or ride.estimated_fare_cents or 0
+        fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else (ride.estimated_fare_cents or 0)
         road_eta = getattr(candidate, "road_eta_minutes", 5.0)
+        from backend.application.services.commission_service import CommissionService
+        commission_estimate = await CommissionService.estimate_for_ride(self.db, ride)
 
         # 1. Event to driver
         driver_payload = {
@@ -256,6 +258,7 @@ class SmartDispatchService:
             "destination_latitude": ride.destination_latitude,
             "destination_longitude": ride.destination_longitude,
             "estimated_fare_cents": fare_cents,
+            **commission_estimate,
             "road_eta_minutes": road_eta,
             "expires_in_seconds": timeout_seconds,
             "timestamp": utc_now().isoformat()

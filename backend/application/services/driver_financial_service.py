@@ -9,6 +9,7 @@ import secrets
 import math
 import json
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Any
 from sqlalchemy import select, and_, or_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,26 +91,12 @@ class DriverFinancialService:
             res2 = await self.db.execute(stmt2)
             driver = res2.scalars().first()
         if not driver:
-            # Create driver profile automatically if valid user
             user = await self.db.get(User, user_id_or_driver_id)
             if user:
-                driver = DriverProfile(
-                    user_id=user.id,
-                    license_number=f"DL01-{secrets.token_hex(4).upper()}",
-                    rating_average=4.95,
-                    total_trips=12
-                )
-                self.db.add(driver)
-                await self.db.flush()
-
-                # Initialize DriverWallet in driver_wallets table
-                wallet = DriverWallet(
-                    driver_id=driver.id,
-                    balance_cents=450000,
-                    currency="INR"
-                )
-                self.db.add(wallet)
-                await self.db.commit()
+                # Use the canonical profile initializer; it creates a zero-balance wallet
+                # and never seeds sample ratings, trips, or money.
+                from backend.application.services.driver_service import DriverService
+                driver = await DriverService(self.db).get_or_create_profile(user.id)
             else:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found.")
         return driver
@@ -120,7 +107,9 @@ class DriverFinancialService:
     # -------------------------------------------------------------------------
     async def get_earnings_dashboard(self, user_id_or_driver_id: str, days: int = 14) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        now = datetime.now(timezone.utc)
+        india_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        today_start_local = india_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = today_start_local.astimezone(timezone.utc)
 
         # Query all completed rides
         stmt = (
@@ -131,7 +120,6 @@ class DriverFinancialService:
         res = await self.db.execute(stmt)
         rides = res.scalars().all()
 
-        from backend.application.services.commission_service import CommissionService
         from backend.domain.models.extended_models import RideCommissionSnapshot
 
         ride_ids = [r.id for r in rides]
@@ -157,10 +145,9 @@ class DriverFinancialService:
         total_gross_cents = sum(r.final_fare_cents or 0 for r in rides)
         total_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in rides)
         total_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in rides)
-        total_net_cents = (total_gross_cents - total_commission_cents) + total_tips_cents
+        total_net_cents = total_gross_cents + total_tips_cents
 
-        # Calculate today's figures
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Calculate today's figures using India Standard Time (the product's operating timezone).
         today_rides = [
             r for r in rides
             if r.completed_at and (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) >= today_start
@@ -168,22 +155,21 @@ class DriverFinancialService:
         today_gross_cents = sum(r.final_fare_cents or 0 for r in today_rides)
         today_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in today_rides)
         today_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in today_rides)
-        today_net_cents = (today_gross_cents - today_commission_cents) + today_tips_cents
+        today_net_cents = today_gross_cents + today_tips_cents
         today_effective_pct = (
             round((today_commission_cents / today_gross_cents) * 100.0, 2)
             if today_gross_cents > 0
-            else (
-                round(sum(ride_pct_map.values()) / len(ride_pct_map), 2)
-                if ride_pct_map
-                else 0.0
-            )
+            else 0.0
         )
 
-        # Calculate this week's figures (Monday to Sunday)
-        monday_start = today_start - timedelta(days=now.weekday())
+        # Calculate this week's figures (Monday to Sunday) in India Standard Time.
+        monday_start_local = today_start_local - timedelta(days=india_now.weekday())
+        monday_start = monday_start_local.astimezone(timezone.utc)
+        next_monday_start = monday_start + timedelta(days=7)
         week_rides = [
             r for r in rides
-            if r.completed_at and (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) >= monday_start
+            if r.completed_at
+            and monday_start <= (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) < next_monday_start
         ]
         week_gross_cents = sum(r.final_fare_cents or 0 for r in week_rides)
         week_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in week_rides)
@@ -193,8 +179,10 @@ class DriverFinancialService:
         # Daily breakdown (past `days` days)
         daily_breakdown = []
         for i in range(days):
-            day_dt = today_start - timedelta(days=i)
-            next_day_dt = day_dt + timedelta(days=1)
+            day_local = today_start_local - timedelta(days=i)
+            next_day_local = day_local + timedelta(days=1)
+            day_dt = day_local.astimezone(timezone.utc)
+            next_day_dt = next_day_local.astimezone(timezone.utc)
             matching = [
                 r for r in rides
                 if r.completed_at and day_dt <= (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) < next_day_dt
@@ -202,15 +190,17 @@ class DriverFinancialService:
             d_gross = sum(r.final_fare_cents or 0 for r in matching)
             d_comm = sum(ride_comm_map.get(r.id, 0) for r in matching)
             d_tips = sum(getattr(r, "tip_cents", 0) or 0 for r in matching)
-            d_net = (d_gross - d_comm) + d_tips
+            d_net = d_gross + d_tips
             daily_breakdown.append({
-                "date": day_dt.strftime("%Y-%m-%d"),
-                "day_name": day_dt.strftime("%a"),
+                "date": day_local.strftime("%Y-%m-%d"),
+                "day_name": day_local.strftime("%a"),
                 "trips_count": len(matching),
                 "gross_fare_cents": d_gross,
                 "gross_fare_rupees": round(d_gross / 100, 2),
                 "commission_cents": d_comm,
                 "tips_cents": d_tips,
+                "gross_earnings_cents": d_gross,
+                "gross_earnings_rupees": round(d_gross / 100, 2),
                 "net_earnings_cents": d_net,
                 "net_earnings_rupees": round(d_net / 100, 2),
                 "online_hours": round(min(10.0, len(matching) * 0.9), 1)
@@ -219,8 +209,10 @@ class DriverFinancialService:
         # Weekly breakdown (last 4 weeks)
         weekly_breakdown = []
         for w in range(4):
-            w_start = monday_start - timedelta(weeks=w)
-            w_end = w_start + timedelta(days=7)
+            w_start_local = monday_start_local - timedelta(weeks=w)
+            w_end_local = w_start_local + timedelta(days=7)
+            w_start = w_start_local.astimezone(timezone.utc)
+            w_end = w_end_local.astimezone(timezone.utc)
             w_matching = [
                 r for r in rides
                 if r.completed_at and w_start <= (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) < w_end
@@ -228,12 +220,13 @@ class DriverFinancialService:
             wg = sum(r.final_fare_cents or 0 for r in w_matching)
             wc = sum(ride_comm_map.get(r.id, 0) for r in w_matching)
             wt = sum(getattr(r, "tip_cents", 0) or 0 for r in w_matching)
-            wn = (wg - wc) + wt
+            wn = wg + wt
             weekly_breakdown.append({
-                "week_label": f"Week of {w_start.strftime('%b %d')}",
-                "week_start": w_start.strftime("%Y-%m-%d"),
+                "week_label": f"Week of {w_start_local.strftime('%b %d')}",
+                "week_start": w_start_local.strftime("%Y-%m-%d"),
                 "trips_count": len(w_matching),
                 "gross_earnings_cents": wg,
+                "gross_earnings_rupees": round(wg / 100, 2),
                 "net_earnings_cents": wn,
                 "net_earnings_rupees": round(wn / 100, 2),
                 "commission_cents": wc,
@@ -245,13 +238,29 @@ class DriverFinancialService:
         current_balance = d_wallet.balance_cents if d_wallet else driver.wallet_balance_cents
         currency_code = d_wallet.currency if d_wallet else "INR"
 
+        from backend.application.services.commission_service import CommissionService
+        commission_outstanding_cents = await CommissionService.get_driver_commission_outstanding_cents(
+            self.db,
+            driver.id,
+        )
+        withdrawable_balance_cents = max(0, int(current_balance) - commission_outstanding_cents)
+
         return {
             "driver_id": driver.id,
             "currency": currency_code,
+            "gross_earnings_cents": total_gross_cents,
+            "gross_earnings_rupees": round(total_gross_cents / 100, 2),
+            "commission_accrued_cents": total_commission_cents,
+            "commission_snapshot_missing_count": missing_snapshot_count,
             "wallet_balance_cents": current_balance,
             "wallet_balance_rupees": round(current_balance / 100, 2),
+            "commission_outstanding_cents": commission_outstanding_cents,
+            "withdrawable_balance_cents": withdrawable_balance_cents,
+            "withdrawable_balance_rupees": round(withdrawable_balance_cents / 100, 2),
             "today": {
                 "trips_count": len(today_rides),
+                "gross_earnings_cents": today_gross_cents,
+                "gross_earnings_rupees": round(today_gross_cents / 100, 2),
                 "gross_fare_cents": today_gross_cents,
                 "commission_cents": today_commission_cents,
                 "tips_cents": today_tips_cents,
@@ -270,12 +279,14 @@ class DriverFinancialService:
             "all_time": {
                 "total_trips": len(rides),
                 "total_gross_cents": total_gross_cents,
+                "total_gross_rupees": round(total_gross_cents / 100, 2),
                 "total_commission_cents": total_commission_cents,
                 "total_net_cents": total_net_cents,
                 "total_net_rupees": round(total_net_cents / 100, 2)
             },
             "daily_history": daily_breakdown,
-            "weekly_history": weekly_breakdown
+            "weekly_history": weekly_breakdown,
+            "commission_snapshot_missing_count": missing_snapshot_count
         }
 
     # -------------------------------------------------------------------------
@@ -284,28 +295,30 @@ class DriverFinancialService:
     async def get_ride_earnings_breakdown(self, user_id_or_driver_id: str, ride_id: str) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
         ride = await self.db.get(Ride, ride_id)
-        if not ride or (ride.assigned_driver_id != driver.id and getattr(ride, "driver_id", None) != driver.id):
+        if not ride or ride.assigned_driver_id != driver.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found or access denied.")
 
-        fare_cents = ride.final_fare_cents or ride.estimated_fare_cents or 150000
-        # Breakdown formulas
-        base_fare_cents = round(fare_cents * 0.25)
-        dist_fare_cents = round(fare_cents * 0.50)
-        time_fare_cents = round(fare_cents * 0.15)
-        amenities_cents = fare_cents - (base_fare_cents + dist_fare_cents + time_fare_cents)
-        from backend.application.services.commission_service import CommissionService
-        snap = await CommissionService.calculate_for_ride(
-            self.db,
-            gross_cents=fare_cents,
-            category_id=getattr(ride, "vehicle_category_id", None),
-            effective_at=getattr(ride, "completed_at", None) or getattr(ride, "requested_at", None),
-            calculation_basis="RIDE_BREAKDOWN",
-        )
-        commission_cents = snap.commission_cents
-        tip_cents = getattr(ride, "tip_cents", 0) or 0
-        recorded_toll_cents = getattr(ride, "toll_cents", 0) or 0
-        toll_cents = recorded_toll_cents if recorded_toll_cents > 0 else (15000 if "Airport" in (ride.destination_address or "") or "Airport" in (ride.pickup_address or "") else 0)
-        net_cents = (fare_cents - commission_cents) + tip_cents + toll_cents
+        fare_cents = ride.final_fare_cents
+        if fare_cents is None:
+            fare_cents = ride.estimated_fare_cents
+        if fare_cents is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ride fare has not been finalized or estimated."
+            )
+
+        from backend.domain.models.extended_models import RideCommissionSnapshot
+        snapshot = (
+            await self.db.execute(
+                select(RideCommissionSnapshot).where(RideCommissionSnapshot.ride_id == ride.id)
+            )
+        ).scalar_one_or_none()
+
+        commission_cents = int(snapshot.commission_cents) if snapshot else None
+        commission_percentage = float(snapshot.commission_percentage) if snapshot else None
+        tip_cents = int(getattr(ride, "tip_cents", 0) or 0)
+        toll_cents = int(getattr(ride, "toll_cents", 0) or 0)
+        driver_gross_cents = int(fare_cents) + tip_cents + toll_cents
 
         return {
             "ride_id": ride.id,
@@ -313,27 +326,32 @@ class DriverFinancialService:
             "pickup_address": ride.pickup_address,
             "destination_address": ride.destination_address,
             "completed_at": ride.completed_at.isoformat() if ride.completed_at else None,
-            "distance_km": ride.actual_distance_km or ride.estimated_distance_km or 12.5,
-            "duration_minutes": ride.actual_duration_minutes or ride.estimated_duration_minutes or 28.0,
+            "distance_km": ride.actual_distance_km if ride.actual_distance_km is not None else ride.estimated_distance_km,
+            "duration_minutes": ride.actual_duration_minutes if ride.actual_duration_minutes is not None else ride.estimated_duration_minutes,
             "fare_breakdown": {
-                "base_fare_cents": base_fare_cents,
-                "distance_fare_cents": dist_fare_cents,
-                "time_fare_cents": time_fare_cents,
-                "amenities_concierge_cents": amenities_cents,
-                "gross_fare_cents": fare_cents,
-                "gross_fare_rupees": round(fare_cents / 100, 2)
+                "components_available": False,
+                "base_fare_cents": None,
+                "distance_fare_cents": None,
+                "time_fare_cents": None,
+                "amenities_concierge_cents": None,
+                "gross_fare_cents": int(fare_cents),
+                "gross_fare_rupees": round(int(fare_cents) / 100, 2)
             },
             "deductions_and_supplements": {
                 "platform_commission_cents": commission_cents,
-                "platform_commission_percentage": snap.percentage,
+                "platform_commission_percentage": commission_percentage,
+                "commission_classification": snapshot.commission_classification if snapshot else None,
+                "commission_snapshot_available": snapshot is not None,
                 "customer_tip_cents": tip_cents,
                 "customer_tip_rupees": round(tip_cents / 100, 2),
                 "toll_reimbursement_cents": toll_cents,
                 "toll_reimbursement_rupees": round(toll_cents / 100, 2)
             },
-            "net_driver_earnings_cents": net_cents,
-            "net_driver_earnings_rupees": round(net_cents / 100, 2),
-            "settlement_status": "CREDITED_TO_WALLET"
+            "driver_gross_earnings_cents": driver_gross_cents,
+            "driver_gross_earnings_rupees": round(driver_gross_cents / 100, 2),
+            "net_driver_earnings_cents": driver_gross_cents,
+            "net_driver_earnings_rupees": round(driver_gross_cents / 100, 2),
+            "settlement_status": "COMMISSION_TRACKED_DEFERRED" if snapshot else "COMMISSION_SNAPSHOT_UNAVAILABLE"
         }
 
     # -------------------------------------------------------------------------
@@ -973,9 +991,11 @@ class DriverFinancialService:
                 "bank_name": a.bank_name,
                 "account_number_mask": a.account_number_mask,
                 "ifsc_code": a.ifsc_code,
-                "upi_vpa": a.upi_vpa,
+                "upi_vpa": None,
                 "beneficiary_name": a.beneficiary_name,
                 "verification_status": a.verification_status,
+                "verification_method": a.verification_method,
+                "verified_at": a.verified_at.isoformat() if a.verified_at else None,
                 "rejection_reason": a.rejection_reason,
                 "is_primary": a.is_primary,
                 "created_at": a.created_at.isoformat()
@@ -989,7 +1009,9 @@ class DriverFinancialService:
         ifsc = (data.get("ifsc_code") or data.get("routing_number") or "").strip().upper()
         raw_acc = (data.get("account_number") or "").strip()
         upi = (data.get("upi_vpa") or "").strip()
-        holder = (data.get("beneficiary_name") or data.get("account_holder_name") or "").strip() or "Pilot Partner"
+        holder = (data.get("beneficiary_name") or data.get("account_holder_name") or "").strip()
+        if not holder:
+            raise HTTPException(status_code=400, detail="Beneficiary/account-holder name is required; no default name is permitted.")
 
         # Determine Bank Name from IFSC or payload
         inferred_bank = data.get("bank_name")
@@ -1013,15 +1035,17 @@ class DriverFinancialService:
 
         # IFSC validation (RBI standard: 4 alphabets, 0, 6 characters or flexible pilot input)
         if acc_type == "BANK_ACCOUNT":
-            if len(ifsc) < 8 or len(ifsc) > 11:
-                raise HTTPException(status_code=400, detail="Invalid IFSC code format (e.g. PUNB0123400, HDFC0001234).")
-            if len(raw_acc) < 6 or len(raw_acc) > 25:
-                raise HTTPException(status_code=400, detail="Account number must contain between 6 and 25 digits.")
-            acc_mask = f"******{raw_acc[-4:]}" if len(raw_acc) >= 4 else raw_acc
+            import re
+            if not re.fullmatch(r"[A-Z]{4}0[A-Z0-9]{6}", ifsc):
+                raise HTTPException(status_code=400, detail="Invalid IFSC code. Enter the 11-character RBI IFSC.")
+            if not raw_acc.isdigit() or len(raw_acc) < 6 or len(raw_acc) > 25:
+                raise HTTPException(status_code=400, detail="Account number must contain 6 to 25 digits.")
+            acc_mask = f"******{raw_acc[-4:]}"
         else:
-            if "@" not in upi:
-                raise HTTPException(status_code=400, detail="Invalid UPI ID. Format: username@bank (e.g. pilot@okaxis).")
-            acc_mask = upi
+            import re
+            if not re.fullmatch(r"[A-Za-z0-9._-]{2,256}@[A-Za-z][A-Za-z0-9.-]{1,63}", upi):
+                raise HTTPException(status_code=400, detail="Invalid UPI ID format.")
+            acc_mask = f"{'*' * max(4, len(upi) - 4)}{upi[-4:]}"
             inferred_bank = "UPI Instant Destination"
 
         # Check existing accounts to determine if first
@@ -1030,21 +1054,27 @@ class DriverFinancialService:
         existing = res.scalars().all()
         is_first = len(existing) == 0
 
+        from backend.infrastructure.security.payout_encryption import encrypt_payout_destination
+        try:
+            encrypted_account = encrypt_payout_destination(raw_acc) if acc_type == "BANK_ACCOUNT" else None
+            encrypted_upi = encrypt_payout_destination(upi) if acc_type == "UPI" else None
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail="Payout destination encryption is not configured; account registration is unavailable.") from exc
+
         acc = DriverPayoutAccount(
             driver_id=driver.id,
             account_type=acc_type,
             bank_name=inferred_bank,
             account_number_mask=acc_mask,
-            ifsc_code=ifsc or "UPI0000000",
-            upi_vpa=upi if acc_type == "UPI" else None,
+            account_number_encrypted=encrypted_account,
+            upi_vpa_encrypted=encrypted_upi,
+            ifsc_code=ifsc if acc_type == "BANK_ACCOUNT" else None,
+            upi_vpa=None,
             beneficiary_name=holder,
-            verification_status="VERIFIED",
-            is_primary=is_first or data.get("is_primary", False),
-            penny_drop_reference=f"PENNY-{secrets.token_hex(4).upper()}"
+            verification_status="PENDING_VERIFICATION",
+            is_primary=False,
+            penny_drop_reference=None,
         )
-        if acc.is_primary:
-            for ex in existing:
-                ex.is_primary = False
 
         self.db.add(acc)
         await self.db.commit()
@@ -1057,7 +1087,7 @@ class DriverFinancialService:
             "bank_name": acc.bank_name,
             "verification_status": acc.verification_status,
             "is_primary": acc.is_primary,
-            "message": "Payout destination registered and verified via instant penny-drop validation."
+            "message": "Payout destination registered and pending verification."
         }
 
     async def set_primary_payout_account(self, user_id_or_driver_id: str, account_id: str) -> Dict[str, Any]:
@@ -1071,6 +1101,11 @@ class DriverFinancialService:
         target = next((a for a in accounts if a.id == account_id), None)
         if not target:
             raise HTTPException(status_code=404, detail="Account not found.")
+        if target.verification_status != "VERIFIED":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only a verified payout account can be set as primary (current status: {target.verification_status}).",
+            )
 
         for a in accounts:
             a.is_primary = (a.id == account_id)

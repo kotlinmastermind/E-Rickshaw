@@ -167,7 +167,10 @@ class DriverTripOperationsService:
             trip_eta = round(ride.estimated_duration_minutes) if ride.estimated_duration_minutes else max(2, round((ride.estimated_distance_km / 22.0) * 60))
             dest_parts = [part.strip() for part in (ride.destination_address or "").split(",") if part.strip()]
             fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents
-            earnings_cents = round(fare_cents * 0.8) if fare_cents is not None else 0
+            # Dispatch estimate is not persisted; completion writes the immutable snapshot.
+            from backend.application.services.commission_service import CommissionService
+            commission_estimate = await CommissionService.estimate_for_ride(self.db, ride)
+            earnings_cents = commission_estimate["estimated_driver_earnings_cents"] or 0
 
             response.append({
                 "ride_id": ride.id,
@@ -177,6 +180,10 @@ class DriverTripOperationsService:
                 "vehicle_category": category_cache[ride.vehicle_category_id],
                 "estimated_fare_cents": fare_cents,
                 "estimated_driver_earnings_cents": earnings_cents,
+                "estimated_commission_cents": commission_estimate["estimated_commission_cents"],
+                "estimated_commission_percentage": commission_estimate["estimated_commission_percentage"],
+                "commission_classification": commission_estimate["commission_classification"],
+                "commission_estimate_available": commission_estimate["commission_estimate_available"],
                 "pickup_distance_km": round(this_distance, 1) if this_distance is not None else None,
                 "pickup_duration_minutes": pickup_eta,
                 "estimated_trip_distance_km": ride.estimated_distance_km,

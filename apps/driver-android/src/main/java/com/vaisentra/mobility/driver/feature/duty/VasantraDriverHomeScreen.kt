@@ -299,7 +299,7 @@ fun VasantraDriverHomeScreen(
 
                     VasantraQuickActionsGrid(
                         modifier = Modifier.fillMaxWidth(),
-                        walletBalanceText = "₹${"%.0f".format(earnings.walletBalanceRupees)}",
+                        walletBalanceText = "₹${"%.0f".format(earnings.withdrawableBalanceRupees)}",
                         onActionClick = { route -> onNavigate(route) }
                     )
 
@@ -789,10 +789,15 @@ fun VasantraRideRequestCard(
                         color = if (validEarnings != null) Color(0xFF0F172A) else Color(0xFF9CA3AF)
                     )
                     Text(
-                        text = if (validEarnings != null) "Estimated Pay" else "Pay Pending",
+                        text = if (validEarnings != null) "Estimated Gross" else "Gross Pending",
                         fontSize = 11.sp,
                         color = if (validEarnings != null) Color(0xFF10B981) else Color(0xFFF59E0B),
                         fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = offer?.estimatedCommissionCents?.let { amount -> "Commission: ₹${"%.2f".format(amount / 100.0)}" } ?: "Commission: unavailable",
+                        fontSize = 10.sp,
+                        color = Color(0xFF6B7280)
                     )
                 }
             }
@@ -1263,10 +1268,15 @@ fun VasantraEarningsSummaryCard(
                         color = Color(0xFF374151)
                     )
                     Text(
-                        text = "₹${"%.0f".format(earnings.todayNetRupees)}",
+                        text = "₹${"%.0f".format(earnings.todayGrossRupees)}",
                         fontSize = 24.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF111827)
+                    )
+                    Text(
+                        text = "Commission tracked: ₹${"%.2f".format(earnings.todayCommissionRupees)}",
+                        fontSize = 10.sp,
+                        color = Color(0xFF6B7280)
                     )
                 }
             }

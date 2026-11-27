@@ -841,11 +841,29 @@ class DriverPayoutRequest(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=False, index=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String(30), default="REQUESTED")  # REQUESTED, APPROVED, PAID, REJECTED
-    bank_account_masked: Mapped[str] = mapped_column(String(32), default="HDFC *******4921")
+    status: Mapped[str] = mapped_column(String(30), default="REQUESTED")  # REQUESTED, APPROVED, AWAITING_MANUAL_TRANSFER, PROCESSING, PAID, FAILED, REJECTED
+    execution_mode: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)  # MANUAL_TRANSFER, RAZORPAYX
+    bank_account_masked: Mapped[str] = mapped_column(String(32), default="Not provided")
+    payout_account_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("driver_payout_accounts.id", ondelete="RESTRICT"), nullable=True, index=True)
+    account_type_snapshot: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    bank_name_snapshot: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    ifsc_code_snapshot: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    beneficiary_name_snapshot: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     payout_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    provider_name: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    provider_payout_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    provider_idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    provider_metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     reviewed_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    manual_transfer_initiated_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    manual_transfer_initiated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     exception_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     settlement_reference: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -857,6 +875,7 @@ class DriverPayoutRequest(Base):
 
     __table_args__ = (
         UniqueConstraint("settlement_reference", name="uq_driver_payout_requests_settlement_reference"),
+        UniqueConstraint("provider_payout_id", name="uq_driver_payout_requests_provider_payout_id"),
     )
 
 
@@ -1659,10 +1678,16 @@ class DriverPayoutAccount(Base):
     account_type: Mapped[str] = mapped_column(String(20), default="BANK_ACCOUNT")  # BANK_ACCOUNT, UPI
     bank_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     account_number_mask: Mapped[str] = mapped_column(String(32), nullable=False)
-    ifsc_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    account_number_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    upi_vpa_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ifsc_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     upi_vpa: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     beneficiary_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    verification_status: Mapped[str] = mapped_column(String(30), default="VERIFIED")  # PENDING_VERIFICATION, VERIFIED, REJECTED
+    verification_status: Mapped[str] = mapped_column(String(30), default="PENDING_VERIFICATION")  # PENDING_VERIFICATION, VERIFIED, REJECTED
+    verification_method: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)  # MANUAL_ADMIN_REVIEW
+    verified_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_notes: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     rejection_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     penny_drop_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -1694,10 +1719,29 @@ class DriverLedgerEntry(Base):
             "category",
             "reference_id",
             unique=True,
-            sqlite_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION') AND reference_id IS NOT NULL"),
-            postgresql_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION') AND reference_id IS NOT NULL"),
+            sqlite_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION', 'COMMISSION_SETTLEMENT') AND reference_id IS NOT NULL"),
+            postgresql_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION', 'COMMISSION_SETTLEMENT') AND reference_id IS NOT NULL"),
         ),
     )
+
+
+class DriverCommissionSettlement(Base):
+    """Immutable record of commission collected from a driver's wallet at payout time."""
+    __tablename__ = "driver_commission_settlements"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    driver_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("driver_profiles.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    payout_request_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("driver_payout_requests.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False, default="INR", server_default=text("'INR'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, server_default=text("CURRENT_TIMESTAMP"))
+
+    driver: Mapped["DriverProfile"] = relationship()
+    payout_request: Mapped["DriverPayoutRequest"] = relationship()
 
 
 class DriverIncentiveProgress(Base):

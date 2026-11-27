@@ -42,6 +42,7 @@ def _valid_prod_kwargs(**overrides):
         DATABASE_URL="postgresql+asyncpg://user:strong_synth_pass_99@db.example.internal:5432/postgres",
         DATABASE_URL_SYNC="postgresql://user:strong_synth_pass_99@db.example.internal:5432/postgres",
         SECRET_KEY="SyntheticHighEntropyJwtSigningKey_AtLeast32CharsLong!",
+        PAYOUT_DESTINATION_ENCRYPTION_KEY="SyntheticTestPayoutEncryptionKey_AtLeast32Chars!",
         RAZORPAY_KEY_ID="rzp_live_SyntheticKey123456",
         RAZORPAY_KEY_SECRET="synthetic_live_api_secret_1234",
         RAZORPAY_WEBHOOK_SECRET="synthetic_live_webhook_secret_5678",

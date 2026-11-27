@@ -310,3 +310,202 @@ async def test_postgres_concurrent_order_creation_leases_multi_instance():
     assert o1["order_id"] == o2["order_id"]
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres_concurrent_driver_payout_and_commission_settlement_invariants():
+    """
+    Verify on genuine PostgreSQL (SELECT FOR UPDATE + UNIQUE idempotency_key + RESTRICT FK):
+    1. Two concurrent payout requests exceeding remaining withdrawable balance only allow 1.
+    2. Duplicate idempotency_key returns the existing payout without double settlement/hold.
+    3. Deleting a driver profile with DriverCommissionSettlement history is blocked by RESTRICT FK.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from backend.application.services.commission_service import CommissionService
+    from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
+    from backend.domain.models import (
+        DriverCommissionSettlement,
+        DriverLedgerEntry,
+        DriverPayoutAccount,
+        DriverPayoutRequest,
+        DriverProfile,
+        DriverWallet,
+    )
+
+    engine = create_async_engine(POSTGRES_TEST_URL, echo=False, pool_size=10, max_overflow=10)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    driver_id = None
+    driver_user_id = None
+    account_id = None
+    async with session_factory() as db:
+        u = User(phone_number=f"+9193{uuid.uuid4().hex[:8]}", full_name="PG Payout Driver", role="driver")
+        db.add(u)
+        await db.flush()
+        driver_user_id = u.id
+        drv = DriverProfile(user_id=u.id, license_number=f"DL-PG-{uuid.uuid4().hex[:8]}", approval_status="APPROVED")
+        db.add(drv)
+        await db.flush()
+        driver_id = drv.id
+        db.add(DriverWallet(driver_id=driver_id, balance_cents=100000, currency="INR"))
+        db.add(
+            DriverLedgerEntry(
+                driver_id=driver_id,
+                entry_type="DEBIT",
+                category="COMMISSION_PAYABLE",
+                amount_cents=-20000,
+                balance_after_cents=100000,
+                reference_id=f"pg_ride_{uuid.uuid4().hex[:8]}",
+                description="PG deferred commission",
+            )
+        )
+        from backend.infrastructure.security.payout_encryption import encrypt_payout_destination
+        acct = DriverPayoutAccount(
+            driver_id=driver_id,
+            account_type="BANK_ACCOUNT",
+            bank_name="HDFC Bank",
+            account_number_mask="******9988",
+            account_number_encrypted=encrypt_payout_destination("998877669988"),
+            ifsc_code="HDFC0001234",
+            beneficiary_name="PG Payout Driver",
+            verification_status="VERIFIED",
+            verification_method="MANUAL_ADMIN_REVIEW",
+            verified_by=u.id,
+            penny_drop_reference="PG-ADMIN-VER-001",
+            is_primary=True,
+        )
+        db.add(acct)
+        await db.commit()
+        account_id = acct.id
+
+    async def _attempt_payout(idem_key: str):
+        async with session_factory() as s:
+            try:
+                p = await DispatchAdvancedService.request_payout(
+                    session=s,
+                    driver_id_or_user_id=driver_id,
+                    amount_cents=60000,
+                    payout_account_id=account_id,
+                    idempotency_key=idem_key,
+                )
+                await s.commit()
+                return ("ok", p.id)
+            except HTTPException as exc:
+                await s.rollback()
+                return ("err", exc.status_code)
+
+    k1 = f"pg_payout_1_{uuid.uuid4().hex[:10]}"
+    k2 = f"pg_payout_2_{uuid.uuid4().hex[:10]}"
+    r1, r2 = await asyncio.gather(
+        _attempt_payout(k1),
+        _attempt_payout(k2),
+    )
+    assert sorted([r1[0], r2[0]]) == ["err", "ok"]
+    winning_key, winning_id = (k1, r1[1]) if r1[0] == "ok" else (k2, r2[1])
+
+    # Duplicate idempotency_key returns existing payout without double settlement/hold
+    dup_status, dup_id = await _attempt_payout(winning_key)
+    assert dup_status == "ok"
+    assert dup_id == winning_id
+
+    async with session_factory() as check_db:
+        w = (await check_db.execute(select(DriverWallet).where(DriverWallet.driver_id == driver_id))).scalar_one()
+        assert w.balance_cents == 20000  # 100000 - 20000 commission - 60000 hold
+        assert await CommissionService.get_driver_commission_outstanding_cents(check_db, driver_id) == 0
+        settlements = (
+            await check_db.execute(
+                select(DriverCommissionSettlement).where(DriverCommissionSettlement.driver_id == driver_id)
+            )
+        ).scalars().all()
+        assert len(settlements) == 1
+
+        # RESTRICT FK must prevent deleting driver with settlement history at the DB level
+        from sqlalchemy import delete as sa_delete
+        with pytest.raises(IntegrityError):
+            await check_db.execute(sa_delete(DriverProfile).where(DriverProfile.id == driver_id))
+        await check_db.rollback()
+
+        # Rejecting the payout reverses ONLY the payout hold (60000); commission settlement (20000) stays intact
+        from backend.application.services.admin_advanced_service import AdminAdvancedService
+        rejected = await AdminAdvancedService.reject_payout(
+            session=check_db,
+            payout_id=winning_id,
+            admin_user_id=driver_user_id,
+            rejection_reason="PG concurrency test rejection",
+        )
+        await check_db.commit()
+        assert rejected.status == "REJECTED"
+        w_after_reject = (await check_db.execute(select(DriverWallet).where(DriverWallet.driver_id == driver_id))).scalar_one()
+        assert w_after_reject.balance_cents == 80000
+        assert await CommissionService.get_driver_commission_outstanding_cents(check_db, driver_id) == 0
+        settlements_after = (
+            await check_db.execute(
+                select(DriverCommissionSettlement).where(DriverCommissionSettlement.driver_id == driver_id)
+            )
+        ).scalars().all()
+        assert len(settlements_after) == 1
+
+    # 4. Concurrent manual confirmation & concurrent webhook callbacks on PostgreSQL
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    k3 = f"pg_payout_3_{uuid.uuid4().hex[:10]}"
+    st3, pid3 = await _attempt_payout(k3)
+    assert st3 == "ok"
+
+    pg_initiator_admin_id = None
+    pg_confirmer_admin_id = None
+    async with session_factory() as prep_db:
+        pg_initiator = User(
+            phone_number=f"+9194{uuid.uuid4().hex[:8]}",
+            full_name="PG Payout Initiator",
+            role="admin",
+            is_active=True,
+            is_verified=True,
+        )
+        pg_confirmer = User(
+            phone_number=f"+9195{uuid.uuid4().hex[:8]}",
+            full_name="PG Payout Independent Confirmer",
+            role="admin",
+            is_active=True,
+            is_verified=True,
+        )
+        prep_db.add_all([pg_initiator, pg_confirmer])
+        await prep_db.flush()
+        pg_initiator_admin_id = pg_initiator.id
+        pg_confirmer_admin_id = pg_confirmer.id
+        await AdminAdvancedService.approve_payout(prep_db, pid3, pg_initiator_admin_id)
+        await PayoutExecutionService.initiate_manual_transfer(
+            prep_db,
+            payout_id=pid3,
+            admin_user_id=pg_initiator_admin_id,
+            settlement_reference=f"PG-UTR-{uuid.uuid4().hex[:10].upper()}",
+            evidence_notes="PostgreSQL integration fixture bank transfer proof reference PG-BANK-STMT-001",
+        )
+        await prep_db.commit()
+
+    async def _confirm_worker():
+        async with session_factory() as s:
+            try:
+                p = await PayoutExecutionService.confirm_manual_transfer(
+                    s,
+                    payout_id=pid3,
+                    admin_user_id=pg_confirmer_admin_id,
+                    confirmation_notes="Independent PostgreSQL fixture review of bank statement and UTR",
+                )
+                await s.commit()
+                return ("ok", p.status)
+            except HTTPException as exc:
+                await s.rollback()
+                return ("err", exc.status_code)
+
+    c1, c2 = await asyncio.gather(_confirm_worker(), _confirm_worker())
+    assert sorted([c1[0], c2[0]]) == ["err", "ok"]
+
+    async with session_factory() as final_db:
+        inv = await PayoutExecutionService.reconcile_payout_invariants(final_db, pid3)
+        assert inv["is_balanced"] is True
+        assert inv["status"] == "PAID"
+
+    await engine.dispose()

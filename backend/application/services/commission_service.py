@@ -25,6 +25,7 @@ from backend.domain.models.extended_models import (
     CommissionRule,
     RideCommissionSnapshot,
 )
+from backend.domain.models.models import DriverCommissionSettlement, DriverLedgerEntry, Ride
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,98 @@ class CommissionService:
             if rule is not None:
                 return rule
         return None
+
+    @classmethod
+    async def estimate_for_ride(cls, session: AsyncSession, ride) -> dict:
+        """Return a non-persisted gross/commission estimate for a dispatch offer.
+
+        The immutable RideCommissionSnapshot is still written only by the
+        authoritative completion/payment flow.
+        """
+        gross_cents = (
+            ride.final_fare_cents
+            if ride.final_fare_cents is not None
+            else ride.estimated_fare_cents
+        )
+        if gross_cents is None:
+            return {
+                "estimated_driver_earnings_cents": None,
+                "estimated_commission_cents": None,
+                "estimated_commission_percentage": None,
+                "commission_classification": None,
+                "commission_estimate_available": False,
+            }
+
+        effective_at = ride.requested_at or datetime.now(timezone.utc)
+        rule = await cls.resolve_rule(
+            session,
+            category_id=ride.vehicle_category_id,
+            effective_at=effective_at,
+        )
+        percentage = None
+        commission_cents = None
+        if rule is not None and rule.platform_commission_percentage is not None:
+            percentage = float(rule.platform_commission_percentage)
+            commission_cents = cls.compute_commission_cents(int(gross_cents), percentage)
+
+        classification = (
+            "RECEIVABLE"
+            if (ride.payment_method or "").strip().upper() == "CASH"
+            else "PAYABLE"
+        )
+        return {
+            # Drivers see the full gross fare; commission is an independent estimate.
+            "estimated_driver_earnings_cents": int(gross_cents),
+            "estimated_commission_cents": commission_cents,
+            "estimated_commission_percentage": percentage,
+            "commission_classification": classification,
+            "commission_estimate_available": commission_cents is not None,
+        }
+
+    @classmethod
+    async def get_driver_commission_outstanding_cents(
+        cls,
+        session: AsyncSession,
+        driver_id: str,
+    ) -> int:
+        """Return unsettled payable/receivable commission from immutable ledger entries."""
+        snapshot_total = (
+            await session.execute(
+                select(func.coalesce(func.sum(RideCommissionSnapshot.commission_cents), 0))
+                .join(Ride, Ride.id == RideCommissionSnapshot.ride_id)
+                .where(Ride.assigned_driver_id == driver_id)
+            )
+        ).scalar_one()
+
+        # Preserve pre-snapshot commission entries without double-counting rides
+        # that already have an immutable RideCommissionSnapshot.
+        legacy_ledger_total = (
+            await session.execute(
+                select(func.coalesce(func.sum(DriverLedgerEntry.amount_cents), 0))
+                .outerjoin(
+                    RideCommissionSnapshot,
+                    RideCommissionSnapshot.ride_id == DriverLedgerEntry.reference_id,
+                )
+                .where(
+                    DriverLedgerEntry.driver_id == driver_id,
+                    DriverLedgerEntry.category.in_([
+                        "COMMISSION_PAYABLE",
+                        "COMMISSION_RECEIVABLE",
+                        "COMMISSION",
+                    ]),
+                    RideCommissionSnapshot.id.is_(None),
+                )
+            )
+        ).scalar_one()
+        legacy_commission_due = max(0, -int(legacy_ledger_total or 0))
+        settled_total = (
+            await session.execute(
+                select(func.coalesce(func.sum(DriverCommissionSettlement.amount_cents), 0)).where(
+                    DriverCommissionSettlement.driver_id == driver_id
+                )
+            )
+        ).scalar_one()
+        return max(0, int(snapshot_total or 0) + legacy_commission_due - int(settled_total or 0))
 
     @classmethod
     async def calculate_for_ride(

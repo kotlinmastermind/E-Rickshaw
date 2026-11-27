@@ -110,6 +110,21 @@ async def payment_webhook(
         account_header=x_razorpay_account,
     )
 
+
+@router.post("/payouts/webhook")
+async def payout_webhook(
+    request: Request,
+    x_razorpay_signature: str = Header(None, alias="X-Razorpay-Signature"),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    body = await request.body()
+    return await PayoutExecutionService.process_payout_webhook(
+        db,
+        raw_body=body,
+        signature_header=x_razorpay_signature or "",
+    )
+
 @router.get("/razorpay/webhook")
 @router.get("/webhook")
 async def payment_webhook_status():

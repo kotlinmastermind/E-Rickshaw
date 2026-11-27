@@ -5,7 +5,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -48,7 +50,7 @@ fun ShiftSummaryScreen(
     ) {
         CockpitHeader(
             title = "Shift Summary",
-            subtitle = "Daily earnings, completed trips & net payout",
+            subtitle = "Gross ride earnings and separately tracked commission",
             onBack = onNavigateBack
         )
 
@@ -62,9 +64,9 @@ fun ShiftSummaryScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("TODAY'S NET EARNINGS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("TODAY'S GROSS EARNINGS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹${"%.2f".format(earnings.todayNetRupees)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("₹${"%.2f".format(earnings.todayGrossRupees)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(4.dp))
                         Text("${earnings.todayCompletedTrips} Completed Trips Today", color = CockpitTextSecondary, fontSize = 12.sp)
                     }
@@ -75,11 +77,16 @@ fun ShiftSummaryScreen(
                 CockpitCard {
                     Text("FINANCIAL SUMMARY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(10.dp))
-                    SummaryRow("Today Earnings", "₹${"%.2f".format(earnings.todayNetRupees)}")
-                    SummaryRow("Weekly Earnings", "₹${"%.2f".format(earnings.weeklyRupees)}")
-                    SummaryRow("Lifetime Earnings", "₹${"%.2f".format(earnings.totalEarningsCents / 100.0)}")
+                    SummaryRow("Today Gross Earnings", "₹${"%.2f".format(earnings.todayGrossRupees)}")
+                    SummaryRow("Weekly Gross Earnings", "₹${"%.2f".format(earnings.weeklyRupees)}")
+                    SummaryRow("Lifetime Gross Earnings", "₹${"%.2f".format(earnings.totalGrossRupees)}")
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = CockpitBorder)
-                    SummaryRow("Wallet Balance", "₹${"%.2f".format(earnings.walletBalanceRupees)}", EmeraldPrimary, isBold = true)
+                    SummaryRow("Wallet Balance", "₹${"%.2f".format(earnings.walletBalanceRupees)}")
+                    SummaryRow("Commission Outstanding", "₹${"%.2f".format(earnings.commissionOutstandingRupees)}", AmberWarning)
+                    SummaryRow("Available to Withdraw", "₹${"%.2f".format(earnings.withdrawableBalanceRupees)}", EmeraldPrimary, isBold = true)
+                    SummaryRow("Commission Accrued", "₹${"%.2f".format(earnings.commissionAccruedRupees)}", AmberWarning)
+                    SummaryRow("Commission Payable", "₹${"%.2f".format(earnings.commissionPayableRupees)}")
+                    SummaryRow("Cash Commission Receivable", "₹${"%.2f".format(earnings.commissionReceivableRupees)}")
                 }
             }
 
@@ -189,7 +196,7 @@ fun PilotEarningsScreen(
     ) {
         CockpitHeader(
             title = "Pilot Earnings & Wallet",
-            subtitle = "Live wallet balance & instant payout gateway",
+            subtitle = "Gross ride earnings, commission tracking & wallet balance",
             onBack = onNavigateBack
         )
 
@@ -200,18 +207,18 @@ fun PilotEarningsScreen(
             item {
                 CockpitCard(glow = true) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        Text("AVAILABLE WITHDRAWABLE BALANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("AVAILABLE TO WITHDRAW", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹${"%.2f".format(earnings.walletBalanceRupees)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("₹${"%.2f".format(earnings.withdrawableBalanceRupees)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Today: ₹${"%.2f".format(earnings.todayNetRupees)}", color = AmberWarning, fontSize = 12.sp)
-                            Text("Currency: ${earnings.currency}", color = CockpitTextMuted, fontSize = 12.sp)
+                            Text("Today gross: ₹${"%.2f".format(earnings.todayGrossRupees)}", color = AmberWarning, fontSize = 12.sp)
+                            Text("Commission today: ₹${"%.2f".format(earnings.todayCommissionRupees)}", color = CockpitTextMuted, fontSize = 12.sp)
                         }
                     }
                     Spacer(Modifier.height(14.dp))
                     CockpitButton(
-                        text = "WITHDRAW INSTANTLY TO BANK (IMPS)",
+                        text = "REQUEST BANK PAYOUT",
                         onClick = onInstantPayout,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -239,16 +246,32 @@ fun PilotEarningsScreen(
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     CockpitCard(modifier = Modifier.weight(1f)) {
-                        Text("THIS WEEK", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("THIS WEEK · GROSS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
                         Text("₹${"%.0f".format(earnings.weeklyRupees)}", color = ElectricCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text("${earnings.completedTripsToday} Total Trips", color = CockpitTextSecondary, fontSize = 12.sp)
+                        Text("${earnings.totalCompletedTrips} All-time Trips", color = CockpitTextSecondary, fontSize = 12.sp)
                     }
                     CockpitCard(modifier = Modifier.weight(1f)) {
                         Text("RATING", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
-                        Text("${"%.2f".format(earnings.ratingAverage)} ★", color = AmberWarning, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Text(if (earnings.ratingCount > 0) "${"%.2f".format(earnings.ratingAverage)} ★" else "Not rated", color = AmberWarning, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text("${earnings.ratingCount} Reviews", color = CockpitTextSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            item {
+                CockpitCard {
+                    Text("COMMISSION TRACKING", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    SummaryRow("Wallet Balance", "₹${"%.2f".format(earnings.walletBalanceRupees)}")
+                    SummaryRow("Total Commission Accrued", "₹${"%.2f".format(earnings.commissionAccruedRupees)}")
+                    SummaryRow("Commission Outstanding", "₹${"%.2f".format(earnings.commissionOutstandingRupees)}", AmberWarning)
+                    SummaryRow("Commission Payable", "₹${"%.2f".format(earnings.commissionPayableRupees)}")
+                    SummaryRow("Cash Commission Receivable", "₹${"%.2f".format(earnings.commissionReceivableRupees)}")
+                    if (earnings.commissionSnapshotMissingCount > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Commission history unavailable for ${earnings.commissionSnapshotMissingCount} completed ride(s); no rate has been guessed.", color = AmberWarning, fontSize = 11.sp)
                     }
                 }
             }
@@ -865,19 +888,32 @@ fun  PayoutAccountsScreen(
                                     fontSize = 14.sp
                                 )
                                 Text(
-                                    acc.upiVpa ?: "${acc.accountNumberMask ?: "****"} • ${acc.ifscCode ?: ""}",
+                                    "${acc.accountNumberMask ?: "****"}${if (!acc.ifscCode.isNullOrBlank()) " • ${acc.ifscCode}" else ""}",
                                     color = CockpitTextSecondary,
                                     fontSize = 12.sp
                                 )
+                                val statusColor = when (acc.verificationStatus) {
+                                    "VERIFIED" -> EmeraldPrimary
+                                    "REJECTED" -> CrimsonAlert
+                                    else -> AmberWarning
+                                }
                                 Text(
                                     "${acc.beneficiaryName ?: ""} • ${acc.verificationStatus}",
-                                    color = CockpitTextMuted,
-                                    fontSize = 11.sp
+                                    color = statusColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
+                                if (acc.verificationStatus == "REJECTED" && !acc.rejectionReason.isNullOrBlank()) {
+                                    Text(
+                                        "Reason: ${acc.rejectionReason}",
+                                        color = CrimsonAlert,
+                                        fontSize = 10.sp
+                                    )
+                                }
                             }
-                            if (acc.isPrimary) {
+                            if (acc.isPrimary && acc.verificationStatus == "VERIFIED") {
                                 CockpitBadge("PRIMARY", EmeraldPrimary)
-                            } else {
+                            } else if (acc.verificationStatus == "VERIFIED") {
                                 OutlinedButton(
                                     onClick = {
                                         scope.launch {
@@ -898,6 +934,11 @@ fun  PayoutAccountsScreen(
                                 ) {
                                     Text("Set Primary", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
+                            } else {
+                                CockpitBadge(
+                                    if (acc.verificationStatus == "REJECTED") "REJECTED" else "PENDING",
+                                    if (acc.verificationStatus == "REJECTED") CrimsonAlert else AmberWarning
+                                )
                             }
                         }
                     }
@@ -918,6 +959,7 @@ fun InstantPayoutScreen(
 ) {
     val earnings by DriverRepository.earnings.collectAsState()
     val accounts by DriverRepository.payoutAccounts.collectAsState()
+    val payoutHistory by DriverRepository.payoutHistory.collectAsState()
     var withdrawAmount by remember { mutableStateOf("") }
     var payoutMethod by remember { mutableStateOf("IMPS Instant") }
     var isSubmitting by remember { mutableStateOf(false) }
@@ -925,17 +967,16 @@ fun InstantPayoutScreen(
     LaunchedEffect(Unit) {
         DriverRepository.fetchEarningsSummary()
         DriverRepository.fetchPayoutAccounts()
+        DriverRepository.fetchPayoutHistory()
     }
 
-    val primaryAccount = accounts.firstOrNull { it.isPrimary } ?: accounts.firstOrNull()
-    val resolvedMask = if (payoutMethod == "UPI Direct") {
-        primaryAccount?.upiVpa ?: primaryAccount?.accountNumberMask ?: "UPI-DEFAULT"
-    } else {
-        primaryAccount?.accountNumberMask ?: "**** 9988"
-    }
-    val resolvedIfsc = if (payoutMethod == "UPI Direct") "UPI" else (primaryAccount?.ifscCode ?: "HDFC0001234")
-    var attemptNonce by remember(withdrawAmount, resolvedMask, resolvedIfsc) { mutableStateOf(0) }
-    val pendingIdempotencyKey = remember(withdrawAmount, resolvedMask, resolvedIfsc, attemptNonce) {
+    val verifiedAccounts = accounts.filter { it.verificationStatus == "VERIFIED" }
+    val primaryAccount = verifiedAccounts.firstOrNull { it.isPrimary } ?: verifiedAccounts.firstOrNull()
+    val resolvedMask = primaryAccount?.accountNumberMask.orEmpty()
+    val resolvedIfsc = primaryAccount?.ifscCode.orEmpty()
+    val hasValidDestination = primaryAccount != null && primaryAccount.id.isNotBlank() && primaryAccount.isPrimary
+    var attemptNonce by remember(withdrawAmount, primaryAccount?.id) { mutableStateOf(0) }
+    val pendingIdempotencyKey = remember(withdrawAmount, primaryAccount?.id, attemptNonce) {
         "payout_${java.util.UUID.randomUUID()}"
     }
 
@@ -947,15 +988,16 @@ fun InstantPayoutScreen(
     ) {
         CockpitHeader(
             title = "Instant Cashout",
-            subtitle = "Zero-delay IMPS/UPI payout directly to your bank",
+            subtitle = "Bank payout request · subject to verification and settlement",
             onBack = onNavigateBack
         )
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 CockpitCard(glow = true) {
@@ -966,9 +1008,9 @@ fun InstantPayoutScreen(
                     ) {
                         Column {
                             Text("MAX WITHDRAWABLE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("₹${"%.2f".format(earnings.walletBalanceRupees)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            Text("₹${"%.2f".format(earnings.withdrawableBalanceRupees)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         }
-                        CockpitBadge("IMPS READY", ElectricCyan)
+                        CockpitBadge(if (hasValidDestination) "ACCOUNT LINKED" else "ACCOUNT REQUIRED", if (hasValidDestination) ElectricCyan else AmberWarning)
                     }
                 }
 
@@ -1007,9 +1049,15 @@ fun InstantPayoutScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val destStatusText = when {
+                            hasValidDestination -> "Verified Primary: $resolvedMask${if (resolvedIfsc.isNotBlank()) " ($resolvedIfsc)" else ""}"
+                            verifiedAccounts.isNotEmpty() -> "Select a verified account as Primary in Payout Accounts before withdrawing"
+                            accounts.any { it.verificationStatus == "PENDING_VERIFICATION" } -> "Payout account pending admin verification"
+                            else -> "Add and verify a payout account before requesting a payout"
+                        }
                         Text(
-                            if (primaryAccount != null) "Destination: $resolvedMask ($resolvedIfsc)" else "Destination: Pending account link",
-                            color = CockpitTextSecondary,
+                            destStatusText,
+                            color = if (hasValidDestination) CockpitTextSecondary else AmberWarning,
                             fontSize = 11.sp
                         )
                         Text("Table: driver_payout_requests", color = ElectricCyan, fontSize = 10.sp)
@@ -1019,14 +1067,13 @@ fun InstantPayoutScreen(
 
             CockpitButton(
                 text = if (isSubmitting) "PROCESSING..." else "CONFIRM WITHDRAWAL OF ₹${withdrawAmount.ifBlank { "0" }}",
-                enabled = !isSubmitting && (withdrawAmount.toDoubleOrNull() ?: 0.0) > 0.0,
+                enabled = !isSubmitting && hasValidDestination && (withdrawAmount.toDoubleOrNull() ?: 0.0) >= 100.0 && (withdrawAmount.toDoubleOrNull() ?: 0.0) * 100.0 <= earnings.withdrawableBalanceCents.toDouble(),
                 onClick = {
                     val amt = withdrawAmount.toDoubleOrNull() ?: 0.0
                     isSubmitting = true
                     DriverRepository.requestInstantWithdrawal(
                         amountRupees = amt,
-                        accountNumberMask = resolvedMask,
-                        ifsc = resolvedIfsc,
+                        payoutAccountId = primaryAccount?.id.orEmpty(),
                         idempotencyKey = pendingIdempotencyKey
                     ) { ok ->
                         isSubmitting = false
@@ -1035,12 +1082,52 @@ fun InstantPayoutScreen(
                             onShowToast("Payout request of ₹$amt submitted!")
                             onPayoutSuccess()
                         } else {
-                            onShowToast("Payout failed. Check wallet balance.")
+                            onShowToast("Payout failed. Check available balance and payout account.")
                         }
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
             )
+
+            if (payoutHistory.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "RECENT PAYOUT REQUESTS (${payoutHistory.size})",
+                    color = CockpitTextMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                payoutHistory.take(5).forEach { item ->
+                    val statusTint = when (item.status) {
+                        "PAID" -> EmeraldPrimary
+                        "FAILED", "REJECTED" -> CrimsonAlert
+                        "AWAITING_MANUAL_TRANSFER", "PROCESSING", "APPROVED" -> ElectricCyan
+                        else -> AmberWarning
+                    }
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "₹${"%.2f".format(item.amountCents / 100.0)} • ${item.bankAccountMask}",
+                                    color = CockpitTextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                val detailNote = item.failureReason
+                                    ?: item.rejectionReason
+                                    ?: item.settlementReference?.let { "Ref: $it" }
+                                    ?: item.requestedAt.take(19).replace("T", " ")
+                                Text(detailNote, color = CockpitTextMuted, fontSize = 11.sp)
+                            }
+                            CockpitBadge(item.status, statusTint)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1086,7 +1173,7 @@ fun DriverLedgerScreen(
                     ) {
                         Column {
                             Text("RUNNING WALLET BALANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            val displayBal = liveLedger.firstOrNull()?.balanceAfterRupees ?: earnings.walletBalanceRupees
+                            val displayBal = earnings.walletBalanceRupees
                             Text("₹${"%.2f".format(displayBal)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         }
                         Column(horizontalAlignment = Alignment.End) {

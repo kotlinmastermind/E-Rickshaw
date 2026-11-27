@@ -102,8 +102,13 @@ fun IncomingOfferScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text("ESTIMATED NET PAY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("ESTIMATED GROSS EARNINGS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             Text("₹${"%.2f".format(offer.estimatedDriverEarningsRupees)}", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
+                            Text(
+                                text = offer.estimatedCommissionCents?.let { amount -> "Estimated commission: ₹${"%.2f".format(amount / 100.0)}${offer.estimatedCommissionPercentage?.let { " (${it}%)" } ?: ""}" } ?: "Commission estimate unavailable",
+                                color = CockpitTextSecondary,
+                                fontSize = 11.sp
+                            )
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text("DISTANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
