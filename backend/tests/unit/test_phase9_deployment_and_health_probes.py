@@ -1,6 +1,7 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 from backend.main import app
+from backend.api.deps import get_current_admin
 
 def run_migrations(check_only: bool = False) -> bool:
     return True
@@ -54,22 +55,26 @@ async def test_operational_metrics_endpoint():
     """
     Task 098: Verify SRE /health/metrics endpoint provides operational telemetry.
     """
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        res = await client.get("/health/metrics")
-        assert res.status_code == 200
-        data = res.json()
-        assert data["service"] == "vaisentra-mobility-backend"
-        assert "uptime_seconds" in data
-        assert data["uptime_seconds"] >= 0
-        assert data["database"]["status"] == "HEALTHY"
-        assert "redis_cache" in data
-        assert "websockets" in data
-        assert "active_ride_subscribers" in data["websockets"]
-        assert "active_driver_subscribers" in data["websockets"]
-        assert "telemetry" in data
-        assert "system" in data
-        assert "pid" in data["system"]
+    app.dependency_overrides[get_current_admin] = lambda: object()
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            res = await client.get("/health/metrics")
+            assert res.status_code == 200
+            data = res.json()
+            assert data["service"] == "vaisentra-mobility-backend"
+            assert "uptime_seconds" in data
+            assert data["uptime_seconds"] >= 0
+            assert data["database"]["status"] == "HEALTHY"
+            assert "redis_cache" in data
+            assert "websockets" in data
+            assert "active_ride_subscribers" in data["websockets"]
+            assert "active_driver_subscribers" in data["websockets"]
+            assert "telemetry" in data
+            assert "system" in data
+            assert "pid" in data["system"]
+    finally:
+        app.dependency_overrides.pop(get_current_admin, None)
 
 def test_pre_migration_check_runner():
     """
