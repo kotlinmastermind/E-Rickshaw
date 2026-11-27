@@ -324,6 +324,8 @@ async def get_live_mobility_feed(
                 "pickup": ride.pickup_address,
                 "targetDrop": ride.destination_address,
                 "waitMins": round(wait_minutes, 1) if wait_minutes is not None else None,
+                "fare": fare_label,
+                "payment": ride.payment_method or "Not recorded",
                 "rating": None,
                 "trips": customer["rides"] if customer else 0
             })
