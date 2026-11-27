@@ -892,8 +892,8 @@ fun  PayoutAccountsScreen(
                                 )
                                 val statusColor = when (acc.verificationStatus) {
                                     "VERIFIED" -> EmeraldPrimary
-                                    "REJECTED" -> CrimsonRed
-                                    else -> AmberGold
+                                    "REJECTED" -> CrimsonAlert
+                                    else -> AmberWarning
                                 }
                                 Text(
                                     "${acc.beneficiaryName ?: ""} • ${acc.verificationStatus}",
@@ -904,7 +904,7 @@ fun  PayoutAccountsScreen(
                                 if (acc.verificationStatus == "REJECTED" && !acc.rejectionReason.isNullOrBlank()) {
                                     Text(
                                         "Reason: ${acc.rejectionReason}",
-                                        color = CrimsonRed,
+                                        color = CrimsonAlert,
                                         fontSize = 10.sp
                                     )
                                 }
@@ -935,7 +935,7 @@ fun  PayoutAccountsScreen(
                             } else {
                                 CockpitBadge(
                                     if (acc.verificationStatus == "REJECTED") "REJECTED" else "PENDING",
-                                    if (acc.verificationStatus == "REJECTED") CrimsonRed else AmberGold
+                                    if (acc.verificationStatus == "REJECTED") CrimsonAlert else AmberWarning
                                 )
                             }
                         }
@@ -1052,7 +1052,7 @@ fun InstantPayoutScreen(
                         }
                         Text(
                             destStatusText,
-                            color = if (hasValidDestination) CockpitTextSecondary else AmberGold,
+                            color = if (hasValidDestination) CockpitTextSecondary else AmberWarning,
                             fontSize = 11.sp
                         )
                         Text("Table: driver_payout_requests", color = ElectricCyan, fontSize = 10.sp)

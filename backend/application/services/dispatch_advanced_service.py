@@ -15,7 +15,7 @@ import math
 import uuid
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
@@ -511,14 +511,24 @@ class DispatchAdvancedService:
                 detail="A verified primary payout_account_id is required.",
             )
 
-        driver_prof = await DispatchAdvancedService._resolve_driver_profile(session, driver_id_or_user_id)
+        # Lock DriverProfile row first to serialize all wallet/commission mutations for this driver,
+        # even if DriverWallet does not exist yet or concurrent ride commissions arrive.
+        driver_prof = (
+            await session.execute(
+                select(DriverProfile)
+                .where(or_(DriverProfile.id == driver_id_or_user_id, DriverProfile.user_id == driver_id_or_user_id))
+                .with_for_update()
+            )
+        ).scalars().first()
         if not driver_prof:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found")
 
         from backend.domain.models import DriverPayoutAccount
         payout_account = (
             await session.execute(
-                select(DriverPayoutAccount).where(DriverPayoutAccount.id == resolved_account_id)
+                select(DriverPayoutAccount)
+                .where(DriverPayoutAccount.id == resolved_account_id)
+                .with_for_update()
             )
         ).scalar_one_or_none()
         if not payout_account:
@@ -562,13 +572,14 @@ class DispatchAdvancedService:
             session,
             driver_prof.id,
         )
-        withdrawable_cents = max(0, int(d_wallet.balance_cents) - commission_due_cents)
+        current_balance_cents = int(d_wallet.balance_cents)
+        withdrawable_cents = max(0, current_balance_cents - commission_due_cents)
         if amount_cents > withdrawable_cents:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     "Insufficient withdrawable balance after deferred commission settlement. "
-                    f"Wallet: ₹{d_wallet.balance_cents / 100:.2f}; "
+                    f"Wallet: ₹{current_balance_cents / 100:.2f}; "
                     f"commission due: ₹{commission_due_cents / 100:.2f}; "
                     f"withdrawable: ₹{withdrawable_cents / 100:.2f}"
                 )
@@ -601,11 +612,32 @@ class DispatchAdvancedService:
                 return existing_payout
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Concurrent payout creation conflict.")
 
-        # Settle outstanding commission first, then place the payout hold atomically.
+        # Atomic conditional SQL debit: ensures two concurrent sessions can never double-spend the same balance.
         now = datetime.now(timezone.utc)
+        total_debit_cents = commission_due_cents + amount_cents
+        debit_result = await session.execute(
+            update(DriverWallet)
+            .where(
+                DriverWallet.driver_id == driver_prof.id,
+                DriverWallet.balance_cents >= total_debit_cents,
+            )
+            .values(
+                balance_cents=DriverWallet.balance_cents - total_debit_cents,
+                updated_at=now,
+            )
+            .returning(DriverWallet.balance_cents)
+        )
+        new_balance_cents = debit_result.scalar_one_or_none()
+        if new_balance_cents is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insufficient withdrawable balance after concurrent wallet update.",
+            )
+        await session.refresh(d_wallet)
+
+        # Settle outstanding commission first, then place the payout hold atomically in the ledger.
+        balance_after_commission = new_balance_cents + amount_cents
         if commission_due_cents > 0:
-            d_wallet.balance_cents -= commission_due_cents
-            d_wallet.updated_at = now
             session.add(DriverCommissionSettlement(
                 driver_id=driver_prof.id,
                 payout_request_id=payout.id,
@@ -619,14 +651,11 @@ class DispatchAdvancedService:
                 entry_type="DEBIT",
                 category="COMMISSION_SETTLEMENT",
                 amount_cents=-commission_due_cents,
-                balance_after_cents=d_wallet.balance_cents,
+                balance_after_cents=balance_after_commission,
                 reference_id=payout.id,
                 description=f"Deferred platform commission settled at payout request ({payout.id[:8]})",
                 created_at=now,
             ))
-
-        d_wallet.balance_cents -= amount_cents
-        d_wallet.updated_at = now
 
         hold_entry = DriverLedgerEntry(
             id=str(uuid.uuid4()),
@@ -634,7 +663,7 @@ class DispatchAdvancedService:
             entry_type="DEBIT",
             category="PAYOUT_HOLD",
             amount_cents=amount_cents,
-            balance_after_cents=d_wallet.balance_cents,
+            balance_after_cents=new_balance_cents,
             reference_id=payout.id,
             description=f"Driver payout request placed under review ({payout.id[:8]})",
             created_at=now

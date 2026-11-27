@@ -339,11 +339,13 @@ async def test_postgres_concurrent_driver_payout_and_commission_settlement_invar
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     driver_id = None
+    driver_user_id = None
     account_id = None
     async with session_factory() as db:
         u = User(phone_number=f"+9193{uuid.uuid4().hex[:8]}", full_name="PG Payout Driver", role="driver")
         db.add(u)
         await db.flush()
+        driver_user_id = u.id
         drv = DriverProfile(user_id=u.id, license_number=f"DL-PG-{uuid.uuid4().hex[:8]}", approval_status="APPROVED")
         db.add(drv)
         await db.flush()
@@ -393,11 +395,19 @@ async def test_postgres_concurrent_driver_payout_and_commission_settlement_invar
                 await s.rollback()
                 return ("err", exc.status_code)
 
+    k1 = f"pg_payout_1_{uuid.uuid4().hex[:10]}"
+    k2 = f"pg_payout_2_{uuid.uuid4().hex[:10]}"
     r1, r2 = await asyncio.gather(
-        _attempt_payout(f"pg_payout_1_{uuid.uuid4().hex[:10]}"),
-        _attempt_payout(f"pg_payout_2_{uuid.uuid4().hex[:10]}"),
+        _attempt_payout(k1),
+        _attempt_payout(k2),
     )
     assert sorted([r1[0], r2[0]]) == ["err", "ok"]
+    winning_key, winning_id = (k1, r1[1]) if r1[0] == "ok" else (k2, r2[1])
+
+    # Duplicate idempotency_key returns existing payout without double settlement/hold
+    dup_status, dup_id = await _attempt_payout(winning_key)
+    assert dup_status == "ok"
+    assert dup_id == winning_id
 
     async with session_factory() as check_db:
         w = (await check_db.execute(select(DriverWallet).where(DriverWallet.driver_id == driver_id))).scalar_one()
@@ -410,11 +420,30 @@ async def test_postgres_concurrent_driver_payout_and_commission_settlement_invar
         ).scalars().all()
         assert len(settlements) == 1
 
-        # RESTRICT FK must prevent cascade-deleting driver with settlement history
-        drv_row = await check_db.get(DriverProfile, driver_id)
+        # RESTRICT FK must prevent deleting driver with settlement history at the DB level
+        from sqlalchemy import delete as sa_delete
         with pytest.raises(IntegrityError):
-            await check_db.delete(drv_row)
-            await check_db.flush()
+            await check_db.execute(sa_delete(DriverProfile).where(DriverProfile.id == driver_id))
         await check_db.rollback()
+
+        # Rejecting the payout reverses ONLY the payout hold (60000); commission settlement (20000) stays intact
+        from backend.application.services.admin_advanced_service import AdminAdvancedService
+        rejected = await AdminAdvancedService.reject_payout(
+            session=check_db,
+            payout_id=winning_id,
+            admin_user_id=driver_user_id,
+            rejection_reason="PG concurrency test rejection",
+        )
+        await check_db.commit()
+        assert rejected.status == "REJECTED"
+        w_after_reject = (await check_db.execute(select(DriverWallet).where(DriverWallet.driver_id == driver_id))).scalar_one()
+        assert w_after_reject.balance_cents == 80000
+        assert await CommissionService.get_driver_commission_outstanding_cents(check_db, driver_id) == 0
+        settlements_after = (
+            await check_db.execute(
+                select(DriverCommissionSettlement).where(DriverCommissionSettlement.driver_id == driver_id)
+            )
+        ).scalars().all()
+        assert len(settlements_after) == 1
 
     await engine.dispose()
