@@ -842,7 +842,7 @@ class DriverPayoutRequest(Base):
     driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=False, index=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="REQUESTED")  # REQUESTED, APPROVED, PAID, REJECTED
-    bank_account_masked: Mapped[str] = mapped_column(String(32), default="HDFC *******4921")
+    bank_account_masked: Mapped[str] = mapped_column(String(32), default="Not provided")
     payout_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     reviewed_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
