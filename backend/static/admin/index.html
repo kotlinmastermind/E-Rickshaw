@@ -1265,6 +1265,13 @@
                         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
                     </button>
                 </div>
+                <div class="flex items-center justify-between gap-3 text-xs text-slate-400">
+                    <span id="driver-earnings-page-info">Driver earnings not loaded.</span>
+                    <div class="flex items-center gap-2">
+                        <button onclick="changeDriverEarningsPage(-1)" id="driver-earnings-prev" disabled class="px-3 py-1.5 rounded-lg bg-card border border-border disabled:opacity-40">Previous</button>
+                        <button onclick="changeDriverEarningsPage(1)" id="driver-earnings-next" disabled class="px-3 py-1.5 rounded-lg bg-card border border-border disabled:opacity-40">Next</button>
+                    </div>
+                </div>
                 <div class="glass-card rounded-2xl overflow-hidden border border-border shadow-xl">
                     <div class="overflow-x-auto">
                         <table class="w-full text-left text-xs">
@@ -2463,6 +2470,8 @@
             welfare: [],
             commissions: [],
             driverEarnings: [],
+            driverEarningsTotal: 0,
+            driverEarningsOffset: 0,
             geofences: [],
             surgeRules: [],
             disputes: [],
@@ -4727,21 +4736,42 @@
         }
 
         // --- Driver Gross Earnings & Deferred Commission ---
-        async function loadDriverEarningsData() {
+        async function loadDriverEarningsData(offset = 0) {
             const tbody = document.getElementById('driver-earnings-table-body');
+            STATE.driverEarningsOffset = Math.max(0, Number(offset) || 0);
             if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500 font-mono">Loading driver financial summaries...</td></tr>';
             try {
                 const headers = {};
                 if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
-                const res = await fetch('/api/v1/admin/driver-earnings?limit=100&offset=0', { headers });
+                const res = await fetch(`/api/v1/admin/driver-earnings?limit=100&offset=${STATE.driverEarningsOffset}`, { headers });
                 if (!res.ok) throw new Error(`Driver earnings request failed: HTTP ${res.status}`);
                 const payload = await res.json();
                 STATE.driverEarnings = Array.isArray(payload.items) ? payload.items : [];
+                STATE.driverEarningsTotal = Number(payload.total) || 0;
                 renderDriverEarningsTable();
+                updateDriverEarningsPagination();
             } catch (err) {
                 if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-rose-400 font-mono">Driver earnings could not be loaded.</td></tr>';
                 console.error('Error loading driver earnings:', err);
             }
+        }
+
+        function changeDriverEarningsPage(direction) {
+            const nextOffset = STATE.driverEarningsOffset + (direction * 100);
+            if (nextOffset < 0 || nextOffset >= STATE.driverEarningsTotal) return;
+            loadDriverEarningsData(nextOffset);
+        }
+
+        function updateDriverEarningsPagination() {
+            const info = document.getElementById('driver-earnings-page-info');
+            const previous = document.getElementById('driver-earnings-prev');
+            const next = document.getElementById('driver-earnings-next');
+            const total = STATE.driverEarningsTotal || 0;
+            const offset = STATE.driverEarningsOffset || 0;
+            const count = (STATE.driverEarnings || []).length;
+            if (info) info.textContent = total === 0 ? 'No active drivers' : `Showing ${offset + 1}–${offset + count} of ${total} active drivers`;
+            if (previous) previous.disabled = offset <= 0;
+            if (next) next.disabled = offset + count >= total;
         }
 
         function renderDriverEarningsTable() {
