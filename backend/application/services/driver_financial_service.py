@@ -978,6 +978,7 @@ class DriverFinancialService:
     # -------------------------------------------------------------------------
     async def get_payout_accounts(self, user_id_or_driver_id: str) -> List[Dict[str, Any]]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
+        from backend.infrastructure.security.payout_encryption import decrypt_payout_destination
         stmt = select(DriverPayoutAccount).where(
             or_(DriverPayoutAccount.driver_id == driver.id, DriverPayoutAccount.driver_id == user_id_or_driver_id)
         ).order_by(DriverPayoutAccount.is_primary.desc())
@@ -991,7 +992,7 @@ class DriverFinancialService:
                 "bank_name": a.bank_name,
                 "account_number_mask": a.account_number_mask,
                 "ifsc_code": a.ifsc_code,
-                "upi_vpa": __import__("backend.infrastructure.security.payout_encryption", fromlist=["decrypt_payout_destination"]).decrypt_payout_destination(a.upi_vpa_encrypted) if a.upi_vpa_encrypted else None,
+                "upi_vpa": decrypt_payout_destination(a.upi_vpa_encrypted) if a.upi_vpa_encrypted else None,
                 "beneficiary_name": a.beneficiary_name,
                 "verification_status": a.verification_status,
                 "verification_method": a.verification_method,
@@ -1042,7 +1043,11 @@ class DriverFinancialService:
                 raise HTTPException(status_code=400, detail="Account number must contain 6 to 25 digits.")
             acc_mask = f"******{raw_acc[-4:]}"
         else:
-NaN
+            import re
+            if not re.fullmatch(r"[A-Za-z0-9._-]{2,256}@[A-Za-z][A-Za-z0-9.-]{1,63}", upi):
+                raise HTTPException(status_code=400, detail="Invalid UPI ID format.")
+            acc_mask = f"{'*' * max(4, len(upi) - 4)}{upi[-4:]}"
+            inferred_bank = "UPI Instant Destination"
 
         # Check existing accounts to determine if first
         stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.driver_id == driver.id)
