@@ -1032,8 +1032,8 @@
                 </div>
                 <div class="glass-card p-4 rounded-2xl border-l-4 border-l-purple-500">
                     <p class="text-xs text-slate-400 font-medium">Active Platform Commission</p>
-                    <p id="payout-stat-commission" class="text-2xl font-bold font-mono text-purple-400 mt-1">10.0%</p>
-                    <p class="text-[10px] text-slate-500 mt-0.5">Versioned rule: 90% pilot share</p>
+                    <p id="payout-stat-commission" class="text-2xl font-bold font-mono text-purple-400 mt-1">No active rule</p>
+                    <p class="text-[10px] text-slate-500 mt-0.5">Read from the active versioned commission rule</p>
                 </div>
             </div>
 
@@ -4695,14 +4695,19 @@
                 if (res.ok) {
                     STATE.commissions = await res.json();
                     renderCommissionsTable();
-                    if (STATE.commissions.length > 0) {
-                        const activeRule = STATE.commissions.find(c => c.is_active) || STATE.commissions[0];
-                        const pct = activeRule.platform_commission_percentage || activeRule.commission_percentage || 10.0;
-                        const el = document.getElementById('payout-stat-commission');
-                        if (el) el.innerText = `${pct.toFixed(1)}%`;
+                    const activeRule = STATE.commissions.find(c => c.is_active && c.approval_status === 'ACTIVE');
+                    const rawPercent = activeRule
+                        ? (activeRule.platform_commission_percentage ?? activeRule.commission_percentage ?? activeRule.commission_percent)
+                        : null;
+                    const el = document.getElementById('payout-stat-commission');
+                    if (el) {
+                        const percent = rawPercent === null || rawPercent === undefined ? NaN : Number(rawPercent);
+                        el.innerText = Number.isFinite(percent) ? `${percent.toFixed(1)}%` : 'No active rule';
                     }
                 }
             } catch (err) {
+                const el = document.getElementById('payout-stat-commission');
+                if (el) el.innerText = 'Unavailable';
                 console.error('Error loading commissions:', err);
             }
         }
