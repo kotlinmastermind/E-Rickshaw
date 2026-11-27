@@ -79,7 +79,9 @@ fun ShiftSummaryScreen(
                     SummaryRow("Weekly Gross Earnings", "₹${"%.2f".format(earnings.weeklyRupees)}")
                     SummaryRow("Lifetime Gross Earnings", "₹${"%.2f".format(earnings.totalGrossRupees)}")
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = CockpitBorder)
-                    SummaryRow("Wallet Balance", "₹${"%.2f".format(earnings.walletBalanceRupees)}", EmeraldPrimary, isBold = true)
+                    SummaryRow("Wallet Balance", "₹${"%.2f".format(earnings.walletBalanceRupees)}")
+                    SummaryRow("Commission Outstanding", "₹${"%.2f".format(earnings.commissionOutstandingRupees)}", AmberWarning)
+                    SummaryRow("Available to Withdraw", "₹${"%.2f".format(earnings.withdrawableBalanceRupees)}", EmeraldPrimary, isBold = true)
                     SummaryRow("Commission Accrued", "₹${"%.2f".format(earnings.commissionAccruedRupees)}", AmberWarning)
                     SummaryRow("Commission Payable", "₹${"%.2f".format(earnings.commissionPayableRupees)}")
                     SummaryRow("Cash Commission Receivable", "₹${"%.2f".format(earnings.commissionReceivableRupees)}")
@@ -203,9 +205,9 @@ fun PilotEarningsScreen(
             item {
                 CockpitCard(glow = true) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        Text("WALLET BALANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("AVAILABLE TO WITHDRAW", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹${"%.2f".format(earnings.walletBalanceRupees)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("₹${"%.2f".format(earnings.withdrawableBalanceRupees)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Today gross: ₹${"%.2f".format(earnings.todayGrossRupees)}", color = AmberWarning, fontSize = 12.sp)
@@ -260,7 +262,9 @@ fun PilotEarningsScreen(
                 CockpitCard {
                     Text("COMMISSION TRACKING", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
+                    SummaryRow("Wallet Balance", "₹${"%.2f".format(earnings.walletBalanceRupees)}")
                     SummaryRow("Total Commission Accrued", "₹${"%.2f".format(earnings.commissionAccruedRupees)}")
+                    SummaryRow("Commission Outstanding", "₹${"%.2f".format(earnings.commissionOutstandingRupees)}", AmberWarning)
                     SummaryRow("Commission Payable", "₹${"%.2f".format(earnings.commissionPayableRupees)}")
                     SummaryRow("Cash Commission Receivable", "₹${"%.2f".format(earnings.commissionReceivableRupees)}")
                     if (earnings.commissionSnapshotMissingCount > 0) {
