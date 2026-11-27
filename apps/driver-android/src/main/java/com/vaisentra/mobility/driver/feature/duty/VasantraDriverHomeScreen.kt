@@ -226,8 +226,9 @@ fun VasantraDriverHomeScreen(
 
                     VasantraDriverTopHeader(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        driverName = profile.fullName.ifBlank { stringResource(id = R.string.driver_name_sample) },
-                        driverRating = if (profile.rating > 0.0) "${"%.1f".format(profile.rating)} (${profile.ratingCount})" else stringResource(id = R.string.driver_rating_sample),
+                        driverName = profile.fullName.takeIf { it.isNotBlank() && !it.equals("Distinguished Guest", ignoreCase = true) } ?: "Driver",
+                        driverRating = profile.rating?.takeIf { profile.ratingCount > 0 }
+                            ?.let { rating -> "${"%.1f".format(rating)} (${profile.ratingCount})" } ?: "Not rated",
                         isOnline = isOnline,
                         onToggleDuty = { next ->
                             DriverRepository.setDutyStatus(next) { ok, err ->
