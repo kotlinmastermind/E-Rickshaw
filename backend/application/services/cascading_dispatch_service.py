@@ -252,6 +252,8 @@ class CascadingDispatchService:
         available_drivers = avail_res.all()
 
         fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents
+        from backend.application.services.commission_service import CommissionService
+        commission_estimate = await CommissionService.estimate_for_ride(self.db, ride)
 
         # Progressive radius expansion
         radii_to_check = [r for r in RADIUS_TIERS if r >= current_radius_km]
@@ -346,6 +348,7 @@ class CascadingDispatchService:
                     "pickup_address": ride.pickup_address,
                     "destination_address": ride.destination_address,
                     "estimated_fare_cents": fare_cents,
+                    **commission_estimate,
                     "pickup_distance_km": round(selected_dist, 1) if selected_dist is not None else None,
                     "pickup_duration_minutes": pickup_eta,
                     "estimated_trip_distance_km": ride.estimated_distance_km,
