@@ -789,7 +789,7 @@ fun VasantraRideRequestCard(
                         color = if (validEarnings != null) Color(0xFF0F172A) else Color(0xFF9CA3AF)
                     )
                     Text(
-                        text = if (validEarnings != null) "Estimated Pay" else "Pay Pending",
+                        text = if (validEarnings != null) "Estimated Gross" else "Gross Pending",
                         fontSize = 11.sp,
                         color = if (validEarnings != null) Color(0xFF10B981) else Color(0xFFF59E0B),
                         fontWeight = FontWeight.Bold
