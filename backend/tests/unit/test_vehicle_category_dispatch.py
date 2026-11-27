@@ -865,3 +865,31 @@ async def test_fare_estimate_id_is_full_valid_uuid(db_session):
     parsed_uuid = uuid.UUID(est.id)
     assert str(parsed_uuid) == est.id
 
+
+
+@pytest.mark.asyncio
+async def test_service_area_candidate_guard_excludes_restricted_and_outside_locations(db_session):
+    service_area = (await db_session.execute(
+        select(GeofenceZone).where(
+            GeofenceZone.city_code == "DELHI_NCR",
+            GeofenceZone.zone_type == "SERVICE_AREA",
+            GeofenceZone.is_active.is_(True),
+        )
+    )).scalars().one()
+    restricted = GeofenceZone(
+        name="Synthetic restricted dispatch test zone",
+        zone_type="RESTRICTED",
+        city_code=None,
+        coordinates_json='[{"lat":28.60,"lng":77.20},{"lat":28.60,"lng":77.22},{"lat":28.62,"lng":77.22},{"lat":28.62,"lng":77.20}]',
+        is_active=True,
+    )
+    db_session.add(restricted)
+    await db_session.flush()
+
+    from backend.application.services.service_area_service import ServiceAreaService
+    service = ServiceAreaService(db_session)
+    _, service_polygon, restricted_polygons = await service.load_area_boundary(service_area.id)
+
+    assert service.location_is_inside_boundary(28.70, 77.30, service_polygon, restricted_polygons)
+    assert not service.location_is_inside_boundary(28.61, 77.21, service_polygon, restricted_polygons)
+    assert not service.location_is_inside_boundary(30.00, 80.00, service_polygon, restricted_polygons)
