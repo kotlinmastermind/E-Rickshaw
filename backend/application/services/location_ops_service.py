@@ -662,6 +662,27 @@ class LocationOpsService:
             status = "NOT_CONFIGURED" if not restricted else "RESTRICTED"
             explanation = "Service boundaries are not configured; coverage cannot be verified yet."
 
+        # Booking, fare and discovery share the same authoritative polygon resolver.
+        # Keep this advisory endpoint consistent with the enforced booking decision.
+        try:
+            from backend.application.services.service_area_service import ServiceAreaService
+            service_area_service = ServiceAreaService(self.db)
+            if dest_latitude is not None and dest_longitude is not None:
+                await service_area_service.resolve_trip(
+                    latitude, longitude, dest_latitude, dest_longitude
+                )
+            else:
+                await service_area_service.resolve_point(latitude, longitude)
+        except HTTPException as exc:
+            eligible = False
+            status = (
+                "NOT_CONFIGURED" if exc.status_code == 503
+                else "BOUNDARY_CONFLICT" if exc.status_code == 409
+                else "RESTRICTED" if restricted
+                else "OUT_OF_ZONE"
+            )
+            explanation = str(exc.detail)
+
         # 439. Zone-Specific Vehicle Availability
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
         latest = select(DriverLocation.driver_id, func.max(DriverLocation.recorded_at).label("latest_at")).group_by(DriverLocation.driver_id).subquery()
