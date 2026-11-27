@@ -120,7 +120,9 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
     assert estimate["estimated_commission_percentage"] == 20.0
 
     breakdown = await DriverFinancialService(db_session).get_ride_earnings_breakdown(driver_user.id, digital_ride.id)
-    assert breakdown["driver_gross_earnings_cents"] == 10000
+    # Driver gross includes the ride fare plus the customer tip; deferred commission is separate.
+    assert breakdown["driver_gross_earnings_cents"] == 10300
+    assert breakdown["deductions_and_supplements"]["customer_tip_cents"] == 300
     assert breakdown["deductions_and_supplements"]["platform_commission_cents"] == 1500
     assert breakdown["deductions_and_supplements"]["platform_commission_percentage"] == 15.0
     assert breakdown["fare_breakdown"]["components_available"] is False
