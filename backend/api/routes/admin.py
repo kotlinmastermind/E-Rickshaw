@@ -136,11 +136,14 @@ async def get_live_mobility_feed(
     )).scalar_one()
     gross_booking_inr = round(gross_booking_cents / 100.0, 2)
 
+    now = datetime.now(timezone.utc)
+    heartbeat_cutoff = now - timedelta(minutes=15)
     online_drivers_count = (await db.execute(
         select(func.count(DriverAvailability.id))
         .join(DriverProfile, DriverAvailability.driver_id == DriverProfile.id)
         .where(
             DriverAvailability.is_online.is_(True),
+            DriverAvailability.last_heartbeat >= heartbeat_cutoff,
             DriverProfile.approval_status == "APPROVED"
         )
     )).scalar_one()
@@ -153,13 +156,23 @@ async def get_live_mobility_feed(
     availability_rows = (await db.execute(select(DriverAvailability))).scalars().all()
     availability_by_driver = {item.driver_id: item for item in availability_rows}
 
-    # Newest-first; setdefault retains the newest persisted GPS point.
+    # Fetch only the newest persisted GPS point per driver; do not load location history.
+    latest_location_ids = (
+        select(
+            DriverLocation.id.label("location_id"),
+            func.row_number().over(
+                partition_by=DriverLocation.driver_id,
+                order_by=(DriverLocation.recorded_at.desc(), DriverLocation.id.desc())
+            ).label("row_number")
+        )
+        .subquery()
+    )
     location_rows = (await db.execute(
-        select(DriverLocation).order_by(DriverLocation.recorded_at.desc())
+        select(DriverLocation)
+        .join(latest_location_ids, DriverLocation.id == latest_location_ids.c.location_id)
+        .where(latest_location_ids.c.row_number == 1)
     )).scalars().all()
-    locations_by_driver = {}
-    for location in location_rows:
-        locations_by_driver.setdefault(location.driver_id, location)
+    locations_by_driver = {location.driver_id: location for location in location_rows}
 
     assignment_rows = (await db.execute(
         select(DriverVehicleAssignment, Vehicle, VehicleCategory)
@@ -189,11 +202,20 @@ async def get_live_mobility_feed(
             canonical_approval = "PENDING"
 
         availability = availability_by_driver.get(profile.id)
+        heartbeat = availability.last_heartbeat if availability else None
+        if heartbeat and heartbeat.tzinfo is None:
+            heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+        is_fresh_online = bool(
+            availability
+            and availability.is_online
+            and heartbeat
+            and heartbeat >= heartbeat_cutoff
+        )
         if canonical_approval != "APPROVED":
             driver_status = canonical_approval
-        elif availability and availability.is_busy:
+        elif is_fresh_online and availability.is_busy:
             driver_status = "IN_TRIP"
-        elif availability and availability.is_online:
+        elif is_fresh_online:
             driver_status = "AVAILABLE"
         else:
             driver_status = "OFFLINE"
@@ -214,6 +236,9 @@ async def get_live_mobility_feed(
             "lat": float(location.latitude) if location else None,
             "lng": float(location.longitude) if location else None,
             "location_recorded_at": location.recorded_at.isoformat() if location else None,
+            "location_is_stale": bool(location and (
+                (location.recorded_at.replace(tzinfo=timezone.utc) if location.recorded_at.tzinfo is None else location.recorded_at) < heartbeat_cutoff
+            )),
             "battery": None,
             "speed": round(float(location.speed) * 3.6, 1) if location and location.speed is not None else None,
             "rating": float(profile.rating_average) if profile.rating_count else None,
@@ -283,7 +308,6 @@ async def get_live_mobility_feed(
 
     formatted_rides = []
     formatted_riders = []
-    now = datetime.now(timezone.utc)
     for ride in active_ride_rows:
         customer = customers_by_profile_id.get(ride.customer_id)
         driver = drivers_by_id.get(str(ride.assigned_driver_id)) if ride.assigned_driver_id else None
