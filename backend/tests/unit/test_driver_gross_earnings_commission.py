@@ -7,6 +7,7 @@ import pytest
 from backend.application.services.commission_service import CommissionService
 from backend.application.services.driver_service import DriverService
 from backend.application.services.driver_financial_service import DriverFinancialService
+from backend.api.routes.admin import list_driver_earnings
 from backend.domain.models import (
     CustomerProfile, DriverLedgerEntry, DriverProfile, DriverWallet, FareRule, Ride, User, VehicleCategory,
 )
@@ -46,6 +47,7 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
         )
 
     digital_ride = make_ride(f"digital-{suffix}", "RAZORPAY", 10000, now)
+    digital_ride.tip_cents = 300
     cash_ride = make_ride(f"cash-{suffix}", "CASH", 5000, now - timedelta(minutes=1))
     legacy_ride = make_ride(f"legacy-{suffix}", "RAZORPAY", 2000, now - timedelta(minutes=2))
     db_session.add_all([digital_ride, cash_ride, legacy_ride])
@@ -82,6 +84,25 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
     assert summary["commission_outstanding_cents"] == 2250
     assert summary["withdrawable_balance_cents"] == 7750
     assert "today_net_cents" not in summary
+
+    # The detailed dashboard must apply the same deferred-commission rule:
+    # gross earnings stay gross, while accrued commission remains a separate figure.
+    dashboard = await DriverFinancialService(db_session).get_earnings_dashboard(driver_user.id)
+    assert dashboard["this_week"]["gross_earnings_cents"] == 17000
+    assert dashboard["this_week"]["commission_accrued_cents"] == 2250
+    assert dashboard["this_week"]["gross_earnings_including_tips_cents"] == 17300
+    assert dashboard["this_week"]["net_earnings_cents"] == 17300
+    assert dashboard["weekly_history"][0]["gross_earnings_cents"] == 17000
+    assert dashboard["weekly_history"][0]["commission_accrued_cents"] == 2250
+    assert dashboard["weekly_history"][0]["net_earnings_cents"] == 17300
+
+    admin_earnings = await list_driver_earnings(limit=50, offset=0, admin=driver_user, db=db_session)
+    driver_row = next(item for item in admin_earnings["items"] if item["driver_id"] == driver.id)
+    assert driver_row["gross_earnings_cents"] == summary["total_gross_earnings_cents"]
+    assert driver_row["commission_accrued_cents"] == summary["commission_accrued_cents"]
+    assert driver_row["commission_outstanding_cents"] == summary["commission_outstanding_cents"]
+    assert driver_row["withdrawable_balance_cents"] == summary["withdrawable_balance_cents"]
+
     legacy_trip = next(item for item in summary["recent_trips"] if item["ride_id"] == legacy_ride.id)
     assert legacy_trip["gross_fare_cents"] == 2000
     assert legacy_trip["commission_cents"] is None
@@ -99,7 +120,9 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
     assert estimate["estimated_commission_percentage"] == 20.0
 
     breakdown = await DriverFinancialService(db_session).get_ride_earnings_breakdown(driver_user.id, digital_ride.id)
-    assert breakdown["driver_gross_earnings_cents"] == 10000
+    # Driver gross includes the ride fare plus the customer tip; deferred commission is separate.
+    assert breakdown["driver_gross_earnings_cents"] == 10300
+    assert breakdown["deductions_and_supplements"]["customer_tip_cents"] == 300
     assert breakdown["deductions_and_supplements"]["platform_commission_cents"] == 1500
     assert breakdown["deductions_and_supplements"]["platform_commission_percentage"] == 15.0
     assert breakdown["fare_breakdown"]["components_available"] is False

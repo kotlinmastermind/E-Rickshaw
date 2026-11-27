@@ -306,6 +306,7 @@ data class DriverEarningsSummaryDto(
     @Deprecated("Driver earnings are shown as gross; commission is reported separately.")
     val todayNetRupees: Double get() = todayGrossRupees
     val weeklyRupees: Double get() = weeklyEarningsCents / 100.0
+    val weeklyCommissionRupees: Double get() = weeklyCommissionCents / 100.0
     val totalGrossRupees: Double get() = totalEarningsCents / 100.0
     val commissionAccruedRupees: Double get() = commissionAccruedCents / 100.0
     val todayCommissionRupees: Double get() = todayCommissionCents / 100.0
