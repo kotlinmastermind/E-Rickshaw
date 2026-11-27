@@ -90,26 +90,12 @@ class DriverFinancialService:
             res2 = await self.db.execute(stmt2)
             driver = res2.scalars().first()
         if not driver:
-            # Create driver profile automatically if valid user
             user = await self.db.get(User, user_id_or_driver_id)
             if user:
-                driver = DriverProfile(
-                    user_id=user.id,
-                    license_number=f"DL01-{secrets.token_hex(4).upper()}",
-                    rating_average=4.95,
-                    total_trips=12
-                )
-                self.db.add(driver)
-                await self.db.flush()
-
-                # Initialize DriverWallet in driver_wallets table
-                wallet = DriverWallet(
-                    driver_id=driver.id,
-                    balance_cents=450000,
-                    currency="INR"
-                )
-                self.db.add(wallet)
-                await self.db.commit()
+                # Use the canonical profile initializer; it creates a zero-balance wallet
+                # and never seeds sample ratings, trips, or money.
+                from backend.application.services.driver_service import DriverService
+                driver = await DriverService(self.db).get_or_create_profile(user.id)
             else:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found.")
         return driver
@@ -157,7 +143,7 @@ class DriverFinancialService:
         total_gross_cents = sum(r.final_fare_cents or 0 for r in rides)
         total_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in rides)
         total_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in rides)
-        total_net_cents = (total_gross_cents - total_commission_cents) + total_tips_cents
+        total_net_cents = total_gross_cents + total_tips_cents
 
         # Calculate today's figures
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -168,7 +154,7 @@ class DriverFinancialService:
         today_gross_cents = sum(r.final_fare_cents or 0 for r in today_rides)
         today_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in today_rides)
         today_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in today_rides)
-        today_net_cents = (today_gross_cents - today_commission_cents) + today_tips_cents
+        today_net_cents = today_gross_cents + today_tips_cents
         today_effective_pct = (
             round((today_commission_cents / today_gross_cents) * 100.0, 2)
             if today_gross_cents > 0
@@ -202,7 +188,7 @@ class DriverFinancialService:
             d_gross = sum(r.final_fare_cents or 0 for r in matching)
             d_comm = sum(ride_comm_map.get(r.id, 0) for r in matching)
             d_tips = sum(getattr(r, "tip_cents", 0) or 0 for r in matching)
-            d_net = (d_gross - d_comm) + d_tips
+            d_net = d_gross + d_tips
             daily_breakdown.append({
                 "date": day_dt.strftime("%Y-%m-%d"),
                 "day_name": day_dt.strftime("%a"),
@@ -211,6 +197,8 @@ class DriverFinancialService:
                 "gross_fare_rupees": round(d_gross / 100, 2),
                 "commission_cents": d_comm,
                 "tips_cents": d_tips,
+                "gross_earnings_cents": d_gross,
+                "gross_earnings_rupees": round(d_gross / 100, 2),
                 "net_earnings_cents": d_net,
                 "net_earnings_rupees": round(d_net / 100, 2),
                 "online_hours": round(min(10.0, len(matching) * 0.9), 1)
@@ -228,12 +216,13 @@ class DriverFinancialService:
             wg = sum(r.final_fare_cents or 0 for r in w_matching)
             wc = sum(ride_comm_map.get(r.id, 0) for r in w_matching)
             wt = sum(getattr(r, "tip_cents", 0) or 0 for r in w_matching)
-            wn = (wg - wc) + wt
+            wn = wg + wt
             weekly_breakdown.append({
                 "week_label": f"Week of {w_start.strftime('%b %d')}",
                 "week_start": w_start.strftime("%Y-%m-%d"),
                 "trips_count": len(w_matching),
                 "gross_earnings_cents": wg,
+                "gross_earnings_rupees": round(wg / 100, 2),
                 "net_earnings_cents": wn,
                 "net_earnings_rupees": round(wn / 100, 2),
                 "commission_cents": wc,
@@ -252,6 +241,8 @@ class DriverFinancialService:
             "wallet_balance_rupees": round(current_balance / 100, 2),
             "today": {
                 "trips_count": len(today_rides),
+                "gross_earnings_cents": today_gross_cents,
+                "gross_earnings_rupees": round(today_gross_cents / 100, 2),
                 "gross_fare_cents": today_gross_cents,
                 "commission_cents": today_commission_cents,
                 "tips_cents": today_tips_cents,
@@ -270,12 +261,14 @@ class DriverFinancialService:
             "all_time": {
                 "total_trips": len(rides),
                 "total_gross_cents": total_gross_cents,
+                "total_gross_rupees": round(total_gross_cents / 100, 2),
                 "total_commission_cents": total_commission_cents,
                 "total_net_cents": total_net_cents,
                 "total_net_rupees": round(total_net_cents / 100, 2)
             },
             "daily_history": daily_breakdown,
-            "weekly_history": weekly_breakdown
+            "weekly_history": weekly_breakdown,
+            "commission_snapshot_missing_count": missing_snapshot_count
         }
 
     # -------------------------------------------------------------------------
