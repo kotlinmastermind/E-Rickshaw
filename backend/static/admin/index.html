@@ -3914,8 +3914,9 @@
                 RIDE_CANCELLED: 'CANCELLED',
                 RIDE_EXPIRED: 'EXPIRED'
             };
-            const nextStatus = eventPayload.status || payload?.status || rideEventStatuses[eventType];
-            if (!nextStatus) return;
+            const nextStatus = String(eventPayload.status || payload?.status || rideEventStatuses[eventType] || '').toUpperCase();
+            const knownRideStatuses = ['REQUESTED', 'ASSIGNED', 'ARRIVED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'CANCELLED', 'EXPIRED'];
+            if (!knownRideStatuses.includes(nextStatus)) return;
             const rideId = String(payload?.ride_id || eventPayload.ride_id || '');
             if (!rideId) return;
             const ride = STATE.activeRides.find(item => String(item.id) === rideId);
