@@ -171,6 +171,7 @@ fun DigitalGiftCardVisual(
 fun GiftCardsHomeScreen(onNavigate: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val wallet by RiderRepository.wallet.collectAsState()
+    val walletLoadState by RiderRepository.walletLoadState.collectAsState()
     val myCards by RiderRepository.myGiftCards.collectAsState()
     val config by RiderRepository.giftCardConfig.collectAsState()
 
@@ -265,15 +266,15 @@ fun GiftCardsHomeScreen(onNavigate: (String) -> Unit) {
                     Text(text = "Redeemed Balance in Wallet", color = TextMuted, fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "₹${wallet.balanceRupees.toInt()}.00",
+                        text = if (wallet.walletId.isNotBlank()) "₹${String.format(java.util.Locale.US, "%.2f", wallet.balanceRupees)}" else "Balance unavailable",
                         color = ElectricCyan,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.ExtraBold
                     )
                 }
                 NeoButton(
-                    text = "Check Balance",
-                    onClick = { onNavigate("gift_cards_redeem") },
+                    text = "Refresh Balance",
+                    onClick = { scope.launch { RiderRepository.fetchWalletBalance() } },
                     backgroundColor = SurfaceElevated
                 )
             }
