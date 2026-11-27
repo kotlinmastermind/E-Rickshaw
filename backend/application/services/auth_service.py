@@ -88,26 +88,38 @@ class AuthService:
                 detail="A valid mobile phone number is required (e.g., +919876543210)."
             )
 
-        # Enforce resend cooldown to protect against SMS spamming
+        # Reserve the resend window atomically before contacting Twilio. A separate
+        # EXISTS followed by SET allows concurrent workers to send duplicate SMS.
         cooldown_key = f"otp_cooldown:{norm_phone}"
         try:
-            if await redis_client.exists(cooldown_key):
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail=f"Please wait {settings.OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting a new passcode."
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+            reserved = await redis_client.set_nx_strict(
+                cooldown_key,
+                "1",
+                ex=settings.OTP_RESEND_COOLDOWN_SECONDS,
+            )
+        except Exception as redis_error:
+            logger.warning("OTP cooldown reservation unavailable; refusing to send verification SMS.")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Verification service is temporarily unavailable. Please try again shortly.",
+            ) from redis_error
+
+        if not reserved:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {settings.OTP_RESEND_COOLDOWN_SECONDS} seconds before requesting a new passcode.",
+            )
 
         sms_provider = get_sms_provider()
-        await sms_provider.send_verification_otp(norm_phone)
-
         try:
-            await redis_client.set(cooldown_key, "1", ex=settings.OTP_RESEND_COOLDOWN_SECONDS)
+            await sms_provider.send_verification_otp(norm_phone)
         except Exception:
-            pass
+            # Do not strand a user behind a cooldown when Twilio did not accept the request.
+            try:
+                await redis_client.delete_strict(cooldown_key)
+            except Exception:
+                logger.warning("Unable to release OTP cooldown after provider failure; TTL will expire naturally.")
+            raise
 
         phone_masked = f"{norm_phone[-4:].rjust(len(norm_phone), '*')}"
         return {
