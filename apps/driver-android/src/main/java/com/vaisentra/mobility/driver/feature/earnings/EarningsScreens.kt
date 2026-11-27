@@ -950,11 +950,11 @@ fun InstantPayoutScreen(
 
     val primaryAccount = accounts.firstOrNull { it.isPrimary } ?: accounts.firstOrNull()
     val resolvedMask = if (payoutMethod == "UPI Direct") {
-        primaryAccount?.upiVpa ?: primaryAccount?.accountNumberMask ?: "UPI-DEFAULT"
+        primaryAccount?.upiVpa ?: primaryAccount?.accountNumberMask ?: ""
     } else {
-        primaryAccount?.accountNumberMask ?: "**** 9988"
+        primaryAccount?.accountNumberMask ?: ""
     }
-    val resolvedIfsc = if (payoutMethod == "UPI Direct") "UPI" else (primaryAccount?.ifscCode ?: "HDFC0001234")
+    val resolvedIfsc = if (payoutMethod == "UPI Direct") "UPI" else (primaryAccount?.ifscCode ?: "")
     var attemptNonce by remember(withdrawAmount, resolvedMask, resolvedIfsc) { mutableStateOf(0) }
     val pendingIdempotencyKey = remember(withdrawAmount, resolvedMask, resolvedIfsc, attemptNonce) {
         "payout_${java.util.UUID.randomUUID()}"
@@ -968,7 +968,7 @@ fun InstantPayoutScreen(
     ) {
         CockpitHeader(
             title = "Instant Cashout",
-            subtitle = "Zero-delay IMPS/UPI payout directly to your bank",
+            subtitle = "Bank payout request · subject to verification and settlement",
             onBack = onNavigateBack
         )
 
@@ -987,9 +987,9 @@ fun InstantPayoutScreen(
                     ) {
                         Column {
                             Text("MAX WITHDRAWABLE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("₹${"%.2f".format(earnings.walletBalanceRupees)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            Text("₹${"%.2f".format(earnings.withdrawableBalanceRupees)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         }
-                        CockpitBadge("IMPS READY", ElectricCyan)
+                        CockpitBadge(if (primaryAccount != null) "ACCOUNT LINKED" else "ACCOUNT REQUIRED", if (primaryAccount != null) ElectricCyan else AmberWarning)
                     }
                 }
 
@@ -1029,7 +1029,7 @@ fun InstantPayoutScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            if (primaryAccount != null) "Destination: $resolvedMask ($resolvedIfsc)" else "Destination: Pending account link",
+                            if (primaryAccount != null) "Destination: $resolvedMask ($resolvedIfsc)" else "Add a verified payout account before requesting a payout",
                             color = CockpitTextSecondary,
                             fontSize = 11.sp
                         )
@@ -1040,7 +1040,7 @@ fun InstantPayoutScreen(
 
             CockpitButton(
                 text = if (isSubmitting) "PROCESSING..." else "CONFIRM WITHDRAWAL OF ₹${withdrawAmount.ifBlank { "0" }}",
-                enabled = !isSubmitting && (withdrawAmount.toDoubleOrNull() ?: 0.0) > 0.0,
+                enabled = !isSubmitting && primaryAccount != null && (withdrawAmount.toDoubleOrNull() ?: 0.0) >= 100.0 && (withdrawAmount.toDoubleOrNull() ?: 0.0) * 100.0 <= earnings.withdrawableBalanceCents.toDouble(),
                 onClick = {
                     val amt = withdrawAmount.toDoubleOrNull() ?: 0.0
                     isSubmitting = true
@@ -1056,7 +1056,7 @@ fun InstantPayoutScreen(
                             onShowToast("Payout request of ₹$amt submitted!")
                             onPayoutSuccess()
                         } else {
-                            onShowToast("Payout failed. Check wallet balance.")
+                            onShowToast("Payout failed. Check available balance and payout account.")
                         }
                     }
                 },
@@ -1107,7 +1107,7 @@ fun DriverLedgerScreen(
                     ) {
                         Column {
                             Text("RUNNING WALLET BALANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            val displayBal = liveLedger.firstOrNull()?.balanceAfterRupees ?: earnings.walletBalanceRupees
+                            val displayBal = earnings.walletBalanceRupees
                             Text("₹${"%.2f".format(displayBal)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         }
                         Column(horizontalAlignment = Alignment.End) {
