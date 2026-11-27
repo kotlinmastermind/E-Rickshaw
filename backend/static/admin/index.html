@@ -1185,11 +1185,12 @@
                                         <th class="py-2.5 px-3">Driver Share %</th>
                                         <th class="py-2.5 px-3">Status</th>
                                         <th class="py-2.5 px-3">Deployed At</th>
+                                        <th class="py-2.5 px-3">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="commission-table-body" class="divide-y divide-border text-slate-300">
                                     <tr>
-                                        <td colspan="5" class="py-4 text-center text-slate-500 font-mono">Loading
+                                        <td colspan="6" class="py-4 text-center text-slate-500 font-mono">Loading
                                             commission versions...</td>
                                     </tr>
                                 </tbody>
@@ -3986,32 +3987,65 @@
         }
 
         function renderCommissionsTable() {
-            const tbody = document.getElementById('commission-table-body');
+            const tbody = document.getElementById("commission-table-body");
             if (!tbody) return;
             const list = STATE.commissions || [];
-            tbody.innerHTML = '';
+            tbody.innerHTML = "";
             if (list.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-slate-500 font-mono">No commission versions deployed yet.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="6" class="py-4 text-center text-slate-500 font-mono">No commission versions deployed yet.</td></tr>`;
                 return;
             }
             list.forEach(c => {
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-surface/50 transition-colors';
-                const platPct = c.platform_commission_percentage || c.commission_percentage || 10.0;
-                const drvPct = c.driver_share_percentage || (100.0 - platPct);
-                const status = c.approval_status || (c.is_active ? 'ACTIVE' : 'DRAFT');
-                let badge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">ACTIVE</span>';
-                if (status === 'PENDING') badge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">PENDING REVIEW</span>';
-
+                const tr = document.createElement("tr");
+                tr.className = "hover:bg-surface/50 transition-colors";
+                const platformPct = Number(c.platform_commission_percentage ?? c.commission_percentage);
+                const driverPct = Number(c.driver_share_percentage);
+                const platformLabel = Number.isFinite(platformPct) ? `${platformPct.toFixed(1)}%` : "N/A";
+                const driverLabel = Number.isFinite(driverPct) ? `${driverPct.toFixed(1)}%` : "N/A";
+                const status = c.approval_status || (c.is_active ? "ACTIVE" : "DRAFT");
+                let badge = `<span class="px-2 py-0.5 rounded-md bg-slate-700 text-slate-300 font-mono text-[10px] font-bold">${status}</span>`;
+                if (status === "PENDING") badge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">PENDING REVIEW</span>';
+                if (status === "ACTIVE") badge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">ACTIVE</span>';
+                if (status === "APPROVED") badge = '<span class="px-2 py-0.5 rounded-md bg-cyan-dim text-cyan-glow font-mono text-[10px] font-bold">APPROVED · SCHEDULED</span>';
+                if (status === "REJECTED") badge = '<span class="px-2 py-0.5 rounded-md bg-crimson-dim text-crimson-glow font-mono text-[10px] font-bold">REJECTED</span>';
+                const actions = status === "PENDING"
+                    ? `<div class="flex gap-1"><button onclick="reviewCommissionRule('${c.id}', true)" class="px-2 py-1 rounded bg-emerald-dim text-emerald-glow">Approve</button><button onclick="reviewCommissionRule('${c.id}', false)" class="px-2 py-1 rounded bg-crimson-dim text-crimson-glow">Reject</button></div>`
+                    : `<span class="text-slate-500">—</span>`;
                 tr.innerHTML = `
-                    <td class="py-2.5 px-3 font-mono font-bold text-white">v${c.version || 1}</td>
-                    <td class="py-2.5 px-3 font-mono font-bold text-purple-400">${platPct.toFixed(1)}%</td>
-                    <td class="py-2.5 px-3 font-mono font-bold text-emerald-glow">${drvPct.toFixed(1)}%</td>
+                    <td class="py-2.5 px-3 font-mono font-bold text-white">v${c.version || "?"}</td>
+                    <td class="py-2.5 px-3 font-mono font-bold text-purple-400">${platformLabel}</td>
+                    <td class="py-2.5 px-3 font-mono font-bold text-emerald-glow">${driverLabel}</td>
                     <td class="py-2.5 px-3">${badge}</td>
-                    <td class="py-2.5 px-3 text-slate-400 font-mono text-[10px]">${(c.created_at || c.effective_from || '').slice(0, 10)}</td>
+                    <td class="py-2.5 px-3 text-slate-400 font-mono text-[10px]">${(c.effective_from || c.created_at || "").slice(0, 10)}</td>
+                    <td class="py-2.5 px-3">${actions}</td>
                 `;
                 tbody.appendChild(tr);
             });
+        }
+
+        async function reviewCommissionRule(ruleId, approve) {
+            const decision = approve ? "approve" : "reject";
+            const reason = window.prompt(`Reason to ${decision} commission rule ${ruleId}:`);
+            if (!reason || reason.trim().length < 10) {
+                showToast("A review reason of at least 10 characters is required.", "error");
+                return;
+            }
+            try {
+                const headers = { "Content-Type": "application/json" };
+                if (STATE.adminToken) headers["Authorization"] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/commissions/${encodeURIComponent(ruleId)}/review`, {
+                    method: "POST", headers, body: JSON.stringify({ approve, reason: reason.trim() })
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || "Commission rule review failed", "error");
+                    return;
+                }
+                showToast(`Commission rule ${approve ? "approved" : "rejected"}.`);
+                await loadCommissionsData();
+            } catch (err) {
+                showToast("Network error while reviewing commission rule", "error");
+            }
         }
 
         async function submitNewCommissionRule() {
