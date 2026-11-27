@@ -107,6 +107,9 @@ class TrackingAdvancedService:
                     "phone": d_user.phone_number if d_user else None
                 }
 
+        vehicle_label = vehicle_model or "Vehicle details unavailable"
+        plate_label = vehicle_plate or "Plate not available"
+
         # Feature 122: Trip status timeline
         timeline_events = [
             {
@@ -121,7 +124,7 @@ class TrackingAdvancedService:
                 "label": "Chauffeur Assigned",
                 "completed": ride.status in ["ASSIGNED", "ARRIVED", "IN_PROGRESS", "COMPLETED"],
                 "timestamp": ride.assigned_at.isoformat() if ride.assigned_at else None,
-                "description": f"{vehicle_model} en route with precision navigation"
+                "description": f"{vehicle_label} en route with precision navigation"
             },
             {
                 "step": "CHAUFFEUR_ARRIVED",
@@ -152,9 +155,9 @@ class TrackingAdvancedService:
         traffic_note = "Minor congestion on Senapati Bapat Marg (+2 mins adjusted)"
 
         # Feature 121: Accessibility Announcement text
-        announcement = f"Chauffeur is {base_eta} minutes away. Plate {vehicle_plate}. OTP passcode is {ride.start_otp}."
+        announcement = f"Driver is {base_eta} minutes away. {plate_label}. OTP passcode is {ride.start_otp}."
         if ride.status == "ARRIVED":
-            announcement = f"Your chauffeur has arrived at {ride.pickup_address}. Vehicle {vehicle_model}, Plate {vehicle_plate}."
+            announcement = f"Your driver has arrived at {ride.pickup_address}. {vehicle_label}, {plate_label}."
         elif ride.status == "IN_PROGRESS":
             announcement = f"Journey in progress to {ride.destination_address}. ETA is {base_eta} minutes."
 
