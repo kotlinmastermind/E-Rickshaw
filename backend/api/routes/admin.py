@@ -1165,6 +1165,29 @@ async def assign_driver_to_service_area(
     return {"driver_id": driver_id, "service_area_id": service_area_id, "is_active": True}
 
 
+@router.get("/drivers/{driver_id}/service-areas")
+async def list_driver_service_areas(
+    driver_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.domain.models import DriverServiceAreaAssignment, GeofenceZone
+    if not await db.get(DriverProfile, driver_id):
+        raise HTTPException(status_code=404, detail="Driver profile not found.")
+    rows = (await db.execute(
+        select(DriverServiceAreaAssignment, GeofenceZone)
+        .join(GeofenceZone, GeofenceZone.id == DriverServiceAreaAssignment.service_area_id)
+        .where(DriverServiceAreaAssignment.driver_id == driver_id)
+        .order_by(GeofenceZone.name)
+    )).all()
+    return [
+        {"service_area_id": assignment.service_area_id, "name": zone.name, "city_code": zone.city_code,
+         "is_active": assignment.is_active, "assigned_at": assignment.assigned_at.isoformat(),
+         "revoked_at": assignment.revoked_at.isoformat() if assignment.revoked_at else None}
+        for assignment, zone in rows
+    ]
+
+
 @router.delete("/drivers/{driver_id}/service-areas/{service_area_id}")
 async def revoke_driver_service_area(
     driver_id: str,
