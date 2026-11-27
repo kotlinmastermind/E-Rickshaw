@@ -171,7 +171,6 @@ fun DigitalGiftCardVisual(
 fun GiftCardsHomeScreen(onNavigate: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     val wallet by RiderRepository.wallet.collectAsState()
-    val walletLoadState by RiderRepository.walletLoadState.collectAsState()
     val myCards by RiderRepository.myGiftCards.collectAsState()
     val config by RiderRepository.giftCardConfig.collectAsState()
 
