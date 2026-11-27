@@ -796,6 +796,7 @@ class SurgeRulePayload(BaseModel):
 class GeofencePayload(BaseModel):
     name: str
     zone_type: str = "RESTRICTED"  # RESTRICTED, SERVICE_AREA, HIGH_DEMAND
+    city_code: Optional[str] = Field(None, min_length=2, max_length=32)
     coordinates: List[dict]  # [{"lat": 19.0, "lng": 72.8}, ...]
     surge_multiplier: float = 1.0
 
@@ -1105,7 +1106,7 @@ async def create_geofence(
     db: AsyncSession = Depends(get_db)
 ):
     result = await AdminGovernanceService(db).save_geofence(admin.id, None, {
-        "name": payload.name, "zone_type": payload.zone_type, "coordinates": payload.coordinates,
+        "name": payload.name, "zone_type": payload.zone_type, "city_code": payload.city_code, "coordinates": payload.coordinates,
         "surge_multiplier": payload.surge_multiplier, "is_active": True,
     })
     return {**result, "status": "CREATED", "zone_id": result["id"]}
@@ -1122,6 +1123,7 @@ async def list_geofences(
             "id": z.id,
             "name": z.name,
             "zone_type": z.zone_type,
+            "city_code": z.city_code,
             "coordinates": json.loads(z.coordinates_json),
             "is_active": z.is_active,
             "surge_multiplier": z.surge_multiplier
