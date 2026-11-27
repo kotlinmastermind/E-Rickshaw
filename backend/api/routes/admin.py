@@ -151,7 +151,12 @@ async def get_live_mobility_feed(
     gross_booking_inr = round(gross_booking_cents / 100.0, 2)
 
     online_drivers_count = (await db.execute(
-        select(func.count(DriverAvailability.id)).where(DriverAvailability.is_online.is_(True))
+        select(func.count(DriverAvailability.id))
+        .join(DriverProfile, DriverAvailability.driver_id == DriverProfile.id)
+        .where(
+            DriverAvailability.is_online.is_(True),
+            DriverProfile.approval_status == "APPROVED"
+        )
     )).scalar_one()
 
     driver_rows = (await db.execute(
@@ -237,7 +242,6 @@ async def get_live_mobility_feed(
         .join(User, CustomerProfile.user_id == User.id)
         .where(User.role == "customer")
         .order_by(User.created_at.desc())
-        .limit(200)
     )).all()
     customer_stats_rows = (await db.execute(
         select(
