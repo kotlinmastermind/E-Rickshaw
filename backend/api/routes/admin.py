@@ -495,7 +495,7 @@ class CreateFareRulePayload(BaseModel):
     fare_cap_cents: Optional[int] = Field(default=None, ge=0)
 
 class UpdateFareRulePayload(BaseModel):
-    city_code: Optional[str] = "DELHI_NCR"
+    city_code: str = Field(..., min_length=1, max_length=32)
     base_fare_rupees: Optional[float] = Field(None, ge=0.0)
     per_km_rupees: Optional[float] = Field(None, ge=0.0)
     per_minute_rupees: Optional[float] = Field(None, ge=0.0)
