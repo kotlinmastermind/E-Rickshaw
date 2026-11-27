@@ -5,6 +5,7 @@ import pytest
 import time
 from backend.application.services.live_location_service import LiveLocationService
 from backend.infrastructure.cache.redis_client import redis_client
+from backend.api.routes.ws import ws_manager
 
 
 @pytest.mark.asyncio
@@ -44,6 +45,35 @@ async def test_ingest_driver_location_valid():
     cell = res["h3_cell"]
     drivers_in_cell = await service.get_drivers_in_cells({cell})
     assert driver_id in drivers_in_cell
+
+
+@pytest.mark.asyncio
+async def test_ride_location_broadcast_matches_rider_websocket_contract(monkeypatch):
+    service = LiveLocationService(db=None)
+    broadcasts = []
+
+    async def capture_broadcast(ride_id, payload):
+        broadcasts.append((ride_id, payload))
+
+    monkeypatch.setattr(ws_manager, "broadcast_to_ride", capture_broadcast)
+    result = await service.ingest_driver_location(
+        driver_id="driver_ws_contract",
+        latitude=25.5941,
+        longitude=85.1376,
+        speed_mps=4.5,
+        is_online=True,
+        is_busy=True,
+        active_ride_id="ride_ws_contract",
+    )
+
+    assert result["status"] == "RECORDED"
+    assert len(broadcasts) == 1
+    ride_id, payload = broadcasts[0]
+    assert ride_id == "ride_ws_contract"
+    assert payload["event_type"] == "DRIVER_LOCATION_UPDATE"
+    assert payload["payload"]["latitude"] == 25.5941
+    assert payload["payload"]["longitude"] == 85.1376
+    assert payload["payload"]["speed_mps"] == 4.5
 
 
 @pytest.mark.asyncio

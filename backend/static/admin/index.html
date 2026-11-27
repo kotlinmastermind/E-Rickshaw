@@ -3871,8 +3871,14 @@
             if (eventType === 'DRIVER_OFFLINE') {
                 const driver = STATE.drivers.find(d => String(d.id) === driverId || String(d.user_id) === driverId);
                 if (!driver) return;
+                const wasOnline = ['AVAILABLE', 'IN_TRIP'].includes(String(driver.status || '').toUpperCase());
                 driver.status = 'OFFLINE';
                 driver.location_is_stale = true;
+                if (wasOnline && STATE.stats) {
+                    STATE.stats.online_drivers = Math.max(0, Number(STATE.stats.online_drivers || 0) - 1);
+                    const onlineEl = document.getElementById('stat-online-drivers');
+                    if (onlineEl) onlineEl.innerText = STATE.stats.online_drivers;
+                }
                 renderMapMarkers();
                 renderDriverTable();
                 return;
