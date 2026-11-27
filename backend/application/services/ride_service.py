@@ -376,6 +376,7 @@ class RideService:
         if resolved_area.id != ride_obj.service_area_id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride service area no longer matches its route.")
         await service_areas.require_driver_assignment(driver.id, ride_obj.service_area_id)
+        await service_areas.require_fresh_driver_inside(driver.id, ride_obj.service_area_id)
 
         from backend.domain.models import DriverVehicleAssignment, Vehicle
         stmt_veh = (
