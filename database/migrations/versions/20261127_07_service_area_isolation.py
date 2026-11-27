@@ -18,6 +18,13 @@ def upgrade() -> None:
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names())
 
+    if "pooled_trips" in tables:
+        columns = {column["name"] for column in inspector.get_columns("pooled_trips")}
+        if "service_area_id" in columns:
+            with op.batch_alter_table("pooled_trips") as batch_op:
+                batch_op.drop_index("ix_pooled_trips_service_area_id")
+                batch_op.drop_constraint("fk_pooled_trips_service_area_id_geofence_zones", type_="foreignkey")
+                batch_op.drop_column("service_area_id")
     if "rides" in tables:
         columns = {column["name"] for column in inspector.get_columns("rides")}
         if "service_area_id" not in columns:
@@ -72,6 +79,33 @@ def upgrade() -> None:
                         sa.text("UPDATE rides SET service_area_id = :area_id WHERE id = :ride_id"),
                         {"area_id": matching_ids[0], "ride_id": ride["id"]},
                     )
+
+    if "pooled_trips" in tables:
+        pooled_columns = {column["name"] for column in inspector.get_columns("pooled_trips")}
+        if "service_area_id" not in pooled_columns:
+            with op.batch_alter_table("pooled_trips") as batch_op:
+                batch_op.add_column(sa.Column("service_area_id", sa.String(36), nullable=True))
+                batch_op.create_foreign_key(
+                    "fk_pooled_trips_service_area_id_geofence_zones",
+                    "geofence_zones",
+                    ["service_area_id"],
+                    ["id"],
+                    ondelete="RESTRICT",
+                )
+                batch_op.create_index("ix_pooled_trips_service_area_id", ["service_area_id"])
+        if "pooled_bookings" in tables:
+            rows = bind.execute(sa.text(
+                "SELECT pb.pooled_trip_id, MIN(r.service_area_id) AS area_id "
+                "FROM pooled_bookings pb JOIN rides r ON r.id = pb.ride_id "
+                "WHERE r.service_area_id IS NOT NULL "
+                "GROUP BY pb.pooled_trip_id "
+                "HAVING COUNT(DISTINCT r.service_area_id) = 1"
+            )).mappings().all()
+            for row in rows:
+                bind.execute(
+                    sa.text("UPDATE pooled_trips SET service_area_id = :area_id WHERE id = :trip_id AND service_area_id IS NULL"),
+                    {"area_id": row["area_id"], "trip_id": row["pooled_trip_id"]},
+                )
 
     if "driver_service_area_assignments" not in tables:
         op.create_table(
