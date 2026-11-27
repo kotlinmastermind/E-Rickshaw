@@ -255,8 +255,9 @@ async def export_dataset(
     db: AsyncSession = Depends(get_db)
 ):
     """Feature 393: Data export with permission checks and auto-redaction."""
-    # Derive active admin permissions
-    permissions = ["analytics:export", "finance:export", "pii:export", "admin.access"]
+    # Admin authentication alone does not grant finance or unmasked PII export.
+    # Until role-scoped export grants are wired here, permit only redacted analytics exports.
+    permissions = ["analytics:export"]
     return await AnalyticsBiService(db).export_dataset_with_permissions(
         dataset=payload.dataset,
         user_permissions=permissions,
