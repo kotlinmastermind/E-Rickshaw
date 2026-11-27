@@ -12,7 +12,7 @@ from backend.domain.state_machine.ride_state_machine import ACTIVE_RIDE_STATUSES
 from backend.domain.models import (
     User, Session, DriverProfile, CustomerProfile, Ride, VehicleCategory,
     DriverAvailability, DriverLocation, FareRule, Vehicle, DriverVehicleAssignment, DriverDocument,
-    AdministrativeAuditLog, CustomerKycDocument, CustomerKycAuditLog
+    AdministrativeAuditLog, CustomerKycDocument, CustomerKycAuditLog, GeofenceZone
 )
 from backend.infrastructure.security.crypto import create_jwt_token, decode_jwt_token,hash_secret , verify_password
 from backend.application.services.admin_service import AdminService
