@@ -478,6 +478,7 @@ class DriverDocumentReviewPayload(BaseModel):
 
 class CreateFareRulePayload(BaseModel):
     category_id: str
+    city_code: Optional[str] = Field(None, min_length=2, max_length=32)
     base_fare_cents: int = Field(..., ge=0)
     per_km_cents: int = Field(..., ge=0)
     per_minute_cents: int = Field(..., ge=0)
@@ -709,7 +710,7 @@ async def create_fare_rule(
 ):
     service = AdminGovernanceService(db)
     return await service.create_fare_draft(admin.id, {
-        "category_id": payload.category_id, "base_fare_cents": payload.base_fare_cents,
+        "category_id": payload.category_id, "city_code": payload.city_code, "base_fare_cents": payload.base_fare_cents,
         "per_km_cents": payload.per_km_cents, "per_minute_cents": payload.per_minute_cents,
         "minimum_fare_cents": payload.minimum_fare_cents, "surge_multiplier": payload.surge_multiplier,
         "fare_cap_cents": getattr(payload, "fare_cap_cents", None), "effective_from": datetime.now(timezone.utc),
