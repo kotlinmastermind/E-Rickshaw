@@ -126,6 +126,7 @@ async def test_phase2_customer_and_admin_workflows(db_session):
             # 6. Admin Geofence CRUD & Point Verification
             geo_resp = await client.post("/api/v1/admin/geofences", json={
                 "name": "South Mumbai VIP Corridor",
+                "city_code": "MUMBAI",
                 "zone_type": "SERVICE_AREA",
                 "coordinates": [
                     {"lat": 18.90, "lng": 72.80},
