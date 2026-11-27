@@ -51,11 +51,11 @@ async def _seed_test_data(session):
     )).scalars().all()
     if not existing_areas:
         test_areas = [
-            ("TEST_DELHI_NCR", [{"lat": 27.0, "lng": 76.0}, {"lat": 27.0, "lng": 78.0}, {"lat": 29.5, "lng": 78.0}, {"lat": 29.5, "lng": 76.0}]),
-            ("TEST_MUMBAI", [{"lat": 17.5, "lng": 72.0}, {"lat": 17.5, "lng": 74.0}, {"lat": 20.0, "lng": 74.0}, {"lat": 20.0, "lng": 72.0}]),
-            ("TEST_BENGALURU", [{"lat": 11.5, "lng": 76.5}, {"lat": 11.5, "lng": 78.5}, {"lat": 14.0, "lng": 78.5}, {"lat": 14.0, "lng": 76.5}]),
-            ("TEST_PATNA", [{"lat": 24.5, "lng": 84.0}, {"lat": 24.5, "lng": 86.0}, {"lat": 26.5, "lng": 86.0}, {"lat": 26.5, "lng": 84.0}]),
-            ("TEST_LUCKNOW", [{"lat": 25.5, "lng": 80.0}, {"lat": 25.5, "lng": 82.0}, {"lat": 28.0, "lng": 82.0}, {"lat": 28.0, "lng": 80.0}]),
+            ("DELHI_NCR", [{"lat": 27.0, "lng": 76.0}, {"lat": 27.0, "lng": 78.0}, {"lat": 29.5, "lng": 78.0}, {"lat": 29.5, "lng": 76.0}]),
+            ("MUMBAI", [{"lat": 17.5, "lng": 72.0}, {"lat": 17.5, "lng": 74.0}, {"lat": 20.0, "lng": 74.0}, {"lat": 20.0, "lng": 72.0}]),
+            ("BENGALURU", [{"lat": 11.5, "lng": 76.5}, {"lat": 11.5, "lng": 78.5}, {"lat": 14.0, "lng": 78.5}, {"lat": 14.0, "lng": 76.5}]),
+            ("PATNA", [{"lat": 24.5, "lng": 84.0}, {"lat": 24.5, "lng": 86.0}, {"lat": 26.5, "lng": 86.0}, {"lat": 26.5, "lng": 84.0}]),
+            ("LUCKNOW", [{"lat": 25.5, "lng": 80.0}, {"lat": 25.5, "lng": 82.0}, {"lat": 28.0, "lng": 82.0}, {"lat": 28.0, "lng": 80.0}]),
         ]
         session.add_all([
             GeofenceZone(
