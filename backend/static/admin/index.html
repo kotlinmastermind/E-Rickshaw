@@ -2106,11 +2106,7 @@
                         Multi-City)</label>
                     <select id="tariff-input-city"
                         class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-glow font-bold">
-                        <option value="DELHI_NCR">Delhi NCR (DELHI_NCR)</option>
-                        <option value="PATNA">Patna (PATNA)</option>
-                        <option value="MUMBAI">Mumbai (MUMBAI)</option>
-                        <option value="LUCKNOW">Lucknow (LUCKNOW)</option>
-                        <option value="BENGALURU">Bengaluru (BENGALURU)</option>
+                        <option value="">Select configured service area</option>
                     </select>
                 </div>
                 <div>
@@ -2266,6 +2262,7 @@
             customers: [],
             customerKycDocuments: [],
             categories: [],
+            serviceAreas: [],
             payouts: [],
             welfare: [],
             commissions: [],
@@ -2871,6 +2868,10 @@
 
                     if (Array.isArray(data.tariffs)) {
                         STATE.categories = data.tariffs;
+                    }
+                    if (Array.isArray(data.service_areas)) {
+                        STATE.serviceAreas = data.service_areas;
+                        renderServiceAreaOptions();
                     }
                 }
             } catch (e) {
