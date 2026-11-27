@@ -162,7 +162,6 @@ object DriverWebSocketClient {
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (text == "pong") return
-                Log.d(TAG, "Ride Tracking Event: $text")
                 try {
                     val json = JSONObject(text)
                     val status = json.optString("status", "").uppercase()
