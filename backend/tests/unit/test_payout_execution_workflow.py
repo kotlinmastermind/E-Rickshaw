@@ -373,7 +373,7 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     # If provider lookup has no result yet, do not submit a second POST.
     empty_lookup = MagicMock(status_code=200)
     empty_lookup.json.return_value = {"items": []}
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=empty_lookup)), \\
+    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=empty_lookup)), \
          patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=AssertionError("Must not re-POST while outcome is unknown!"))):
         with pytest.raises(HTTPException) as still_unknown:
             await PayoutExecutionService.execute_provider_payout(
