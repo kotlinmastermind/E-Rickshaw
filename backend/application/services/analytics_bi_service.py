@@ -502,31 +502,33 @@ class AnalyticsBiService:
         promos = (await self.db.execute(select(PromoCode))).scalars().all()
         redemptions = (await self.db.execute(select(PromoRedemption))).scalars().all()
         redemption_counts: Dict[str, int] = {}
+        discount_spend: Dict[str, int] = {}
         for redemption in redemptions:
-            promo_id = getattr(redemption, "promo_code_id", None)
-            if promo_id:
-                redemption_counts[promo_id] = redemption_counts.get(promo_id, 0) + 1
-        campaigns = [
-            {
+            promo_id = redemption.promo_id
+            redemption_counts[promo_id] = redemption_counts.get(promo_id, 0) + 1
+            discount_spend[promo_id] = discount_spend.get(promo_id, 0) + int(redemption.discount_applied_cents or 0)
+        campaigns = []
+        for promo in promos:
+            spend = discount_spend.get(promo.id, 0)
+            campaigns.append({
                 "promo_id": promo.id,
                 "code": promo.code,
-                "title": getattr(promo, "description", None) or promo.code,
+                "title": promo.description or promo.code,
                 "redemptions": redemption_counts.get(promo.id, 0),
-                "status": "ACTIVE" if getattr(promo, "is_active", False) else "INACTIVE",
-                "discount_spend_inr": None,
+                "discount_spend_inr": round(spend / 100, 2),
                 "gross_bookings_generated_inr": None,
                 "net_roi_multiple": None,
                 "subsequent_unsubsidized_trips": None,
-            }
-            for promo in promos
-        ]
+                "status": "ACTIVE" if promo.is_active else "INACTIVE",
+            })
+        total_spend = sum(discount_spend.values())
         return {
-            "active_campaigns_count": sum(1 for promo in promos if getattr(promo, "is_active", False)),
+            "active_campaigns_count": sum(1 for promo in promos if promo.is_active),
             "campaigns": campaigns,
-            "total_discount_spend_inr": None,
+            "total_discount_spend_inr": round(total_spend / 100, 2),
             "total_gross_generated_inr": None,
             "aggregate_roi_multiple": None,
-            "data_available": True,
+            "roi_data_available": False,
         }
 
     # -------------------------------------------------------------------------
@@ -534,15 +536,24 @@ class AnalyticsBiService:
     # -------------------------------------------------------------------------
     async def get_referral_fraud_analytics(self) -> Dict[str, Any]:
         referrals = (await self.db.execute(select(ReferralRecord))).scalars().all()
-        # Referral records do not persist device/IP evidence or a reviewed fraud decision.
+        flagged = [
+            item for item in referrals
+            if (item.fraud_review_status or "").upper() in ("FLAGGED", "REJECTED", "UNDER_REVIEW")
+        ]
+        reasons: Dict[str, int] = {}
+        for item in flagged:
+            reason = (item.fraud_reason or "Reason not recorded").strip()
+            reasons[reason] = reasons.get(reason, 0) + 1
         return {
             "total_referrals_screened": len(referrals),
-            "flagged_suspicious_referrals": None,
+            "flagged_suspicious_referrals": len(flagged),
             "fraud_prevention_savings_inr": None,
-            "detection_heuristics": [],
+            "detection_heuristics": [
+                {"rule": reason, "weight": "RECORDED_REVIEW", "detections": count}
+                for reason, count in sorted(reasons.items(), key=lambda item: item[1], reverse=True)
+            ],
             "suspicious_clusters": [],
-            "fraud_detection_available": False,
-            "message": "Referral records exist, but device/IP evidence and adjudicated fraud outcomes are not stored.",
+            "fraud_detection_available": True,
         }
 
     # -------------------------------------------------------------------------
@@ -708,108 +719,106 @@ class AnalyticsBiService:
         export_format: str = "CSV",
         filters: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """
-        Gated dataset exporter.
-        Enforces:
-        - `analytics:export` for operational aggregates
-        - `finance:export` for revenue / payout records
-        - `pii:export` for unmasked PII. If lacking `pii:export`, auto-masks phone, email, and names.
-        """
+        """Export persisted records only; redact real identity data without pii:export."""
         can_export_analytics = "analytics:export" in user_permissions or "admin.access" in user_permissions
         can_export_finance = "finance:export" in user_permissions or "admin.access" in user_permissions
         can_export_pii = "pii:export" in user_permissions
+        dataset = dataset.upper()
 
         if dataset in ["FINANCE_SETTLEMENTS", "REFUNDS", "PAYOUTS"] and not can_export_finance:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied: Required permission 'finance:export' to download financial records."
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Required permission 'finance:export'.")
         if dataset in ["RIDES", "CHAUFFEURS", "GUESTS"] and not can_export_analytics:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied: Required permission 'analytics:export' to download dataset."
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Required permission 'analytics:export'.")
+        if dataset not in ["RIDES", "CHAUFFEURS", "GUESTS"]:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported export dataset.")
 
-        # Build records
+        def mask_phone(value: Optional[str]) -> Optional[str]:
+            if not value:
+                return None
+            return ("*" * max(0, len(value) - 4)) + value[-4:]
+
         rows: List[Dict[str, Any]] = []
-
         if dataset == "RIDES":
-            rides = (await self.db.execute(select(Ride).limit(100))).scalars().all()
-            for r in rides:
-                customer_name = "Guest"
-                customer_phone = "+91 98*** **000"
-                if can_export_pii:
-                    customer_phone = "+91 98200 12345"
-                    customer_name = "Ratan Tata"
-
+            stmt = (
+                select(Ride, User)
+                .outerjoin(CustomerProfile, CustomerProfile.id == Ride.customer_id)
+                .outerjoin(User, User.id == CustomerProfile.user_id)
+                .order_by(desc(Ride.requested_at))
+                .limit(100)
+            )
+            records = (await self.db.execute(stmt)).all()
+            for ride, user in records:
                 rows.append({
-                    "Ride ID": r.id,
-                    "Status": r.status,
-                    "Guest Name": customer_name,
-                    "Guest Phone": customer_phone,
-                    "Fare (INR)": (r.final_fare_cents or r.estimated_fare_cents or 0) / 100,
-                    "Pickup Lat": r.pickup_latitude,
-                    "Pickup Lon": r.pickup_longitude,
-                    "Created At": (r.requested_at or datetime.now(timezone.utc)).isoformat()
+                    "Ride ID": ride.id,
+                    "Status": ride.status,
+                    "Guest Name": (user.full_name if user and user.full_name else None) if can_export_pii else ("REDACTED" if user else None),
+                    "Guest Phone": (user.phone_number if user else None) if can_export_pii else (mask_phone(user.phone_number) if user else None),
+                    "Fare (INR)": ((ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents) / 100) if (ride.final_fare_cents is not None or ride.estimated_fare_cents is not None) else None,
+                    "Pickup Lat": ride.pickup_latitude,
+                    "Pickup Lon": ride.pickup_longitude,
+                    "Created At": ride.requested_at.isoformat() if ride.requested_at else None,
                 })
         elif dataset == "CHAUFFEURS":
-            drivers = (await self.db.execute(select(DriverProfile).limit(100))).scalars().all()
-            for d in drivers:
+            stmt = (
+                select(DriverProfile, User)
+                .join(User, User.id == DriverProfile.user_id)
+                .order_by(desc(DriverProfile.id))
+                .limit(100)
+            )
+            records = (await self.db.execute(stmt)).all()
+            for driver, user in records:
                 rows.append({
-                    "Driver Profile ID": d.id,
-                    "Approval Status": d.approval_status,
-                    "Rating": d.rating_average,
-                    "Total Trips": d.total_trips,
-                    "Bank Account": "HDFC-****4891" if not can_export_pii else "HDFC-00281050014891",
-                    "Aadhaar Mask": "XXXX-XXXX-8912"
+                    "Driver Profile ID": driver.id,
+                    "Driver Name": (user.full_name if user.full_name else None) if can_export_pii else "REDACTED",
+                    "Phone": user.phone_number if can_export_pii else mask_phone(user.phone_number),
+                    "Approval Status": driver.approval_status,
+                    "Rating": driver.rating_average if int(driver.rating_count or 0) > 0 else None,
+                    "Rating Count": int(driver.rating_count or 0),
+                    "Total Trips": int(driver.total_trips or 0),
                 })
-        else:
-            # Default operational summary
-            rows = [
-                {"Metric": "Total Completed Trips", "Value": "1042"},
-                {"Metric": "Fleet Utilization", "Value": "68.2%"},
-                {"Metric": "Gross Revenue INR", "Value": "2984000.00"},
-                {"Metric": "SLA Compliance", "Value": "98.2%"}
-            ]
+        elif dataset == "GUESTS":
+            stmt = (
+                select(CustomerProfile, User)
+                .join(User, User.id == CustomerProfile.user_id)
+                .order_by(desc(CustomerProfile.id))
+                .limit(100)
+            )
+            records = (await self.db.execute(stmt)).all()
+            for customer, user in records:
+                rows.append({
+                    "Customer Profile ID": customer.id,
+                    "Name": user.full_name if can_export_pii else "REDACTED",
+                    "Phone": user.phone_number if can_export_pii else mask_phone(user.phone_number),
+                    "Email": user.email if can_export_pii else ("REDACTED" if user.email else None),
+                    "Created At": user.created_at.isoformat() if user.created_at else None,
+                })
 
-        # Audit log the export
         self.db.add(AdministrativeAuditLog(
             admin_user_id=admin_user_id,
             action="DATASET_EXPORTED",
             target_resource=dataset,
             target_id=None,
             changes_json=json.dumps({
-                "dataset": dataset,
-                "format": export_format,
-                "row_count": len(rows),
-                "pii_unmasked": can_export_pii
-            })
+                "dataset": dataset, "format": export_format,
+                "row_count": len(rows), "pii_unmasked": can_export_pii,
+            }),
         ))
         await self.db.commit()
 
-        # Generate CSV or JSON
         if export_format.upper() == "CSV":
             output = io.StringIO()
             if rows:
                 writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
                 writer.writeheader()
                 writer.writerows(rows)
-            content = output.getvalue()
             return {
-                "dataset": dataset,
-                "format": "CSV",
-                "row_count": len(rows),
-                "pii_redacted": not can_export_pii,
-                "data": content
+                "dataset": dataset, "format": "CSV", "row_count": len(rows),
+                "pii_redacted": not can_export_pii, "data": output.getvalue(),
             }
-        else:
-            return {
-                "dataset": dataset,
-                "format": "JSON",
-                "row_count": len(rows),
-                "pii_redacted": not can_export_pii,
-                "records": rows
-            }
+        return {
+            "dataset": dataset, "format": "JSON", "row_count": len(rows),
+            "pii_redacted": not can_export_pii, "records": rows,
+        }
 
     # -------------------------------------------------------------------------
     # 394. Scheduled Report Delivery
