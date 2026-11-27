@@ -147,6 +147,12 @@ private fun IncomingOfferModal() {
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
+            text = currentOffer.estimatedCommissionCents?.let { amount -> "Estimated commission: ₹${"%.2f".format(amount / 100.0)}${currentOffer.estimatedCommissionPercentage?.let { " (${it}%)" } ?: ""}" } ?: "Commission estimate unavailable",
+            color = PilotTextMuted,
+            fontSize = 11.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
             text = "Pickup: ${currentOffer.pickupAddress} (${currentOffer.pickupDistanceMeters}m away)",
             color = PilotTextWhite,
             fontSize = 13.sp
