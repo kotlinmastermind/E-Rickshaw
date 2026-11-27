@@ -144,8 +144,7 @@ class ServiceAreaService:
             )
         return pickup
 
-    async def is_driver_inside(self, service_area_id: str, latitude: float, longitude: float) -> bool:
-        lat, lng = self._validate_point(latitude, longitude)
+    async def load_area_boundary(self, service_area_id: str):
         zone = (await self.db.execute(
             select(GeofenceZone).where(
                 GeofenceZone.id == service_area_id,
@@ -154,15 +153,32 @@ class ServiceAreaService:
             )
         )).scalars().first()
         if zone is None or not zone.city_code:
-            return False
+            raise HTTPException(status_code=400, detail="Ride service area is missing or inactive; dispatch is blocked.")
         try:
             polygon = self.parse_polygon(zone.coordinates_json)
-        except ValueError:
-            return False
-        if not self.contains_point(lat, lng, polygon):
-            return False
-        _, restricted_areas = await self._load_active_zones()
-        if any(self.contains_point(lat, lng, restricted) for _, restricted in restricted_areas):
-            return False
+        except ValueError as exc:
+            raise HTTPException(status_code=503, detail="Ride service-area boundary is invalid; dispatch is blocked.") from exc
         await self._ensure_city_active(zone.city_code.strip().upper())
-        return True
+        _, restricted_areas = await self._load_active_zones()
+        return zone, polygon, [polygon for _, polygon in restricted_areas]
+
+    @classmethod
+    def location_is_inside_boundary(
+        cls,
+        latitude: float,
+        longitude: float,
+        service_polygon: List[Dict[str, float]],
+        restricted_polygons: List[List[Dict[str, float]]],
+    ) -> bool:
+        try:
+            lat, lng = cls._validate_point(latitude, longitude)
+        except HTTPException:
+            return False
+        return (
+            cls.contains_point(lat, lng, service_polygon)
+            and not any(cls.contains_point(lat, lng, polygon) for polygon in restricted_polygons)
+        )
+
+    async def is_driver_inside(self, service_area_id: str, latitude: float, longitude: float) -> bool:
+        _, polygon, restricted = await self.load_area_boundary(service_area_id)
+        return self.location_is_inside_boundary(latitude, longitude, polygon, restricted)
