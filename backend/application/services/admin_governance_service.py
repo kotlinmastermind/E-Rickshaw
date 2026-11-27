@@ -396,7 +396,7 @@ class AdminGovernanceService:
         if not include_drafts:
             stmt = stmt.where(FareRule.workflow_status != "DRAFT")
         rows = (await self.db.execute(stmt.order_by(VehicleCategory.sort_order.asc(), FareRule.version.desc()))).all()
-        return [{"id": f.id, "category_id": f.category_id, "category_name": c.name, "category_code": c.code,
+        return [{"id": f.id, "category_id": f.category_id, "category_name": c.name, "category_code": c.code, "city_code": f.city_code,
                  "version": f.version, "base_fare_cents": f.base_fare_cents, "per_km_cents": f.per_km_cents,
                  "per_minute_cents": f.per_minute_cents, "minimum_fare_cents": f.minimum_fare_cents,
                  "surge_multiplier": f.surge_multiplier, "workflow_status": f.workflow_status,
@@ -411,7 +411,7 @@ class AdminGovernanceService:
         rule = FareRule(category_id=category.id, version=current + 1, base_fare_cents=values["base_fare_cents"],
                         per_km_cents=values["per_km_cents"], per_minute_cents=values["per_minute_cents"],
                         minimum_fare_cents=values["minimum_fare_cents"], surge_multiplier=values["surge_multiplier"],
-                        fare_cap_cents=values.get("fare_cap_cents"), is_active=False, workflow_status="DRAFT",
+                        fare_cap_cents=values.get("fare_cap_cents"), city_code=(values.get("city_code") or "").strip().upper() or None, is_active=False, workflow_status="DRAFT",
                         effective_from=values["effective_from"], created_by=admin_id)
         self.db.add(rule)
         await self.db.flush()
