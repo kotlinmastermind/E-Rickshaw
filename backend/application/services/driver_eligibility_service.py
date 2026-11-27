@@ -81,6 +81,7 @@ class DriverEligibilityService:
         max_rings: int = 3,
         ride_id: Optional[str] = None,
         required_category_id: Optional[str] = None,
+        required_service_area_id: Optional[str] = None,
         max_candidates: int = 20
     ) -> List[CandidateDriver]:
         """
@@ -133,6 +134,12 @@ class DriverEligibilityService:
             # Batch retrieve database profiles and vehicle assignments if DB session is available
             db_profile_map: Dict[str, Dict[str, Any]] = {}
             if self.db:
+                if required_service_area_id:
+                    from backend.application.services.service_area_service import ServiceAreaService
+                    assigned_ids = await ServiceAreaService(self.db).active_driver_ids(
+                        required_service_area_id, eligible_ring_ids
+                    )
+                    eligible_ring_ids = [driver_id for driver_id in eligible_ring_ids if driver_id in assigned_ids]
                 db_profile_map = await self._batch_fetch_driver_profiles(
                     eligible_ring_ids, required_category_id=required_category_id
                 )
