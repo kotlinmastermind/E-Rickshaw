@@ -1161,6 +1161,13 @@ async def assign_driver_to_service_area(
         assignment.is_active = True
         assignment.revoked_at = None
         assignment.assigned_by_user_id = admin.id
+    from backend.domain.models import GeofenceZoneAudit
+    db.add(GeofenceZoneAudit(
+        zone_id=service_area_id,
+        admin_user_id=admin.id,
+        action="DRIVER_ASSIGNED",
+        new_state_json=json.dumps({"driver_id": driver_id, "is_active": True}),
+    ))
     await db.commit()
     return {"driver_id": driver_id, "service_area_id": service_area_id, "is_active": True}
 
@@ -1204,6 +1211,14 @@ async def revoke_driver_service_area(
         raise HTTPException(status_code=404, detail="Driver service-area assignment not found.")
     assignment.is_active = False
     assignment.revoked_at = datetime.now(timezone.utc)
+    from backend.domain.models import GeofenceZoneAudit
+    db.add(GeofenceZoneAudit(
+        zone_id=service_area_id,
+        admin_user_id=admin.id,
+        action="DRIVER_ASSIGNMENT_REVOKED",
+        previous_state_json=json.dumps({"driver_id": driver_id, "is_active": True}),
+        new_state_json=json.dumps({"driver_id": driver_id, "is_active": False}),
+    ))
     await db.commit()
     return {"driver_id": driver_id, "service_area_id": service_area_id, "is_active": False}
 
