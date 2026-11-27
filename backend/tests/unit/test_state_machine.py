@@ -1,6 +1,6 @@
 import pytest
 from backend.domain.state_machine.ride_state_machine import (
-    RideStateMachine, RideStatus, ActorRole, RideTransitionError
+    RideStateMachine, RideStatus, ActorRole, RideTransitionError, ACTIVE_RIDE_STATUSES
 )
 
 def test_permitted_ride_transitions():
@@ -31,6 +31,13 @@ def test_state_machine_raises_exception():
     assert "Illegal transition" in str(exc_info.value)
     assert exc_info.value.current_status == "IN_PROGRESS"
     assert exc_info.value.target_status == "CANCELLED"
+
+def test_paused_is_a_non_terminal_active_ride_status():
+    assert RideStatus.PAUSED.value in ACTIVE_RIDE_STATUSES
+    assert RideStateMachine.is_terminal(RideStatus.PAUSED.value) is False
+    assert RideStateMachine.can_transition(RideStatus.IN_PROGRESS.value, RideStatus.PAUSED.value, "DRIVER") is True
+    assert RideStateMachine.can_transition(RideStatus.PAUSED.value, RideStatus.IN_PROGRESS.value, "DRIVER") is True
+
 
 def test_terminal_states():
     assert RideStateMachine.is_terminal(RideStatus.COMPLETED.value) is True

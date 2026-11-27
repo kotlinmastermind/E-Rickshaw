@@ -176,11 +176,7 @@ class RideService:
         # Check active ride to prevent duplicate concurrent bookings
         active_ride_stmt = select(Ride).where(
             Ride.customer_id == customer.id,
-            Ride.status.in_([
-                RideStatus.REQUESTED.value,
-                RideStatus.ASSIGNED.value,
-                *ACTIVE_RIDE_STATUSES
-            ])
+            Ride.status.in_(ACTIVE_RIDE_STATUSES)
         )
         existing_active = (await self.db.execute(active_ride_stmt)).scalars().first()
         if existing_active:
