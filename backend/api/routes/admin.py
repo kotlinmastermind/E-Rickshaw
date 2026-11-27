@@ -144,7 +144,7 @@ async def get_live_mobility_feed(
         .where(
             DriverAvailability.is_online.is_(True),
             DriverAvailability.last_heartbeat >= heartbeat_cutoff,
-            DriverProfile.approval_status == "APPROVED"
+            func.upper(DriverProfile.approval_status).in_(["APPROVED", "YES", "TRUE", "1"])
         )
     )).scalar_one()
 
