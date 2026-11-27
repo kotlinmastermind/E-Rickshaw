@@ -2899,63 +2899,48 @@
         }
 
         // Render Driver Table
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>\"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' }[char]));
+        }
+
         function renderDriverTable() {
             const tbody = document.getElementById('driver-table-body');
             const filterStatus = document.getElementById('driver-status-select')?.value || 'ALL';
             const searchTerm = (document.getElementById('driver-search-input')?.value || '').toLowerCase();
-
             const driversList = STATE.drivers || [];
-
             tbody.innerHTML = '';
             driversList.forEach(driver => {
+                const name = driver.name || `Driver ${String(driver.id).slice(0, 8)}`;
+                const phone = driver.phone || '';
+                const plate = driver.plate || '';
+                const model = driver.model || '';
+                const category = driver.category || '';
                 if (filterStatus !== 'ALL' && driver.status !== filterStatus) return;
-                if (searchTerm && !driver.name.toLowerCase().includes(searchTerm) && !driver.phone.includes(searchTerm) && !driver.plate.toLowerCase().includes(searchTerm)) return;
+                if (searchTerm && !name.toLowerCase().includes(searchTerm) && !phone.toLowerCase().includes(searchTerm) && !plate.toLowerCase().includes(searchTerm)) return;
 
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-surface/50 transition-colors';
-
                 let kycBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">VERIFIED</span>';
-                if (driver.approval_status === 'PENDING' || driver.status === 'PENDING') {
-                    kycBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold animate-pulse">PENDING REVIEW</span>';
-                } else if (driver.approval_status === 'REJECTED' || driver.status === 'REJECTED') {
-                    kycBadge = '<span class="px-2 py-0.5 rounded-md bg-crimson-dim text-crimson-glow font-mono text-[10px] font-bold">REJECTED</span>';
-                }
+                if (driver.approval_status === 'PENDING' || driver.status === 'PENDING') kycBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">PENDING REVIEW</span>';
+                else if (driver.approval_status === 'REJECTED') kycBadge = '<span class="px-2 py-0.5 rounded-md bg-crimson-dim text-crimson-glow font-mono text-[10px] font-bold">REJECTED</span>';
+                else if (driver.approval_status === 'SUSPENDED') kycBadge = '<span class="px-2 py-0.5 rounded-md bg-crimson-dim text-crimson-glow font-mono text-[10px] font-bold">SUSPENDED</span>';
 
-                let dutyBadge = '<span class="text-emerald-glow font-mono">🟢 AVAILABLE</span>';
-                if (driver.status === 'IN_TRIP') dutyBadge = '<span class="text-cyan-glow font-mono">🔵 IN-TRIP</span>';
-                if (driver.status === 'OFFLINE') dutyBadge = '<span class="text-slate-400 font-mono">⚪ OFFLINE</span>';
+                let dutyBadge = '<span class="text-slate-400 font-mono">⚪ OFFLINE</span>';
+                if (driver.status === 'AVAILABLE') dutyBadge = '<span class="text-emerald-glow font-mono">🟢 AVAILABLE</span>';
+                if (driver.status === 'BUSY') dutyBadge = '<span class="text-cyan-glow font-mono">🔵 BUSY</span>';
                 if (driver.status === 'PENDING') dutyBadge = '<span class="text-amber-glow font-mono">🟡 PENDING REVIEW</span>';
-                if (driver.status === 'REJECTED') dutyBadge = '<span class="text-crimson-glow font-mono">🔴 REJECTED</span>';
+                if (driver.status === 'REJECTED' || driver.status === 'SUSPENDED') dutyBadge = '<span class="text-crimson-glow font-mono">🔴 ${escapeHtml(driver.status)}</span>';
 
+                const encoded = [driver.id, name, phone, category].map(value => encodeURIComponent(String(value ?? '')));
                 tr.innerHTML = `
-                    <td class="py-3.5 px-4 font-semibold text-white flex items-center gap-2.5">
-                        <div class="w-7 h-7 rounded-lg bg-surface flex items-center justify-center text-xs">👨‍✈️</div>
-                        <div>
-                            <div>${driver.name}</div>
-                            <span class="text-[10px] text-slate-400 font-mono font-normal">ID: #${driver.id.slice(0, 8)}</span>
-                        </div>
-                    </td>
-                    <td class="py-3.5 px-4 font-mono text-slate-300">
-                        <div>${driver.phone}</div>
-                        <span class="text-[10px] text-slate-500">${driver.dl}</span>
-                    </td>
-                    <td class="py-3.5 px-4">
-                        <span class="font-mono font-bold text-white">${driver.plate}</span>
-                        <div class="text-[10px] text-slate-400">${driver.model}</div>
-                    </td>
-                    <td class="py-3.5 px-4 text-cyan-glow">${driver.category}</td>
+                    <td class="py-3.5 px-4 font-semibold text-white flex items-center gap-2.5"><div class="w-7 h-7 rounded-lg bg-surface flex items-center justify-center text-xs">👨‍✈️</div><div><div>${escapeHtml(name)}</div><span class="text-[10px] text-slate-400 font-mono font-normal">ID: #${escapeHtml(String(driver.id).slice(0, 8))}</span></div></td>
+                    <td class="py-3.5 px-4 font-mono text-slate-300"><div>${escapeHtml(phone || 'Not provided')}</div><span class="text-[10px] text-slate-500">${escapeHtml(driver.dl || 'Not available')}</span></td>
+                    <td class="py-3.5 px-4"><span class="font-mono font-bold text-white">${escapeHtml(plate || 'Not assigned')}</span><div class="text-[10px] text-slate-400">${escapeHtml(model || 'Vehicle unavailable')}</div></td>
+                    <td class="py-3.5 px-4 text-cyan-glow">${escapeHtml(category || 'Not assigned')}</td>
                     <td class="py-3.5 px-4">${dutyBadge}</td>
                     <td class="py-3.5 px-4">${kycBadge}</td>
                     <td class="py-3.5 px-4 text-right">
-                        ${(driver.approval_status === 'PENDING' || driver.status === 'PENDING') ? `
-                            <button onclick="openKycModal('${driver.id}', '${driver.name.replace(/'/g, "\\'")}', '${driver.phone}', '${driver.category.replace(/'/g, "\\'")}')" class="px-3 py-1 rounded-lg bg-cyan-glow text-black font-extrabold text-[11px] hover:opacity-90 transition-all shadow-sm">
-                                Review KYC
-                            </button>
-                        ` : `
-                            <button onclick="switchTab('map'); openDriverInspector(STATE.drivers.find(d => d.id === '${driver.id}') || STATE.drivers[0])" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px] transition-all">
-                                Locate on Map
-                            </button>
-                        `}
+                        ${(driver.approval_status === 'PENDING' || driver.status === 'PENDING') ? `<button onclick="openKycModal(decodeURIComponent('${encoded[0]}'), decodeURIComponent('${encoded[1]}'), decodeURIComponent('${encoded[2]}'), decodeURIComponent('${encoded[3]}'))" class="px-3 py-1 rounded-lg bg-cyan-glow text-black font-extrabold text-[11px]">Review KYC</button>` : `<button onclick="switchTab('map'); openDriverInspector(STATE.drivers.find(d => d.id === decodeURIComponent('${encoded[0]}')) || STATE.drivers[0])" class="px-2.5 py-1 rounded-lg bg-surface border border-border text-slate-300 text-[11px]">Locate on Map</button>`}
                     </td>
                 `;
                 tbody.appendChild(tr);
