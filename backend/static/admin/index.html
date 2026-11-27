@@ -3043,49 +3043,25 @@
         // Render Tariff Cards from Supabase Categories
         function renderTariffCards() {
             const grid = document.getElementById('tariff-cards-grid');
-            const categories = (STATE.categories && STATE.categories.length > 0) ? STATE.categories : [
-                { code: 'E_RICKSHAW_STANDARD', name: 'Standard E-Rickshaw', desc: '4 Seats • Local Metro Feeder', base: '₹20', perKm: '₹10/km', perMin: '₹1.0/min', minFare: '₹20', icon: '🛺', active: true },
-                { code: 'E_RICKSHAW_SHARE', name: 'Shared Eco-Pool', desc: 'Per Seat Micro-pooling', base: '₹10', perKm: '₹6/km', perMin: '₹0.5/min', minFare: '₹15', icon: '👥', active: true },
-                { code: 'E_AUTO', name: 'High-Speed Electric Auto', desc: '3 Seats • L5M Weather Shielded', base: '₹30', perKm: '₹12/km', perMin: '₹1.5/min', minFare: '₹30', icon: '⚡', active: true },
-                { code: 'E_CARGO_LOADER', name: 'E-Loader Cargo', desc: '1 Seat • B2B Merchant Parcels', base: '₹50', perKm: '₹15/km', perMin: '₹2.0/min', minFare: '₹60', icon: '📦', active: true }
-            ];
-
+            const categories = STATE.categories || [];
             grid.innerHTML = '';
+            if (categories.length === 0) {
+                grid.innerHTML = '<div class="col-span-full text-center py-8 text-slate-400 font-mono text-xs">No vehicle categories returned by the backend.</div>';
+                return;
+            }
             categories.forEach((cat, idx) => {
                 const card = document.createElement('div');
                 card.className = 'glass-card p-4 rounded-2xl border border-border flex flex-col justify-between space-y-3';
+                const activeBadge = cat.active ? '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow text-[10px] font-mono font-bold">ACTIVE TARIFF</span>' : '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow text-[10px] font-mono font-bold">NO ACTIVE RULE</span>';
                 card.innerHTML = `
-                    <div>
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-2xl">${cat.icon || '🛺'}</span>
-                            <span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow text-[10px] font-mono font-bold">ACTIVE TARIFF</span>
-                        </div>
-                        <h4 class="text-sm font-bold text-white">${cat.name}</h4>
-                        <p class="text-xs text-slate-400">${cat.desc || 'Clean electric mobility'}</p>
-                    </div>
-
+                    <div><div class="flex items-center justify-between mb-2"><span class="text-2xl">${escapeHtml(cat.icon || '🛺')}</span>${activeBadge}</div><h4 class="text-sm font-bold text-white">${escapeHtml(cat.name || 'Unnamed category')}</h4><p class="text-xs text-slate-400">${escapeHtml(cat.desc || 'Description unavailable')}</p></div>
                     <div class="pt-2 border-t border-border space-y-1.5 text-xs font-mono">
-                        <div class="flex justify-between text-slate-300">
-                            <span>Base Fare:</span>
-                            <strong class="text-white">${cat.base}</strong>
-                        </div>
-                        <div class="flex justify-between text-slate-300">
-                            <span>Distance Rate:</span>
-                            <strong class="text-cyan-glow">${cat.perKm}</strong>
-                        </div>
-                        <div class="flex justify-between text-slate-300">
-                            <span>Time Rate:</span>
-                            <strong class="text-slate-200">${cat.perMin}</strong>
-                        </div>
-                        <div class="flex justify-between text-slate-300">
-                            <span>Min Ride Bill:</span>
-                            <strong class="text-emerald-glow">${cat.minFare}</strong>
-                        </div>
+                        <div class="flex justify-between text-slate-300"><span>Base Fare:</span><strong class="text-white">${escapeHtml(cat.base || 'Not configured')}</strong></div>
+                        <div class="flex justify-between text-slate-300"><span>Distance Rate:</span><strong class="text-cyan-glow">${escapeHtml(cat.perKm || 'Not configured')}</strong></div>
+                        <div class="flex justify-between text-slate-300"><span>Time Rate:</span><strong class="text-slate-200">${escapeHtml(cat.perMin || 'Not configured')}</strong></div>
+                        <div class="flex justify-between text-slate-300"><span>Min Ride Bill:</span><strong class="text-emerald-glow">${escapeHtml(cat.minFare || 'Not configured')}</strong></div>
                     </div>
-
-                    <button onclick="openTariffEditModal(${idx})" class="w-full py-1.5 rounded-lg bg-surface hover:bg-card border border-border text-xs text-slate-300 hover:text-cyan-glow font-semibold transition-all">
-                        Adjust Rates ⚙️
-                    </button>
+                    <button onclick="openTariffEditModal(${idx})" class="w-full py-1.5 rounded-lg bg-surface border border-border text-xs text-slate-300 font-semibold">Adjust Rates ⚙️</button>
                 `;
                 grid.appendChild(card);
             });
