@@ -70,3 +70,18 @@ async def test_admin_spa_and_api_route_separation():
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
 
+
+
+@pytest.mark.asyncio
+async def test_admin_console_does_not_advertise_unverified_live_state():
+    admin_path = os.path.join(STATIC_ADMIN_DIR, "index.html")
+    with open(admin_path, "r", encoding="utf-8") as source:
+        html = source.read()
+
+    # Live badges start empty and only show counts after the authenticated feed responds.
+    assert '>2</span>' not in html
+    assert '>8</span>' not in html
+    assert "SUPABASE LIVE (AWS)" not in html
+    assert "CONNECTING TO ADMIN API" in html
+    assert "if (!response.ok)" in html
+    assert "setAdminConnectionStatus('unavailable')" in html
