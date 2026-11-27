@@ -240,6 +240,9 @@ data class DispatchOfferDto(
     @SerializedName("trip_duration_minutes", alternate = ["estimated_duration_minutes"]) val tripDurationMinutes: Int? = null,
     @SerializedName("estimated_fare_cents") val estimatedFareCents: Long = 0L,
     @SerializedName("estimated_driver_earnings_cents") val estimatedDriverEarningsCents: Long = 0L,
+    @SerializedName("estimated_commission_cents") val estimatedCommissionCents: Long? = null,
+    @SerializedName("estimated_commission_percentage") val estimatedCommissionPercentage: Double? = null,
+    @SerializedName("commission_classification") val commissionClassification: String? = null,
     @SerializedName("payment_mode") val paymentMode: String = "UPI",
     @SerializedName("expires_at") val expiresAt: String? = null,
     @SerializedName("escalation_level") val escalationLevel: Int = 0,
@@ -663,13 +666,19 @@ data class IncentiveOverviewDto(
 )
 
 data class FareBreakdownInnerDto(
-    @SerializedName("gross_fare_rupees") val grossFareRupees: Double = 0.0
+    @SerializedName("gross_fare_rupees") val grossFareRupees: Double = 0.0,
+    @SerializedName("components_available") val componentsAvailable: Boolean = false
 )
 
 data class RideBreakdownDto(
     @SerializedName("ride_id") val rideId: String = "",
     @SerializedName("status") val status: String = "",
     @SerializedName("fare_breakdown") val fareBreakdown: FareBreakdownInnerDto? = null,
+    @SerializedName("driver_gross_earnings_rupees") val driverGrossEarningsRupees: Double? = null,
+    @SerializedName("commission_cents") val commissionCents: Long? = null,
+    @SerializedName("commission_percentage") val commissionPercentage: Double? = null,
+    @SerializedName("commission_classification") val commissionClassification: String? = null,
+    @SerializedName("commission_snapshot_available") val commissionSnapshotAvailable: Boolean = false,
     @SerializedName("net_driver_earnings_rupees") val netDriverEarningsRupees: Double = 0.0
 )
 
