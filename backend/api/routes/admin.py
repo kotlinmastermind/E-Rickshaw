@@ -91,20 +91,6 @@ async def admin_secure_login(
             "role": admin_user.role
         }
     }
-DELHI_COMMAND_ANCHORS = [
-    (28.6475, 77.3150),  # Anand Vihar ISBT & Terminal Corridor
-    (28.6320, 77.2195),  # Connaught Place Central Hub
-    (28.6360, 77.2925),  # Preet Vihar & Karkardooma Metro Corridor
-    (28.6508, 77.1906),  # Karol Bagh & Pusa Road Market
-    (28.6280, 77.3680),  # Noida Sector 62 Electronic City Depot
-    (28.6110, 77.3020),  # Mayur Vihar Phase 1 & Chilla Regulator
-    (28.6562, 77.2304),  # Chandni Chowk & Old Delhi Railway Junction
-    (28.5494, 77.2530),  # Nehru Place & Kalkaji Commercial Complex
-    (28.6450, 77.1215),  # Rajouri Garden & Shivaji College Corridor
-    (28.6300, 77.2770),  # Laxmi Nagar Vikas Marg Interchange
-    (28.6920, 77.1510)   # Netaji Subhash Place & Pitampura Feeder
-]
-
 @router.get("/live-feed")
 async def get_live_mobility_feed(
     admin: User = Depends(get_admin_actor),
