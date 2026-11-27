@@ -1307,11 +1307,11 @@ async def test_concurrent_cash_collection_prevents_double_commission(db_session:
 async def test_service_area_resolution_uses_admin_polygons_not_hardcoded_city_radii(db_session: AsyncSession):
     fare_service = FareService(db_session)
 
-    assert await fare_service.resolve_operating_city(None, 28.6139, 77.2090) == "TEST_DELHI_NCR"
-    assert await fare_service.resolve_operating_city(None, 18.9217, 72.8332) == "TEST_MUMBAI"
-    assert await fare_service.resolve_operating_city(None, 12.9716, 77.5946) == "TEST_BENGALURU"
-    assert await fare_service.resolve_operating_city(None, 25.5941, 85.1376) == "TEST_PATNA"
-    assert await fare_service.resolve_operating_city(None, 26.8467, 80.9462) == "TEST_LUCKNOW"
+    assert await fare_service.resolve_operating_city(None, 28.6139, 77.2090) == "DELHI_NCR"
+    assert await fare_service.resolve_operating_city(None, 18.9217, 72.8332) == "MUMBAI"
+    assert await fare_service.resolve_operating_city(None, 12.9716, 77.5946) == "BENGALURU"
+    assert await fare_service.resolve_operating_city(None, 25.5941, 85.1376) == "PATNA"
+    assert await fare_service.resolve_operating_city(None, 26.8467, 80.9462) == "LUCKNOW"
 
     # Points outside every configured polygon are rejected even if near a known city.
     with pytest.raises(HTTPException) as exc_outside:
@@ -1321,7 +1321,7 @@ async def test_service_area_resolution_uses_admin_polygons_not_hardcoded_city_ra
 
     # Client-supplied city codes cannot override polygon-derived service-area identity.
     with pytest.raises(HTTPException) as exc_forged:
-        await fare_service.resolve_operating_city("TEST_DELHI_NCR", 12.9716, 77.5946)
+        await fare_service.resolve_operating_city("DELHI_NCR", 12.9716, 77.5946)
     assert exc_forged.value.status_code == 400
     assert "Cross-area fare spoofing is prohibited" in exc_forged.value.detail
 
