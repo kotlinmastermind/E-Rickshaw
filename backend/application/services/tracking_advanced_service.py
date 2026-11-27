@@ -500,20 +500,26 @@ class TrackingAdvancedService:
             base_rupees = min(subtotal, 25.0)
             distance_rupees = round(max(0.0, subtotal - base_rupees), 2)
 
-        driver_name = "Assigned Pilot"
-        vehicle_model = "Electric Auto / E-Rickshaw"
-        license_plate = "DL-EV-PILOT"
+        driver_name = None
+        vehicle_model = ride.vehicle_model_override or None
+        license_plate = ride.vehicle_plate_override or None
 
         if ride.assigned_driver_id:
             driver_prof = await self.db.get(DriverProfile, ride.assigned_driver_id)
             if driver_prof:
                 driver_user = await self.db.get(User, driver_prof.user_id) if driver_prof.user_id else None
-                driver_name = (driver_user.full_name or driver_user.phone_number) if driver_user else "Assigned Pilot"
+                if (
+                    driver_user and driver_user.full_name and driver_user.full_name.strip()
+                    and driver_user.full_name.strip().casefold() != "distinguished guest"
+                ):
+                    driver_name = driver_user.full_name.strip()
+                elif driver_user and driver_user.phone_number:
+                    driver_name = None
         if ride.vehicle_id:
             veh = await self.db.get(Vehicle, ride.vehicle_id)
             if veh:
-                vehicle_model = f"{veh.make} {veh.model}".strip() if (veh.make or veh.model) else "Electric Vehicle"
-                license_plate = veh.license_plate or license_plate
+                vehicle_model = f"{veh.make} {veh.model}".strip() if (veh.make or veh.model) else None
+                license_plate = veh.license_plate or None
 
         invoice_num = ride.invoice_number or f"INV-VR-2026-{ride.id[:6].upper()}"
 
