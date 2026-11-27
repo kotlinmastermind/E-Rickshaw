@@ -226,11 +226,11 @@ data class WalletBalanceDto(
     @SerializedName("balance_rupees") val balanceRupees: Double = (balanceCents / 100.0),
     @SerializedName("currency") val currency: String = "INR",
     @SerializedName("auto_topup_enabled") val autoTopupEnabled: Boolean = false,
-    @SerializedName("auto_topup_threshold") val autoTopupThreshold: Double = 100.0,
-    @SerializedName("auto_topup_amount") val autoTopupAmount: Double = 500.0
+    @SerializedName("auto_topup_threshold") val autoTopupThreshold: Double = 0.0,
+    @SerializedName("auto_topup_amount") val autoTopupAmount: Double = 0.0
 ) {
     val displayBalanceRupees: Double
-        get() = if (balanceRupees > 0.0) balanceRupees else (balanceCents / 100.0)
+        get() = balanceCents / 100.0
 }
 
 data class TopupCreateOrderRequest(
