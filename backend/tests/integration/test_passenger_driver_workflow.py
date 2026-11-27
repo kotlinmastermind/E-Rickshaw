@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from backend.domain.models import (
-    User, CustomerProfile, DriverProfile, DriverAvailability,
+    User, CustomerProfile, DriverProfile, DriverAvailability, GeofenceZone, DriverServiceAreaAssignment,
     VehicleCategory, FareRule, Ride, RideAssignment, Vehicle, DriverVehicleAssignment
 )
 from backend.domain.state_machine.ride_state_machine import RideStateMachine, RideStatus, ActorRole
@@ -27,6 +27,7 @@ from backend.infrastructure.cache.redis_client import redis_client
 @pytest.mark.asyncio
 async def test_complete_passenger_driver_dispatch_and_reassignment_flow(db_session):
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
 
     # Category and rule
     cat = VehicleCategory(id=str(uuid.uuid4()), code=f"FLOW_CAT_{suffix}", name="Workflow Fleet")
@@ -55,6 +56,11 @@ async def test_complete_passenger_driver_dispatch_and_reassignment_flow(db_sessi
     d_prof2 = DriverProfile(id=str(uuid.uuid4()), user_id=d_user2.id, license_number=f"DL-{suffix}-2", approval_status="APPROVED")
     db_session.add_all([d_prof1, d_prof2])
     await db_session.flush()
+    db_session.add_all([
+        DriverServiceAreaAssignment(driver_id=d_prof1.id, service_area_id=service_area.id),
+        DriverServiceAreaAssignment(driver_id=d_prof2.id, service_area_id=service_area.id),
+    ])
+    await db_session.flush()
 
     d_avail1 = DriverAvailability(driver_id=d_prof1.id, is_online=True, is_busy=False)
     d_avail2 = DriverAvailability(driver_id=d_prof2.id, is_online=True, is_busy=False)
@@ -78,6 +84,7 @@ async def test_complete_passenger_driver_dispatch_and_reassignment_flow(db_sessi
 
     # 1. Passenger requests ride
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof.id,
         vehicle_category_id=cat.id,
         fare_rule_id=rule.id,
