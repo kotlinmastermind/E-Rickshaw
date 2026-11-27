@@ -775,6 +775,9 @@ async def test_accept_ride_atomic_validates_category_match(db_session):
     db_session.add(offer2)
     await db_session.commit()
 
+    # The driver must have fresh GPS within the ride service area before acceptance.
+    await LiveLocationService(db=db_session).ingest_driver_location(d_prof2.id, 28.6140, 77.2090, is_online=True)
+
     # 2. Driver 2 (Cab) accepts Cab ride -> SUCCEEDS
     res = await ride_svc.accept_ride_atomic(d_user2.id, ride.id)
     assert res["status"] in ["CONFIRMED", "ACCEPTED", "SCHEDULED", "ASSIGNED"]
