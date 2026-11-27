@@ -1210,3 +1210,21 @@ class CustomerKycAuditLog(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class DriverServiceAreaAssignment(Base):
+    """Explicit operational authorization for a driver to receive rides in a service area."""
+    __tablename__ = "driver_service_area_assignments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    service_area_id: Mapped[str] = mapped_column(String(36), ForeignKey("geofence_zones.id", ondelete="RESTRICT"), nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    assigned_by_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, server_default=text("CURRENT_TIMESTAMP"))
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("driver_id", "service_area_id", name="uq_driver_service_area_assignment"),
+        Index("ix_driver_service_area_active", "service_area_id", "is_active", "driver_id"),
+    )
