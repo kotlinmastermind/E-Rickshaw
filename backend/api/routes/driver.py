@@ -276,9 +276,11 @@ async def get_wallet(user: User = Depends(get_current_driver), db: AsyncSession 
     summary = await service.get_earnings_summary(user.id)
     return {
         "wallet_balance_cents": summary["wallet_balance_cents"],
-        "currency": "INR",
-        "pending_settlement_cents": 0,
-        "available_for_payout": True
+        "commission_outstanding_cents": summary["commission_outstanding_cents"],
+        "pending_settlement_cents": summary["commission_outstanding_cents"],
+        "withdrawable_balance_cents": summary["withdrawable_balance_cents"],
+        "currency": summary["currency"],
+        "available_for_payout": summary["withdrawable_balance_cents"] >= 10000
     }
 
 from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
