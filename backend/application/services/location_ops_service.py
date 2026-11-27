@@ -621,7 +621,7 @@ class LocationOpsService:
                 continue
             if zone.zone_type == "SERVICE_AREA":
                 service_zones.append((zone, points))
-            if zone.zone_type == "RESTRICTED":
+            if str(zone.zone_type or "").upper() in ("RESTRICTED", "RESTRICTED_ZONE"):
                 restricted_zones.append((zone, points))
 
         points_to_check = [("pickup", latitude, longitude)]
@@ -657,7 +657,8 @@ class LocationOpsService:
                     f"To proceed, please set pickup within licensed zones or coordinate a cross-border dispatch via concierge."
                 )
         else:
-            eligible = not restricted
+            # Missing coverage polygons must never be interpreted as serviceable.
+            eligible = False
             status = "NOT_CONFIGURED" if not restricted else "RESTRICTED"
             explanation = "Service boundaries are not configured; coverage cannot be verified yet."
 
