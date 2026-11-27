@@ -288,7 +288,22 @@ class CascadingDispatchService:
                 if await self.is_driver_on_cooldown(candidate_driver.id, ride_id):
                     continue
 
-                # 3. Check driver preferences
+                # 3. Require an active vehicle assigned to this exact ride category.
+                from backend.domain.models import DriverVehicleAssignment, Vehicle
+                matching_vehicle = (await self.db.execute(
+                    select(Vehicle)
+                    .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+                    .where(
+                        DriverVehicleAssignment.driver_id == candidate_driver.id,
+                        DriverVehicleAssignment.is_active.is_(True),
+                        Vehicle.is_active.is_(True),
+                        Vehicle.category_id == ride.vehicle_category_id,
+                    )
+                )).scalars().first()
+                if not matching_vehicle:
+                    continue
+
+                # 4. Check driver preferences
                 pref = await self._driver_preferences(candidate_driver.id)
                 if fare_cents is not None and fare_cents < pref.minimum_fare_cents:
                     continue
