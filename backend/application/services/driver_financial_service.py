@@ -21,7 +21,7 @@ from backend.domain.models import (
     DriverLedgerEntry, DriverIncentiveProgress, DriverOperatingExpense,
     DriverFinancialSupportRequest, DriverPayoutReconciliation,
     DriverPayoutRequest, CommissionRule, AdministrativeAuditLog,
-    Wallet, WalletTransaction, DriverWallet
+    Wallet, WalletTransaction, DriverWallet, RideAssignment, DriverRating, IncidentReport
 )
 
 # Standard Luxury Service Zones for Comparative Earnings (Feature 274)
@@ -786,115 +786,135 @@ class DriverFinancialService:
     # -------------------------------------------------------------------------
     async def get_incentive_overview(self, user_id_or_driver_id: str) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        now = datetime.now(timezone.utc)
 
-        # Ensure seed incentive quests exist
-        stmt = select(DriverIncentiveProgress).where(DriverIncentiveProgress.driver_id == driver.id)
-        res = await self.db.execute(stmt)
-        quests = res.scalars().all()
-
-        if not quests:
-            exp = now + timedelta(days=5)
-            q1 = DriverIncentiveProgress(
-                driver_id=driver.id,
-                program_code="WEEKEND_SOVEREIGN_RUSH",
-                program_name="Weekend Sovereign Velocity Quest",
-                tier_name="BRONZE",
-                target_trips=15,
-                current_trips=0,
-                reward_cents=200000,  # ₹2,000
-                is_unlocked=False,
-                expires_at=exp,
-                is_eligible=True,
-                eligibility_notes="Rating >= 4.85 & Acceptance >= 90%"
-            )
-            q2 = DriverIncentiveProgress(
-                driver_id=driver.id,
-                program_code="WEEKEND_SOVEREIGN_RUSH_SILVER",
-                program_name="Weekend Sovereign Velocity Quest (Silver)",
-                tier_name="SILVER",
-                target_trips=30,
-                current_trips=0,
-                reward_cents=500000,  # ₹5,000
-                is_unlocked=False,
-                expires_at=exp,
-                is_eligible=True,
-                eligibility_notes="Complete 30 VIP journeys by Sunday"
-            )
-            q3 = DriverIncentiveProgress(
-                driver_id=driver.id,
-                program_code="AIRPORT_EXCELLENCE_STREAK",
-                program_name="Airport Private Aviation Ride Streak",
-                tier_name="SOVEREIGN_GOLD",
-                target_trips=10,
-                current_trips=0,
-                reward_cents=350000,  # ₹3,500
-                is_unlocked=False,
-                expires_at=exp,
-                is_eligible=True,
-                eligibility_notes="10 Airport transfers without customer cancellation"
-            )
-            self.db.add_all([q1, q2, q3])
-            await self.db.commit()
-            quests = [q1, q2, q3]
-
+        # Only Admin-configured, persisted incentive progress is displayed.
+        quests = (await self.db.execute(
+            select(DriverIncentiveProgress).where(
+                DriverIncentiveProgress.driver_id == driver.id
+            ).order_by(DriverIncentiveProgress.expires_at.asc())
+        )).scalars().all()
         milestones = []
-        for q in quests:
-            pct = min(100.0, round((q.current_trips / max(1, q.target_trips)) * 100.0, 1))
+        for quest in quests:
+            pct = min(100.0, round(
+                (int(quest.current_trips or 0) / max(1, int(quest.target_trips or 0))) * 100.0, 1
+            ))
             milestones.append({
-                "id": q.id,
-                "program_code": q.program_code,
-                "program_name": q.program_name,
-                "tier_name": q.tier_name,
-                "target_trips": q.target_trips,
-                "current_trips": q.current_trips,
-                "trips_remaining": max(0, q.target_trips - q.current_trips),
+                "id": quest.id,
+                "program_code": quest.program_code,
+                "program_name": quest.program_name,
+                "tier_name": quest.tier_name,
+                "target_trips": quest.target_trips,
+                "current_trips": quest.current_trips,
+                "trips_remaining": max(0, quest.target_trips - quest.current_trips),
                 "progress_percentage": pct,
-                "reward_rupees": round(q.reward_cents / 100, 2),
-                "is_unlocked": q.is_unlocked,
-                "is_eligible": q.is_eligible,
-                "eligibility_notes": q.eligibility_notes,
-                "expires_at": q.expires_at.isoformat()
+                "reward_rupees": round(quest.reward_cents / 100, 2),
+                "is_unlocked": quest.is_unlocked,
+                "is_eligible": quest.is_eligible,
+                "eligibility_notes": quest.eligibility_notes,
+                "expires_at": quest.expires_at.isoformat(),
             })
 
-        # Eligibility criteria checklist (Feature 258)
-        eligibility_checks = [
-            {"criterion": "Minimum Rating Average", "required": ">= 4.85", "actual": (f"{driver.rating_average:.2f}" if driver.rating_count and driver.rating_average is not None else "Not rated"), "passed": bool(driver.rating_count and driver.rating_average is not None and driver.rating_average >= 4.85)},
-            {"criterion": "Offer Acceptance Rate", "required": ">= 90.0%", "actual": "94.2%", "passed": True},
-            {"criterion": "Driver Cancellation Rate", "required": "<= 3.0%", "actual": "1.2%", "passed": True},
-            {"criterion": "Active Safety Violations", "required": "0 Active", "actual": "0 Active", "passed": True},
-            {"criterion": "Vehicle Cleanliness Score", "required": ">= 4.90", "actual": "4.96", "passed": True}
-        ]
-        is_all_eligible = all(c["passed"] for c in eligibility_checks)
+        assignments = (await self.db.execute(
+            select(RideAssignment).where(RideAssignment.driver_id == driver.id)
+        )).scalars().all()
+        accepted_offers = sum(1 for offer in assignments if offer.is_accepted is True)
+        rejected_offers = sum(1 for offer in assignments if offer.is_accepted is False)
+        decided_offers = accepted_offers + rejected_offers
+        acceptance_rate = (
+            accepted_offers / decided_offers * 100 if decided_offers else None
+        )
 
-        # Bonus history (Feature 260)
-        bonus_history = [
+        assigned_rides = (await self.db.execute(
+            select(Ride).where(Ride.assigned_driver_id == driver.id)
+        )).scalars().all()
+        driver_cancelled = sum(
+            1 for ride in assigned_rides
+            if ride.status == "CANCELLED" and (ride.cancelled_by_role or "").upper() == "DRIVER"
+        )
+        cancellation_rate = (
+            driver_cancelled / len(assigned_rides) * 100 if assigned_rides else None
+        )
+
+        active_incidents = int((await self.db.execute(
+            select(func.count(IncidentReport.id))
+            .join(Ride, IncidentReport.ride_id == Ride.id)
+            .where(
+                Ride.assigned_driver_id == driver.id,
+                IncidentReport.status.in_(["OPEN", "INVESTIGATING", "ESCALATED"]),
+            )
+        )).scalar_one() or 0)
+
+        cleanliness_average = (await self.db.execute(
+            select(func.avg(DriverRating.cleanliness_score)).where(
+                DriverRating.driver_id == driver.id
+            )
+        )).scalar_one()
+        cleanliness_count = int((await self.db.execute(
+            select(func.count(DriverRating.id)).where(DriverRating.driver_id == driver.id)
+        )).scalar_one() or 0)
+        cleanliness_average = float(cleanliness_average) if cleanliness_average is not None and cleanliness_count else None
+
+        has_rating = int(driver.rating_count or 0) > 0 and driver.rating_average is not None
+        rating_passed = bool(has_rating and driver.rating_average >= 4.85)
+        acceptance_passed = acceptance_rate is not None and acceptance_rate >= 90.0
+        cancellation_passed = cancellation_rate is not None and cancellation_rate <= 3.0
+        safety_passed = active_incidents == 0
+        cleanliness_passed = cleanliness_average is not None and cleanliness_average >= 4.90
+
+        eligibility_checks = [
             {
-                "id": "bon-prev-9921",
-                "bonus_name": "Diwali Festival Grand Quest Bonus",
-                "tier": "SOVEREIGN_GOLD",
-                "amount_rupees": 7500.0,
-                "paid_at": (now - timedelta(days=12)).strftime("%d %b %Y"),
-                "status": "CREDITED",
-                "reference_no": "GC-BON-2026-9921"
+                "criterion": "Minimum Rating Average", "required": ">= 4.85",
+                "actual": f"{driver.rating_average:.2f}" if has_rating else "Not rated",
+                "passed": rating_passed,
             },
             {
-                "id": "bon-prev-8812",
-                "bonus_name": "Airport Weekend Velocity Bonus",
-                "tier": "SILVER",
-                "amount_rupees": 4000.0,
-                "paid_at": (now - timedelta(days=19)).strftime("%d %b %Y"),
+                "criterion": "Offer Acceptance Rate", "required": ">= 90.0%",
+                "actual": f"{acceptance_rate:.1f}%" if acceptance_rate is not None else "Not available",
+                "passed": acceptance_passed,
+            },
+            {
+                "criterion": "Driver Cancellation Rate", "required": "<= 3.0%",
+                "actual": f"{cancellation_rate:.1f}%" if cancellation_rate is not None else "Not available",
+                "passed": cancellation_passed,
+            },
+            {
+                "criterion": "Active Safety Violations", "required": "0 Active",
+                "actual": str(active_incidents),
+                "passed": safety_passed,
+            },
+            {
+                "criterion": "Vehicle Cleanliness Score", "required": ">= 4.90",
+                "actual": f"{cleanliness_average:.2f}" if cleanliness_average is not None else "Not available",
+                "passed": cleanliness_passed,
+            },
+        ]
+
+        bonus_entries = (await self.db.execute(
+            select(DriverLedgerEntry).where(
+                DriverLedgerEntry.driver_id == driver.id,
+                DriverLedgerEntry.entry_type == "CREDIT",
+                DriverLedgerEntry.category.in_(["INCENTIVE_BONUS", "SURGE_BONUS"]),
+            ).order_by(DriverLedgerEntry.created_at.desc()).limit(100)
+        )).scalars().all()
+        bonus_history = [
+            {
+                "id": entry.id,
+                "bonus_name": entry.description,
+                "tier": None,
+                "amount_rupees": round(entry.amount_cents / 100, 2),
+                "paid_at": entry.created_at.strftime("%d %b %Y") if entry.created_at else None,
                 "status": "CREDITED",
-                "reference_no": "GC-BON-2026-8812"
+                "reference_no": entry.reference_id,
             }
+            for entry in bonus_entries
         ]
 
         return {
             "driver_id": driver.id,
-            "overall_incentive_eligibility": is_all_eligible,
+            "overall_incentive_eligibility": all(item["passed"] for item in eligibility_checks),
             "eligibility_checklist": eligibility_checks,
             "active_milestones": milestones,
-            "bonus_history": bonus_history
+            "bonus_history": bonus_history,
         }
 
     # -------------------------------------------------------------------------
