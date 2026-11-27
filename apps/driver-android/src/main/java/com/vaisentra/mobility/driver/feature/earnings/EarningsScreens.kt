@@ -48,7 +48,7 @@ fun ShiftSummaryScreen(
     ) {
         CockpitHeader(
             title = "Shift Summary",
-            subtitle = "Daily earnings, completed trips & net payout",
+            subtitle = "Gross ride earnings and separately tracked commission",
             onBack = onNavigateBack
         )
 
@@ -62,9 +62,9 @@ fun ShiftSummaryScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("TODAY'S NET EARNINGS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("TODAY'S GROSS EARNINGS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
-                        Text("₹${"%.2f".format(earnings.todayNetRupees)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("₹${"%.2f".format(earnings.todayGrossRupees)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(4.dp))
                         Text("${earnings.todayCompletedTrips} Completed Trips Today", color = CockpitTextSecondary, fontSize = 12.sp)
                     }
@@ -75,11 +75,14 @@ fun ShiftSummaryScreen(
                 CockpitCard {
                     Text("FINANCIAL SUMMARY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(10.dp))
-                    SummaryRow("Today Earnings", "₹${"%.2f".format(earnings.todayNetRupees)}")
-                    SummaryRow("Weekly Earnings", "₹${"%.2f".format(earnings.weeklyRupees)}")
-                    SummaryRow("Lifetime Earnings", "₹${"%.2f".format(earnings.totalEarningsCents / 100.0)}")
+                    SummaryRow("Today Gross Earnings", "₹${"%.2f".format(earnings.todayGrossRupees)}")
+                    SummaryRow("Weekly Gross Earnings", "₹${"%.2f".format(earnings.weeklyRupees)}")
+                    SummaryRow("Lifetime Gross Earnings", "₹${"%.2f".format(earnings.totalGrossRupees)}")
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = CockpitBorder)
                     SummaryRow("Wallet Balance", "₹${"%.2f".format(earnings.walletBalanceRupees)}", EmeraldPrimary, isBold = true)
+                    SummaryRow("Commission Accrued", "₹${"%.2f".format(earnings.commissionAccruedRupees)}", AmberWarning)
+                    SummaryRow("Commission Payable", "₹${"%.2f".format(earnings.commissionPayableRupees)}")
+                    SummaryRow("Cash Commission Receivable", "₹${"%.2f".format(earnings.commissionReceivableRupees)}")
                 }
             }
 
@@ -189,7 +192,7 @@ fun PilotEarningsScreen(
     ) {
         CockpitHeader(
             title = "Pilot Earnings & Wallet",
-            subtitle = "Live wallet balance & instant payout gateway",
+            subtitle = "Gross ride earnings, commission tracking & wallet balance",
             onBack = onNavigateBack
         )
 
@@ -200,18 +203,18 @@ fun PilotEarningsScreen(
             item {
                 CockpitCard(glow = true) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        Text("AVAILABLE WITHDRAWABLE BALANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("WALLET BALANCE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
                         Text("₹${"%.2f".format(earnings.walletBalanceRupees)}", color = EmeraldPrimary, fontSize = 36.sp, fontWeight = FontWeight.ExtraBold)
                         Spacer(Modifier.height(8.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Today: ₹${"%.2f".format(earnings.todayNetRupees)}", color = AmberWarning, fontSize = 12.sp)
-                            Text("Currency: ${earnings.currency}", color = CockpitTextMuted, fontSize = 12.sp)
+                            Text("Today gross: ₹${"%.2f".format(earnings.todayGrossRupees)}", color = AmberWarning, fontSize = 12.sp)
+                            Text("Commission today: ₹${"%.2f".format(earnings.todayCommissionRupees)}", color = CockpitTextMuted, fontSize = 12.sp)
                         }
                     }
                     Spacer(Modifier.height(14.dp))
                     CockpitButton(
-                        text = "WITHDRAW INSTANTLY TO BANK (IMPS)",
+                        text = "REQUEST BANK PAYOUT",
                         onClick = onInstantPayout,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -239,16 +242,30 @@ fun PilotEarningsScreen(
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     CockpitCard(modifier = Modifier.weight(1f)) {
-                        Text("THIS WEEK", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("THIS WEEK · GROSS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
                         Text("₹${"%.0f".format(earnings.weeklyRupees)}", color = ElectricCyan, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text("${earnings.completedTripsToday} Total Trips", color = CockpitTextSecondary, fontSize = 12.sp)
+                        Text("${earnings.totalCompletedTrips} All-time Trips", color = CockpitTextSecondary, fontSize = 12.sp)
                     }
                     CockpitCard(modifier = Modifier.weight(1f)) {
                         Text("RATING", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(4.dp))
-                        Text("${"%.2f".format(earnings.ratingAverage)} ★", color = AmberWarning, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Text(if (earnings.ratingCount > 0) "${"%.2f".format(earnings.ratingAverage)} ★" else "Not rated", color = AmberWarning, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text("${earnings.ratingCount} Reviews", color = CockpitTextSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            item {
+                CockpitCard {
+                    Text("COMMISSION TRACKING", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    SummaryRow("Total Commission Accrued", "₹${"%.2f".format(earnings.commissionAccruedRupees)}")
+                    SummaryRow("Commission Payable", "₹${"%.2f".format(earnings.commissionPayableRupees)}")
+                    SummaryRow("Cash Commission Receivable", "₹${"%.2f".format(earnings.commissionReceivableRupees)}")
+                    if (earnings.commissionSnapshotMissingCount > 0) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Commission history unavailable for ${earnings.commissionSnapshotMissingCount} completed ride(s); no rate has been guessed.", color = AmberWarning, fontSize = 11.sp)
                     }
                 }
             }
