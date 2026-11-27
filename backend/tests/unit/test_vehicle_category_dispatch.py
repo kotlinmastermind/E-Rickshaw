@@ -93,7 +93,6 @@ async def test_ride_request_preserves_selected_category_in_db(db_session):
     assert res["category_id"] == cat_auto.id
 
     # Verify directly from Database
-    from sqlalchemy import select
     db_ride = (await db_session.execute(select(Ride).where(Ride.id == res["ride_id"]))).scalar_one()
     assert db_ride.vehicle_category_id == cat_auto.id
     assert db_ride.vehicle_category_id != cat_rickshaw.id
@@ -502,7 +501,6 @@ async def test_driver_registration_binds_dynamic_category(db_session):
     has their Vehicle.category_id correctly persisted in the database.
     """
     from backend.application.services.auth_service import AuthService
-    from sqlalchemy import select
 
     suffix = uuid.uuid4().hex[:6].upper()
     cat_bike = VehicleCategory(
