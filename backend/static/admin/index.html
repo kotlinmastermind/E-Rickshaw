@@ -3116,15 +3116,18 @@
             const cat = ACTIVE_EDIT_TARIFF;
             const targetId = cat.id || cat.code;
 
-            const baseFare = parseFloat(document.getElementById('tariff-input-base').value) || 0;
-            const perKm = parseFloat(document.getElementById('tariff-input-per-km').value) || 0;
-            const perMin = parseFloat(document.getElementById('tariff-input-per-min').value) || 0;
-            const minFare = parseFloat(document.getElementById('tariff-input-min-fare').value) || 0;
-            const surge = parseFloat(document.getElementById('tariff-input-surge').value) || 1.0;
-            const cancellation = parseFloat(document.getElementById('tariff-input-cancellation').value) || 10;
-            const cityCode = document.getElementById('tariff-input-city')?.value || 'DELHI_NCR';
-            const reason = document.getElementById('tariff-input-reason').value.trim() || 'Admin runtime tariff adjustment via Controls Center';
-
+            const fieldIds = ['tariff-input-base', 'tariff-input-per-km', 'tariff-input-per-min', 'tariff-input-min-fare', 'tariff-input-surge', 'tariff-input-cancellation'];
+            const rawValues = fieldIds.map(id => document.getElementById(id).value.trim());
+            if (rawValues.some(value => value === '')) { showToast('All fare fields must be explicitly configured.', 'error'); return; }
+            const [baseFare, perKm, perMin, minFare, surge, cancellation] = rawValues.map(Number);
+            if ([baseFare, perKm, perMin, minFare, surge, cancellation].some(value => !Number.isFinite(value) || value < 0) || surge <= 0) {
+                showToast('Enter valid non-negative fare values and a surge multiplier greater than zero.', 'error');
+                return;
+            }
+            const cityCode = document.getElementById('tariff-input-city')?.value || '';
+            if (!cityCode) { showToast('Select a configured service area before saving fare rules.', 'error'); return; }
+            const reason = document.getElementById('tariff-input-reason').value.trim();
+            if (reason.length < 10) { showToast('Provide a reason of at least 10 characters for this fare change.', 'error'); return; }
             showToast(`Applying runtime tariff update for ${cat.name} (${cityCode})...`);
             try {
                 const headers = { 'Content-Type': 'application/json' };
