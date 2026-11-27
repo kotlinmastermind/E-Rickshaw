@@ -88,6 +88,12 @@ class ServiceAreaService:
             raise HTTPException(status_code=409, detail="Location falls inside overlapping active service areas.")
         return matches[0]
 
+    async def require_point_in_area(self, service_area_id: str, latitude: float, longitude: float) -> None:
+        zone = await self.db.get(GeofenceZone, service_area_id)
+        polygon = self._polygon(zone) if zone and zone.is_active and zone.zone_type == "SERVICE_AREA" else None
+        if polygon is None or not AdminAdvancedService.is_point_in_polygon(latitude, longitude, polygon):
+            raise HTTPException(status_code=400, detail="Every pickup, destination, and intermediate stop must remain inside the ride service area.")
+
     async def require_driver_assignment(self, driver_id: str, service_area_id: str) -> None:
         assignment = (await self.db.execute(
             select(DriverServiceAreaAssignment.id).where(
