@@ -1165,7 +1165,7 @@ async def assign_driver_to_service_area(
     db.add(GeofenceZoneAudit(
         zone_id=service_area_id,
         admin_user_id=admin.id,
-        action="DRIVER_ASSIGNED",
+        action="DRIVER_AREA_ASSIGNED",
         new_state_json=json.dumps({"driver_id": driver_id, "is_active": True}),
     ))
     await db.commit()
@@ -1215,7 +1215,7 @@ async def revoke_driver_service_area(
     db.add(GeofenceZoneAudit(
         zone_id=service_area_id,
         admin_user_id=admin.id,
-        action="DRIVER_ASSIGNMENT_REVOKED",
+        action="DRIVER_AREA_REVOKED",
         previous_state_json=json.dumps({"driver_id": driver_id, "is_active": True}),
         new_state_json=json.dumps({"driver_id": driver_id, "is_active": False}),
     ))
