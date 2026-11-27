@@ -5,6 +5,7 @@ import pytest
 import json
 from datetime import datetime, timezone, timedelta
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, GeofenceZone, SavedLocationPin,
@@ -186,8 +187,15 @@ async def test_part18_geofence_and_governance(db_session):
         {"lat": 28.70, "lng": 77.30},
         {"lat": 28.50, "lng": 77.30}
     ]
+    existing_areas = (await db_session.execute(
+        select(GeofenceZone).where(GeofenceZone.zone_type == "SERVICE_AREA")
+    )).scalars().all()
+    for existing_area in existing_areas:
+        existing_area.is_active = False
+
     zone = GeofenceZone(
         name="Delhi Executive Metro Core",
+        city_code="DELHI_NCR",
         zone_type="SERVICE_AREA",
         coordinates_json=json.dumps(delhi_poly),
         is_active=True
