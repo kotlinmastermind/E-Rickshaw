@@ -59,7 +59,6 @@ object DriverWebSocketClient {
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (text == "pong") return
-                Log.d(TAG, "Driver Dispatch Message: $text")
                 try {
                     val json = JSONObject(text)
                     val eventType = json.optString("event", json.optString("type", ""))
