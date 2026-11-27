@@ -337,19 +337,22 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
 
     payout = await DispatchAdvancedService.request_payout(
         session=db_session,
-        driver_id_or_user_id=driver.id,
+        driver_id_or_user_id=driver_id,
         amount_cents=50000,
         payout_account_id=account_id,
         idempotency_key=f"prov_exec_{uuid.uuid4().hex[:12]}",
     )
-    await AdminAdvancedService.approve_payout(db_session, payout.id, admin_user.id)
+    payout_id = payout_id
+    admin_user_id = admin_user_id
+    driver_id = driver_id
+    await AdminAdvancedService.approve_payout(db_session, payout_id, admin_user_id)
     await db_session.commit()
 
     # 1. Provider timeout leaves uncertain_outcome=True without reversing hold
     with patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=httpx.TimeoutException("timeout"))):
         with pytest.raises(HTTPException) as exc_to:
             await PayoutExecutionService.execute_provider_payout(
-                db_session, payout_id=payout.id, admin_user_id=admin_user.id
+                db_session, payout_id=payout_id, admin_user_id=admin_user_id
             )
         assert exc_to.value.status_code == 504
         await db_session.commit()
@@ -361,8 +364,8 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     with pytest.raises(HTTPException) as uncertain_fail:
         await PayoutExecutionService.fail_payout(
             db_session,
-            payout_id=payout.id,
-            actor_user_id=admin_user.id,
+            payout_id=payout_id,
+            actor_user_id=admin_user_id,
             failure_reason="Admin attempted failure before reconciliation",
         )
     assert uncertain_fail.value.status_code == 409
@@ -377,7 +380,7 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
          patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=AssertionError("Must not re-POST while outcome is unknown!"))):
         with pytest.raises(HTTPException) as still_unknown:
             await PayoutExecutionService.execute_provider_payout(
-                db_session, payout_id=payout.id, admin_user_id=admin_user.id
+                db_session, payout_id=payout_id, admin_user_id=admin_user_id
             )
         assert still_unknown.value.status_code == 409
         await db_session.rollback()
@@ -385,12 +388,12 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     # 2. Re-executing after timeout reconciles uncertain outcome first (no duplicate POST)
     reconcile_resp = MagicMock(status_code=200)
     reconcile_resp.json.return_value = {
-        "items": [{"id": "pout_rx_001", "status": "queued", "reference_id": payout.id}]
+        "items": [{"id": "pout_rx_001", "status": "queued", "reference_id": payout_id}]
     }
     with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=reconcile_resp)), \
          patch("httpx.AsyncClient.post", new=AsyncMock(side_effect=AssertionError("Must not re-POST before reconciling!"))):
         res_rec = await PayoutExecutionService.execute_provider_payout(
-            db_session, payout_id=payout.id, admin_user_id=admin_user.id
+            db_session, payout_id=payout_id, admin_user_id=admin_user_id
         )
         assert res_rec.status == "PROCESSING"
         assert res_rec.provider_payout_id == "pout_rx_001"
@@ -412,7 +415,7 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     # 4. payout.failed webhook transitions PROCESSING -> FAILED, reverses hold ONCE, preserves commission settlement
     fail_body = json.dumps({
         "event": "payout.failed",
-        "payload": {"payout": {"entity": {"id": "pout_rx_001", "reference_id": payout.id, "failure_reason": "Beneficiary bank offline"}}},
+        "payload": {"payout": {"entity": {"id": "pout_rx_001", "reference_id": payout_id, "failure_reason": "Beneficiary bank offline"}}},
     }).encode()
     fail_sig = hmac.new(wh_secret.encode(), fail_body, hashlib.sha256).hexdigest()
     fail_wh = await client.post("/api/v1/payments/payouts/webhook", content=fail_body, headers={"X-Razorpay-Signature": fail_sig})
@@ -426,12 +429,12 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
 
     await db_session.refresh(wallet)
     assert wallet.balance_cents == 90000  # 40000 + 50000 hold reversed; 10000 commission remains settled!
-    assert await CommissionService.get_driver_commission_outstanding_cents(db_session, driver.id) == 0
-    settlements = (await db_session.execute(select(DriverCommissionSettlement).where(DriverCommissionSettlement.driver_id == driver.id))).scalars().all()
+    assert await CommissionService.get_driver_commission_outstanding_cents(db_session, driver_id) == 0
+    settlements = (await db_session.execute(select(DriverCommissionSettlement).where(DriverCommissionSettlement.driver_id == driver_id))).scalars().all()
     assert len(settlements) == 1
 
     # 5. Safe retry (FAILED -> APPROVED) re-reserves 50000 without duplicating commission settlement
-    retried = await PayoutExecutionService.retry_failed_payout(db_session, payout_id=payout.id, admin_user_id=admin_user.id)
+    retried = await PayoutExecutionService.retry_failed_payout(db_session, payout_id=payout_id, admin_user_id=admin_user_id)
     assert retried.status == "APPROVED"
     assert retried.retry_count == 1
     await db_session.commit()
@@ -440,10 +443,10 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
 
     # Execute provider payout on retry (APPROVED -> PROCESSING, NOT PAID until webhook)
     ok_post = MagicMock(status_code=201)
-    ok_post.json.return_value = {"id": "pout_rx_002", "status": "processing", "reference_id": payout.id}
+    ok_post.json.return_value = {"id": "pout_rx_002", "status": "processing", "reference_id": payout_id}
     with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=ok_post)):
         proc = await PayoutExecutionService.execute_provider_payout(
-            db_session, payout_id=payout.id, admin_user_id=admin_user.id
+            db_session, payout_id=payout_id, admin_user_id=admin_user_id
         )
         assert proc.status == "PROCESSING"
         assert proc.provider_payout_id == "pout_rx_002"
@@ -452,7 +455,7 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     # 6. payout.processed webhook transitions PROCESSING -> PAID
     paid_body = json.dumps({
         "event": "payout.processed",
-        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": payout.id, "utr": "UTR_RX_99887766"}}},
+        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": payout_id, "utr": "UTR_RX_99887766"}}},
     }).encode()
     paid_sig = hmac.new(wh_secret.encode(), paid_body, hashlib.sha256).hexdigest()
     paid_wh = await client.post("/api/v1/payments/payouts/webhook", content=paid_body, headers={"X-Razorpay-Signature": paid_sig})
@@ -462,7 +465,7 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     # 7. Out-of-order late payout.queued webhook after PAID does not regress state
     late_body = json.dumps({
         "event": "payout.queued",
-        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": payout.id}}},
+        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": payout_id}}},
     }).encode()
     late_sig = hmac.new(wh_secret.encode(), late_body, hashlib.sha256).hexdigest()
     late_wh = await client.post("/api/v1/payments/payouts/webhook", content=late_body, headers={"X-Razorpay-Signature": late_sig})
@@ -470,7 +473,7 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     assert late_wh.json()["status"] == "IGNORED_OUT_OF_ORDER"
     assert late_wh.json()["payout_status"] == "PAID"
 
-    inv = await PayoutExecutionService.reconcile_payout_invariants(db_session, payout.id)
+    inv = await PayoutExecutionService.reconcile_payout_invariants(db_session, payout_id)
     assert inv["is_balanced"] is True
     assert inv["commission_settlement_count"] == 1
     assert inv["wallet_balance_cents"] == 40000
