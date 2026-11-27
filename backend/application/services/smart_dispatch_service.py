@@ -106,13 +106,31 @@ class SmartDispatchService:
         prior_res = await self.db.execute(prior_stmt)
         prior_driver_ids = set(prior_res.scalars().all())
 
-        # 4. Discover eligible drivers across concentric H3 rings
+        # A ride without a persisted operational area must never enter dispatch.
+        if not ride.service_area_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ride has no validated service area and cannot be dispatched.",
+            )
+        from backend.application.services.service_area_service import ServiceAreaService
+        resolved_area = await ServiceAreaService(self.db).resolve_route(
+            ride.pickup_latitude, ride.pickup_longitude,
+            ride.destination_latitude, ride.destination_longitude,
+        )
+        if resolved_area.id != ride.service_area_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ride service-area assignment no longer matches its route. Revalidate before dispatch.",
+            )
+
+        # 4. Discover eligible drivers only inside the ride's operational area.
         candidates = await self.eligibility.discover_eligible_candidates(
             pickup_lat=ride.pickup_latitude,
             pickup_lng=ride.pickup_longitude,
             max_rings=max_rings,
             ride_id=ride_id,
             required_category_id=ride.vehicle_category_id,
+            required_service_area_id=ride.service_area_id,
             max_candidates=15
         )
 
@@ -348,6 +366,17 @@ class SmartDispatchService:
 
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+        if not ride.service_area_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride has no validated service area.")
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_areas = ServiceAreaService(self.db)
+        resolved_area = await service_areas.resolve_route(
+            ride.pickup_latitude, ride.pickup_longitude,
+            ride.destination_latitude, ride.destination_longitude,
+        )
+        if resolved_area.id != ride.service_area_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride is no longer valid for its recorded service area.")
+        await service_areas.require_driver_assignment(driver.id, ride.service_area_id)
 
         # Validate state transition via authoritative state machine
         RideStateMachine.validate_transition(ride.status, RideStatus.ASSIGNED.value, ActorRole.DRIVER.value)
