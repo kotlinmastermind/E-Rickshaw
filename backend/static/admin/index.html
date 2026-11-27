@@ -4268,6 +4268,13 @@
                     <td class="py-3.5 px-4">${statusBadge}</td>
                     <td class="py-3.5 px-4 text-right">${actionBtns}</td>
                 `;
+                if (z.zone_type === 'SERVICE_AREA') {
+                    const toggle = document.createElement('button');
+                    toggle.textContent = z.is_active ? 'Deactivate' : 'Activate';
+                    toggle.className = 'ml-1 px-2.5 py-1 rounded-lg bg-surface border border-border text-[11px] ' + (z.is_active ? 'text-rose-300' : 'text-emerald-300');
+                    toggle.onclick = () => toggleServiceAreaStatus(z.id);
+                    tr.lastElementChild.appendChild(toggle);
+                }
                 tbody.appendChild(tr);
             });
             lucide.createIcons();
@@ -5154,6 +5161,35 @@
             lucide.createIcons();
         }
 
+        async function toggleServiceAreaStatus(zoneId) {
+            const zone = (STATE.geofences || []).find(item => item.id === zoneId);
+            if (!zone || zone.zone_type !== 'SERVICE_AREA') return;
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = 'Bearer ' + STATE.adminToken;
+                const options = zone.is_active
+                    ? { method: 'DELETE', headers }
+                    : { method: 'PUT', headers, body: JSON.stringify({
+                        name: zone.name, zone_type: zone.zone_type, city_code: zone.city_code,
+                        coordinates: zone.coordinates, surge_multiplier: zone.surge_multiplier || 1.0
+                    }) };
+                const res = await fetch('/api/v1/admin/geofences/' + encodeURIComponent(zoneId), options);
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || 'Service-area update failed', 'error');
+                    return;
+                }
+                const refreshed = await fetch('/api/v1/admin/geofences', { headers });
+                if (refreshed.ok) {
+                    STATE.geofences = await refreshed.json();
+                    renderGeofencesTable();
+                    updateSurgeZoneDropdown();
+                }
+                showToast(zone.is_active ? 'Service area deactivated' : 'Service area activated');
+            } catch (err) {
+                showToast('Network error while updating service area', 'error');
+            }
+        }
         async function submitCreateGeofence() {
             const name = document.getElementById('geo-name').value.trim();
             const zoneType = document.getElementById('geo-type').value;
