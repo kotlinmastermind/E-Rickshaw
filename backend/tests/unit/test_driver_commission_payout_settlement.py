@@ -6,6 +6,8 @@ from sqlalchemy import select
 
 from backend.application.services.commission_service import CommissionService
 from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
+from backend.application.services.driver_service import DriverService
+from backend.application.services.admin_advanced_service import AdminAdvancedService
 from backend.domain.models import (
     DriverCommissionSettlement, DriverLedgerEntry, DriverPayoutRequest,
     DriverProfile, DriverWallet, User,
@@ -46,6 +48,9 @@ async def test_payout_settles_deferred_commission_before_holding_payout(db_sessi
 
     due_before = await CommissionService.get_driver_commission_outstanding_cents(db_session, driver.id)
     assert due_before == 15000
+    before_summary = await DriverService(db_session).get_earnings_summary(driver.user_id)
+    assert before_summary["commission_outstanding_cents"] == 15000
+    assert before_summary["withdrawable_balance_cents"] == 85000
 
     payout = await DispatchAdvancedService.request_payout(
         session=db_session,
@@ -88,6 +93,17 @@ async def test_payout_settles_deferred_commission_before_holding_payout(db_sessi
         select(DriverCommissionSettlement).where(DriverCommissionSettlement.driver_id == driver.id)
     )).scalars().all()
     assert len(settlement_count) == 1
+
+    # A rejected bank payout reverses only the payout hold; settled commission stays settled.
+    await AdminAdvancedService.reject_payout(
+        session=db_session, payout_id=payout.id, admin_user_id=str(uuid.uuid4()),
+        rejection_reason="Bank details require correction"
+    )
+    await db_session.refresh(wallet)
+    assert wallet.balance_cents == 85000
+    assert await CommissionService.get_driver_commission_outstanding_cents(db_session, driver.id) == 0
+    after_rejection = await DriverService(db_session).get_earnings_summary(driver.user_id)
+    assert after_rejection["withdrawable_balance_cents"] == 85000
 
 
 @pytest.mark.asyncio
