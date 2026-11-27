@@ -819,22 +819,23 @@ class AdminGovernanceService:
         overlaps = await self.geofence_preview(points, zone_id)
         zone = await self.db.get(GeofenceZone, zone_id) if zone_id else None
         if zone_id and not zone: raise HTTPException(404, "Service zone not found.")
-        previous = None if not zone else {"name": zone.name, "zone_type": zone.zone_type, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
+        previous = None if not zone else {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
         if not zone:
-            zone = GeofenceZone(name=values["name"].strip(), zone_type=values["zone_type"], coordinates_json=json.dumps(points), surge_multiplier=values["surge_multiplier"], is_active=values["is_active"])
+            zone = GeofenceZone(name=values["name"].strip(), zone_type=values["zone_type"], city_code=(values.get("city_code") or "").strip().upper() or None, coordinates_json=json.dumps(points), surge_multiplier=values["surge_multiplier"], is_active=values["is_active"])
             self.db.add(zone)
         else:
             zone.name, zone.zone_type, zone.coordinates_json = values["name"].strip(), values["zone_type"], json.dumps(points)
+            zone.city_code = (values.get("city_code") or "").strip().upper() or None
             zone.surge_multiplier, zone.is_active = values["surge_multiplier"], values["is_active"]
         await self.db.flush()
-        current = {"name": zone.name, "zone_type": zone.zone_type, "coordinates": points, "is_active": zone.is_active}
+        current = {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "coordinates": points, "is_active": zone.is_active}
         action = "CREATED" if previous is None else ("ACTIVATED" if not previous["is_active"] and zone.is_active else "DEACTIVATED" if previous["is_active"] and not zone.is_active else "UPDATED")
         self.db.add(GeofenceZoneAudit(zone_id=zone.id, admin_user_id=admin_id, action=action,
             previous_state_json=json.dumps(previous) if previous else None, new_state_json=json.dumps(current)))
-        self.audit(admin_id, "SERVICE_ZONE_SAVED", "geofence_zones", zone.id, {"name": zone.name, "zone_type": zone.zone_type, "overlap_warning_count": len(overlaps)})
+        self.audit(admin_id, "SERVICE_ZONE_SAVED", "geofence_zones", zone.id, {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "overlap_warning_count": len(overlaps)})
         if commit:
             await self.db.commit()
-        return {"id": zone.id, "name": zone.name, "zone_type": zone.zone_type, "is_active": zone.is_active, "overlap_warnings": overlaps}
+        return {"id": zone.id, "name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "is_active": zone.is_active, "overlap_warnings": overlaps}
 
     async def delete_geofence(self, admin_id: str, zone_id: str) -> Dict[str, Any]:
         zone = await self.db.get(GeofenceZone, zone_id)
