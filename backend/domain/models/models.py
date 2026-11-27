@@ -1700,6 +1700,29 @@ class DriverLedgerEntry(Base):
     )
 
 
+class DriverCommissionSettlement(Base):
+    """Immutable record of commission collected from a driver's wallet at payout time."""
+    __tablename__ = "driver_commission_settlements"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    driver_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("driver_profiles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    payout_request_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("driver_payout_requests.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False, default="INR")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    driver: Mapped["DriverProfile"] = relationship()
+    payout_request: Mapped["DriverPayoutRequest"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("payout_request_id", name="uq_driver_commission_settlement_payout"),
+    )
+
+
 class DriverIncentiveProgress(Base):
     __tablename__ = "driver_incentive_progress"
 
