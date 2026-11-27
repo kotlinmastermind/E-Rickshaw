@@ -18,6 +18,7 @@ from backend.infrastructure.cache.redis_client import redis_client
 @pytest.mark.asyncio
 async def test_smart_dispatch_lifecycle(db_session):
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
 
     # Category
     cat = VehicleCategory(
@@ -59,6 +60,8 @@ async def test_smart_dispatch_lifecycle(db_session):
         rating_average=4.9
     )
     db_session.add(driver_profile)
+    await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=driver_profile.id, service_area_id=service_area.id))
     await db_session.flush()
 
     driver_avail = DriverAvailability(
@@ -110,6 +113,7 @@ async def test_smart_dispatch_lifecycle(db_session):
 
     now = datetime.now(timezone.utc)
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=customer_profile.id,
         vehicle_category_id=cat.id,
         fare_rule_id=fare_rule.id,
@@ -166,6 +170,7 @@ async def test_smart_dispatch_lifecycle(db_session):
 @pytest.mark.asyncio
 async def test_smart_dispatch_rejection_and_exhaustion(db_session):
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
 
     cat = VehicleCategory(
         id=str(uuid.uuid4()),
@@ -205,6 +210,8 @@ async def test_smart_dispatch_rejection_and_exhaustion(db_session):
         rating_average=4.7
     )
     db_session.add(driver_profile)
+    await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=driver_profile.id, service_area_id=service_area.id))
     await db_session.flush()
 
     driver_avail = DriverAvailability(
@@ -254,6 +261,7 @@ async def test_smart_dispatch_rejection_and_exhaustion(db_session):
     await db_session.flush()
 
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=customer_profile.id,
         vehicle_category_id=cat.id,
         fare_rule_id=fare_rule.id,
