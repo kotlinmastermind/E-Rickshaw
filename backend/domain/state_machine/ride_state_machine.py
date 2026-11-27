@@ -1,6 +1,9 @@
 from enum import Enum
 from typing import Dict, Set, Tuple, Optional
 
+ACTIVE_RIDE_STATUSES = ("REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED")
+
+
 class RideStatus(str, Enum):
     REQUESTED = "REQUESTED"
     ASSIGNED = "ASSIGNED"

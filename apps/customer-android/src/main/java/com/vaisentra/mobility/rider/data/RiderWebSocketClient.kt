@@ -59,34 +59,43 @@ object RiderWebSocketClient {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val json = JSONObject(text)
-                    val eventType = json.optString("type", "")
+                    val eventType = json.optString("event_type")
+                        .ifBlank { json.optString("type") }
+                        .ifBlank { json.optString("event") }
+                    val payload = json.optJSONObject("payload") ?: json
 
                     when (eventType) {
-                        "STATUS_UPDATE", "RIDE_UPDATE" -> {
-                            val newStatus = json.optString("status", "")
-                            if (newStatus.isNotEmpty()) {
-                                RiderRepository.updateActiveRideStatus(newStatus)
+                        "STATUS_UPDATE", "RIDE_UPDATE", "RIDE_STATE_SNAPSHOT",
+                        "RIDE_ACCEPTED", "DRIVER_ARRIVED", "TRIP_STARTED",
+                        "TRIP_PAUSED", "TRIP_RESUMED", "TRIP_COMPLETED",
+                        "RIDE_CANCELLED", "RIDE_EXPIRED" -> {
+                            val status = payload.optString("status").ifBlank {
+                                json.optString("status")
+                            }.ifBlank {
+                                when (eventType) {
+                                    "RIDE_ACCEPTED" -> "ASSIGNED"
+                                    "DRIVER_ARRIVED" -> "ARRIVED"
+                                    "TRIP_STARTED", "TRIP_RESUMED" -> "IN_PROGRESS"
+                                    "TRIP_PAUSED" -> "PAUSED"
+                                    "TRIP_COMPLETED" -> "COMPLETED"
+                                    "RIDE_CANCELLED" -> "CANCELLED"
+                                    "RIDE_EXPIRED" -> "EXPIRED"
+                                    else -> ""
+                                }
                             }
+                            if (status.isNotBlank()) RiderRepository.updateActiveRideStatus(status)
                         }
-                        "DRIVER_LOCATION", "LOCATION_UPDATE" -> {
-                            val lat = json.optDouble("latitude", json.optDouble("lat", 0.0))
-                            val lng = json.optDouble("longitude", json.optDouble("lng", 0.0))
-                            val speed = json.optDouble("speed_kmh", 25.0)
-                            if (lat != 0.0 && lng != 0.0) {
-                                RiderRepository.updateDriverLiveLocation(lat, lng, speed)
-                            }
-                        }
-                        "RIDE_COMPLETED" -> {
-                            RiderRepository.updateActiveRideStatus("COMPLETED")
-                        }
-                        "RIDE_CANCELLED" -> {
-                            RiderRepository.updateActiveRideStatus("CANCELLED")
-                        }
-                        else -> {
-                            // Also check top-level "status"
-                            val status = json.optString("status", "")
-                            if (status.isNotEmpty()) {
-                                RiderRepository.updateActiveRideStatus(status)
+                        "DRIVER_LOCATION_UPDATE", "DRIVER_LOCATION", "LOCATION_UPDATE" -> {
+                            val lat = payload.optDouble("driver_latitude", payload.optDouble("latitude", payload.optDouble("lat", Double.NaN)))
+                            val lng = payload.optDouble("driver_longitude", payload.optDouble("longitude", payload.optDouble("lng", Double.NaN)))
+                            val speedMps = if (payload.has("speed_mps") && !payload.isNull("speed_mps")) payload.optDouble("speed_mps", Double.NaN) else Double.NaN
+                            val speedKmh = if (payload.has("speed_kmh") && !payload.isNull("speed_kmh")) {
+                                payload.optDouble("speed_kmh", Double.NaN)
+                            } else if (speedMps.isFinite() && speedMps >= 0.0) {
+                                speedMps * 3.6
+                            } else null
+                            if (lat.isFinite() && lng.isFinite() && lat in -90.0..90.0 && lng in -180.0..180.0) {
+                                RiderRepository.updateDriverLiveLocation(lat, lng, speedKmh)
                             }
                         }
                     }

@@ -8,6 +8,7 @@ from sqlalchemy import select, desc, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_admin
+from backend.domain.state_machine.ride_state_machine import ACTIVE_RIDE_STATUSES
 from backend.domain.models import (
     User, Session, DriverProfile, CustomerProfile, Ride, VehicleCategory,
     DriverAvailability, DriverLocation, FareRule, Vehicle, DriverVehicleAssignment, DriverDocument,
@@ -102,7 +103,7 @@ async def get_live_mobility_feed(
     Missing telemetry, assignments, payment details, and profile attributes remain
     unavailable rather than being replaced with synthetic values.
     """
-    active_statuses = ["REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS"]
+    active_statuses = ACTIVE_RIDE_STATUSES
 
     total_users_count = (await db.execute(select(func.count(User.id)))).scalar_one()
     total_customers_count = (await db.execute(
