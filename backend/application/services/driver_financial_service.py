@@ -9,6 +9,7 @@ import secrets
 import math
 import json
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Any
 from sqlalchemy import select, and_, or_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -106,7 +107,9 @@ class DriverFinancialService:
     # -------------------------------------------------------------------------
     async def get_earnings_dashboard(self, user_id_or_driver_id: str, days: int = 14) -> Dict[str, Any]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        now = datetime.now(timezone.utc)
+        india_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        today_start_local = india_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = today_start_local.astimezone(timezone.utc)
 
         # Query all completed rides
         stmt = (
@@ -145,8 +148,7 @@ class DriverFinancialService:
         total_tips_cents = sum(getattr(r, "tip_cents", 0) or 0 for r in rides)
         total_net_cents = total_gross_cents + total_tips_cents
 
-        # Calculate today's figures
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Calculate today's figures using India Standard Time (the product's operating timezone).
         today_rides = [
             r for r in rides
             if r.completed_at and (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) >= today_start
@@ -165,11 +167,14 @@ class DriverFinancialService:
             )
         )
 
-        # Calculate this week's figures (Monday to Sunday)
-        monday_start = today_start - timedelta(days=now.weekday())
+        # Calculate this week's figures (Monday to Sunday) in India Standard Time.
+        monday_start_local = today_start_local - timedelta(days=india_now.weekday())
+        monday_start = monday_start_local.astimezone(timezone.utc)
+        next_monday_start = monday_start + timedelta(days=7)
         week_rides = [
             r for r in rides
-            if r.completed_at and (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) >= monday_start
+            if r.completed_at
+            and monday_start <= (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) < next_monday_start
         ]
         week_gross_cents = sum(r.final_fare_cents or 0 for r in week_rides)
         week_commission_cents = sum(ride_comm_map.get(r.id, 0) for r in week_rides)
@@ -179,8 +184,10 @@ class DriverFinancialService:
         # Daily breakdown (past `days` days)
         daily_breakdown = []
         for i in range(days):
-            day_dt = today_start - timedelta(days=i)
-            next_day_dt = day_dt + timedelta(days=1)
+            day_local = today_start_local - timedelta(days=i)
+            next_day_local = day_local + timedelta(days=1)
+            day_dt = day_local.astimezone(timezone.utc)
+            next_day_dt = next_day_local.astimezone(timezone.utc)
             matching = [
                 r for r in rides
                 if r.completed_at and day_dt <= (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) < next_day_dt
@@ -190,8 +197,8 @@ class DriverFinancialService:
             d_tips = sum(getattr(r, "tip_cents", 0) or 0 for r in matching)
             d_net = d_gross + d_tips
             daily_breakdown.append({
-                "date": day_dt.strftime("%Y-%m-%d"),
-                "day_name": day_dt.strftime("%a"),
+                "date": day_local.strftime("%Y-%m-%d"),
+                "day_name": day_local.strftime("%a"),
                 "trips_count": len(matching),
                 "gross_fare_cents": d_gross,
                 "gross_fare_rupees": round(d_gross / 100, 2),
@@ -207,8 +214,10 @@ class DriverFinancialService:
         # Weekly breakdown (last 4 weeks)
         weekly_breakdown = []
         for w in range(4):
-            w_start = monday_start - timedelta(weeks=w)
-            w_end = w_start + timedelta(days=7)
+            w_start_local = monday_start_local - timedelta(weeks=w)
+            w_end_local = w_start_local + timedelta(days=7)
+            w_start = w_start_local.astimezone(timezone.utc)
+            w_end = w_end_local.astimezone(timezone.utc)
             w_matching = [
                 r for r in rides
                 if r.completed_at and w_start <= (r.completed_at if r.completed_at.tzinfo else r.completed_at.replace(tzinfo=timezone.utc)) < w_end
@@ -218,8 +227,8 @@ class DriverFinancialService:
             wt = sum(getattr(r, "tip_cents", 0) or 0 for r in w_matching)
             wn = wg + wt
             weekly_breakdown.append({
-                "week_label": f"Week of {w_start.strftime('%b %d')}",
-                "week_start": w_start.strftime("%Y-%m-%d"),
+                "week_label": f"Week of {w_start_local.strftime('%b %d')}",
+                "week_start": w_start_local.strftime("%Y-%m-%d"),
                 "trips_count": len(w_matching),
                 "gross_earnings_cents": wg,
                 "gross_earnings_rupees": round(wg / 100, 2),
