@@ -103,7 +103,7 @@ def upgrade() -> None:
                         and _inside(ride["destination_latitude"], ride["destination_longitude"], polygon)
                     ):
                         matching_ids.append(zone["id"])
-                except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+                except (TypeError, ValueError, KeyError, IndexError, json.JSONDecodeError):
                     continue
             if len(matching_ids) == 1:
                 bind.execute(
