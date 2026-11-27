@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     # Security (JWT Authentication)
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
     PAYOUT_DESTINATION_ENCRYPTION_KEY: Optional[str] = os.getenv("PAYOUT_DESTINATION_ENCRYPTION_KEY", None)
+    PAYOUT_DESTINATION_ENCRYPTION_KEY_PREVIOUS: Optional[str] = os.getenv("PAYOUT_DESTINATION_ENCRYPTION_KEY_PREVIOUS", None)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))  # 15 minutes short-lived access token
     REFRESH_TOKEN_GRACE_PERIOD_SECONDS: int = int(os.getenv("REFRESH_TOKEN_GRACE_PERIOD_SECONDS", "10"))
@@ -76,6 +77,8 @@ class Settings(BaseSettings):
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = os.getenv("RAZORPAY_WEBHOOK_SECRET", None)
     RAZORPAY_WEBHOOK_SECRET_PREVIOUS: Optional[str] = os.getenv("RAZORPAY_WEBHOOK_SECRET_PREVIOUS", None)
     RAZORPAY_MERCHANT_ACCOUNT_ID: Optional[str] = os.getenv("RAZORPAY_MERCHANT_ACCOUNT_ID", None)
+    RAZORPAYX_ACCOUNT_NUMBER: Optional[str] = os.getenv("RAZORPAYX_ACCOUNT_NUMBER", None)
+    PAYOUT_EXECUTION_MODE: str = os.getenv("PAYOUT_EXECUTION_MODE", "MANUAL_TRANSFER")
 
     # Primary SMS Gateway (Twilio Verify Service)
     SMS_PROVIDER: str = os.getenv("SMS_PROVIDER", "twilio")
@@ -184,6 +187,12 @@ class Settings(BaseSettings):
                 raise ValueError("CRITICAL CONFIGURATION ERROR: PAYOUT_DESTINATION_ENCRYPTION_KEY must be configured with at least 32 non-placeholder characters.")
             if hmac.compare_digest(payout_key.encode("utf-8"), secret.encode("utf-8")):
                 raise ValueError("CRITICAL CONFIGURATION ERROR: PAYOUT_DESTINATION_ENCRYPTION_KEY must be distinct from SECRET_KEY.")
+            prev_payout_key = (self.PAYOUT_DESTINATION_ENCRYPTION_KEY_PREVIOUS or "").strip()
+            if prev_payout_key:
+                if len(prev_payout_key) < 32 or _contains_placeholder(prev_payout_key):
+                    raise ValueError("CRITICAL CONFIGURATION ERROR: PAYOUT_DESTINATION_ENCRYPTION_KEY_PREVIOUS must be at least 32 non-placeholder characters when configured.")
+                if hmac.compare_digest(prev_payout_key.encode("utf-8"), secret.encode("utf-8")):
+                    raise ValueError("CRITICAL CONFIGURATION ERROR: PAYOUT_DESTINATION_ENCRYPTION_KEY_PREVIOUS must be distinct from SECRET_KEY.")
 
             rzp_key_id = (self.RAZORPAY_KEY_ID or "").strip()
             if not rzp_key_id.startswith("rzp_live_") or len(rzp_key_id) < 18 or _contains_placeholder(rzp_key_id):

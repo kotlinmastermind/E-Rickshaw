@@ -841,7 +841,8 @@ class DriverPayoutRequest(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     driver_id: Mapped[str] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=False, index=True)
     amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String(30), default="REQUESTED")  # REQUESTED, APPROVED, PAID, REJECTED
+    status: Mapped[str] = mapped_column(String(30), default="REQUESTED")  # REQUESTED, APPROVED, AWAITING_MANUAL_TRANSFER, PROCESSING, PAID, FAILED, REJECTED
+    execution_mode: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)  # MANUAL_TRANSFER, RAZORPAYX
     bank_account_masked: Mapped[str] = mapped_column(String(32), default="Not provided")
     payout_account_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("driver_payout_accounts.id", ondelete="RESTRICT"), nullable=True, index=True)
     account_type_snapshot: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -849,8 +850,20 @@ class DriverPayoutRequest(Base):
     ifsc_code_snapshot: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     beneficiary_name_snapshot: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     payout_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    provider_name: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    provider_payout_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    provider_idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    provider_metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     reviewed_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    manual_transfer_initiated_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    manual_transfer_initiated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     exception_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     settlement_reference: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -862,6 +875,7 @@ class DriverPayoutRequest(Base):
 
     __table_args__ = (
         UniqueConstraint("settlement_reference", name="uq_driver_payout_requests_settlement_reference"),
+        UniqueConstraint("provider_payout_id", name="uq_driver_payout_requests_provider_payout_id"),
     )
 
 

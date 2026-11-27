@@ -395,6 +395,7 @@ async def request_payout(
         "payout_id": payout.id,
         "amount_cents": payout.amount_cents,
         "bank_account_mask": payout.bank_account_masked,
+        "execution_mode": payout.execution_mode,
         "requested_at": payout.created_at.isoformat()
     }
 
@@ -420,10 +421,19 @@ async def get_payout_history(
             "id": p.id,
             "amount_cents": p.amount_cents,
             "status": p.status,
+            "execution_mode": p.execution_mode,
             "bank_account_mask": getattr(p, "bank_account_masked", getattr(p, "bank_account_mask", "")),
+            "account_type": p.account_type_snapshot,
+            "bank_name": p.bank_name_snapshot,
+            "ifsc_code": p.ifsc_code_snapshot,
+            "payout_reference": p.payout_reference or p.settlement_reference,
+            "settlement_reference": p.settlement_reference or p.payout_reference,
             "requested_at": p.created_at.isoformat(),
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
-            "paid_at": p.updated_at.isoformat() if p.status == "PAID" and p.updated_at else None,
+            "paid_at": p.paid_at.isoformat() if p.paid_at else (p.updated_at.isoformat() if p.status == "PAID" and p.updated_at else None),
+            "failed_at": p.failed_at.isoformat() if p.failed_at else None,
+            "failure_reason": p.failure_reason,
+            "retry_count": p.retry_count or 0,
             "rejection_reason": p.rejection_reason
         }
         for p in payouts

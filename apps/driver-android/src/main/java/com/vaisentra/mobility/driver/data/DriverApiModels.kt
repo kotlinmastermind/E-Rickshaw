@@ -339,6 +339,26 @@ data class PayoutRequestDto(
     @SerializedName("idempotency_key") val idempotencyKey: String
 )
 
+data class PayoutHistoryItemDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("amount_cents") val amountCents: Long = 0L,
+    @SerializedName("status") val status: String = "REQUESTED",
+    @SerializedName("execution_mode") val executionMode: String? = null,
+    @SerializedName("bank_account_mask") val bankAccountMask: String = "",
+    @SerializedName("account_type") val accountType: String? = null,
+    @SerializedName("bank_name") val bankName: String? = null,
+    @SerializedName("ifsc_code") val ifscCode: String? = null,
+    @SerializedName("payout_reference") val payoutReference: String? = null,
+    @SerializedName("settlement_reference") val settlementReference: String? = null,
+    @SerializedName("requested_at") val requestedAt: String = "",
+    @SerializedName("reviewed_at") val reviewedAt: String? = null,
+    @SerializedName("paid_at") val paidAt: String? = null,
+    @SerializedName("failed_at") val failedAt: String? = null,
+    @SerializedName("failure_reason") val failureReason: String? = null,
+    @SerializedName("retry_count") val retryCount: Int = 0,
+    @SerializedName("rejection_reason") val rejectionReason: String? = null
+)
+
 data class LedgerItemDto(
     @SerializedName("id") val id: String = "",
     @SerializedName("entry_type") val type: String = "CREDIT",

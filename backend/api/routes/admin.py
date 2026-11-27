@@ -727,7 +727,18 @@ class PayoutRejectPayload(BaseModel):
     rejection_reason: str = Field(..., min_length=3)
 
 class PayoutSettlePayload(BaseModel):
-    settlement_reference: str = Field(..., min_length=3)
+    settlement_reference: Optional[str] = Field(None, min_length=3)
+    confirmation_notes: Optional[str] = Field(None, max_length=240)
+
+class PayoutManualTransferPayload(BaseModel):
+    settlement_reference: str = Field(..., min_length=8, max_length=128)
+    evidence_notes: Optional[str] = Field(None, max_length=240)
+
+class PayoutConfirmManualTransferPayload(BaseModel):
+    confirmation_notes: Optional[str] = Field(None, max_length=240)
+
+class PayoutFailPayload(BaseModel):
+    failure_reason: str = Field(..., min_length=4, max_length=500)
 
 # 1. Support Tickets
 @router.get("/support/tickets")
@@ -1062,11 +1073,24 @@ async def list_payouts(
             "commission_settled_cents": settlements_by_payout[p.id].amount_cents if p.id in settlements_by_payout else 0,
             "commission_settled_rupees": round(settlements_by_payout[p.id].amount_cents / 100.0, 2) if p.id in settlements_by_payout else 0.0,
             "status": p.status,
+            "execution_mode": p.execution_mode,
+            "account_type": p.account_type_snapshot,
+            "bank_name": p.bank_name_snapshot,
+            "ifsc_code": p.ifsc_code_snapshot,
+            "beneficiary_name": p.beneficiary_name_snapshot,
             "bank_account_mask": p.bank_account_masked,
             "bank_account_masked": p.bank_account_masked,
             "requested_at": p.created_at.isoformat(),
             "reviewed_at": p.reviewed_at.isoformat() if p.reviewed_at else None,
+            "manual_transfer_initiated_at": p.manual_transfer_initiated_at.isoformat() if p.manual_transfer_initiated_at else None,
+            "confirmed_at": p.confirmed_at.isoformat() if p.confirmed_at else None,
+            "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+            "failed_at": p.failed_at.isoformat() if p.failed_at else None,
+            "failure_reason": p.failure_reason,
+            "retry_count": p.retry_count or 0,
             "rejection_reason": p.rejection_reason,
+            "provider_name": p.provider_name,
+            "provider_payout_id": p.provider_payout_id,
             "payout_reference": p.payout_reference or p.settlement_reference,
             "settlement_reference": p.settlement_reference or p.payout_reference
         }
@@ -1081,7 +1105,7 @@ async def approve_payout(
 ):
     payout = await AdminAdvancedService.approve_payout(db, payout_id, admin.id)
     await db.commit()
-    return {"status": "APPROVED", "payout_id": payout.id}
+    return {"status": payout.status, "payout_id": payout.id, "execution_mode": payout.execution_mode}
 
 @router.post("/payouts/{payout_id}/reject")
 async def reject_payout(
@@ -1092,7 +1116,115 @@ async def reject_payout(
 ):
     payout = await AdminAdvancedService.reject_payout(db, payout_id, admin.id, payload.rejection_reason)
     await db.commit()
-    return {"status": "REJECTED", "payout_id": payout.id}
+    return {"status": payout.status, "payout_id": payout.id}
+
+@router.post("/payouts/{payout_id}/manual-transfer")
+async def initiate_manual_transfer(
+    payout_id: str,
+    payload: PayoutManualTransferPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.initiate_manual_transfer(
+        db,
+        payout_id=payout_id,
+        admin_user_id=admin.id,
+        settlement_reference=payload.settlement_reference,
+        evidence_notes=payload.evidence_notes,
+    )
+    await db.commit()
+    return {
+        "status": payout.status,
+        "payout_id": payout.id,
+        "execution_mode": payout.execution_mode,
+        "settlement_reference": payout.settlement_reference,
+    }
+
+@router.post("/payouts/{payout_id}/confirm-manual-transfer")
+async def confirm_manual_transfer(
+    payout_id: str,
+    payload: Optional[PayoutConfirmManualTransferPayload] = None,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.confirm_manual_transfer(
+        db,
+        payout_id=payout_id,
+        admin_user_id=admin.id,
+        confirmation_notes=payload.confirmation_notes if payload else None,
+    )
+    await db.commit()
+    return {
+        "status": payout.status,
+        "payout_id": payout.id,
+        "settlement_reference": payout.settlement_reference,
+        "paid_at": payout.paid_at.isoformat() if payout.paid_at else None,
+    }
+
+@router.post("/payouts/{payout_id}/execute")
+async def execute_provider_payout(
+    payout_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.execute_provider_payout(
+        db, payout_id=payout_id, admin_user_id=admin.id
+    )
+    await db.commit()
+    return {
+        "status": payout.status,
+        "payout_id": payout.id,
+        "execution_mode": payout.execution_mode,
+        "provider_payout_id": payout.provider_payout_id,
+    }
+
+@router.post("/payouts/{payout_id}/reconcile")
+async def reconcile_provider_payout(
+    payout_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.reconcile_provider_payout(
+        db, payout_id=payout_id, admin_user_id=admin.id
+    )
+    await db.commit()
+    return {
+        "status": payout.status,
+        "payout_id": payout.id,
+        "provider_payout_id": payout.provider_payout_id,
+        "settlement_reference": payout.settlement_reference,
+    }
+
+@router.post("/payouts/{payout_id}/fail")
+async def fail_payout(
+    payout_id: str,
+    payload: PayoutFailPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.fail_payout(
+        db, payout_id=payout_id, actor_user_id=admin.id, failure_reason=payload.failure_reason
+    )
+    await db.commit()
+    return {"status": payout.status, "payout_id": payout.id, "failure_reason": payout.failure_reason}
+
+@router.post("/payouts/{payout_id}/retry")
+async def retry_payout(
+    payout_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    payout = await PayoutExecutionService.retry_failed_payout(
+        db, payout_id=payout_id, admin_user_id=admin.id
+    )
+    await db.commit()
+    return {"status": payout.status, "payout_id": payout.id, "retry_count": payout.retry_count}
 
 @router.post("/payouts/{payout_id}/settle")
 async def settle_payout(
@@ -1101,9 +1233,9 @@ async def settle_payout(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    payout = await AdminAdvancedService.mark_payout_paid(db, payout_id, admin.id, payload.settlement_reference)
+    payout = await AdminAdvancedService.mark_payout_paid(db, payout_id, admin.id, payload.settlement_reference or "")
     await db.commit()
-    return {"status": "PAID", "payout_id": payout.id, "settlement_reference": payout.payout_reference}
+    return {"status": payout.status, "payout_id": payout.id, "settlement_reference": payout.payout_reference}
 
 # 7. Commission Settings
 @router.post("/commissions")

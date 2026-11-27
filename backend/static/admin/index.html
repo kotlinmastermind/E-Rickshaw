@@ -1065,8 +1065,11 @@
                             class="bg-card border border-border rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-glow/50 font-mono">
                             <option value="ALL">All Payout Requests</option>
                             <option value="REQUESTED" selected>Pending Review (REQUESTED)</option>
-                            <option value="APPROVED">Approved (Awaiting Settlement)</option>
+                            <option value="APPROVED">Approved (Awaiting Execution)</option>
+                            <option value="AWAITING_MANUAL_TRANSFER">Awaiting Manual Confirmation</option>
+                            <option value="PROCESSING">Processing (Provider)</option>
                             <option value="PAID">Settled & Paid (PAID)</option>
+                            <option value="FAILED">Failed (Reversed)</option>
                             <option value="REJECTED">Rejected (Reversed)</option>
                         </select>
                     </div>
@@ -1955,7 +1958,7 @@
         <div class="glass-panel w-full max-w-md rounded-2xl border border-border p-6 shadow-2xl space-y-4">
             <div class="flex items-center justify-between border-b border-border pb-3">
                 <h3 class="text-base font-bold text-white flex items-center gap-2">
-                    <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-glow"></i> Settle Driver Bank Payout
+                    <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-glow"></i> Record Manual Bank Transfer
                 </h3>
                 <button onclick="closePayoutSettleModal()"
                     class="w-8 h-8 rounded-lg bg-surface border border-border flex items-center justify-center text-slate-400 hover:text-white">
@@ -1983,7 +1986,7 @@
             <div class="flex gap-3 pt-2 border-t border-border">
                 <button onclick="submitPayoutSettleConfirm()"
                     class="flex-1 py-2.5 rounded-xl bg-emerald-glow text-black font-extrabold text-xs hover:opacity-90 transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-glow/20">
-                    <i data-lucide="check" class="w-4 h-4"></i> Confirm Settlement & Mark Paid
+                    <i data-lucide="check" class="w-4 h-4"></i> Record Transfer (Awaiting Confirmation)
                 </button>
                 <button onclick="closePayoutSettleModal()"
                     class="px-4 py-2.5 rounded-xl bg-surface border border-border text-slate-400 hover:text-white text-xs">Cancel</button>
@@ -3839,23 +3842,52 @@
                 const amtRupees = ((p.amount_cents || 0) / 100).toFixed(2);
                 let statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">REQUESTED</span>';
                 if (p.status === 'APPROVED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-cyan-dim text-cyan-glow font-mono text-[10px] font-bold">APPROVED</span>';
-                if (p.status === 'PAID' || p.status === 'SETTLED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">SETTLED</span>';
+                if (p.status === 'AWAITING_MANUAL_TRANSFER') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">AWAITING_MANUAL_TRANSFER</span>';
+                if (p.status === 'PROCESSING') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-cyan-dim text-cyan-glow font-mono text-[10px] font-bold">PROCESSING</span>';
+                if (p.status === 'PAID' || p.status === 'SETTLED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">PAID</span>';
+                if (p.status === 'FAILED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-crimson-dim text-crimson-glow font-mono text-[10px] font-bold">FAILED</span>';
                 if (p.status === 'REJECTED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-crimson-dim text-crimson-glow font-mono text-[10px] font-bold">REJECTED</span>';
 
+                const maskedDest = p.bank_account_mask || p.bank_account_masked || 'Primary Account';
                 let actionBtns = '';
                 if (p.status === 'REQUESTED' || p.status === 'PENDING') {
                     actionBtns = `
                         <div class="flex items-center justify-end gap-1.5">
                             <button onclick="approvePayout('${p.id}')" class="px-2.5 py-1 rounded-lg bg-cyan-dim hover:bg-cyan-glow hover:text-black text-cyan-glow border border-cyan-glow/30 text-[11px] font-bold transition-all">Approve</button>
-                            <button onclick="openPayoutSettleModal('${p.id}', '${amtRupees}', '${p.bank_account_mask || p.bank_account_masked || 'Primary Bank Account'}')" class="px-2.5 py-1 rounded-lg bg-emerald-glow text-black font-extrabold text-[11px] hover:opacity-90 transition-all">Settle</button>
                             <button onclick="openPayoutRejectModal('${p.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim hover:bg-crimson-glow hover:text-white text-crimson-glow border border-crimson-glow/30 text-[11px] font-bold transition-all">Reject</button>
                         </div>
                     `;
                 } else if (p.status === 'APPROVED') {
+                    const providerBtn = p.execution_mode === 'RAZORPAYX'
+                        ? `<button onclick="executeProviderPayout('${p.id}')" class="px-2.5 py-1 rounded-lg bg-cyan-glow text-black font-extrabold text-[11px] hover:opacity-90 transition-all">Execute Provider</button>`
+                        : '';
                     actionBtns = `
                         <div class="flex items-center justify-end gap-1.5">
-                            <button onclick="openPayoutSettleModal('${p.id}', '${amtRupees}', '${p.bank_account_mask || p.bank_account_masked || 'Primary Bank Account'}')" class="px-3 py-1 rounded-lg bg-emerald-glow text-black font-extrabold text-[11px] hover:opacity-90 transition-all">Settle with UTR</button>
+                            ${providerBtn}
+                            <button onclick="openPayoutSettleModal('${p.id}', '${amtRupees}', '${maskedDest.replace(/'/g, '')}')" class="px-3 py-1 rounded-lg bg-emerald-glow text-black font-extrabold text-[11px] hover:opacity-90 transition-all">Record Transfer UTR</button>
                             <button onclick="openPayoutRejectModal('${p.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim hover:bg-crimson-glow hover:text-white text-crimson-glow border border-crimson-glow/30 text-[11px] font-bold transition-all">Reject</button>
+                        </div>
+                    `;
+                } else if (p.status === 'AWAITING_MANUAL_TRANSFER') {
+                    actionBtns = `
+                        <div class="flex items-center justify-end gap-1.5">
+                            <span class="text-[10px] text-slate-400 font-mono">UTR: <strong class="text-white">${p.settlement_reference || 'N/A'}</strong></span>
+                            <button onclick="confirmManualTransfer('${p.id}')" class="px-3 py-1 rounded-lg bg-emerald-glow text-black font-extrabold text-[11px] hover:opacity-90 transition-all">Confirm Paid</button>
+                            <button onclick="failPayoutPrompt('${p.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim text-crimson-glow border border-crimson-glow/30 text-[11px] font-bold">Mark Failed</button>
+                        </div>
+                    `;
+                } else if (p.status === 'PROCESSING') {
+                    actionBtns = `
+                        <div class="flex items-center justify-end gap-1.5">
+                            <button onclick="reconcilePayout('${p.id}')" class="px-2.5 py-1 rounded-lg bg-cyan-dim text-cyan-glow border border-cyan-glow/30 text-[11px] font-bold">Reconcile</button>
+                            <button onclick="failPayoutPrompt('${p.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim text-crimson-glow border border-crimson-glow/30 text-[11px] font-bold">Mark Failed</button>
+                        </div>
+                    `;
+                } else if (p.status === 'FAILED') {
+                    actionBtns = `
+                        <div class="flex items-center justify-end gap-1.5">
+                            <span class="text-[10px] text-crimson-glow" title="${p.failure_reason || ''}">${(p.failure_reason || 'Failed').slice(0, 20)}</span>
+                            <button onclick="retryPayout('${p.id}')" class="px-2.5 py-1 rounded-lg bg-amber-dim text-amber-glow border border-amber-glow/30 text-[11px] font-bold">Retry</button>
                         </div>
                     `;
                 } else if (p.status === 'PAID' || p.status === 'SETTLED') {
@@ -3923,30 +3955,127 @@
 
         async function submitPayoutSettleConfirm() {
             const utr = document.getElementById('settle-modal-utr').value.trim();
-            if (!utr) {
-                showToast('Bank IMPS/UPI UTR is mandatory for settlement record', 'error');
+            if (utr.length < 8) {
+                showToast('Bank IMPS/UPI UTR (min 8 chars) is mandatory for transfer record', 'error');
                 return;
             }
             const payoutId = STATE.activeSettlePayout.id;
             closePayoutSettleModal();
-            showToast(`Settling payout #${payoutId.slice(0, 8)} with UTR ${utr}...`);
+            showToast(`Recording manual transfer for payout #${payoutId.slice(0, 8)} with UTR ${utr}...`);
             try {
                 const headers = { 'Content-Type': 'application/json' };
                 if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
-                const res = await fetch(`/api/v1/admin/payouts/${payoutId}/settle`, {
+                const res = await fetch(`/api/v1/admin/payouts/${payoutId}/manual-transfer`, {
                     method: 'POST',
                     headers: headers,
                     body: JSON.stringify({ settlement_reference: utr })
                 });
                 if (res.ok) {
-                    showToast(`Payout #${payoutId.slice(0, 8)} settled and marked PAID!`);
+                    showToast(`Manual transfer recorded (AWAITING_MANUAL_TRANSFER). Confirm completion once bank clears.`);
                     await loadPayoutsData();
                 } else {
                     const err = await res.json();
-                    showToast(err.detail || 'Settlement failed', 'error');
+                    showToast(err.detail || 'Recording manual transfer failed', 'error');
                 }
             } catch (err) {
-                showToast('Network error while settling payout', 'error');
+                showToast('Network error while recording manual transfer', 'error');
+            }
+        }
+
+        async function confirmManualTransfer(payoutId) {
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/payouts/${payoutId}/confirm-manual-transfer`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ confirmation_notes: 'Confirmed by admin after bank clearance' })
+                });
+                if (res.ok) {
+                    showToast(`Payout #${payoutId.slice(0, 8)} confirmed PAID!`);
+                    await loadPayoutsData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Confirmation failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error confirming manual transfer', 'error');
+            }
+        }
+
+        async function executeProviderPayout(payoutId) {
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/payouts/${payoutId}/execute`, { method: 'POST', headers });
+                if (res.ok) {
+                    const body = await res.json();
+                    showToast(`Payout #${payoutId.slice(0, 8)} status: ${body.status}`);
+                    await loadPayoutsData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Provider execution failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error executing provider payout', 'error');
+            }
+        }
+
+        async function reconcilePayout(payoutId) {
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/payouts/${payoutId}/reconcile`, { method: 'POST', headers });
+                if (res.ok) {
+                    const body = await res.json();
+                    showToast(`Reconciled payout #${payoutId.slice(0, 8)}: ${body.status}`);
+                    await loadPayoutsData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Reconciliation failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error reconciling payout', 'error');
+            }
+        }
+
+        async function failPayoutPrompt(payoutId) {
+            const reason = window.prompt('Enter failure reason (min 4 characters):');
+            if (!reason || reason.trim().length < 4) return;
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/payouts/${payoutId}/fail`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ failure_reason: reason.trim() })
+                });
+                if (res.ok) {
+                    showToast(`Payout #${payoutId.slice(0, 8)} marked FAILED and wallet hold reversed.`);
+                    await loadPayoutsData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Failed to mark payout failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error marking payout failed', 'error');
+            }
+        }
+
+        async function retryPayout(payoutId) {
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/payouts/${payoutId}/retry`, { method: 'POST', headers });
+                if (res.ok) {
+                    showToast(`Payout #${payoutId.slice(0, 8)} moved back to APPROVED for retry.`);
+                    await loadPayoutsData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Retry failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error retrying payout', 'error');
             }
         }
 

@@ -5,7 +5,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -886,7 +888,7 @@ fun  PayoutAccountsScreen(
                                     fontSize = 14.sp
                                 )
                                 Text(
-                                    acc.upiVpa ?: "${acc.accountNumberMask ?: "****"} • ${acc.ifscCode ?: ""}",
+                                    "${acc.accountNumberMask ?: "****"}${if (!acc.ifscCode.isNullOrBlank()) " • ${acc.ifscCode}" else ""}",
                                     color = CockpitTextSecondary,
                                     fontSize = 12.sp
                                 )
@@ -957,6 +959,7 @@ fun InstantPayoutScreen(
 ) {
     val earnings by DriverRepository.earnings.collectAsState()
     val accounts by DriverRepository.payoutAccounts.collectAsState()
+    val payoutHistory by DriverRepository.payoutHistory.collectAsState()
     var withdrawAmount by remember { mutableStateOf("") }
     var payoutMethod by remember { mutableStateOf("IMPS Instant") }
     var isSubmitting by remember { mutableStateOf(false) }
@@ -964,11 +967,12 @@ fun InstantPayoutScreen(
     LaunchedEffect(Unit) {
         DriverRepository.fetchEarningsSummary()
         DriverRepository.fetchPayoutAccounts()
+        DriverRepository.fetchPayoutHistory()
     }
 
     val verifiedAccounts = accounts.filter { it.verificationStatus == "VERIFIED" }
     val primaryAccount = verifiedAccounts.firstOrNull { it.isPrimary } ?: verifiedAccounts.firstOrNull()
-    val resolvedMask = primaryAccount?.upiVpa?.takeIf { it.isNotBlank() } ?: primaryAccount?.accountNumberMask.orEmpty()
+    val resolvedMask = primaryAccount?.accountNumberMask.orEmpty()
     val resolvedIfsc = primaryAccount?.ifscCode.orEmpty()
     val hasValidDestination = primaryAccount != null && primaryAccount.id.isNotBlank() && primaryAccount.isPrimary
     var attemptNonce by remember(withdrawAmount, primaryAccount?.id) { mutableStateOf(0) }
@@ -991,8 +995,9 @@ fun InstantPayoutScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 CockpitCard(glow = true) {
@@ -1083,6 +1088,46 @@ fun InstantPayoutScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             )
+
+            if (payoutHistory.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "RECENT PAYOUT REQUESTS (${payoutHistory.size})",
+                    color = CockpitTextMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                payoutHistory.take(5).forEach { item ->
+                    val statusTint = when (item.status) {
+                        "PAID" -> EmeraldPrimary
+                        "FAILED", "REJECTED" -> CrimsonAlert
+                        "AWAITING_MANUAL_TRANSFER", "PROCESSING", "APPROVED" -> ElectricCyan
+                        else -> AmberWarning
+                    }
+                    CockpitCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "₹${"%.2f".format(item.amountCents / 100.0)} • ${item.bankAccountMask}",
+                                    color = CockpitTextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                val detailNote = item.failureReason
+                                    ?: item.rejectionReason
+                                    ?: item.settlementReference?.let { "Ref: $it" }
+                                    ?: item.requestedAt.take(19).replace("T", " ")
+                                Text(detailNote, color = CockpitTextMuted, fontSize = 11.sp)
+                            }
+                            CockpitBadge(item.status, statusTint)
+                        }
+                    }
+                }
+            }
         }
     }
 }

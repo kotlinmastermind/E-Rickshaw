@@ -730,11 +730,13 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
         db_session.add(super_role)
         await db_session.flush()
     from backend.domain.models import DriverPayoutAccount
+    from backend.infrastructure.security.payout_encryption import encrypt_payout_destination
     payout_account = DriverPayoutAccount(
         driver_id=driver_prof.id,
         account_type="BANK_ACCOUNT",
         bank_name="ICICI Bank",
         account_number_mask="ICICI *******5678",
+        account_number_encrypted=encrypt_payout_destination("123456785678"),
         ifsc_code="ICIC0000123",
         beneficiary_name="Payout Route Driver",
         verification_status="VERIFIED",
@@ -795,10 +797,14 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
         )
         assert resp_diff_amt.status_code == 409
 
-    # 4. Approve payout1 and settle with UTR1; create payout2, approve, and attempt duplicate UTR1 -> 409
+    # 4. Approve payout1, record manual transfer, and confirm PAID; create payout2, approve, and attempt duplicate UTR1 -> 409
+    from backend.application.services.payout_execution_service import PayoutExecutionService
     p1_id = data1["payout_id"]
     await AdminAdvancedService.approve_payout(db_session, p1_id, admin_user.id)
     utr = f"UTR-HDFC-{uuid.uuid4().hex[:10].upper()}"
+    await PayoutExecutionService.initiate_manual_transfer(
+        db_session, payout_id=p1_id, admin_user_id=admin_user.id, settlement_reference=utr
+    )
     await AdminAdvancedService.mark_payout_paid(db_session, p1_id, admin_user.id, utr)
 
     p2 = await DispatchAdvancedService.request_payout(
@@ -806,7 +812,9 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
     )
     await AdminAdvancedService.approve_payout(db_session, p2.id, admin_user.id)
     with pytest.raises(HTTPException) as exc_dup_utr:
-        await AdminAdvancedService.mark_payout_paid(db_session, p2.id, admin_user.id, utr)
+        await PayoutExecutionService.initiate_manual_transfer(
+            db_session, payout_id=p2.id, admin_user_id=admin_user.id, settlement_reference=utr
+        )
     assert exc_dup_utr.value.status_code == 409
 
     # Reject payout2 and ensure reversal happens exactly once

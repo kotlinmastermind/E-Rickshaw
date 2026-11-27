@@ -362,11 +362,13 @@ async def test_postgres_concurrent_driver_payout_and_commission_settlement_invar
                 description="PG deferred commission",
             )
         )
+        from backend.infrastructure.security.payout_encryption import encrypt_payout_destination
         acct = DriverPayoutAccount(
             driver_id=driver_id,
             account_type="BANK_ACCOUNT",
             bank_name="HDFC Bank",
             account_number_mask="******9988",
+            account_number_encrypted=encrypt_payout_destination("998877669988"),
             ifsc_code="HDFC0001234",
             beneficiary_name="PG Payout Driver",
             verification_status="VERIFIED",
@@ -445,5 +447,52 @@ async def test_postgres_concurrent_driver_payout_and_commission_settlement_invar
             )
         ).scalars().all()
         assert len(settlements_after) == 1
+
+    # 4. Concurrent manual confirmation & concurrent webhook callbacks on PostgreSQL
+    from backend.application.services.payout_execution_service import PayoutExecutionService
+    k3 = f"pg_payout_3_{uuid.uuid4().hex[:10]}"
+    st3, pid3 = await _attempt_payout(k3)
+    assert st3 == "ok"
+
+    pg_admin_id = None
+    async with session_factory() as prep_db:
+        pg_admin = User(
+            phone_number=f"+9194{uuid.uuid4().hex[:8]}",
+            full_name="PG Payout Admin",
+            role="admin",
+            is_active=True,
+            is_verified=True,
+        )
+        prep_db.add(pg_admin)
+        await prep_db.flush()
+        pg_admin_id = pg_admin.id
+        await AdminAdvancedService.approve_payout(prep_db, pid3, pg_admin_id)
+        await PayoutExecutionService.initiate_manual_transfer(
+            prep_db,
+            payout_id=pid3,
+            admin_user_id=pg_admin_id,
+            settlement_reference=f"PG-UTR-{uuid.uuid4().hex[:10].upper()}",
+        )
+        await prep_db.commit()
+
+    async def _confirm_worker():
+        async with session_factory() as s:
+            try:
+                p = await PayoutExecutionService.confirm_manual_transfer(
+                    s, payout_id=pid3, admin_user_id=pg_admin_id
+                )
+                await s.commit()
+                return ("ok", p.status)
+            except HTTPException as exc:
+                await s.rollback()
+                return ("err", exc.status_code)
+
+    c1, c2 = await asyncio.gather(_confirm_worker(), _confirm_worker())
+    assert sorted([c1[0], c2[0]]) == ["err", "ok"]
+
+    async with session_factory() as final_db:
+        inv = await PayoutExecutionService.reconcile_payout_invariants(final_db, pid3)
+        assert inv["is_balanced"] is True
+        assert inv["status"] == "PAID"
 
     await engine.dispose()

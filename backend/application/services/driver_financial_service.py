@@ -978,7 +978,6 @@ class DriverFinancialService:
     # -------------------------------------------------------------------------
     async def get_payout_accounts(self, user_id_or_driver_id: str) -> List[Dict[str, Any]]:
         driver = await self._get_driver_profile(user_id_or_driver_id)
-        from backend.infrastructure.security.payout_encryption import decrypt_payout_destination
         stmt = select(DriverPayoutAccount).where(
             or_(DriverPayoutAccount.driver_id == driver.id, DriverPayoutAccount.driver_id == user_id_or_driver_id)
         ).order_by(DriverPayoutAccount.is_primary.desc())
@@ -992,7 +991,7 @@ class DriverFinancialService:
                 "bank_name": a.bank_name,
                 "account_number_mask": a.account_number_mask,
                 "ifsc_code": a.ifsc_code,
-                "upi_vpa": decrypt_payout_destination(a.upi_vpa_encrypted) if a.upi_vpa_encrypted else None,
+                "upi_vpa": None,
                 "beneficiary_name": a.beneficiary_name,
                 "verification_status": a.verification_status,
                 "verification_method": a.verification_method,

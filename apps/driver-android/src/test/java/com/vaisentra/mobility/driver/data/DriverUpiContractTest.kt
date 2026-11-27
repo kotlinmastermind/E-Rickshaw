@@ -44,4 +44,24 @@ class DriverUpiContractTest {
         assertEquals("acc_verified_001", decoded.payoutAccountId)
         assertEquals("payout_driver_unique_001", decoded.idempotencyKey)
     }
+
+    @Test
+    fun payoutHistory_deserializesAuthoritativeBackendStates() {
+        val raw = """
+            {
+              "id": "pay_001",
+              "amount_cents": 50000,
+              "status": "AWAITING_MANUAL_TRANSFER",
+              "execution_mode": "MANUAL_TRANSFER",
+              "bank_account_mask": "******1234",
+              "settlement_reference": "UTR202611270001",
+              "requested_at": "2026-11-27T10:00:00Z",
+              "retry_count": 0
+            }
+        """.trimIndent()
+        val item = gson.fromJson(raw, PayoutHistoryItemDto::class.java)
+        assertEquals("AWAITING_MANUAL_TRANSFER", item.status)
+        assertEquals("MANUAL_TRANSFER", item.executionMode)
+        assertEquals("UTR202611270001", item.settlementReference)
+    }
 }

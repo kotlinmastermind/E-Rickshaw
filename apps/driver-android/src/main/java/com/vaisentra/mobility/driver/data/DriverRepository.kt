@@ -309,6 +309,9 @@ object DriverRepository {
     private val _payoutAccounts = MutableStateFlow<List<PayoutAccountDto>>(emptyList())
     val payoutAccounts: StateFlow<List<PayoutAccountDto>> = _payoutAccounts.asStateFlow()
 
+    private val _payoutHistory = MutableStateFlow<List<PayoutHistoryItemDto>>(emptyList())
+    val payoutHistory: StateFlow<List<PayoutHistoryItemDto>> = _payoutHistory.asStateFlow()
+
     private val _weeklyGoal = MutableStateFlow(WeeklyGoalDto())
     val weeklyGoal: StateFlow<WeeklyGoalDto> = _weeklyGoal.asStateFlow()
 
@@ -1153,6 +1156,7 @@ object DriverRepository {
                 )
                 if (res.isSuccessful) {
                     fetchEarningsSummary()
+                    fetchPayoutHistory()
                     onResult(true)
                 } else {
                     val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
@@ -1866,6 +1870,20 @@ object DriverRepository {
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    fun fetchPayoutHistory() {
+        scope.launch {
+            try {
+                val res = DriverNetworkClient.apiService.getPayoutHistory()
+                val body = res.body()
+                if (res.isSuccessful && body != null) {
+                    _payoutHistory.value = body
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchPayoutHistory error: ${e.message}")
+            }
         }
     }
 
