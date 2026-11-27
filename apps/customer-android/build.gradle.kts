@@ -75,6 +75,21 @@ android {
     }
 }
 
+// Razorpay Checkout 1.6.40 publishes standard-core with the dynamic Maven version
+// "LATEST". Resolve that transitive request to a fixed, published version so CI and
+// production builds do not need mutable Maven metadata for every dependency resolution.
+configurations.configureEach {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "com.razorpay" &&
+            requested.name == "standard-core" &&
+            requested.version == "LATEST"
+        ) {
+            useVersion("1.7.22")
+            because("Pin Razorpay's dynamic LATEST transitive dependency for reproducible builds")
+        }
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
