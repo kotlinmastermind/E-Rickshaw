@@ -2626,6 +2626,7 @@
                 if (driver.status === 'IN_TRIP') { color = '#00F2FE'; badge = 'IN TRIP'; }
                 if (driver.status === 'PENDING') { color = '#F59E0B'; badge = 'PENDING'; }
                 if (driver.status === 'REJECTED' || driver.status === 'SUSPENDED') { color = '#EF4444'; }
+                if (driver.location_is_stale) { color = '#64748B'; badge = 'LAST KNOWN LOCATION'; }
 
                 const customHtml = `
                     <div class="driver-marker-pulse flex items-center justify-center w-8 h-8 rounded-full shadow-xl cursor-pointer" style="background-color: ${color}; box-shadow: 0 0 15px ${color};">
