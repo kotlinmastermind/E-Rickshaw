@@ -8,7 +8,8 @@ from sqlalchemy import select
 
 from backend.domain.models import (
     Ride, RideAssignment, DriverProfile, DriverAvailability,
-    User, CustomerProfile, VehicleCategory, FareRule, Vehicle, DriverVehicleAssignment
+    User, CustomerProfile, VehicleCategory, FareRule, Vehicle, DriverVehicleAssignment,
+    GeofenceZone, DriverServiceAreaAssignment
 )
 from backend.application.services.smart_dispatch_service import SmartDispatchService
 from backend.application.services.live_location_service import LiveLocationService
