@@ -20,11 +20,11 @@ import uuid
 from typing import Any
 from urllib.parse import quote
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.config import settings
-from backend.domain.models import AuditLog, Session, User
+from backend.domain.models import AuditLog, Session
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.infrastructure.database.session import async_session_maker, engine
 from backend.infrastructure.security.crypto import generate_mfa_secret, verify_password
