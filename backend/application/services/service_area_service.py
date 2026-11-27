@@ -45,7 +45,15 @@ class ServiceAreaService:
         for zone in zones:
             polygon = self._polygon(zone)
             if polygon is None:
-                continue
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Active service area '{zone.name}' has invalid polygon data; booking and dispatch are blocked.",
+                )
+            if not zone.city_code or not zone.city_code.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Active service area '{zone.name}' has no city code; booking and dispatch are blocked.",
+                )
             if (
                 AdminAdvancedService.is_point_in_polygon(pickup_lat, pickup_lng, polygon)
                 and AdminAdvancedService.is_point_in_polygon(destination_lat, destination_lng, polygon)
@@ -63,6 +71,11 @@ class ServiceAreaService:
                 detail="Route falls inside overlapping active service areas. Resolve the overlapping service-area configuration before booking.",
             )
         zone = matches[0]
+        _, service_polygon, restricted_polygons = await self.load_area_boundary(zone.id)
+        if not self.location_is_inside_boundary(pickup_lat, pickup_lng, service_polygon, restricted_polygons):
+            raise HTTPException(status_code=400, detail="Pickup is inside a restricted zone or outside the active service boundary.")
+        if not self.location_is_inside_boundary(destination_lat, destination_lng, service_polygon, restricted_polygons):
+            raise HTTPException(status_code=400, detail="Destination is inside a restricted zone or outside the active service boundary.")
         if requested_city_code and requested_city_code.strip().upper() != (zone.city_code or "").strip().upper():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -80,19 +93,30 @@ class ServiceAreaService:
         matches = []
         for zone in zones:
             polygon = self._polygon(zone)
-            if polygon and AdminAdvancedService.is_point_in_polygon(latitude, longitude, polygon):
+            if polygon is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Active service area '{zone.name}' has invalid polygon data; location checks are blocked.",
+                )
+            if not zone.city_code or not zone.city_code.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Active service area '{zone.name}' has no city code; location checks are blocked.",
+                )
+            if AdminAdvancedService.is_point_in_polygon(latitude, longitude, polygon):
                 matches.append(zone)
         if not matches:
             raise HTTPException(status_code=400, detail="Location is outside every active operational service area.")
         if len(matches) > 1:
             raise HTTPException(status_code=409, detail="Location falls inside overlapping active service areas.")
-        return matches[0]
+        zone = matches[0]
+        if not await self.is_driver_inside(zone.id, latitude, longitude):
+            raise HTTPException(status_code=400, detail="Location is inside a restricted zone or outside the active service boundary.")
+        return zone
 
     async def require_point_in_area(self, service_area_id: str, latitude: float, longitude: float) -> None:
-        zone = await self.db.get(GeofenceZone, service_area_id)
-        polygon = self._polygon(zone) if zone and zone.is_active and zone.zone_type == "SERVICE_AREA" else None
-        if polygon is None or not AdminAdvancedService.is_point_in_polygon(latitude, longitude, polygon):
-            raise HTTPException(status_code=400, detail="Every pickup, destination, and intermediate stop must remain inside the ride service area.")
+        if not await self.is_driver_inside(service_area_id, latitude, longitude):
+            raise HTTPException(status_code=400, detail="Every pickup, destination, and intermediate stop must remain inside the ride service area and outside restricted zones.")
 
     async def require_driver_assignment(self, driver_id: str, service_area_id: str) -> None:
         assignment = (await self.db.execute(
