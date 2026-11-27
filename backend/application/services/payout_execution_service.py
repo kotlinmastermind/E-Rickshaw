@@ -845,6 +845,12 @@ class PayoutExecutionService:
                 "failed_at": None,
                 "settlement_reference": None,
                 "payout_reference": None,
+                # Each retry is a new provider attempt. Never reconcile it against the
+                # previous attempt's payout id or stale provider metadata.
+                "provider_payout_id": None,
+                "provider_idempotency_key": None,
+                "provider_metadata_json": None,
+                "provider_name": None,
                 "reviewed_by": admin_user_id,
                 "reviewed_at": now,
                 "updated_at": now,
