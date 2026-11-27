@@ -2254,6 +2254,7 @@
             mfaSetupToken: null,
             currentTab: 'map',
             map: null,
+            mapHasFitLiveEntities: false,
             mapFilter: 'all',
             drivers: [],
             riders: [],
@@ -2590,48 +2591,19 @@
 
         // Initialize Leaflet Map with CartoDB Dark Tiles
         function initLeafletMap() {
-            // Centered on East Delhi - Anand Vihar / Connaught Place corridor
+            // India-wide default view; actual live points determine the first operational viewport.
             STATE.map = L.map('command-map', {
                 zoomControl: false,
                 attributionControl: false
-            }).setView([28.6304, 77.2600], 13);
+            }).setView([22.9734, 78.6569], 5);
 
-            // Add High-End Dark Tiles
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{x}/{y}{r}.png', {
                 maxZoom: 19,
                 subdomains: 'abcd'
             }).addTo(STATE.map);
 
-            // Zoom control on bottom right
             L.control.zoom({ position: 'bottomright' }).addTo(STATE.map);
-
-            // Seed Simulated Live Fleet Entities for Demo & Visual Real-time Feel
-            seedFleetEntities();
             renderMapMarkers();
-        }
-
-        function seedFleetEntities() {
-            STATE.drivers = [
-                { id: 'drv-1', name: 'Ramesh Kumar', phone: '+91 98112 34567', plate: 'DL-1ER-4921', category: 'Standard E-Rickshaw', model: 'Mahindra Treo', status: 'AVAILABLE', lat: 28.6475, lng: 28.6475 ? 77.3150 : 77.3150, battery: 86, speed: 0, rating: 4.95, trips: 2420, dl: 'DL-0420190082910' },
-                { id: 'drv-2', name: 'Mohammad Tariq', phone: '+91 98711 55441', plate: 'DL-1ER-8812', category: 'Shared Eco-Pool', model: 'Piaggio Ape E-City', status: 'IN_TRIP', lat: 28.6350, lng: 77.2910, battery: 72, speed: 26, rating: 4.91, trips: 1840, dl: 'DL-0420200033101', tripId: 'TRP-9812', pickup: 'Anand Vihar ISBT Gate 2', drop: 'Preet Vihar Metro Gate 3', fare: '₹74.25', riderName: 'Ankit Verma' },
-                { id: 'drv-3', name: 'Sohan Lal', phone: '+91 99100 88210', plate: 'DL-1EA-5531', category: 'High-Speed Electric Auto', model: 'Bajaj RE E-Auto', status: 'AVAILABLE', lat: 28.6300, lng: 77.2180, battery: 94, speed: 18, rating: 4.98, trips: 3100, dl: 'DL-0420180011928' },
-                { id: 'drv-4', name: 'Deepak Verma', phone: '+91 98101 22345', plate: 'DL-1EC-9011', category: 'E-Loader Cargo', model: 'Euler HiLoad EV', status: 'IN_TRIP', lat: 28.6280, lng: 77.3680, battery: 64, speed: 28, rating: 4.88, trips: 920, dl: 'DL-0420210099412', tripId: 'TRP-9799', pickup: 'Noida Sec 62 B2B Depot', drop: 'Indirapuram Market', fare: '₹140.00', riderName: 'Merchant Logistics Ltd' },
-                { id: 'drv-5', name: 'Ajay Sharma', phone: '+91 98710 44321', plate: 'DL-1ER-3420', category: 'Standard E-Rickshaw', model: 'Saarthi Shavak EV', status: 'AVAILABLE', lat: 28.6085, lng: 77.2995, battery: 52, speed: 12, rating: 4.92, trips: 1450, dl: 'DL-0420200077881' },
-                { id: 'drv-6', name: 'Mukesh Singh', phone: '+91 99990 12340', plate: 'DL-1ER-2201', category: 'Shared Eco-Pool', model: 'Mahindra Treo', status: 'ALERT', lat: 28.6380, lng: 77.2820, battery: 14, speed: 8, rating: 4.78, trips: 890, dl: 'DL-0420220055112' }
-            ];
-
-            STATE.riders = [
-                { id: 'rdr-1', name: 'Priya Sharma', phone: '+91 98110 99881', lat: 28.6465, lng: 77.3180, status: 'WAITING', pickup: 'Anand Vihar Footover Bridge', targetDrop: 'Karkardooma Court', waitMins: 3.2, rating: 4.9 },
-                { id: 'rdr-2', name: 'Vikram Malhotra', phone: '+91 98712 11223', lat: 28.6315, lng: 77.2210, status: 'WAITING', pickup: 'Connaught Place Inner Circle', targetDrop: 'Barakhamba Road Metro', waitMins: 1.5, rating: 5.0 },
-                { id: 'rdr-3', name: 'Neha Gupta', phone: '+91 99114 44556', lat: 28.6110, lng: 77.3020, status: 'WAITING', pickup: 'Mayur Vihar Ph-1 Gate 1', targetDrop: 'Pocket 2 Market', waitMins: 4.0, rating: 4.8 }
-            ];
-
-            STATE.activeRides = [
-                { id: 'TRP-9812', rider: 'Ankit Verma', driver: 'Mohammad Tariq', plate: 'DL-1ER-8812', pickup: 'Anand Vihar ISBT Gate 2', drop: 'Preet Vihar Metro Gate 3', fare: '₹74.25', payment: 'UPI Autopay', status: 'IN_PROGRESS' },
-                { id: 'TRP-9799', rider: 'Merchant Logistics Ltd', driver: 'Deepak Verma', plate: 'DL-1EC-9011', pickup: 'Noida Sec 62 B2B Depot', drop: 'Indirapuram Market', fare: '₹140.00', payment: 'Razorpay QR', status: 'IN_PROGRESS' },
-                { id: 'TRP-9780', rider: 'Kavita Sundaram', driver: 'Sohan Lal', plate: 'DL-1EA-5531', pickup: 'CP Palika Bazaar', drop: 'ITO Flyover', fare: '₹62.00', payment: 'Cash Due', status: 'ASSIGNED' },
-                { id: 'TRP-9766', rider: 'Rohit Joshi', driver: 'Ajay Sharma', plate: 'DL-1ER-3420', pickup: 'Mayur Vihar Ph-1', drop: 'Nirman Vihar', fare: '₹45.00', payment: 'UPI Digital', status: 'COMPLETED' }
-            ];
         }
 
         // Render Professional Custom Markers on Leaflet
@@ -2703,6 +2675,19 @@
 
                 STATE.markers[rider.id] = marker;
             });
+        }
+
+        function fitMapToLiveEntities() {
+            if (!STATE.map || STATE.mapHasFitLiveEntities) return;
+            const points = [...STATE.drivers, ...STATE.riders]
+                .filter(entity => entity.lat != null && entity.lng != null &&
+                    Number.isFinite(Number(entity.lat)) && Number.isFinite(Number(entity.lng)))
+                .map(entity => [Number(entity.lat), Number(entity.lng)]);
+            if (!points.length) return;
+            const bounds = L.latLngBounds(points);
+            if (!bounds.isValid()) return;
+            STATE.map.fitBounds(bounds.pad(0.15), { maxZoom: 14 });
+            STATE.mapHasFitLiveEntities = true;
         }
 
         // Open Inspector Drawer for Driver
@@ -2915,6 +2900,7 @@
                     STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];
                     STATE.customers = Array.isArray(data.customers) ? data.customers : [];
                     STATE.categories = Array.isArray(data.tariffs) ? data.tariffs : [];
+                    fitMapToLiveEntities();
                 }
             } catch (e) {
                 console.error('Admin live feed unavailable:', e);
@@ -3610,6 +3596,7 @@
                         STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];
                         STATE.customers = Array.isArray(data.customers) ? data.customers : [];
                         STATE.categories = Array.isArray(data.tariffs) ? data.tariffs : [];
+                        fitMapToLiveEntities();
                         renderMapMarkers();
                         renderDriverTable();
                         renderRidesTable();
