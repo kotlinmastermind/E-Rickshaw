@@ -4046,6 +4046,8 @@
                 STATE.stats.active_rides = Math.max(0, Number(STATE.stats.active_rides || 0) + (isActive ? 1 : -1));
                 const activeEl = document.getElementById('stat-active-rides');
                 if (activeEl) activeEl.innerText = STATE.stats.active_rides;
+                const activeRideBadge = document.getElementById('badge-active-rides-tab');
+                if (activeRideBadge) activeRideBadge.innerText = STATE.stats.active_rides;
             }
             if (STATE.stats && wasWaiting !== isWaiting) {
                 STATE.stats.waiting_riders = Math.max(0, Number(STATE.stats.waiting_riders || 0) + (isWaiting ? 1 : -1));
