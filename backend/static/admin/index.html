@@ -217,13 +217,13 @@
                 class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 text-slate-400 hover:text-white transition-all whitespace-nowrap">
                 <i data-lucide="truck" class="w-3.5 h-3.5"></i> Driver Fleet & KYC
                 <span id="badge-pending-kyc"
-                    class="px-1.5 py-0.2 rounded-full bg-amber-dim text-amber-glow text-[10px] font-mono">2</span>
+                    class="px-1.5 py-0.2 rounded-full bg-amber-dim text-amber-glow text-[10px] font-mono"></span>
             </button>
             <button onclick="switchTab('rides')" id="tab-btn-rides"
                 class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 text-slate-400 hover:text-white transition-all whitespace-nowrap">
                 <i data-lucide="navigation" class="w-3.5 h-3.5"></i> Active Rides
                 <span id="badge-active-rides-tab"
-                    class="px-1.5 py-0.2 rounded-full bg-cyan-dim text-cyan-glow text-[10px] font-mono">8</span>
+                    class="px-1.5 py-0.2 rounded-full bg-cyan-dim text-cyan-glow text-[10px] font-mono"></span>
             </button>
             <button onclick="switchTab('customers')" id="tab-btn-customers"
                 class="tab-btn px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 text-slate-400 hover:text-white transition-all whitespace-nowrap">
@@ -276,9 +276,9 @@
         <div class="flex items-center space-x-3">
             <!-- Connection Indicator -->
             <div id="connection-status-pill"
-                class="flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-dim border border-emerald-glow/30 text-xs text-emerald-glow font-mono">
-                <span class="w-2 h-2 rounded-full bg-emerald-glow animate-pulse"></span>
-                <span id="connection-label">SUPABASE LIVE (AWS)</span>
+                class="flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-800 border border-slate-600 text-xs text-slate-300 font-mono">
+                <span id="connection-status-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+                <span id="connection-label">CONNECTING TO ADMIN API</span>
             </div>
 
             <!-- Reload / Sync button -->
@@ -3053,34 +3053,55 @@
             showToast(`Navigated to ${name}`);
         }
 
-        // Toggle Driver Duty from Inspector Drawer
+        function setAdminConnectionStatus(state) {
+            const pill = document.getElementById('connection-status-pill');
+            const dot = document.getElementById('connection-status-dot');
+            const label = document.getElementById('connection-label');
+            if (!pill || !dot || !label) return;
+            const styles = {
+                loading: ['bg-slate-800 border-slate-600 text-slate-300', 'bg-slate-400', 'CONNECTING TO ADMIN API'],
+                live: ['bg-emerald-dim border-emerald-glow/30 text-emerald-glow', 'bg-emerald-glow animate-pulse', 'LIVE DATABASE FEED'],
+                unavailable: ['bg-crimson-dim border-crimson-glow/30 text-crimson-glow', 'bg-crimson-glow', 'LIVE DATA UNAVAILABLE']
+            };
+            const selected = styles[state] || styles.unavailable;
+            pill.className = 'flex items-center space-x-2 px-3 py-1 rounded-full border text-xs font-mono ' + selected[0];
+            dot.className = 'w-2 h-2 rounded-full ' + selected[1];
+            label.innerText = selected[2];
+        }
+
+        // Toggle Driver Duty only after the authoritative Admin API confirms the change.
         async function adminToggleDriverDuty() {
             if (!STATE.selectedEntity || STATE.selectedEntity.type !== 'driver') return;
             const driver = STATE.selectedEntity.data;
             const newStatus = driver.status === 'AVAILABLE' ? 'OFFLINE' : 'AVAILABLE';
-            driver.status = newStatus;
-
-            showToast(`Pilot ${driver.name} duty state updated to: ${newStatus}`);
-            openDriverInspector(driver);
-            renderMapMarkers();
-
-            // Real API Call to FastAPI
             try {
                 const headers = { 'Content-Type': 'application/json' };
-                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
-                await fetch(`/api/v1/admin/drivers/${driver.id}/duty`, {
+                if (STATE.adminToken) headers['Authorization'] = 'Bearer ' + STATE.adminToken;
+                const response = await fetch('/api/v1/admin/drivers/' + driver.id + '/duty', {
                     method: 'PUT',
                     headers: headers,
                     body: JSON.stringify({ is_online: newStatus === 'AVAILABLE', reason: 'Admin command override' })
                 });
-                await loadInitialData();
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => ({}));
+                    throw new Error(errorBody.detail || ('Duty update failed (HTTP ' + response.status + ').'));
+                }
+                const refreshed = await loadInitialData();
+                const updatedDriver = STATE.drivers.find(item => String(item.id) === String(driver.id));
+                if (updatedDriver) openDriverInspector(updatedDriver);
+                if (refreshed) showToast('Pilot ' + driver.name + ' duty state updated to: ' + newStatus);
+                else showToast('Duty update was accepted, but the live feed could not be refreshed.', 'error');
             } catch (err) {
-                console.log('Local backend fallback synced duty update.');
+                console.error('Admin driver duty update failed:', err);
+                showToast(err.message || 'Driver duty update failed. No local status change was applied.', 'error');
+                await loadInitialData();
             }
         }
 
         // Load Initial Data from Backend & Render Tables
         async function loadInitialData() {
+            setAdminConnectionStatus('loading');
+            let liveFeedLoaded = false;
             // 1. Require explicit Administrator Password + MFA authentication
             if (!STATE.adminToken) {
                 if (STATE.adminRefreshToken) {
@@ -3088,7 +3109,8 @@
                 }
                 if (!STATE.adminToken) {
                     openAdminLoginModal();
-                    return;
+                    setAdminConnectionStatus('unavailable');
+                    return false;
                 }
             }
 
@@ -3104,6 +3126,8 @@
 
                 if (res.ok) {
                     const data = await res.json();
+                    liveFeedLoaded = true;
+                    setAdminConnectionStatus('live');
 
                     if (data.stats) {
                         STATE.stats = data.stats;
@@ -3120,13 +3144,13 @@
                         if (elPending) elPending.innerText = data.stats.pending_kyc || 0;
 
                         const elBadge = document.getElementById('badge-pending-kyc');
-                        if (elBadge) elBadge.innerText = data.stats.pending_kyc || 0;
+                        if (elBadge) elBadge.innerText = data.stats.pending_kyc ?? 0;
+                        const activeRideBadge = document.getElementById('badge-active-rides-tab');
+                        if (activeRideBadge) activeRideBadge.innerText = data.stats.active_rides ?? 0;
 
                         const elWaiting = document.getElementById('stat-waiting-riders');
                         if (elWaiting) elWaiting.innerText = data.stats.waiting_riders || 0;
 
-                        const elConn = document.getElementById('connection-label');
-                        if (elConn) elConn.innerText = 'LIVE DATABASE FEED';
                     }
 
                     STATE.drivers = Array.isArray(data.drivers) ? data.drivers : [];
@@ -3143,8 +3167,7 @@
                 STATE.activeRides = [];
                 STATE.customers = [];
                 STATE.categories = [];
-                const connectionLabel = document.getElementById('connection-label');
-                if (connectionLabel) connectionLabel.innerText = 'LIVE DATA UNAVAILABLE';
+                setAdminConnectionStatus('unavailable');
             }
 
             renderMapMarkers();
@@ -3159,6 +3182,7 @@
 
             renderCustomerTable();
             renderTariffCards();
+            return liveFeedLoaded;
         }
 
         // Render Driver Table
@@ -4067,6 +4091,9 @@
                             if (elPending) elPending.innerText = data.stats.pending_kyc ?? 0;
                             const elBadge = document.getElementById('badge-pending-kyc');
                             if (elBadge) elBadge.innerText = data.stats.pending_kyc ?? 0;
+                            const activeRideBadge = document.getElementById('badge-active-rides-tab');
+                            if (activeRideBadge) activeRideBadge.innerText = data.stats.active_rides ?? 0;
+                            setAdminConnectionStatus('live');
                         }
                         STATE.drivers = Array.isArray(data.drivers) ? data.drivers : [];
                         STATE.riders = Array.isArray(data.riders) ? data.riders : [];
@@ -4080,21 +4107,25 @@
                         renderCustomerTable();
                         renderTariffCards();
                     }
-                } catch (e) { }
+                } catch (e) {
+                    setAdminConnectionStatus('unavailable');
+                }
             }
 
             // Map positions are updated only by persisted GPS telemetry.
             renderMapMarkers();
         }
 
-        function refreshAllData() {
+        async function refreshAllData() {
             const icon = document.getElementById('refresh-icon');
-            icon.classList.add('animate-spin');
-            setTimeout(() => {
-                icon.classList.remove('animate-spin');
-                showToast('All real-time mobility tables & maps refreshed from Supabase');
-            }, 600);
-            loadInitialData();
+            if (icon) icon.classList.add('animate-spin');
+            try {
+                const refreshed = await loadInitialData();
+                if (refreshed) showToast('Admin operational data refreshed from the backend.');
+                else showToast('Admin live data could not be refreshed. Check the connection and session.', 'error');
+            } finally {
+                if (icon) icon.classList.remove('animate-spin');
+            }
         }
 
         // Stripe-Style Toast Notifications
