@@ -2860,23 +2860,23 @@
                         if (elConn) elConn.innerText = 'LIVE SUPABASE (AWS-AP-SOUTHEAST-2)';
                     }
 
-                    if (Array.isArray(data.drivers) && data.drivers.length > 0) {
+                    if (Array.isArray(data.drivers)) {
                         STATE.drivers = data.drivers;
                     }
 
-                    if (Array.isArray(data.riders) && data.riders.length > 0) {
+                    if (Array.isArray(data.riders)) {
                         STATE.riders = data.riders;
                     }
 
-                    if (Array.isArray(data.active_rides) && data.active_rides.length > 0) {
+                    if (Array.isArray(data.active_rides)) {
                         STATE.activeRides = data.active_rides;
                     }
 
-                    if (Array.isArray(data.customers) && data.customers.length > 0) {
+                    if (Array.isArray(data.customers)) {
                         STATE.customers = data.customers;
                     }
 
-                    if (Array.isArray(data.tariffs) && data.tariffs.length > 0) {
+                    if (Array.isArray(data.tariffs)) {
                         STATE.categories = data.tariffs;
                     }
                 }
