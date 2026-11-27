@@ -1612,6 +1612,38 @@ class AdminResolveAnomalyPayload(BaseModel):
     resolution_notes: str = Field(..., min_length=5, max_length=500)
 
 
+@router.get("/customers/{customer_id}/wallet")
+async def admin_get_customer_wallet(
+    customer_id: str,
+    admin: User = Depends(get_admin_actor),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read the persisted customer wallet without creating or changing financial records."""
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).customer_wallet_overview(
+        admin_id=admin.id,
+        user_id=customer_id,
+    )
+
+
+@router.get("/customers/{customer_id}/wallet/transactions")
+async def admin_get_customer_wallet_transactions(
+    customer_id: str,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    admin: User = Depends(get_admin_actor),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a paginated, read-only view of immutable customer wallet ledger entries."""
+    from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
+    return await AdminFinanceSupportService(db).customer_wallet_transactions(
+        admin_id=admin.id,
+        user_id=customer_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
 @router.get("/payments")
 async def admin_list_payments(
     q: Optional[str] = None,

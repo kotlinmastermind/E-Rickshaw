@@ -720,6 +720,7 @@
                                 <th class="py-3.5 px-4">Completed Trips</th>
                                 <th class="py-3.5 px-4">Completed Ride Fares</th>
                                 <th class="py-3.5 px-4">Rating</th>
+                                <th class="py-3.5 px-4">Wallet & Ledger</th>
                                 <th class="py-3.5 px-4">Account Status</th>
                                 <th class="py-3.5 px-4">Customer KYC</th>
                                 <th class="py-3.5 px-4 text-right">Action</th>
@@ -1863,6 +1864,34 @@
                     <i data-lucide="x" class="w-4 h-4"></i> Reject
                 </button>
             </div>
+        </div>
+    </div>
+
+    <div id="modal-customer-wallet-ledger" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden p-4">
+        <div class="glass-panel w-full max-w-5xl max-h-[92vh] overflow-y-auto rounded-2xl border border-border p-6 shadow-2xl space-y-5">
+            <div class="flex items-center justify-between border-b border-border pb-3">
+                <div><h3 class="text-base font-bold text-white">Customer Wallet & Transaction Ledger</h3><p id="customer-wallet-identity" class="text-xs text-slate-400 mt-1">Loading customer account...</p></div>
+                <div class="flex items-center gap-2">
+                    <button type="button" onclick="refreshCustomerWalletLedger()" class="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs text-cyan-glow">Refresh</button>
+                    <button type="button" onclick="closeCustomerWalletLedger()" class="w-8 h-8 rounded-lg bg-surface border border-border text-slate-400 hover:text-white">×</button>
+                </div>
+            </div>
+            <div id="customer-wallet-summary" class="grid grid-cols-1 sm:grid-cols-3 gap-3"><div class="glass-card p-4 rounded-xl text-xs text-slate-400">Loading persisted wallet record...</div></div>
+            <div class="glass-card rounded-xl border border-border overflow-hidden">
+                <div class="flex items-center justify-between px-4 py-3 border-b border-border"><div><h4 class="text-sm font-bold text-white">Immutable Wallet Transactions</h4><p id="customer-wallet-ledger-count" class="text-[11px] text-slate-500">Loading ledger...</p></div><span class="text-[10px] text-slate-500 font-mono">READ ONLY</span></div>
+                <div class="overflow-x-auto"><table class="w-full text-left text-xs">
+                    <thead class="bg-surface/90 text-slate-400 uppercase font-mono text-[10px] tracking-wider"><tr>
+                        <th class="py-3 px-3">Timestamp</th><th class="py-3 px-3">Type / Source</th><th class="py-3 px-3 text-right">Amount</th><th class="py-3 px-3 text-right">Balance After</th><th class="py-3 px-3">Reference</th><th class="py-3 px-3">Description</th>
+                    </tr></thead>
+                    <tbody id="customer-wallet-transactions-body" class="divide-y divide-border text-slate-300"><tr><td colspan="6" class="py-6 text-center text-slate-500">Loading ledger entries...</td></tr></tbody>
+                </table></div>
+                <div class="flex items-center justify-between px-4 py-3 border-t border-border">
+                    <button id="customer-wallet-prev" type="button" onclick="changeCustomerWalletPage(-1)" class="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs text-slate-300 disabled:opacity-40" disabled>Previous</button>
+                    <span id="customer-wallet-page-label" class="text-[11px] text-slate-500">Page 1</span>
+                    <button id="customer-wallet-next" type="button" onclick="changeCustomerWalletPage(1)" class="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs text-slate-300 disabled:opacity-40" disabled>Next</button>
+                </div>
+            </div>
+            <p id="customer-wallet-error" class="text-xs text-crimson-glow hidden"></p>
         </div>
     </div>
 
@@ -3057,7 +3086,7 @@
 
             tbody.innerHTML = '';
             if (customers.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500">No customer records available.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="py-6 text-center text-slate-500">No customer records available.</td></tr>';
                 return;
             }
             customers.forEach(user => {
@@ -3085,6 +3114,9 @@
                     <td class="py-3.5 px-4 font-mono font-bold text-emerald-glow">${user.spend}</td>
                     <td class="py-3.5 px-4 text-amber-glow font-mono">${user.rating == null ? 'Not rated' : `${user.rating} ★`}</td>
                     <td class="py-3.5 px-4">
+                        <button type="button" data-customer-wallet class="px-2.5 py-1 rounded-lg bg-emerald-dim border border-emerald-glow/30 text-emerald-glow text-[11px] font-bold hover:bg-emerald-glow/10">View Wallet & Ledger</button>
+                    </td>
+                    <td class="py-3.5 px-4">
                         <span class="px-2 py-0.5 rounded-md ${user.active ? 'bg-emerald-dim text-emerald-glow' : 'bg-crimson-dim text-crimson-glow'} font-mono text-[10px] font-bold">
                             ${user.active ? 'ACTIVE' : 'SUSPENDED'}
                         </span>
@@ -3098,6 +3130,7 @@
                         </button>
                     </td>
                 `;
+                tr.querySelector('[data-customer-wallet]')?.addEventListener('click', () => openCustomerWalletLedger(user.id, user.name, user.phone));
                 if (pendingDoc) {
                     const actionCell = tr.querySelector('td:last-child');
                     const reviewButton = document.createElement('button');
@@ -3109,6 +3142,142 @@
                 }
                 tbody.appendChild(tr);
             });
+        }
+
+        let ACTIVE_CUSTOMER_WALLET_ID = null;
+        let ACTIVE_CUSTOMER_WALLET_OFFSET = 0;
+        const CUSTOMER_WALLET_PAGE_SIZE = 25;
+
+        function closeCustomerWalletLedger() {
+            document.getElementById('modal-customer-wallet-ledger')?.classList.add('hidden');
+            ACTIVE_CUSTOMER_WALLET_ID = null;
+            ACTIVE_CUSTOMER_WALLET_OFFSET = 0;
+        }
+
+        function customerWalletAuthHeaders() {
+            const headers = {};
+            if (STATE.adminToken) headers.Authorization = 'Bearer ' + STATE.adminToken;
+            return headers;
+        }
+
+        async function openCustomerWalletLedger(customerId, customerName, customerPhone) {
+            ACTIVE_CUSTOMER_WALLET_ID = customerId;
+            ACTIVE_CUSTOMER_WALLET_OFFSET = 0;
+            document.getElementById('customer-wallet-identity').textContent =
+                (customerName || 'Customer') + ' · ' + (customerPhone || '') + ' · #' + String(customerId).slice(0, 8);
+            document.getElementById('customer-wallet-summary').textContent = 'Loading persisted wallet record...';
+            document.getElementById('customer-wallet-error').classList.add('hidden');
+            document.getElementById('modal-customer-wallet-ledger').classList.remove('hidden');
+            await refreshCustomerWalletLedger();
+        }
+
+        async function refreshCustomerWalletLedger() {
+            if (!ACTIVE_CUSTOMER_WALLET_ID) return;
+            const customerId = encodeURIComponent(ACTIVE_CUSTOMER_WALLET_ID);
+            const summaryEl = document.getElementById('customer-wallet-summary');
+            const errorEl = document.getElementById('customer-wallet-error');
+            errorEl.classList.add('hidden');
+            summaryEl.textContent = 'Loading persisted wallet record...';
+            try {
+                const response = await fetch('/api/v1/admin/customers/' + customerId + '/wallet', {
+                    headers: customerWalletAuthHeaders()
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.detail || ('Wallet lookup failed (' + response.status + ')'));
+                }
+                const data = await response.json();
+                const wallet = data.wallet;
+                summaryEl.innerHTML = '';
+                const cards = [
+                    ['Wallet Balance', wallet ? '₹' + (wallet.balance_cents / 100).toFixed(2) : 'No wallet record', wallet ? 'SERVER LEDGER' : 'NOT CREATED'],
+                    ['Outstanding Wallet Debt', wallet ? '₹' + (wallet.debt_cents / 100).toFixed(2) : 'Unavailable', wallet ? wallet.currency : 'No wallet'],
+                    ['Ledger Transactions', String(data.transaction_count ?? 0), wallet?.updated_at ? 'Updated ' + new Date(wallet.updated_at).toLocaleString() : 'No wallet update']
+                ];
+                cards.forEach(([label, value, detail]) => {
+                    const card = document.createElement('div');
+                    card.className = 'glass-card p-4 rounded-xl border border-border';
+                    const heading = document.createElement('p');
+                    heading.className = 'text-[11px] text-slate-400';
+                    heading.textContent = label;
+                    const amount = document.createElement('p');
+                    amount.className = 'text-xl font-bold font-mono text-white mt-1';
+                    amount.textContent = value;
+                    const note = document.createElement('p');
+                    note.className = 'text-[10px] text-slate-500 mt-1';
+                    note.textContent = detail;
+                    card.append(heading, amount, note);
+                    summaryEl.appendChild(card);
+                });
+                await loadCustomerWalletTransactions(0);
+            } catch (error) {
+                summaryEl.textContent = 'Wallet summary unavailable.';
+                errorEl.textContent = error.message || 'Unable to load customer wallet.';
+                errorEl.classList.remove('hidden');
+                document.getElementById('customer-wallet-transactions-body').innerHTML =
+                    '<tr><td colspan="6" class="py-6 text-center text-slate-500">Ledger unavailable.</td></tr>';
+                document.getElementById('customer-wallet-ledger-count').textContent = 'Unable to load ledger';
+            }
+        }
+
+        async function loadCustomerWalletTransactions(offset) {
+            if (!ACTIVE_CUSTOMER_WALLET_ID) return;
+            ACTIVE_CUSTOMER_WALLET_OFFSET = Math.max(0, offset);
+            const body = document.getElementById('customer-wallet-transactions-body');
+            const customerId = encodeURIComponent(ACTIVE_CUSTOMER_WALLET_ID);
+            body.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-500">Loading ledger entries...</td></tr>';
+            const params = new URLSearchParams({ limit: String(CUSTOMER_WALLET_PAGE_SIZE), offset: String(ACTIVE_CUSTOMER_WALLET_OFFSET) });
+            try {
+                const response = await fetch('/api/v1/admin/customers/' + customerId + '/wallet/transactions?' + params, {
+                    headers: customerWalletAuthHeaders()
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.detail || ('Ledger request failed (' + response.status + ')'));
+                }
+                const data = await response.json();
+                body.innerHTML = '';
+                if (!data.wallet_exists) {
+                    body.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-500">No wallet or transaction records exist for this customer.</td></tr>';
+                } else if (!data.transactions?.length) {
+                    body.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-500">No wallet transactions recorded.</td></tr>';
+                } else {
+                    data.transactions.forEach(tx => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'hover:bg-surface/50';
+                        const values = [
+                            tx.created_at ? new Date(tx.created_at).toLocaleString() : 'Timestamp unavailable',
+                            tx.transaction_type + ' · ' + tx.source,
+                            (tx.currency || 'INR') + ' ' + Number(tx.amount_rupees).toFixed(2),
+                            (tx.currency || 'INR') + ' ' + Number(tx.balance_after_rupees).toFixed(2),
+                            tx.reference_id || '—',
+                            tx.description || '—'
+                        ];
+                        values.forEach((value, index) => {
+                            const td = document.createElement('td');
+                            td.className = 'py-3 px-3 ' + ((index === 2 || index === 3) ? 'text-right font-mono' : '');
+                            td.textContent = value;
+                            tr.appendChild(td);
+                        });
+                        body.appendChild(tr);
+                    });
+                }
+                const total = Number(data.total || 0);
+                const currentPage = Math.floor(ACTIVE_CUSTOMER_WALLET_OFFSET / CUSTOMER_WALLET_PAGE_SIZE) + 1;
+                document.getElementById('customer-wallet-ledger-count').textContent = total + ' persisted transaction(s)';
+                document.getElementById('customer-wallet-page-label').textContent = 'Page ' + currentPage;
+                document.getElementById('customer-wallet-prev').disabled = ACTIVE_CUSTOMER_WALLET_OFFSET <= 0;
+                document.getElementById('customer-wallet-next').disabled = ACTIVE_CUSTOMER_WALLET_OFFSET + CUSTOMER_WALLET_PAGE_SIZE >= total;
+            } catch (error) {
+                body.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-500">Ledger unavailable.</td></tr>';
+                document.getElementById('customer-wallet-error').textContent = error.message || 'Unable to load wallet transactions.';
+                document.getElementById('customer-wallet-error').classList.remove('hidden');
+            }
+        }
+
+        function changeCustomerWalletPage(direction) {
+            const nextOffset = ACTIVE_CUSTOMER_WALLET_OFFSET + (direction * CUSTOMER_WALLET_PAGE_SIZE);
+            if (nextOffset >= 0) loadCustomerWalletTransactions(nextOffset);
         }
 
         function filterCustomerTable() {
