@@ -122,7 +122,7 @@ class FareService:
         dest_lat: float, dest_lng: float,
         city_code: Optional[str] = None
     ) -> Dict[str, Any]:
-        resolved_city = await self.resolve_operating_city(city_code, pickup_lat, pickup_lng)
+        resolved_city = await self.resolve_operating_city(city_code, pickup_lat, pickup_lng, dest_lat, dest_lng)
         rule = await self.get_active_rule_for_category(category_id, city_code=resolved_city)
         route = await self.maps_provider.get_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
 
@@ -249,7 +249,7 @@ class FareService:
         city_code: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Feature 78: Compare fare estimates across all luxury vehicle classes."""
-        resolved_city = await self.resolve_operating_city(city_code, pickup_lat, pickup_lng)
+        resolved_city = await self.resolve_operating_city(city_code, pickup_lat, pickup_lng, dest_lat, dest_lng)
         stmt = select(VehicleCategory).where(VehicleCategory.is_active == True).order_by(VehicleCategory.sort_order.asc())
         res = await self.db.execute(stmt)
         categories = res.scalars().all()
