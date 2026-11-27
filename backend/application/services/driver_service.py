@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import json
 import os
 import uuid
@@ -780,9 +781,10 @@ class DriverService:
                 return None
             return completed_at if completed_at.tzinfo else completed_at.replace(tzinfo=timezone.utc)
 
-        now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        week_start = today_start - timedelta(days=today_start.weekday())
+        india_now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        today_start_local = india_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = today_start_local.astimezone(timezone.utc)
+        week_start = (today_start_local - timedelta(days=india_now.weekday())).astimezone(timezone.utc)
         next_week_start = week_start + timedelta(days=7)
 
         today_rides = [
