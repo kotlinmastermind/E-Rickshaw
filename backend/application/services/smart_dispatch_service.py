@@ -87,6 +87,23 @@ class SmartDispatchService:
             logger.info(f"Ride {ride_id} is in status {ride.status} (assigned={ride.assigned_driver_id}). Skipping dispatch.")
             return None
 
+        # Resolve both endpoints from active Admin geofences before looking for drivers.
+        from backend.application.services.service_area_service import ServiceAreaService
+        area = await ServiceAreaService(self.db).resolve_trip(
+            ride.pickup_latitude,
+            ride.pickup_longitude,
+            ride.destination_latitude,
+            ride.destination_longitude,
+        )
+        if ride.service_area_id and ride.service_area_id != area.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ride service area changed or is no longer active. Dispatch is blocked; revalidate the booking.",
+            )
+        if not ride.service_area_id:
+            ride.service_area_id = area.id
+            await self.db.flush()
+
         now = utc_now()
 
         # 2. Check if an active unexpired offer already exists in flight
@@ -113,7 +130,8 @@ class SmartDispatchService:
             max_rings=max_rings,
             ride_id=ride_id,
             required_category_id=ride.vehicle_category_id,
-            max_candidates=15
+            max_candidates=15,
+            required_service_area_id=ride.service_area_id
         )
 
         # Exclude drivers who already received an offer for this ride
