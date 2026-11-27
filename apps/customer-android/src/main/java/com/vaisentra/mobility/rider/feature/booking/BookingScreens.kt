@@ -359,7 +359,7 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "👛 ₹${wallet.displayBalanceRupees.toInt()}",
+                            text = if (wallet.walletId.isNotBlank()) "👛 ₹${wallet.displayBalanceRupees.toInt()}" else "👛 Balance unavailable",
                             color = EmeraldGreen,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
