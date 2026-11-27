@@ -353,6 +353,7 @@ class FareEstimate(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     category_id: Mapped[str] = mapped_column(String(36), ForeignKey("vehicle_categories.id"), nullable=False)
     fare_rule_id: Mapped[str] = mapped_column(String(36), ForeignKey("fare_rules.id"), nullable=False)
+    service_area_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("geofence_zones.id", ondelete="RESTRICT"), nullable=True, index=True)
     pickup_latitude: Mapped[float] = mapped_column(Float, nullable=False)
     pickup_longitude: Mapped[float] = mapped_column(Float, nullable=False)
     destination_latitude: Mapped[float] = mapped_column(Float, nullable=False)
