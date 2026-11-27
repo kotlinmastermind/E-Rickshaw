@@ -335,12 +335,42 @@ async def get_live_mobility_feed(
             "status": ride.status,
         })
 
+    from backend.domain.models.extended_models import MultiCityOperatingConfig
+    city_config_rows = (
+        await db.execute(
+            select(MultiCityOperatingConfig)
+            .where(MultiCityOperatingConfig.is_active.is_(True))
+            .order_by(MultiCityOperatingConfig.city_name.asc())
+        )
+    ).scalars().all()
+    service_areas = [
+        {"city_code": item.city_code, "city_name": item.city_name or item.city_code}
+        for item in city_config_rows
+        if item.city_code
+    ]
+    if not service_areas:
+        configured_city_codes = (
+            await db.execute(
+                select(FareRule.city_code)
+                .where(FareRule.is_active.is_(True), FareRule.city_code.is_not(None))
+                .distinct()
+                .order_by(FareRule.city_code.asc())
+            )
+        ).scalars().all()
+        service_areas = [
+            {"city_code": code, "city_name": str(code).replace("_", " ").title()}
+            for code in configured_city_codes
+        ]
+
     fare_rows = (
         await db.execute(
             select(FareRule).where(FareRule.is_active.is_(True))
         )
     ).scalars().all()
-    fares_by_category = {rule.category_id: rule for rule in fare_rows}
+    fares_by_category_city = {
+        (rule.category_id, rule.city_code): rule
+        for rule in fare_rows
+    }
     icons_by_code = {
         "E_RICKSHAW_STANDARD": "🛺",
         "E_RICKSHAW_SHARE": "👥",
@@ -353,31 +383,36 @@ async def get_live_mobility_feed(
     for category in category_rows:
         if category.code == "BIKE":
             continue
-        rule = fares_by_category.get(category.id)
-        base_fare = rule.base_fare_cents / 100.0 if rule else None
-        per_km = rule.per_km_cents / 100.0 if rule else None
-        per_minute = rule.per_minute_cents / 100.0 if rule else None
-        minimum_fare = rule.minimum_fare_cents / 100.0 if rule else None
-        cancellation_fee = rule.cancellation_fee_cents / 100.0 if rule else None
-        formatted_tariffs.append({
-            "id": category.id,
-            "ruleId": rule.id if rule else None,
-            "code": category.code,
-            "name": category.name,
-            "desc": category.description,
-            "base": f"₹{base_fare:.0f}" if base_fare is not None else None,
-            "perKm": f"₹{per_km:.1f}/km" if per_km is not None else None,
-            "perMin": f"₹{per_minute:.1f}/min" if per_minute is not None else None,
-            "minFare": f"₹{minimum_fare:.0f}" if minimum_fare is not None else None,
-            "baseFareRupees": base_fare,
-            "perKmRupees": per_km,
-            "perMinuteRupees": per_minute,
-            "minimumFareRupees": minimum_fare,
-            "cancellationFeeRupees": cancellation_fee,
-            "surgeMultiplier": rule.surge_multiplier if rule else None,
-            "icon": icons_by_code.get(category.code, "🛺"),
-            "active": bool(rule and rule.is_active),
-        })
+        areas_to_render = service_areas or [{"city_code": None, "city_name": None}]
+        for area in areas_to_render:
+            city_code = area["city_code"]
+            rule = fares_by_category_city.get((category.id, city_code))
+            base_fare = rule.base_fare_cents / 100.0 if rule else None
+            per_km = rule.per_km_cents / 100.0 if rule else None
+            per_minute = rule.per_minute_cents / 100.0 if rule else None
+            minimum_fare = rule.minimum_fare_cents / 100.0 if rule else None
+            cancellation_fee = rule.cancellation_fee_cents / 100.0 if rule else None
+            formatted_tariffs.append({
+                "id": category.id,
+                "ruleId": rule.id if rule else None,
+                "code": category.code,
+                "name": category.name,
+                "desc": category.description,
+                "cityCode": city_code,
+                "cityName": area["city_name"],
+                "base": f"₹{base_fare:.0f}" if base_fare is not None else None,
+                "perKm": f"₹{per_km:.1f}/km" if per_km is not None else None,
+                "perMin": f"₹{per_minute:.1f}/min" if per_minute is not None else None,
+                "minFare": f"₹{minimum_fare:.0f}" if minimum_fare is not None else None,
+                "baseFareRupees": base_fare,
+                "perKmRupees": per_km,
+                "perMinuteRupees": per_minute,
+                "minimumFareRupees": minimum_fare,
+                "cancellationFeeRupees": cancellation_fee,
+                "surgeMultiplier": rule.surge_multiplier if rule else None,
+                "icon": icons_by_code.get(category.code, "🛺"),
+                "active": bool(rule and rule.is_active),
+            })
 
     return {
         "stats": {
@@ -396,6 +431,7 @@ async def get_live_mobility_feed(
         "active_rides": formatted_rides,
         "customers": formatted_customers,
         "tariffs": formatted_tariffs,
+        "service_areas": service_areas,
     }
 
 @router.get("/shared-rides/analytics")
