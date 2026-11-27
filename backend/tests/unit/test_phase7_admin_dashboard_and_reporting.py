@@ -1,4 +1,5 @@
 import pytest
+from sqlalchemy import select
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -316,6 +317,6 @@ async def test_admin_customer_wallet_read_does_not_create_missing_wallet(db_sess
     assert page["wallet_exists"] is False
     assert page["transactions"] == []
     wallet = (await db_session.execute(
-        __import__("sqlalchemy").select(Wallet).where(Wallet.user_id == customer.id)
+        select(Wallet).where(Wallet.user_id == customer.id)
     )).scalar_one_or_none()
     assert wallet is None
