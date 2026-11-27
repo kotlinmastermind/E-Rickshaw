@@ -79,7 +79,7 @@ class ServiceAreaService:
                 continue
             if zone.zone_type == "SERVICE_AREA" and zone.city_code and zone.city_code.strip():
                 service_areas.append((zone, polygon))
-            elif zone.zone_type == "RESTRICTED":
+            elif str(zone.zone_type or "").upper() in ("RESTRICTED", "RESTRICTED_ZONE"):
                 restricted_areas.append((zone, polygon))
         if not service_areas:
             raise HTTPException(
