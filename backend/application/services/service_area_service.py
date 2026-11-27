@@ -4,7 +4,7 @@ GeofenceZone records with zone_type=SERVICE_AREA define actual operating polygon
 Geographic master-data coverage is deliberately independent from operational coverage.
 """
 import json
-from typing import Optional, Tuple
+from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
