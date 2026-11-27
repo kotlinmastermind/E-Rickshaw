@@ -808,6 +808,8 @@ class AdminGovernanceService:
 
     async def save_geofence(self, admin_id: str, zone_id: Optional[str], values: Dict[str, Any], commit: bool = True) -> Dict[str, Any]:
         points = values["coordinates"]
+        if values["zone_type"] == "SERVICE_AREA" and not (values.get("city_code") or "").strip():
+            raise HTTPException(422, "An operational service area requires a city code for tariff mapping.")
         if len(points) < 3 or len(points) > 200:
             raise HTTPException(422, "A service boundary requires 3 to 200 vertices.")
         try:
