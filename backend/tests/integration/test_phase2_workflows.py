@@ -126,13 +126,13 @@ async def test_phase2_customer_and_admin_workflows(db_session):
             # 6. Admin Geofence CRUD & Point Verification
             geo_resp = await client.post("/api/v1/admin/geofences", json={
                 "name": "Jaipur Test Service Corridor",
-                "city_code": "MUMBAI",
+                "city_code": "JAIPUR",
                 "zone_type": "SERVICE_AREA",
                 "coordinates": [
-                    {"lat": 18.90, "lng": 72.80},
-                    {"lat": 19.00, "lng": 72.80},
-                    {"lat": 19.00, "lng": 72.90},
-                    {"lat": 18.90, "lng": 72.90}
+                    {"lat": 26.90, "lng": 75.70},
+                    {"lat": 27.00, "lng": 75.70},
+                    {"lat": 27.00, "lng": 75.80},
+                    {"lat": 26.90, "lng": 75.80}
                 ],
                 "surge_multiplier": 1.25
             }, headers=admin_headers)
@@ -140,8 +140,8 @@ async def test_phase2_customer_and_admin_workflows(db_session):
             assert geo_resp.json()["status"] == "CREATED"
 
             verify_pt = await client.post("/api/v1/admin/geofences/verify-point", json={
-                "latitude": 18.95,
-                "longitude": 72.85
+                "latitude": 26.95,
+                "longitude": 75.75
             }, headers=admin_headers)
             assert verify_pt.status_code == 200
             assert verify_pt.json()["is_serviceable"] is True
