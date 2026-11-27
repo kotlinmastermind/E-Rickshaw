@@ -28,16 +28,19 @@ import kotlinx.coroutines.launch
 fun PaymentMethodPickerScreen(onNavigate: (String) -> Unit) {
     var selectedMethod by remember { mutableStateOf("UPI") }
     val wallet by RiderRepository.wallet.collectAsState()
+    val walletLoadState by RiderRepository.walletLoadState.collectAsState()
     val hasWalletBalance = wallet.walletId.isNotBlank()
 
     LaunchedEffect(Unit) {
         RiderRepository.fetchWalletBalance()
     }
 
-    val walletLabel = if (hasWalletBalance) {
-        "RiderGo Cashless Wallet (₹${String.format(java.util.Locale.US, "%.2f", wallet.displayBalanceRupees)} available)"
-    } else {
-        "RiderGo Cashless Wallet (balance unavailable)"
+    val walletLabel = when {
+        !hasWalletBalance -> "RiderGo Cashless Wallet (balance unavailable)"
+        walletLoadState is RiderRepository.WalletBalanceLoadState.Error ->
+            "RiderGo Wallet (last confirmed ₹${String.format(java.util.Locale.US, "%.2f", wallet.displayBalanceRupees)})"
+        else ->
+            "RiderGo Cashless Wallet (₹${String.format(java.util.Locale.US, "%.2f", wallet.displayBalanceRupees)} available)"
     }
     val methods = listOf(
         Triple("UPI", "Instant UPI (Google Pay, PhonePe, Paytm)", "⚡"),
