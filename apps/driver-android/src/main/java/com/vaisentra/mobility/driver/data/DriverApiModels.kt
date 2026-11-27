@@ -335,8 +335,8 @@ data class DriverRecentTripEarningDto(
 
 data class PayoutRequestDto(
     @SerializedName("amount_cents") val amountCents: Long,
-    @SerializedName("account_number_mask") val accountNumberMask: String = "**** 9988",
-    @SerializedName("ifsc") val ifsc: String = "HDFC0001234",
+    @SerializedName("account_number_mask") val accountNumberMask: String,
+    @SerializedName("ifsc") val ifsc: String,
     @SerializedName("idempotency_key") val idempotencyKey: String
 )
 
