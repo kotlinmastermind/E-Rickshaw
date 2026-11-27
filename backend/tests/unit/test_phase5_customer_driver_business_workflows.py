@@ -8,7 +8,8 @@ from sqlalchemy import select, update
 from backend.main import app
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability, Vehicle, VehicleCategory,
-    FareRule, FareEstimate, Ride, RideAssignment, RideOperationalEvent, Session, DriverVehicleAssignment
+    FareRule, FareEstimate, Ride, RideAssignment, RideOperationalEvent, Session, DriverVehicleAssignment,
+    GeofenceZone, DriverServiceAreaAssignment
 )
 from backend.domain.state_machine.ride_state_machine import RideStateMachine, RideStatus, ActorRole, RideTransitionError
 from backend.infrastructure.security.crypto import (
