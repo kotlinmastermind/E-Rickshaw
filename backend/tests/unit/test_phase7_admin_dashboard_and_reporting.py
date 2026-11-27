@@ -258,6 +258,7 @@ async def test_admin_customer_wallet_overview_and_ledger_are_real_read_only_reco
         reference_id="payment-topup-1",
         idempotency_key=f"admin-ledger-a-{suffix}",
         description="Verified Razorpay top-up",
+        created_at=datetime.now(timezone.utc) - timedelta(minutes=1),
     )
     second = WalletTransaction(
         wallet_id=wallet.id,
@@ -268,6 +269,7 @@ async def test_admin_customer_wallet_overview_and_ledger_are_real_read_only_reco
         reference_id="ride-ledger-1",
         idempotency_key=f"admin-ledger-b-{suffix}",
         description="Ride payment",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add_all([first, second])
     await db_session.commit()
