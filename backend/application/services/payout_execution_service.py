@@ -638,10 +638,29 @@ class PayoutExecutionService:
                     auth=(settings.RAZORPAY_KEY_ID or "", settings.RAZORPAY_KEY_SECRET or ""),
                 )
                 items = (resp.json() or {}).get("items", []) if resp.status_code == 200 else []
-                item = items[0] if items else None
+                item = next(
+                    (candidate for candidate in items if candidate.get("reference_id") == payout.id),
+                    None,
+                )
 
         if not item:
             return payout
+
+        if (item.get("reference_id") or "").strip() != payout.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Provider reconciliation returned a payout with a different reference; no wallet or payout state was changed.",
+            )
+        if item.get("amount") is not None and int(item["amount"]) != payout.amount_cents:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Provider payout amount does not match the authoritative payout request.",
+            )
+        if item.get("currency") and str(item["currency"]).upper() != "INR":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Provider payout currency does not match INR.",
+            )
 
         prov_status = (item.get("status") or "").lower()
         now = datetime.now(timezone.utc)
@@ -958,6 +977,23 @@ class PayoutExecutionService:
             inbox.processed_at = now
             await session.commit()
             return {"status": "IGNORED_UNKNOWN_PAYOUT", "digest": digest}
+
+        if reference_id and reference_id != payout.id:
+            inbox.status = "FAILED"
+            inbox.last_error = "Provider payout id and reference id resolve to different payout requests."
+            await session.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Payout webhook identity mismatch; no payout state or wallet balance was changed.",
+            )
+        if payout.provider_payout_id and provider_payout_id and payout.provider_payout_id != provider_payout_id:
+            inbox.status = "FAILED"
+            inbox.last_error = "Webhook provider payout id does not match the payout's current execution attempt."
+            await session.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Stale or mismatched provider payout event rejected.",
+            )
 
         # Out-of-order / terminal protection
         if payout.status in TERMINAL_PAYOUT_STATUSES:
