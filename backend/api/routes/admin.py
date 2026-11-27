@@ -1188,6 +1188,57 @@ async def list_payouts(
         for p in payouts
     ]
 
+@router.get("/driver-earnings")
+async def list_driver_earnings(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read-only, paginated driver gross earnings and deferred commission overview."""
+    from backend.application.services.driver_service import DriverService
+
+    criteria = (User.role.in_(["driver", "DRIVER"]), User.is_active.is_(True))
+    total = int(
+        await db.scalar(
+            select(func.count(DriverProfile.id))
+            .join(User, User.id == DriverProfile.user_id)
+            .where(*criteria)
+        ) or 0
+    )
+    rows = (
+        await db.execute(
+            select(DriverProfile, User)
+            .join(User, User.id == DriverProfile.user_id)
+            .where(*criteria)
+            .order_by(DriverProfile.id.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).all()
+
+    service = DriverService(db)
+    items = []
+    for profile, user in rows:
+        summary = await service.get_earnings_summary(user.id)
+        items.append({
+            "driver_id": profile.id,
+            "driver_name": user.full_name,
+            "currency": summary["currency"],
+            "gross_earnings_cents": summary["total_gross_earnings_cents"],
+            "commission_accrued_cents": summary["commission_accrued_cents"],
+            "commission_outstanding_cents": summary["commission_outstanding_cents"],
+            "commission_payable_cents": summary["commission_payable_cents"],
+            "commission_receivable_cents": summary["commission_receivable_cents"],
+            "commission_snapshot_missing_count": summary["commission_snapshot_missing_count"],
+            "wallet_balance_cents": summary["wallet_balance_cents"],
+            "withdrawable_balance_cents": summary["withdrawable_balance_cents"],
+            "completed_trips": summary["completed_trips"],
+        })
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
 @router.post("/payouts/{payout_id}/approve")
 async def approve_payout(
     payout_id: str,
