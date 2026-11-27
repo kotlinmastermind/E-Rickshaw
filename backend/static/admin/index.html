@@ -3844,21 +3844,103 @@
         function handleLiveWsTelemetry(payload) {
             const eventType = payload?.event_type || payload?.type || payload?.event;
             const eventPayload = payload?.payload && typeof payload.payload === 'object' ? payload.payload : payload;
-            if (eventType !== 'DRIVER_LOCATION_UPDATE') return;
-            const driver = STATE.drivers.find(d => d.id === String(eventPayload.driver_id || ''));
-            if (!driver) return;
-            const latitude = Number(eventPayload.latitude);
-            const longitude = Number(eventPayload.longitude);
-            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-            driver.lat = latitude;
-            driver.lng = longitude;
-            if (eventPayload.speed_kmh != null && Number.isFinite(Number(eventPayload.speed_kmh))) {
-                driver.speed = Number(eventPayload.speed_kmh);
-            } else if (eventPayload.speed_mps != null && Number.isFinite(Number(eventPayload.speed_mps))) {
-                driver.speed = Number(eventPayload.speed_mps) * 3.6;
+            const driverId = String(eventPayload.driver_id || eventPayload.id || eventPayload.user_id || '');
+
+            if (eventType === 'DRIVER_LOCATION_UPDATE') {
+                const driver = STATE.drivers.find(d => String(d.id) === driverId || String(d.user_id) === driverId);
+                if (!driver) return;
+                const latitude = Number(eventPayload.latitude ?? eventPayload.driver_latitude);
+                const longitude = Number(eventPayload.longitude ?? eventPayload.driver_longitude);
+                if (!Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+                    latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return;
+                driver.lat = latitude;
+                driver.lng = longitude;
+                if (eventPayload.speed_kmh != null && Number.isFinite(Number(eventPayload.speed_kmh))) {
+                    driver.speed = Number(eventPayload.speed_kmh);
+                } else if (eventPayload.speed_mps != null && Number.isFinite(Number(eventPayload.speed_mps))) {
+                    driver.speed = Number(eventPayload.speed_mps) * 3.6;
+                } else if (eventPayload.speed != null && Number.isFinite(Number(eventPayload.speed))) {
+                    driver.speed = Number(eventPayload.speed) * 3.6;
+                }
+                const recordedAt = eventPayload.recorded_at || eventPayload.last_seen || eventPayload.updated_at;
+                if (recordedAt) driver.location_recorded_at = recordedAt;
+                renderMapMarkers();
+                return;
             }
-            driver.location_recorded_at = eventPayload.recorded_at || new Date().toISOString();
+
+            if (eventType === 'DRIVER_OFFLINE') {
+                const driver = STATE.drivers.find(d => String(d.id) === driverId || String(d.user_id) === driverId);
+                if (!driver) return;
+                driver.status = 'OFFLINE';
+                driver.location_is_stale = true;
+                renderMapMarkers();
+                renderDriverTable();
+                return;
+            }
+
+            if (eventType === 'CUSTOMER_LOCATION_UPDATE') {
+                const rideId = String(payload?.ride_id || eventPayload.ride_id || '');
+                const activeRide = STATE.activeRides.find(ride => String(ride.id) === rideId);
+                if (!rideId || !activeRide) return;
+                const latitude = Number(eventPayload.latitude);
+                const longitude = Number(eventPayload.longitude);
+                if (!Number.isFinite(latitude) || !Number.isFinite(longitude) ||
+                    latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return;
+                let rider = STATE.riders.find(item => String(item.ride_id || item.id) === rideId);
+                if (!rider) {
+                    rider = { id: rideId, ride_id: rideId, name: activeRide.rider || null, status: 'IN_RIDE' };
+                    STATE.riders.push(rider);
+                }
+                rider.lat = latitude;
+                rider.lng = longitude;
+                renderMapMarkers();
+                return;
+            }
+
+            const rideEventStatuses = {
+                RIDE_REQUESTED: 'REQUESTED',
+                RIDE_ACCEPTED: 'ASSIGNED',
+                DRIVER_ARRIVED: 'ARRIVED',
+                TRIP_STARTED: 'IN_PROGRESS',
+                TRIP_PAUSED: 'PAUSED',
+                TRIP_RESUMED: 'IN_PROGRESS',
+                TRIP_COMPLETED: 'COMPLETED',
+                RIDE_CANCELLED: 'CANCELLED',
+                RIDE_EXPIRED: 'EXPIRED'
+            };
+            const nextStatus = eventPayload.status || payload?.status || rideEventStatuses[eventType];
+            if (!nextStatus) return;
+            const rideId = String(payload?.ride_id || eventPayload.ride_id || '');
+            if (!rideId) return;
+            const ride = STATE.activeRides.find(item => String(item.id) === rideId);
+            if (!ride) return;
+
+            const activeStatuses = ['REQUESTED', 'ASSIGNED', 'ARRIVED', 'IN_PROGRESS', 'PAUSED'];
+            const wasActive = activeStatuses.includes(String(ride.status || '').toUpperCase());
+            const wasWaiting = String(ride.status || '').toUpperCase() === 'REQUESTED';
+            ride.status = String(nextStatus).toUpperCase();
+            const isActive = activeStatuses.includes(ride.status);
+            const isWaiting = ride.status === 'REQUESTED';
+
+            if (STATE.stats && wasActive !== isActive) {
+                STATE.stats.active_rides = Math.max(0, Number(STATE.stats.active_rides || 0) + (isActive ? 1 : -1));
+                const activeEl = document.getElementById('stat-active-rides');
+                if (activeEl) activeEl.innerText = STATE.stats.active_rides;
+            }
+            if (STATE.stats && wasWaiting !== isWaiting) {
+                STATE.stats.waiting_riders = Math.max(0, Number(STATE.stats.waiting_riders || 0) + (isWaiting ? 1 : -1));
+                const waitingEl = document.getElementById('stat-waiting-riders');
+                if (waitingEl) waitingEl.innerText = STATE.stats.waiting_riders;
+            }
+
+            if (!isWaiting) {
+                STATE.riders = STATE.riders.filter(item => String(item.ride_id || item.id) !== rideId);
+            }
+            if (!isActive) {
+                STATE.activeRides = STATE.activeRides.filter(item => String(item.id) !== rideId);
+            }
             renderMapMarkers();
+            renderRidesTable();
         }
 
         // Heartbeat Periodic Sync
