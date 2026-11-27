@@ -249,8 +249,8 @@ async def get_live_mobility_feed(
         drivers_by_id[str(profile.id)] = driver_data
 
     customer_rows = (await db.execute(
-        select(CustomerProfile, User)
-        .join(User, CustomerProfile.user_id == User.id)
+        select(User, CustomerProfile)
+        .outerjoin(CustomerProfile, CustomerProfile.user_id == User.id)
         .where(User.role == "customer")
         .order_by(User.created_at.desc())
     )).all()
@@ -261,8 +261,7 @@ async def get_live_mobility_feed(
             func.coalesce(func.sum(Ride.final_fare_cents), 0).label("completed_spend_cents")
         )
         .where(
-            Ride.status == "COMPLETED",
-            Ride.final_fare_cents.is_not(None)
+            Ride.status == "COMPLETED"
         )
         .group_by(Ride.customer_id)
     )).all()
@@ -276,21 +275,22 @@ async def get_live_mobility_feed(
 
     customers_by_profile_id = {}
     formatted_customers = []
-    for profile, user in customer_rows:
-        stats = customer_stats.get(profile.id, {"rides": 0, "spend_cents": 0})
+    for user, profile in customer_rows:
+        stats = customer_stats.get(profile.id, {"rides": 0, "spend_cents": 0}) if profile else {"rides": 0, "spend_cents": 0}
         customer_data = {
             "id": str(user.id),
-            "profile_id": str(profile.id),
+            "profile_id": str(profile.id) if profile else None,
             "name": user.full_name or "Name unavailable",
             "phone": user.phone_number or "",
             "email": user.email or "",
             "rides": stats["rides"],
             "spend": f"₹{stats['spend_cents'] / 100.0:,.2f}",
-            "rating": float(profile.rating_average) if profile.rating_count else None,
+            "rating": float(profile.rating_average) if profile and profile.rating_count else None,
             "active": bool(user.is_active)
         }
         formatted_customers.append(customer_data)
-        customers_by_profile_id[profile.id] = customer_data
+        if profile:
+            customers_by_profile_id[profile.id] = customer_data
 
     active_ride_rows = (await db.execute(
         select(Ride)
