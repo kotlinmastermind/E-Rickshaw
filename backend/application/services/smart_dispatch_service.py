@@ -377,6 +377,7 @@ class SmartDispatchService:
         if resolved_area.id != ride.service_area_id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride is no longer valid for its recorded service area.")
         await service_areas.require_driver_assignment(driver.id, ride.service_area_id)
+        await service_areas.require_fresh_driver_inside(driver.id, ride.service_area_id)
 
         # Validate state transition via authoritative state machine
         RideStateMachine.validate_transition(ride.status, RideStatus.ASSIGNED.value, ActorRole.DRIVER.value)
