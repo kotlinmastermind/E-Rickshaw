@@ -1,11 +1,6 @@
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
-class IdentityLookupPayload(BaseModel):
-    """Payload to look up user credentials and auth options by phone or email."""
-    identifier: str = Field(..., description="Mobile number (e.g. +919876543210) or Email address", json_schema_extra={"example": "+919876543210"})
-    role: str = Field(default="customer", description="customer or driver", json_schema_extra={"example": "customer"})
-
 class TokenRefreshPayload(BaseModel):
     """Payload to exchange active refresh token for a fresh access token."""
     refresh_token: str = Field(..., description="Cryptographically signed refresh token")
