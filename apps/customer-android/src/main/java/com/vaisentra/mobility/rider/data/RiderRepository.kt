@@ -55,17 +55,9 @@ object RiderRepository {
     private val _rideHistory = MutableStateFlow<List<ActiveRideDto>>(emptyList())
     val rideHistory: StateFlow<List<ActiveRideDto>> = _rideHistory.asStateFlow()
 
-    private val _wallet = MutableStateFlow<WalletBalanceDto>(
-        WalletBalanceDto(
-            walletId = "w-default",
-            balanceCents = 48500,
-            balanceRupees = 485.00,
-            autoTopupEnabled = true,
-            autoTopupThreshold = 100.0,
-            autoTopupAmount = 500.0
-        )
-    )
-    val wallet: StateFlow<WalletBalanceDto> = _wallet.asStateFlow()
+    // No local/demo balance is authoritative. Null means the server balance has not loaded.
+    private val _wallet = MutableStateFlow<WalletBalanceDto?>(null)
+    val wallet: StateFlow<WalletBalanceDto?> = _wallet.asStateFlow()
 
     private val _loyalty = MutableStateFlow(LoyaltySummaryDto())
     val loyalty: StateFlow<LoyaltySummaryDto> = _loyalty.asStateFlow()
@@ -616,17 +608,26 @@ object RiderRepository {
     suspend fun fetchWalletBalance(): Result<WalletBalanceDto> {
         return try {
             val response = NetworkClient.apiService.getWalletBalance()
-            if (response.isSuccessful && response.body() != null) {
-                val bal = response.body()!!
-                val computedRupees = if (bal.balanceRupees > 0.0) bal.balanceRupees else (bal.balanceCents / 100.0)
-                val synced = bal.copy(balanceRupees = computedRupees)
-                _wallet.value = synced
-                Result.success(synced)
+            val balance = response.body()
+            if (response.isSuccessful && balance != null &&
+                balance.walletId.isNotBlank() && balance.balanceCents >= 0 &&
+                balance.currency.equals("INR", ignoreCase = true)
+            ) {
+                // Paise from the authenticated backend ledger are the source of truth.
+                val authoritative = balance.copy(balanceRupees = balance.balanceCents / 100.0)
+                _wallet.value = authoritative
+                Result.success(authoritative)
             } else {
-                Result.success(_wallet.value)
+                _wallet.value = null
+                val detail = response.errorBody()?.string()?.takeIf { it.isNotBlank() }
+                    ?: ("Wallet balance is unavailable (HTTP " + response.code() + ").")
+                Result.failure(IllegalStateException(detail))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Result.success(_wallet.value)
+            _wallet.value = null
+            Result.failure(e)
         }
     }
 
