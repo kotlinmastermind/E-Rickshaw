@@ -196,6 +196,24 @@ class RideService:
             if stop_area.id != service_area.id:
                 raise HTTPException(status_code=400, detail="All intermediate stops must remain inside the ride's service area.")
 
+        # Do not accept a booking in an area/category with no real eligible driver.
+        # Candidate discovery enforces approval, online/non-busy state, fresh GPS,
+        # assigned vehicle category, and the same service-area polygon.
+        from backend.application.services.driver_eligibility_service import DriverEligibilityService
+        eligible_drivers = await DriverEligibilityService(db=self.db).discover_eligible_candidates(
+            pickup_lat=estimate.pickup_latitude,
+            pickup_lng=estimate.pickup_longitude,
+            max_rings=5,
+            required_category_id=estimate.category_id,
+            max_candidates=1,
+            required_service_area_id=service_area.id,
+        )
+        if not eligible_drivers:
+            raise HTTPException(
+                status_code=409,
+                detail="No eligible online driver with a matching vehicle is currently available in this service area. Booking was not created.",
+            )
+
         now = datetime.now(timezone.utc)
 
         expires_at = estimate.expires_at if estimate.expires_at.tzinfo else estimate.expires_at.replace(tzinfo=timezone.utc)
