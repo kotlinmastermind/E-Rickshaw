@@ -1059,7 +1059,7 @@ async def test_out_of_bounds_and_cross_city_spoofing_rejected(db_session: AsyncS
             dest_lng=65.1
         )
     assert exc_ocean.value.status_code == 400
-    assert "outside our operational service area" in exc_ocean.value.detail
+    assert "same active operational service area" in exc_ocean.value.detail
 
     # 2. Coordinates in Delhi NCR but client claims city_code="PATNA"
     with pytest.raises(HTTPException) as exc_spoof:
@@ -1072,7 +1072,7 @@ async def test_out_of_bounds_and_cross_city_spoofing_rejected(db_session: AsyncS
             city_code="PATNA"  # Spoofed city
         )
     assert exc_spoof.value.status_code == 400
-    assert "Cross-city fare spoofing is prohibited" in exc_spoof.value.detail
+    assert "does not match the service area" in exc_spoof.value.detail
 
 
 @pytest.mark.asyncio
