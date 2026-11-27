@@ -252,6 +252,7 @@ class BookingAdvancedService:
                 customer_id=ride.customer_id,
                 vehicle_category_id=ride.vehicle_category_id,
                 fare_rule_id=ride.fare_rule_id,
+                service_area_id=ride.service_area_id,
                 status="REQUESTED",
                 pickup_address=destination_address,
                 pickup_latitude=ride.destination_latitude,

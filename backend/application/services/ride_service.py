@@ -167,6 +167,24 @@ class RideService:
             stmt_est = select(FareEstimate).where(FareEstimate.id == est_data["estimate_id"])
             estimate = (await self.db.execute(stmt_est)).scalar_one()
 
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_areas = ServiceAreaService(self.db)
+        service_area = await service_areas.resolve_route(
+            pickup_lat=estimate.pickup_latitude,
+            pickup_lng=estimate.pickup_longitude,
+            destination_lat=estimate.destination_latitude,
+            destination_lng=estimate.destination_longitude,
+        )
+        for stop_data in stops or []:
+            try:
+                stop_lat = float(stop_data["latitude"])
+                stop_lng = float(stop_data["longitude"])
+            except (KeyError, TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Each intermediate stop requires valid latitude and longitude coordinates.")
+            if not (-90 <= stop_lat <= 90 and -180 <= stop_lng <= 180):
+                raise HTTPException(status_code=400, detail="Intermediate stop coordinates are outside valid geographic ranges.")
+            await service_areas.require_point_in_area(service_area.id, stop_lat, stop_lng)
+
         now = datetime.now(timezone.utc)
 
         expires_at = estimate.expires_at if estimate.expires_at.tzinfo else estimate.expires_at.replace(tzinfo=timezone.utc)
@@ -207,6 +225,7 @@ class RideService:
             customer_id=customer.id,
             vehicle_category_id=estimate.category_id,
             fare_rule_id=estimate.fare_rule_id,
+            service_area_id=service_area.id,
             status=RideStatus.REQUESTED.value,
             pickup_address=pickup_address,
             pickup_latitude=estimate.pickup_latitude,
@@ -346,6 +365,17 @@ class RideService:
         ride_obj = ride_res.scalar_one_or_none()
         if not ride_obj:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+        if not ride_obj.service_area_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride has no validated operational service area.")
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_areas = ServiceAreaService(self.db)
+        resolved_area = await service_areas.resolve_route(
+            ride_obj.pickup_latitude, ride_obj.pickup_longitude,
+            ride_obj.destination_latitude, ride_obj.destination_longitude,
+        )
+        if resolved_area.id != ride_obj.service_area_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride service area no longer matches its route.")
+        await service_areas.require_driver_assignment(driver.id, ride_obj.service_area_id)
 
         from backend.domain.models import DriverVehicleAssignment, Vehicle
         stmt_veh = (

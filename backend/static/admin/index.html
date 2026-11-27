@@ -1335,6 +1335,7 @@
                                 <label class="block text-[11px] text-slate-400 mb-1">Zone Policy Type</label>
                                 <select id="geo-type"
                                     class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-glow/50 font-mono">
+                                    <option value="SERVICE_AREA">SERVICE_AREA (Operational Booking & Dispatch)</option>
                                     <option value="AIRPORT_ZONE">AIRPORT_ZONE (Priority Queue)</option>
                                     <option value="HIGH_DENSITY_CORRIDOR">HIGH_DENSITY_CORRIDOR (Auto-Surge)</option>
                                     <option value="RESTRICTED_ZONE">RESTRICTED_ZONE (No-Go VIP/Hold)</option>
@@ -1342,6 +1343,11 @@
                             </div>
                         </div>
 
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">City Code (required for SERVICE_AREA tariff mapping)</label>
+                            <input type="text" id="geo-city-code" placeholder="e.g. PATNA"
+                                class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white font-mono">
+                        </div>
                         <div>
                             <div class="flex justify-between items-center mb-1">
                                 <label class="text-[11px] text-slate-400">Coordinate Polygon Vertices (Lat/Lng
@@ -1375,6 +1381,24 @@
                             </button>
                         </div>
                     </div>
+                </div>
+
+                <div class="glass-card p-5 rounded-2xl border border-border space-y-3">
+                    <h3 class="text-sm font-bold text-white">Assign Driver to Operational Service Area</h3>
+                    <p class="text-xs text-slate-400">Only explicitly assigned drivers can receive offers inside an active service area.</p>
+                    <input type="text" id="service-area-driver-id" placeholder="Driver profile ID"
+                        class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white font-mono">
+                    <select id="service-area-driver-zone" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white">
+                        <option value="">Select active service area</option>
+                    </select>
+                    <button onclick="assignDriverToServiceArea()" class="px-4 py-2 rounded-xl bg-cyan-glow text-black font-bold text-xs">
+                        Assign Driver
+                    </button>
+                    <div class="flex gap-2">
+                        <button onclick="revokeDriverFromServiceArea()" class="px-3 py-2 rounded-xl bg-rose-500/15 text-rose-300 font-bold text-xs">Revoke</button>
+                        <button onclick="loadDriverServiceAreas()" class="px-3 py-2 rounded-xl bg-surface text-slate-200 font-bold text-xs">View Assignments</button>
+                    </div>
+                    <div id="service-area-driver-assignments" class="text-[11px] text-slate-400 font-mono"></div>
                 </div>
 
                 <!-- Dynamic Surge Scheduler Card -->
@@ -4244,6 +4268,13 @@
                     <td class="py-3.5 px-4">${statusBadge}</td>
                     <td class="py-3.5 px-4 text-right">${actionBtns}</td>
                 `;
+                if (z.zone_type === 'SERVICE_AREA') {
+                    const toggle = document.createElement('button');
+                    toggle.textContent = z.is_active ? 'Deactivate' : 'Activate';
+                    toggle.className = 'ml-1 px-2.5 py-1 rounded-lg bg-surface border border-border text-[11px] ' + (z.is_active ? 'text-rose-300' : 'text-emerald-300');
+                    toggle.onclick = () => toggleServiceAreaStatus(z.id);
+                    tr.lastElementChild.appendChild(toggle);
+                }
                 tbody.appendChild(tr);
             });
             lucide.createIcons();
@@ -4995,12 +5026,94 @@
             const select = document.getElementById('surge-zone-select');
             if (!select) return;
             select.innerHTML = '<option value="">All City Corridors (Citywide)</option>';
+            const serviceAreaSelect = document.getElementById('service-area-driver-zone');
+            if (serviceAreaSelect) {
+                serviceAreaSelect.innerHTML = '<option value="">Select active service area</option>';
+                (STATE.geofences || []).filter(z => z.zone_type === 'SERVICE_AREA' && z.is_active).forEach(z => {
+                    const serviceOption = document.createElement('option');
+                    serviceOption.value = z.id;
+                    serviceOption.innerText = `${z.name} (${z.city_code || 'No city code'})`;
+                    serviceAreaSelect.appendChild(serviceOption);
+                });
+            }
             (STATE.geofences || []).forEach(z => {
                 const opt = document.createElement('option');
                 opt.value = z.id;
                 opt.innerText = `${z.name} (${z.zone_type})`;
                 select.appendChild(opt);
             });
+        }
+
+        async function assignDriverToServiceArea() {
+            const driverId = document.getElementById('service-area-driver-id').value.trim();
+            const zoneId = document.getElementById('service-area-driver-zone').value;
+            if (!driverId || !zoneId) {
+                showToast('Enter a driver profile ID and select a service area', 'error');
+                return;
+            }
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/drivers/${encodeURIComponent(driverId)}/service-areas/${encodeURIComponent(zoneId)}`, {
+                    method: 'PUT', headers
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || 'Driver assignment failed', 'error');
+                    return;
+                }
+                showToast('Driver assigned to service area');
+            } catch (err) {
+                showToast('Network error while assigning driver', 'error');
+            }
+        }
+
+        async function revokeDriverFromServiceArea() {
+            const driverId = document.getElementById('service-area-driver-id').value.trim();
+            const zoneId = document.getElementById('service-area-driver-zone').value;
+            if (!driverId || !zoneId) {
+                showToast('Enter a driver profile ID and select a service area', 'error');
+                return;
+            }
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/drivers/${encodeURIComponent(driverId)}/service-areas/${encodeURIComponent(zoneId)}`, {
+                    method: 'DELETE', headers
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || 'Driver revocation failed', 'error');
+                    return;
+                }
+                showToast('Driver service-area assignment revoked');
+                await loadDriverServiceAreas();
+            } catch (err) {
+                showToast('Network error while revoking driver assignment', 'error');
+            }
+        }
+
+        async function loadDriverServiceAreas() {
+            const driverId = document.getElementById('service-area-driver-id').value.trim();
+            const target = document.getElementById('service-area-driver-assignments');
+            if (!driverId) {
+                showToast('Enter a driver profile ID', 'error');
+                return;
+            }
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/drivers/${encodeURIComponent(driverId)}/service-areas`, { headers });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || 'Could not load assignments', 'error');
+                    return;
+                }
+                const rows = await res.json();
+                target.textContent = rows.length ? rows.map(item => `${item.name} (${item.city_code}) — ${item.is_active ? 'ACTIVE' : 'REVOKED'}`).join(' | ') : 'No service-area assignments';
+            } catch (err) {
+                showToast('Network error while loading driver assignments', 'error');
+            }
         }
 
         function renderGeofencesTable() {
@@ -5048,6 +5161,35 @@
             lucide.createIcons();
         }
 
+        async function toggleServiceAreaStatus(zoneId) {
+            const zone = (STATE.geofences || []).find(item => item.id === zoneId);
+            if (!zone || zone.zone_type !== 'SERVICE_AREA') return;
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = 'Bearer ' + STATE.adminToken;
+                const options = zone.is_active
+                    ? { method: 'DELETE', headers }
+                    : { method: 'PUT', headers, body: JSON.stringify({
+                        name: zone.name, zone_type: zone.zone_type, city_code: zone.city_code,
+                        coordinates: zone.coordinates, surge_multiplier: zone.surge_multiplier || 1.0
+                    }) };
+                const res = await fetch('/api/v1/admin/geofences/' + encodeURIComponent(zoneId), options);
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || 'Service-area update failed', 'error');
+                    return;
+                }
+                const refreshed = await fetch('/api/v1/admin/geofences', { headers });
+                if (refreshed.ok) {
+                    STATE.geofences = await refreshed.json();
+                    renderGeofencesTable();
+                    updateSurgeZoneDropdown();
+                }
+                showToast(zone.is_active ? 'Service area deactivated' : 'Service area activated');
+            } catch (err) {
+                showToast('Network error while updating service area', 'error');
+            }
+        }
         async function submitCreateGeofence() {
             const name = document.getElementById('geo-name').value.trim();
             const zoneType = document.getElementById('geo-type').value;
@@ -5080,6 +5222,7 @@
                     body: JSON.stringify({
                         name: name,
                         zone_type: zoneType,
+                        city_code: document.getElementById("geo-city-code").value.trim().toUpperCase() || null,
                         surge_multiplier: surge,
                         coordinates: coords
                     })
@@ -5088,6 +5231,7 @@
                     showToast(`Geofence "${name}" successfully deployed and active!`);
                     document.getElementById('geo-name').value = '';
                     document.getElementById('geo-coords').value = '';
+                    document.getElementById('geo-city-code').value = '';
                     await loadGeofencesData();
                 } else {
                     const err = await res.json();

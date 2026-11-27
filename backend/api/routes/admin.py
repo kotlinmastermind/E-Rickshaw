@@ -12,7 +12,7 @@ from backend.domain.state_machine.ride_state_machine import ACTIVE_RIDE_STATUSES
 from backend.domain.models import (
     User, Session, DriverProfile, CustomerProfile, Ride, VehicleCategory,
     DriverAvailability, DriverLocation, FareRule, Vehicle, DriverVehicleAssignment, DriverDocument,
-    AdministrativeAuditLog, CustomerKycDocument, CustomerKycAuditLog
+    AdministrativeAuditLog, CustomerKycDocument, CustomerKycAuditLog, GeofenceZone
 )
 from backend.infrastructure.security.crypto import create_jwt_token, decode_jwt_token,hash_secret , verify_password
 from backend.application.services.admin_service import AdminService
@@ -478,6 +478,7 @@ class DriverDocumentReviewPayload(BaseModel):
 
 class CreateFareRulePayload(BaseModel):
     category_id: str
+    city_code: Optional[str] = Field(None, min_length=2, max_length=32)
     base_fare_cents: int = Field(..., ge=0)
     per_km_cents: int = Field(..., ge=0)
     per_minute_cents: int = Field(..., ge=0)
@@ -709,7 +710,7 @@ async def create_fare_rule(
 ):
     service = AdminGovernanceService(db)
     return await service.create_fare_draft(admin.id, {
-        "category_id": payload.category_id, "base_fare_cents": payload.base_fare_cents,
+        "category_id": payload.category_id, "city_code": payload.city_code, "base_fare_cents": payload.base_fare_cents,
         "per_km_cents": payload.per_km_cents, "per_minute_cents": payload.per_minute_cents,
         "minimum_fare_cents": payload.minimum_fare_cents, "surge_multiplier": payload.surge_multiplier,
         "fare_cap_cents": getattr(payload, "fare_cap_cents", None), "effective_from": datetime.now(timezone.utc),
@@ -797,6 +798,7 @@ class GeofencePayload(BaseModel):
     name: str
     zone_type: str = "RESTRICTED"  # RESTRICTED, SERVICE_AREA, HIGH_DEMAND
     coordinates: List[dict]  # [{"lat": 19.0, "lng": 72.8}, ...]
+    city_code: Optional[str] = Field(None, min_length=2, max_length=32)
     surge_multiplier: float = 1.0
 
 class VerifyPointPayload(BaseModel):
@@ -1105,10 +1107,52 @@ async def create_geofence(
     db: AsyncSession = Depends(get_db)
 ):
     result = await AdminGovernanceService(db).save_geofence(admin.id, None, {
-        "name": payload.name, "zone_type": payload.zone_type, "coordinates": payload.coordinates,
+        "name": payload.name, "zone_type": payload.zone_type, "city_code": payload.city_code, "coordinates": payload.coordinates,
         "surge_multiplier": payload.surge_multiplier, "is_active": True,
     })
     return {**result, "status": "CREATED", "zone_id": result["id"]}
+
+@router.put("/geofences/{zone_id}")
+async def update_geofence(
+    zone_id: str,
+    payload: GeofencePayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    existing = await db.get(GeofenceZone, zone_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Geofence zone not found.")
+    result = await AdminGovernanceService(db).save_geofence(admin.id, zone_id, {
+        "name": payload.name,
+        "zone_type": payload.zone_type,
+        "city_code": payload.city_code,
+        "coordinates": payload.coordinates,
+        "surge_multiplier": payload.surge_multiplier,
+        "is_active": True,
+    })
+    return {**result, "status": "UPDATED", "zone_id": result["id"]}
+
+
+@router.delete("/geofences/{zone_id}")
+async def deactivate_geofence(
+    zone_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    existing = await db.get(GeofenceZone, zone_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Geofence zone not found.")
+    import json
+    result = await AdminGovernanceService(db).save_geofence(admin.id, zone_id, {
+        "name": existing.name,
+        "zone_type": existing.zone_type,
+        "city_code": existing.city_code,
+        "coordinates": json.loads(existing.coordinates_json),
+        "surge_multiplier": existing.surge_multiplier,
+        "is_active": False,
+    })
+    return {**result, "status": "DEACTIVATED", "zone_id": result["id"]}
+
 
 @router.get("/geofences")
 async def list_geofences(
@@ -1122,12 +1166,110 @@ async def list_geofences(
             "id": z.id,
             "name": z.name,
             "zone_type": z.zone_type,
+            "city_code": z.city_code,
             "coordinates": json.loads(z.coordinates_json),
             "is_active": z.is_active,
             "surge_multiplier": z.surge_multiplier
         }
         for z in zones
     ]
+
+@router.put("/drivers/{driver_id}/service-areas/{service_area_id}")
+async def assign_driver_to_service_area(
+    driver_id: str,
+    service_area_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.domain.models import DriverServiceAreaAssignment, GeofenceZone
+    driver = await db.get(DriverProfile, driver_id)
+    zone = await db.get(GeofenceZone, service_area_id)
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver profile not found.")
+    if driver.approval_status != "APPROVED":
+        raise HTTPException(status_code=409, detail="Only approved drivers can be assigned to an operational service area.")
+    driver_user = await db.get(User, driver.user_id)
+    if not driver_user or not driver_user.is_active:
+        raise HTTPException(status_code=409, detail="Inactive driver accounts cannot be assigned to a service area.")
+    if not zone or not zone.is_active or zone.zone_type != "SERVICE_AREA":
+        raise HTTPException(status_code=404, detail="Active operational service area not found.")
+    assignment = (await db.execute(select(DriverServiceAreaAssignment).where(
+        DriverServiceAreaAssignment.driver_id == driver_id,
+        DriverServiceAreaAssignment.service_area_id == service_area_id,
+    ))).scalar_one_or_none()
+    if assignment is None:
+        assignment = DriverServiceAreaAssignment(
+            driver_id=driver_id,
+            service_area_id=service_area_id,
+            is_active=True,
+            assigned_by_user_id=admin.id,
+        )
+        db.add(assignment)
+    else:
+        assignment.is_active = True
+        assignment.revoked_at = None
+        assignment.assigned_by_user_id = admin.id
+    from backend.domain.models import GeofenceZoneAudit
+    db.add(GeofenceZoneAudit(
+        zone_id=service_area_id,
+        admin_user_id=admin.id,
+        action="DRIVER_AREA_ASSIGNED",
+        new_state_json=json.dumps({"driver_id": driver_id, "is_active": True}),
+    ))
+    await db.commit()
+    return {"driver_id": driver_id, "service_area_id": service_area_id, "is_active": True}
+
+
+@router.get("/drivers/{driver_id}/service-areas")
+async def list_driver_service_areas(
+    driver_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.domain.models import DriverServiceAreaAssignment, GeofenceZone
+    if not await db.get(DriverProfile, driver_id):
+        raise HTTPException(status_code=404, detail="Driver profile not found.")
+    rows = (await db.execute(
+        select(DriverServiceAreaAssignment, GeofenceZone)
+        .join(GeofenceZone, GeofenceZone.id == DriverServiceAreaAssignment.service_area_id)
+        .where(DriverServiceAreaAssignment.driver_id == driver_id)
+        .order_by(GeofenceZone.name)
+    )).all()
+    return [
+        {"service_area_id": assignment.service_area_id, "name": zone.name, "city_code": zone.city_code,
+         "is_active": assignment.is_active, "assigned_at": assignment.assigned_at.isoformat(),
+         "revoked_at": assignment.revoked_at.isoformat() if assignment.revoked_at else None}
+        for assignment, zone in rows
+    ]
+
+
+@router.delete("/drivers/{driver_id}/service-areas/{service_area_id}")
+async def revoke_driver_service_area(
+    driver_id: str,
+    service_area_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.domain.models import DriverServiceAreaAssignment
+    assignment = (await db.execute(select(DriverServiceAreaAssignment).where(
+        DriverServiceAreaAssignment.driver_id == driver_id,
+        DriverServiceAreaAssignment.service_area_id == service_area_id,
+    ).with_for_update())).scalar_one_or_none()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Driver service-area assignment not found.")
+    assignment.is_active = False
+    assignment.revoked_at = datetime.now(timezone.utc)
+    from backend.domain.models import GeofenceZoneAudit
+    db.add(GeofenceZoneAudit(
+        zone_id=service_area_id,
+        admin_user_id=admin.id,
+        action="DRIVER_AREA_REVOKED",
+        previous_state_json=json.dumps({"driver_id": driver_id, "is_active": True}),
+        new_state_json=json.dumps({"driver_id": driver_id, "is_active": False}),
+    ))
+    await db.commit()
+    return {"driver_id": driver_id, "service_area_id": service_area_id, "is_active": False}
+
 
 @router.post("/geofences/verify-point")
 async def verify_point_in_geofence(

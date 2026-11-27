@@ -15,7 +15,8 @@ from fastapi import HTTPException
 
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    VehicleCategory, FareRule, Ride, RideAssignment, Vehicle, DriverVehicleAssignment
+    VehicleCategory, FareRule, Ride, RideAssignment, Vehicle, DriverVehicleAssignment,
+    GeofenceZone, DriverServiceAreaAssignment
 )
 from backend.infrastructure.database.session import async_session_maker
 from backend.application.services.smart_dispatch_service import SmartDispatchService
@@ -31,6 +32,9 @@ async def test_driver_cannot_receive_two_conflicting_offers(db_session):
     distributed atomic locking ensures the sole driver is offered ONLY ONE ride.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
 
     # Category and rule
     cat = VehicleCategory(id=str(uuid.uuid4()), code=f"CONCUR_CAT_{suffix}", name="Concur Fleet")
@@ -48,6 +52,8 @@ async def test_driver_cannot_receive_two_conflicting_offers(db_session):
 
     d_prof = DriverProfile(id=str(uuid.uuid4()), user_id=d_user.id, license_number=f"DL-CONCUR-{suffix}", approval_status="APPROVED")
     db_session.add(d_prof)
+    await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=d_prof.id, service_area_id=service_area.id))
     await db_session.flush()
 
     d_avail = DriverAvailability(driver_id=d_prof.id, is_online=True, is_busy=False)
@@ -76,12 +82,14 @@ async def test_driver_cannot_receive_two_conflicting_offers(db_session):
     await db_session.flush()
 
     ride1 = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof1.id, vehicle_category_id=cat.id, fare_rule_id=rule.id, start_otp="1111", status="REQUESTED",
         pickup_address="Pickup 1", pickup_latitude=28.6140, pickup_longitude=77.2091,
         destination_address="Dest 1", destination_latitude=28.6200, destination_longitude=77.2200,
         estimated_distance_km=2.0, estimated_duration_minutes=8.0, estimated_fare_cents=8000
     )
     ride2 = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof2.id, vehicle_category_id=cat.id, fare_rule_id=rule.id, start_otp="2222", status="REQUESTED",
         pickup_address="Pickup 2", pickup_latitude=28.6141, pickup_longitude=77.2092,
         destination_address="Dest 2", destination_latitude=28.6210, destination_longitude=77.2210,
@@ -117,6 +125,9 @@ async def test_ride_cannot_have_multiple_accepted_drivers(db_session):
     Ensures that a single ride cannot be accepted by more than one driver.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
     cat = VehicleCategory(id=str(uuid.uuid4()), code=f"MULTI_CAT_{suffix}", name="Multi Fleet")
     rule = FareRule(id=str(uuid.uuid4()), category_id=cat.id, base_fare_cents=2000, per_km_cents=500, per_minute_cents=100, minimum_fare_cents=2000)
     db_session.add_all([cat, rule])
@@ -130,6 +141,7 @@ async def test_ride_cannot_have_multiple_accepted_drivers(db_session):
     await db_session.flush()
 
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof.id, vehicle_category_id=cat.id, fare_rule_id=rule.id, start_otp="3333", status="REQUESTED",
         pickup_address="Pickup Multi", pickup_latitude=28.6140, pickup_longitude=77.2091,
         destination_address="Dest Multi", destination_latitude=28.6200, destination_longitude=77.2200,
@@ -147,6 +159,11 @@ async def test_ride_cannot_have_multiple_accepted_drivers(db_session):
     d_prof1 = DriverProfile(id=str(uuid.uuid4()), user_id=d_user1.id, license_number=f"DL-{suffix}-1", approval_status="APPROVED")
     d_prof2 = DriverProfile(id=str(uuid.uuid4()), user_id=d_user2.id, license_number=f"DL-{suffix}-2", approval_status="APPROVED")
     db_session.add_all([d_prof1, d_prof2])
+    await db_session.flush()
+    db_session.add_all([
+        DriverServiceAreaAssignment(driver_id=d_prof1.id, service_area_id=service_area.id),
+        DriverServiceAreaAssignment(driver_id=d_prof2.id, service_area_id=service_area.id),
+    ])
     await db_session.flush()
 
     now = datetime.now(timezone.utc)
@@ -178,6 +195,9 @@ async def test_race_between_timeout_and_driver_acceptance(db_session):
     a late acceptance by the driver must be safely rejected with HTTP 409/410.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
     cat = VehicleCategory(id=str(uuid.uuid4()), code=f"RACE_CAT_{suffix}", name="Race Fleet")
     rule = FareRule(id=str(uuid.uuid4()), category_id=cat.id, base_fare_cents=2000, per_km_cents=500, per_minute_cents=100, minimum_fare_cents=2000)
     db_session.add_all([cat, rule])
@@ -191,6 +211,7 @@ async def test_race_between_timeout_and_driver_acceptance(db_session):
     await db_session.flush()
 
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof.id, vehicle_category_id=cat.id, fare_rule_id=rule.id, start_otp="4444", status="REQUESTED",
         pickup_address="Pickup Race", pickup_latitude=28.6140, pickup_longitude=77.2091,
         destination_address="Dest Race", destination_latitude=28.6200, destination_longitude=77.2200,
@@ -205,6 +226,8 @@ async def test_race_between_timeout_and_driver_acceptance(db_session):
 
     d_prof = DriverProfile(id=str(uuid.uuid4()), user_id=d_user.id, license_number=f"DL-{suffix}-LATE", approval_status="APPROVED")
     db_session.add(d_prof)
+    await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=d_prof.id, service_area_id=service_area.id))
     await db_session.flush()
 
     # Assignment created with an expired timestamp in the past

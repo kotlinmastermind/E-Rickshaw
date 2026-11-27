@@ -42,10 +42,12 @@ class PoolService:
         category = await self.db.get(VehicleCategory, category_id)
         if not category or not category.is_active:
             raise HTTPException(status_code=404, detail="Shared-ride vehicle category is unavailable.")
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_area = await ServiceAreaService(self.db).resolve_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
         if seats_requested > category.capacity:
             raise HTTPException(status_code=400, detail=f"This vehicle category supports up to {category.capacity} passengers.")
 
-        rule = await self.fare_service.get_active_rule_for_category(category_id)
+        rule = await self.fare_service.get_active_rule_for_category(category_id, city_code=service_area.city_code)
         route = await self.maps_provider.get_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
 
         # Baseline private solo calculation in minor units (paise/cents)
@@ -134,10 +136,13 @@ class PoolService:
         category = await self.db.get(VehicleCategory, category_id)
         if not category or not category.is_active:
             raise HTTPException(status_code=404, detail="Shared-ride vehicle category is unavailable.")
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_area = await ServiceAreaService(self.db).resolve_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
         if seats_requested < 1 or seats_requested > category.capacity:
             raise HTTPException(status_code=400, detail=f"Requested seats exceed this category's passenger capacity ({category.capacity}).")
         stmt = select(PooledTrip).where(
             PooledTrip.vehicle_category_id == category_id,
+            PooledTrip.service_area_id == service_area.id,
             PooledTrip.status == "OPEN"
         ).order_by(PooledTrip.created_at.asc(), PooledTrip.id.asc())
         res = await self.db.execute(stmt)
@@ -258,6 +263,13 @@ class PoolService:
             exp = exp.replace(tzinfo=timezone.utc)
         if exp < datetime.now(timezone.utc):
             raise HTTPException(status_code=status.HTTP_410_GONE, detail="Fare estimate has expired. Please recalculate.")
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_area = await ServiceAreaService(self.db).resolve_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
+        if any(abs(actual - quoted) > 0.0005 for actual, quoted in (
+            (pickup_lat, estimate.pickup_latitude), (pickup_lng, estimate.pickup_longitude),
+            (dest_lat, estimate.destination_latitude), (dest_lng, estimate.destination_longitude),
+        )):
+            raise HTTPException(status_code=409, detail="Shared booking coordinates differ from the persisted fare estimate. Recalculate the fare.")
 
         # Validate fare rule
         rule_stmt = select(FareRule).where(FareRule.id == estimate.fare_rule_id)
@@ -302,6 +314,7 @@ class PoolService:
             # Create a new PooledTrip
             pooled_trip = PooledTrip(
                 vehicle_category_id=category_id,
+                service_area_id=service_area.id,
                 status="OPEN",
                 max_seats=category.capacity,
                 reserved_seats=0,
@@ -345,6 +358,7 @@ class PoolService:
             customer_id=customer.id,
             vehicle_category_id=category_id,
             fare_rule_id=fare_rule.id,
+            service_area_id=service_area.id,
             status="REQUESTED",
             pickup_address=pickup_address,
             pickup_latitude=pickup_lat,

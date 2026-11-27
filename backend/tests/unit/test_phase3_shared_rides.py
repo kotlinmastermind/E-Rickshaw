@@ -78,6 +78,11 @@ async def test_atomic_seat_reservation_and_overbooking_prevention():
             fallback_policy="CREATE_NEW_POOL"
         )
         assert booking1["seats_reserved"] == 3
+        from backend.domain.models import Ride
+        shared_ride = await session.get(Ride, booking1["ride_id"])
+        shared_trip = await session.get(PooledTrip, booking1["pooled_trip_id"])
+        assert shared_ride.service_area_id is not None
+        assert shared_trip.service_area_id == shared_ride.service_area_id
         assert booking1["total_trip_reserved_seats"] == 3
         pool_id = booking1["pooled_trip_id"]
 

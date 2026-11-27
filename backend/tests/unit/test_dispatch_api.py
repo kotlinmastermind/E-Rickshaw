@@ -4,13 +4,15 @@ Unit and API integration tests for /api/v1/dispatch endpoints.
 import uuid
 import pytest
 from datetime import datetime, timezone
+from sqlalchemy import select
 from httpx import AsyncClient, ASGITransport
 
 from backend.main import app
 from backend.api.deps import get_current_user, get_current_driver
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    VehicleCategory, FareRule, Ride, Vehicle, DriverVehicleAssignment
+    VehicleCategory, FareRule, Ride, Vehicle, DriverVehicleAssignment,
+    GeofenceZone, DriverServiceAreaAssignment
 )
 
 
@@ -57,6 +59,13 @@ async def test_dispatch_api_endpoints(db_session):
         rating_average=4.95
     )
     db_session.add(driver_profile)
+    await db_session.flush()
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
+    db_session.add(DriverServiceAreaAssignment(
+        driver_id=driver_profile.id, service_area_id=service_area.id
+    ))
     await db_session.flush()
 
     driver_avail = DriverAvailability(
@@ -106,6 +115,7 @@ async def test_dispatch_api_endpoints(db_session):
 
     # Ride
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=cust_profile.id,
         vehicle_category_id=cat.id,
         fare_rule_id=fare_rule.id,

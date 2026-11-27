@@ -13,7 +13,8 @@ from backend.main import app
 from backend.api.deps import get_current_customer, get_current_user
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    VehicleCategory, FareRule, Ride, Vehicle, DriverVehicleAssignment, FareEstimate
+    VehicleCategory, FareRule, Ride, Vehicle, DriverVehicleAssignment, FareEstimate,
+    GeofenceZone, DriverServiceAreaAssignment
 )
 from backend.application.services.smart_dispatch_service import SmartDispatchService
 from backend.application.services.live_location_service import LiveLocationService
@@ -28,6 +29,7 @@ async def test_ride_request_preserves_selected_category_in_db(db_session):
     vehicle_category_id == selected category (and NOT defaulted to E-Rickshaw).
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
 
     # Create two categories in DB: Rickshaw and Auto
     cat_rickshaw = VehicleCategory(
@@ -91,7 +93,6 @@ async def test_ride_request_preserves_selected_category_in_db(db_session):
     assert res["category_id"] == cat_auto.id
 
     # Verify directly from Database
-    from sqlalchemy import select
     db_ride = (await db_session.execute(select(Ride).where(Ride.id == res["ride_id"]))).scalar_one()
     assert db_ride.vehicle_category_id == cat_auto.id
     assert db_ride.vehicle_category_id != cat_rickshaw.id
@@ -105,6 +106,7 @@ async def test_dispatch_targets_only_matching_category_driver(db_session):
     and does NOT offer it to a driver assigned to Category Rickshaw or Cab.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
 
     # Categories
     cat_rickshaw = VehicleCategory(
@@ -151,6 +153,8 @@ async def test_dispatch_targets_only_matching_category_driver(db_session):
     d_prof1 = DriverProfile(id=f"dp1_{suffix}", user_id=d_user1.id, license_number=f"DL-R-{suffix}", approval_status="APPROVED")
     db_session.add(d_prof1)
     await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=d_prof1.id, service_area_id=service_area.id))
+    await db_session.flush()
 
     veh1 = Vehicle(id=f"v1_{suffix}", category_id=cat_rickshaw.id, make="Mahindra", model="Treo EV", year=2024, license_plate=f"DL-1R-{suffix}")
     db_session.add(veh1)
@@ -167,6 +171,8 @@ async def test_dispatch_targets_only_matching_category_driver(db_session):
     await db_session.flush()
     d_prof2 = DriverProfile(id=f"dp2_{suffix}", user_id=d_user2.id, license_number=f"DL-A-{suffix}", approval_status="APPROVED")
     db_session.add(d_prof2)
+    await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=d_prof2.id, service_area_id=service_area.id))
     await db_session.flush()
 
     veh2 = Vehicle(id=f"v2_{suffix}", category_id=cat_auto.id, make="Bajaj", model="RE E-Auto", year=2024, license_plate=f"DL-1A-{suffix}")
@@ -185,6 +191,7 @@ async def test_dispatch_targets_only_matching_category_driver(db_session):
 
     # Passenger books ride for Auto category
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof.id,
         vehicle_category_id=cat_auto.id,
         fare_rule_id=rule_auto.id,
@@ -221,6 +228,7 @@ async def test_rides_api_endpoint_accepts_category_id(db_session):
     saves the ride with that category, and returns it in active ride status.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
 
     cat_cargo = VehicleCategory(
         id=f"cat_cargo_{suffix}",
@@ -298,6 +306,7 @@ async def test_invalid_and_inactive_category_error_handling(db_session):
     appropriate HTTP 404 and HTTP 400 errors instead of silently defaulting.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
     cat_inactive = VehicleCategory(
         id=f"cat_inact_{suffix}",
         code=f"INACTIVE_{suffix}",
@@ -364,6 +373,7 @@ async def test_ride_request_without_category_rejected_with_400(db_session):
     the request is strictly REJECTED with HTTP 400. NO default category or E-Rickshaw fallback.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
     cat_default = VehicleCategory(
         id=f"cat_def_{suffix}",
         code="E_RICKSHAW",
@@ -441,6 +451,7 @@ async def test_ride_service_rejects_none_or_empty_category(db_session):
     Verifies RideService directly raises HTTP 400 when category_id is None or empty.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
     c_user = User(
         phone_number=f"+91981{suffix}91",
         full_name="Service Validation User",
@@ -490,7 +501,6 @@ async def test_driver_registration_binds_dynamic_category(db_session):
     has their Vehicle.category_id correctly persisted in the database.
     """
     from backend.application.services.auth_service import AuthService
-    from sqlalchemy import select
 
     suffix = uuid.uuid4().hex[:6].upper()
     cat_bike = VehicleCategory(
@@ -533,6 +543,7 @@ async def test_offline_or_unapproved_driver_excluded_from_dispatch(db_session):
     they are unapproved (PENDING) or offline.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
 
     cat_test = VehicleCategory(
         id=f"cat_test_{suffix}",
@@ -570,6 +581,8 @@ async def test_offline_or_unapproved_driver_excluded_from_dispatch(db_session):
     d_prof1 = DriverProfile(id=f"dp_pend_{suffix}", user_id=d_user1.id, license_number=f"DL-P-{suffix}", approval_status="PENDING")
     db_session.add(d_prof1)
     await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=d_prof1.id, service_area_id=service_area.id))
+    await db_session.flush()
     veh1 = Vehicle(id=f"vp_{suffix}", category_id=cat_test.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-1P-{suffix}")
     db_session.add(veh1)
     await db_session.flush()
@@ -582,6 +595,8 @@ async def test_offline_or_unapproved_driver_excluded_from_dispatch(db_session):
     await db_session.flush()
     d_prof2 = DriverProfile(id=f"dp_off_{suffix}", user_id=d_user2.id, license_number=f"DL-O-{suffix}", approval_status="APPROVED")
     db_session.add(d_prof2)
+    await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=d_prof2.id, service_area_id=service_area.id))
     await db_session.flush()
     veh2 = Vehicle(id=f"vo_{suffix}", category_id=cat_test.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-1O-{suffix}")
     db_session.add(veh2)
@@ -596,6 +611,7 @@ async def test_offline_or_unapproved_driver_excluded_from_dispatch(db_session):
     await live_loc.ingest_driver_location(d_prof2.id, 28.6140, 77.2090, is_online=False)
 
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof.id,
         vehicle_category_id=cat_test.id,
         fare_rule_id=rule_test.id,
@@ -633,6 +649,7 @@ async def test_unassigned_driver_never_receives_categorized_ride(db_session):
     ride offers for a categorized ride.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
     cat_cab = VehicleCategory(id=f"cat_cab_{suffix}", code=f"CAB_{suffix.upper()}", name="Cab Fleet", is_active=True)
     rule_cab = FareRule(id=f"rule_cab_{suffix}", category_id=cat_cab.id, base_fare_cents=5000, per_km_cents=1500, per_minute_cents=200, minimum_fare_cents=5000)
     db_session.add_all([cat_cab, rule_cab])
@@ -651,6 +668,8 @@ async def test_unassigned_driver_never_receives_categorized_ride(db_session):
     d_prof = DriverProfile(id=f"dp_unassign_{suffix}", user_id=d_user.id, license_number=f"DL-U-{suffix}", approval_status="APPROVED")
     db_session.add(d_prof)
     await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=d_prof.id, service_area_id=service_area.id))
+    await db_session.flush()
     db_session.add(DriverAvailability(driver_id=d_prof.id, is_online=True, is_busy=False))
     await db_session.commit()
 
@@ -658,6 +677,7 @@ async def test_unassigned_driver_never_receives_categorized_ride(db_session):
     await live_loc.ingest_driver_location(d_prof.id, 28.6140, 77.2090, is_online=True)
 
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof.id,
         vehicle_category_id=cat_cab.id,
         fare_rule_id=rule_cab.id,
@@ -694,6 +714,7 @@ async def test_accept_ride_atomic_validates_category_match(db_session):
     2. If the driver's vehicle category matches, acceptance SUCCEEDS and binds driver and vehicle.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
     cat_bike = VehicleCategory(id=f"cat_bk_{suffix}", code=f"BIKE_{suffix.upper()}", name="Speed Bike", sort_order=1, is_active=True)
     cat_cab = VehicleCategory(id=f"cat_cb_{suffix}", code=f"CAB_{suffix.upper()}", name="City Cab", sort_order=2, is_active=True)
     rule_cab = FareRule(id=f"rule_cb_{suffix}", category_id=cat_cab.id, base_fare_cents=5000, per_km_cents=1200, per_minute_cents=200, minimum_fare_cents=5000)
@@ -715,6 +736,8 @@ async def test_accept_ride_atomic_validates_category_match(db_session):
     d_prof1 = DriverProfile(id=f"dp_bike_{suffix}", user_id=d_user1.id, license_number=f"DL-BK-{suffix}", approval_status="APPROVED")
     db_session.add(d_prof1)
     await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=d_prof1.id, service_area_id=service_area.id))
+    await db_session.flush()
     veh1 = Vehicle(id=f"v_bike_{suffix}", category_id=cat_bike.id, make="Hero", model="Splendor", year=2024, license_plate=f"DL-BK-{suffix}")
     db_session.add(veh1)
     await db_session.flush()
@@ -727,6 +750,8 @@ async def test_accept_ride_atomic_validates_category_match(db_session):
     d_prof2 = DriverProfile(id=f"dp_cab_{suffix}", user_id=d_user2.id, license_number=f"DL-CB-{suffix}", approval_status="APPROVED")
     db_session.add(d_prof2)
     await db_session.flush()
+    db_session.add(DriverServiceAreaAssignment(driver_id=d_prof2.id, service_area_id=service_area.id))
+    await db_session.flush()
     veh2 = Vehicle(id=f"v_cab_{suffix}", category_id=cat_cab.id, make="Maruti", model="Dzire", year=2024, license_plate=f"DL-CB-{suffix}")
     db_session.add(veh2)
     await db_session.flush()
@@ -735,6 +760,7 @@ async def test_accept_ride_atomic_validates_category_match(db_session):
 
     # Create a Cab Ride
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof.id,
         vehicle_category_id=cat_cab.id,
         fare_rule_id=rule_cab.id,
@@ -791,6 +817,7 @@ async def test_fare_estimate_id_is_full_valid_uuid(db_session):
     Fare Estimate ID must be a full valid UUID (36 chars), avoiding collisions and truncations.
     """
     suffix = uuid.uuid4().hex[:6]
+    service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
     cat = VehicleCategory(id=f"cat_est_{suffix}", code=f"CAT_EST_{suffix.upper()}", name="Estimate Cat", is_active=True)
     rule = FareRule(id=f"rule_est_{suffix}", category_id=cat.id, base_fare_cents=3000, per_km_cents=800, per_minute_cents=150, minimum_fare_cents=3000)
     db_session.add_all([cat, rule])

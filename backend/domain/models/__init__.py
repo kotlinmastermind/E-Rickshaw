@@ -195,6 +195,7 @@ __all__ = [
     "DriverVehicleInspection",
     "FeatureFlag",
     "GeofenceZoneAudit",
+    "DriverServiceAreaAssignment",
     "GiftCard",
     "GiftCardTransaction",
     "HelpArticleRating",

@@ -6,7 +6,7 @@ from backend.main import app
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
     DriverLocation, Ride, RideAssignment, RideLocationHistory,
-    VehicleCategory, Vehicle, DriverVehicleAssignment
+    VehicleCategory, Vehicle, DriverVehicleAssignment, GeofenceZone, DriverServiceAreaAssignment
 )
 from backend.infrastructure.security.crypto import hash_password
 
@@ -116,6 +116,19 @@ async def test_end_to_end_ride_lifecycle_and_trip_breadcrumbs(db_session):
     cust_prof = CustomerProfile(user_id=cust_user.id)
     driver_prof = DriverProfile(user_id=driver_user.id, license_number="DL-04-2024-9988", approval_status="APPROVED")
     db_session.add_all([cust_prof, driver_prof])
+    await db_session.flush()
+
+    service_area = (await db_session.execute(
+        select(GeofenceZone).where(
+            GeofenceZone.city_code == "DELHI_NCR",
+            GeofenceZone.zone_type == "SERVICE_AREA",
+            GeofenceZone.is_active.is_(True),
+        )
+    )).scalars().one()
+    db_session.add(DriverServiceAreaAssignment(
+        driver_id=driver_prof.id,
+        service_area_id=service_area.id,
+    ))
     await db_session.flush()
 
     driver_avail = DriverAvailability(driver_id=driver_prof.id, is_online=True, is_busy=False)

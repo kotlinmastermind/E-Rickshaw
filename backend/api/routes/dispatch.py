@@ -116,12 +116,15 @@ async def get_nearby_drivers(
     if not h3_service.validate_coordinates(latitude, longitude):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid coordinates.")
 
+    from backend.application.services.service_area_service import ServiceAreaService
+    service_area = await ServiceAreaService(db).resolve_point(latitude, longitude)
     eligibility = DriverEligibilityService(db=db)
     candidates = await eligibility.discover_eligible_candidates(
         pickup_lat=latitude,
         pickup_lng=longitude,
         max_rings=max_rings,
         required_category_id=category_id,
+        required_service_area_id=service_area.id,
         max_candidates=10
     )
 

@@ -416,6 +416,7 @@ class Ride(Base):
     vehicle_category_id: Mapped[str] = mapped_column(String(36), ForeignKey("vehicle_categories.id"), nullable=False)
     vehicle_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("vehicles.id"), nullable=True)
     fare_rule_id: Mapped[str] = mapped_column(String(36), ForeignKey("fare_rules.id"), nullable=False)
+    service_area_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("geofence_zones.id", ondelete="RESTRICT"), nullable=True, index=True)
     
     # States: REQUESTED, ASSIGNED, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED, EXPIRED
     status: Mapped[str] = mapped_column(String(30), default="REQUESTED", index=True)
@@ -1227,6 +1228,7 @@ class PooledTrip(Base):
     __tablename__ = "pooled_trips"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    service_area_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("geofence_zones.id", ondelete="RESTRICT"), nullable=True, index=True)
     vehicle_category_id: Mapped[str] = mapped_column(String(36), ForeignKey("vehicle_categories.id"), nullable=False, index=True)
     driver_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("driver_profiles.id"), nullable=True, index=True)
     vehicle_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("vehicles.id"), nullable=True)

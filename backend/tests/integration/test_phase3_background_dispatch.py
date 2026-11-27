@@ -4,6 +4,7 @@ import uuid
 import json
 import asyncio
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import select
 from httpx import AsyncClient, ASGITransport
 from starlette.websockets import WebSocketDisconnect
 
@@ -12,7 +13,8 @@ from backend.infrastructure.security.crypto import create_jwt_token
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
-    VehicleCategory, Ride, RideAssignment, Session, Vehicle, DriverVehicleAssignment
+    VehicleCategory, Ride, RideAssignment, Session, Vehicle, DriverVehicleAssignment,
+    GeofenceZone, DriverServiceAreaAssignment
 )
 from backend.application.services.cascading_dispatch_service import CascadingDispatchService
 from backend.application.services.ride_service import RideService
@@ -125,6 +127,13 @@ async def setup_dispatch_environment(db_session):
     assign_v1 = DriverVehicleAssignment(driver_id=driver1_profile.id, vehicle_id=veh1.id, is_active=True)
     assign_v2 = DriverVehicleAssignment(driver_id=driver2_profile.id, vehicle_id=veh2.id, is_active=True)
     db_session.add_all([assign_v1, assign_v2])
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "BENGALURU", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
+    db_session.add_all([
+        DriverServiceAreaAssignment(driver_id=driver1_profile.id, service_area_id=service_area.id),
+        DriverServiceAreaAssignment(driver_id=driver2_profile.id, service_area_id=service_area.id),
+    ])
 
     # Sessions for tokens
     sess_expiry = datetime.now(timezone.utc) + timedelta(days=7)
@@ -143,6 +152,7 @@ async def setup_dispatch_environment(db_session):
         "driver2_user": driver2_user,
         "driver2_profile": driver2_profile,
         "session2": session2,
+        "service_area": service_area,
     }
 
 
@@ -677,6 +687,7 @@ async def test_atomic_acceptance_prevents_duplicate_booking(setup_dispatch_envir
 
     now = datetime.now(timezone.utc)
     ride = Ride(
+        service_area_id=env["service_area"].id,
         customer_id=customer.id,
         vehicle_category_id=cat.id,
         fare_rule_id=str(uuid.uuid4()),

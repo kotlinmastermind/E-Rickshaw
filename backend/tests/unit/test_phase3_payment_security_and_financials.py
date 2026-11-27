@@ -34,7 +34,7 @@ async def _get_or_create_category_and_rule(db_session):
         db_session.add(cat)
         await db_session.flush()
 
-    rule = (await db_session.execute(select(FareRule).where(FareRule.category_id == cat.id))).scalar_one_or_none()
+    rule = (await db_session.execute(select(FareRule).where(FareRule.category_id == cat.id, FareRule.city_code == "DELHI_NCR", FareRule.is_active.is_(True)).order_by(FareRule.version.desc(), FareRule.effective_from.desc()).limit(1))).scalar_one_or_none()
     if not rule:
         rule = FareRule(
             category_id=cat.id,
