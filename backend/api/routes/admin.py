@@ -358,6 +358,7 @@ async def get_live_mobility_feed(
         per_km = rule.per_km_cents / 100.0 if rule else None
         per_minute = rule.per_minute_cents / 100.0 if rule else None
         minimum_fare = rule.minimum_fare_cents / 100.0 if rule else None
+        cancellation_fee = rule.cancellation_fee_cents / 100.0 if rule else None
         formatted_tariffs.append({
             "id": category.id,
             "ruleId": rule.id if rule else None,
@@ -372,6 +373,7 @@ async def get_live_mobility_feed(
             "perKmRupees": per_km,
             "perMinuteRupees": per_minute,
             "minimumFareRupees": minimum_fare,
+            "cancellationFeeRupees": cancellation_fee,
             "surgeMultiplier": rule.surge_multiplier if rule else None,
             "icon": icons_by_code.get(category.code, "🛺"),
             "active": bool(rule and rule.is_active),
