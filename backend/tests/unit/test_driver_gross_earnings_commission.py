@@ -83,7 +83,9 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
     await CommissionService.create_and_activate_rule(
         db_session, category_id=category.id, percentage=20.0, admin_user_id=None, reason="Later rate change test"
     )
-    estimate = await CommissionService.estimate_for_ride(db_session, digital_ride)
+    new_ride = make_ride(f"new-{suffix}", "RAZORPAY", 10000, now + timedelta(minutes=1))
+    new_ride.requested_at = datetime.now(timezone.utc)
+    estimate = await CommissionService.estimate_for_ride(db_session, new_ride)
     assert estimate["estimated_driver_earnings_cents"] == 10000
     assert estimate["estimated_commission_cents"] == 2000
     assert estimate["estimated_commission_percentage"] == 20.0
