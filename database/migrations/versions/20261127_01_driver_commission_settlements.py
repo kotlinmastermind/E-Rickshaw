@@ -14,6 +14,15 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.drop_index("ix_driver_ledger_unique_category_ref", table_name="driver_ledger_entries")
+    op.create_index(
+        "ix_driver_ledger_unique_category_ref",
+        "driver_ledger_entries",
+        ["driver_id", "category", "reference_id"],
+        unique=True,
+        postgresql_where=sa.text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION', 'COMMISSION_SETTLEMENT') AND reference_id IS NOT NULL"),
+        sqlite_where=sa.text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION', 'COMMISSION_SETTLEMENT') AND reference_id IS NOT NULL"),
+    )
     op.create_table(
         "driver_commission_settlements",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -31,5 +40,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_driver_ledger_unique_category_ref", table_name="driver_ledger_entries")
+    op.create_index(
+        "ix_driver_ledger_unique_category_ref",
+        "driver_ledger_entries",
+        ["driver_id", "category", "reference_id"],
+        unique=True,
+        postgresql_where=sa.text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION') AND reference_id IS NOT NULL"),
+        sqlite_where=sa.text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION') AND reference_id IS NOT NULL"),
+    )
     op.drop_index("ix_driver_commission_settlements_driver_id", table_name="driver_commission_settlements")
     op.drop_table("driver_commission_settlements")
