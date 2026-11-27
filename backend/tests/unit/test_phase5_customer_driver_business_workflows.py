@@ -1,6 +1,7 @@
 import uuid
 import pytest
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import select
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import select, update
 
@@ -183,6 +184,14 @@ async def test_driver_ride_acceptance_race_condition_prevention(db_session):
     d2_prof = DriverProfile(user_id=d2_user.id, approval_status="APPROVED", license_number=f"DL2-{suffix}")
     db_session.add_all([c_prof, d1_prof, d2_prof])
     await db_session.flush()
+    service_area = (await db_session.execute(select(GeofenceZone).where(
+        GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"
+    ))).scalars().one()
+    db_session.add_all([
+        DriverServiceAreaAssignment(driver_id=d1_prof.id, service_area_id=service_area.id),
+        DriverServiceAreaAssignment(driver_id=d2_prof.id, service_area_id=service_area.id),
+    ])
+    await db_session.flush()
 
     d1_avail = DriverAvailability(driver_id=d1_prof.id, is_online=True, is_busy=False)
     d2_avail = DriverAvailability(driver_id=d2_prof.id, is_online=True, is_busy=False)
@@ -205,6 +214,7 @@ async def test_driver_ride_acceptance_race_condition_prevention(db_session):
 
     # Create Requested Ride
     ride = Ride(
+        service_area_id=service_area.id,
         customer_id=c_prof.id,
         vehicle_category_id=cat.id,
         fare_rule_id=rule.id,
