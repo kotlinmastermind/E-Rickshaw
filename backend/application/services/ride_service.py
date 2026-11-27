@@ -443,10 +443,15 @@ class RideService:
             if not await live_locations.is_driver_fresh(driver.id):
                 raise HTTPException(status_code=409, detail="Fresh driver GPS is required to accept this offer.")
             driver_location = await live_locations.get_driver_live_location(driver.id)
-            if not driver_location or not await area_service.is_driver_inside(
-                ride_obj.service_area_id,
-                driver_location.get("latitude"),
-                driver_location.get("longitude"),
+            if (
+                not driver_location
+                or driver_location.get("latitude") is None
+                or driver_location.get("longitude") is None
+                or not await area_service.is_driver_inside(
+                    ride_obj.service_area_id,
+                    driver_location.get("latitude"),
+                    driver_location.get("longitude"),
+                )
             ):
                 raise HTTPException(
                     status_code=403,
