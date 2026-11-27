@@ -9,7 +9,7 @@ from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_admin
 from backend.domain.models import (
     User, Session, DriverProfile, CustomerProfile, Ride, VehicleCategory,
-    DriverAvailability, DriverLocation, FareRule, Vehicle, DriverDocument,
+    DriverAvailability, DriverLocation, DriverVehicleAssignment, FareRule, Vehicle, DriverDocument,
     AdministrativeAuditLog, CustomerKycDocument, CustomerKycAuditLog
 )
 from backend.infrastructure.security.crypto import create_jwt_token, decode_jwt_token,hash_secret , verify_password
@@ -110,227 +110,297 @@ async def get_live_mobility_feed(
     admin: User = Depends(get_admin_actor),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Unified high-performance real-time mobility feed querying Supabase directly.
-    Powers the Enterprise Controls Center interactive map, driver fleet, customer accounts,
-    active rides ledger, dynamic tariffs, and live command metrics.
-    """
-    # 1. Real Metrics from Supabase
-    total_users_count = (await db.execute(select(func.count(User.id)))).scalar_one()
-    total_customers_count = (await db.execute(select(func.count(User.id)).where(User.role == "customer"))).scalar_one()
-    total_drivers_count = (await db.execute(select(func.count(User.id)).where(User.role == "driver"))).scalar_one()
+    """Return only persisted operational records; unavailable telemetry stays null."""
+    total_users_count = (await db.execute(select(func.count(User.id)))).scalar_one() or 0
+    total_customers_count = (
+        await db.execute(select(func.count(User.id)).where(User.role == "customer"))
+    ).scalar_one() or 0
+    total_drivers_count = (
+        await db.execute(select(func.count(User.id)).where(User.role == "driver"))
+    ).scalar_one() or 0
 
-    pending_kyc_count = (await db.execute(
-        select(func.count(DriverProfile.id)).where(
-            or_(
-                DriverProfile.approval_status == "PENDING",
-                DriverProfile.approval_status == "pending",
-                DriverProfile.approval_status.is_(None)
+    pending_kyc_count = (
+        await db.execute(
+            select(func.count(DriverProfile.id)).where(
+                or_(
+                    DriverProfile.approval_status.in_(["PENDING", "pending"]),
+                    DriverProfile.approval_status.is_(None),
+                )
             )
         )
-    )).scalar_one()
+    ).scalar_one() or 0
 
-    active_rides_count = (await db.execute(
-        select(func.count(Ride.id)).where(Ride.status.in_(["REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS"]))
-    )).scalar_one()
+    active_rides_count = (
+        await db.execute(
+            select(func.count(Ride.id)).where(
+                Ride.status.in_(["REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS"])
+            )
+        )
+    ).scalar_one() or 0
 
-    rev_res = await db.execute(
-        select(func.sum(func.coalesce(Ride.final_fare_cents, Ride.estimated_fare_cents, 0)))
-    )
-    gross_booking_inr = round((rev_res.scalar_one() or 4825000) / 100.0, 2)
+    gross_revenue_cents = (
+        await db.execute(
+            select(func.coalesce(func.sum(Ride.final_fare_cents), 0)).where(
+                Ride.status == "COMPLETED",
+                Ride.final_fare_cents.is_not(None),
+            )
+        )
+    ).scalar_one() or 0
+    gross_booking_inr = round(int(gross_revenue_cents) / 100.0, 2)
 
-    online_count_res = await db.execute(
-        select(func.count(DriverAvailability.id)).where(DriverAvailability.is_online == True)
-    )
-    online_drivers_count = online_count_res.scalar_one() or 0
+    online_drivers_count = (
+        await db.execute(
+            select(func.count(DriverAvailability.id)).where(DriverAvailability.is_online.is_(True))
+        )
+    ).scalar_one() or 0
 
-    # 2. Real Drivers from Supabase (all DriverProfiles joined with User)
-    stmt_drivers = (
-        select(DriverProfile, User)
-        .join(User, DriverProfile.user_id == User.id)
-        .order_by(DriverProfile.created_at.desc())
-    )
-    driver_rows = (await db.execute(stmt_drivers)).all()
+    driver_rows = (
+        await db.execute(
+            select(DriverProfile, User)
+            .join(User, DriverProfile.user_id == User.id)
+            .order_by(DriverProfile.created_at.desc())
+        )
+    ).all()
 
-    a_res = await db.execute(select(DriverAvailability))
-    avails = {a.driver_id: a for a in a_res.scalars().all()}
+    availability_rows = (await db.execute(select(DriverAvailability))).scalars().all()
+    availabilities = {item.driver_id: item for item in availability_rows}
 
-    cat_res = await db.execute(select(VehicleCategory))
-    categories = cat_res.scalars().all()
-    cat_names = [c.name for c in categories if c.code != "BIKE"] or [
-        "Standard E-Rickshaw", "Shared E-Rickshaw (Eco-Pool)", "High-Speed Electric Auto", "E-Loader Cargo"
-    ]
+    category_rows = (await db.execute(select(VehicleCategory))).scalars().all()
+    categories_by_id = {item.id: item for item in category_rows}
 
-    loc_res = await db.execute(select(DriverLocation).order_by(DriverLocation.recorded_at.desc()))
-    locations_by_driver = {l.driver_id: l for l in loc_res.scalars().all()}
+    assignment_rows = (
+        await db.execute(
+            select(DriverVehicleAssignment, Vehicle)
+            .join(Vehicle, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+            .where(
+                DriverVehicleAssignment.is_active.is_(True),
+                Vehicle.is_active.is_(True),
+            )
+            .order_by(DriverVehicleAssignment.assigned_at.desc())
+        )
+    ).all()
+    vehicles_by_driver = {}
+    for assignment, vehicle in assignment_rows:
+        vehicles_by_driver.setdefault(assignment.driver_id, vehicle)
+
+    location_rows = (
+        await db.execute(
+            select(DriverLocation).order_by(DriverLocation.recorded_at.desc())
+        )
+    ).scalars().all()
+    locations_by_driver = {}
+    for location in location_rows:
+        # Results are newest-first: keep the first location for each driver.
+        locations_by_driver.setdefault(location.driver_id, location)
 
     formatted_drivers = []
-    for idx, (dp, u) in enumerate(driver_rows):
-        coord = DELHI_COMMAND_ANCHORS[idx % len(DELHI_COMMAND_ANCHORS)]
-        loc = locations_by_driver.get(dp.id)
-        lat = float(loc.latitude) if loc and loc.latitude else coord[0]
-        lng = float(loc.longitude) if loc and loc.longitude else coord[1]
-        speed = int(loc.speed) if loc and loc.speed else 0
+    users_by_driver_id = {}
+    for profile, user in driver_rows:
+        users_by_driver_id[profile.id] = user
+        availability = availabilities.get(profile.id)
+        is_online = bool(availability.is_online) if availability else False
+        is_busy = bool(availability.is_busy) if availability else False
 
-        avail = avails.get(dp.id)
-        is_online = avail.is_online if avail else (str(dp.approval_status).upper() in ["APPROVED", "YES", "TRUE", "1"])
-
-        appr = str(dp.approval_status or "PENDING").strip().upper()
-        if appr in ["APPROVED", "YES", "TRUE", "1"]:
-            canonical_appr = "APPROVED"
-            status_val = "AVAILABLE" if is_online else "OFFLINE"
-        elif appr in ["REJECTED", "REJECT", "NO"]:
-            canonical_appr = "REJECTED"
-            status_val = "OFFLINE"
+        approval = str(profile.approval_status or "PENDING").strip().upper()
+        if approval in {"APPROVED", "YES", "TRUE", "1"}:
+            canonical_approval = "APPROVED"
+            status_value = "BUSY" if is_online and is_busy else ("AVAILABLE" if is_online else "OFFLINE")
+        elif approval in {"REJECTED", "REJECT"}:
+            canonical_approval = "REJECTED"
+            status_value = "OFFLINE"
+        elif approval == "SUSPENDED":
+            canonical_approval = "SUSPENDED"
+            status_value = "OFFLINE"
         else:
-            canonical_appr = "PENDING"
-            status_val = "PENDING"
+            canonical_approval = "PENDING"
+            status_value = "PENDING"
 
-        cat_name = cat_names[idx % len(cat_names)]
-        plate = f"DL-1E-{str(dp.id)[:4].upper()}" if len(str(dp.id)) >= 4 else f"DL-1E-000{dp.id}"
-        model = "Mahindra Treo EV" if "Rickshaw" in cat_name else ("Bajaj RE E-Auto" if "Auto" in cat_name else "Euler HiLoad EV")
+        location = locations_by_driver.get(profile.id)
+        vehicle = vehicles_by_driver.get(profile.id)
+        category = categories_by_id.get(vehicle.category_id) if vehicle else None
 
         formatted_drivers.append({
-            "id": str(dp.id),
-            "user_id": str(u.id),
-            "name": u.full_name or f"Pilot {str(dp.id)[:6]}",
-            "phone": u.phone_number or "+91 98765 00000",
-            "plate": plate,
-            "model": model,
-            "category": cat_name,
-            "status": status_val,
-            "approval_status": canonical_appr,
-            "lat": lat,
-            "lng": lng,
-            "battery": 80 + (idx * 3) % 20,
-            "speed": speed,
-            "rating": float(dp.rating_average or 5.0),
-            "trips": int(dp.total_trips or 0),
-            "dl": dp.license_number or f"DL-042024-{str(dp.id)[:6].upper()}"
+            "id": str(profile.id),
+            "user_id": str(user.id),
+            "name": user.full_name,
+            "phone": user.phone_number,
+            "email": user.email,
+            "plate": vehicle.license_plate if vehicle else None,
+            "model": f"{vehicle.make} {vehicle.model}".strip() if vehicle else None,
+            "category": category.name if category else None,
+            "status": status_value,
+            "approval_status": canonical_approval,
+            "lat": float(location.latitude) if location and location.latitude is not None else None,
+            "lng": float(location.longitude) if location and location.longitude is not None else None,
+            "battery": None,
+            "speed": float(location.speed) if location and location.speed is not None else None,
+            "heading": float(location.heading) if location and location.heading is not None else None,
+            "location_recorded_at": location.recorded_at.isoformat() if location and location.recorded_at else None,
+            "rating": float(profile.rating_average) if profile.rating_count else None,
+            "trips": int(profile.total_trips or 0),
+            "dl": profile.license_number,
         })
 
-    # 3. Real Customers from Supabase (all Users with role='customer')
-    cust_res = (await db.execute(
-        select(User).where(User.role == "customer").order_by(User.created_at.desc())
-    )).scalars().all()
+    customer_rows = (
+        await db.execute(
+            select(CustomerProfile, User)
+            .join(User, CustomerProfile.user_id == User.id)
+            .order_by(User.created_at.desc())
+        )
+    ).all()
+    customers_by_profile_id = {profile.id: (profile, user) for profile, user in customer_rows}
+    customers_by_user_id = {user.id: (profile, user) for profile, user in customer_rows}
 
+    customer_activity_rows = (
+        await db.execute(
+            select(
+                Ride.customer_id,
+                func.count(Ride.id),
+                func.coalesce(func.sum(Ride.final_fare_cents), 0),
+            )
+            .where(Ride.status == "COMPLETED", Ride.final_fare_cents.is_not(None))
+            .group_by(Ride.customer_id)
+        )
+    ).all()
+    customer_activity = {
+        customer_id: {"rides": int(ride_count or 0), "spend_cents": int(spend_cents or 0)}
+        for customer_id, ride_count, spend_cents in customer_activity_rows
+    }
+
+    all_customer_users = (
+        await db.execute(
+            select(User).where(User.role == "customer").order_by(User.created_at.desc())
+        )
+    ).scalars().all()
     formatted_customers = []
-    formatted_riders = []
-    pickup_labels = [
-        "Anand Vihar ISBT Gate 2", "Connaught Place Inner Circle", "Preet Vihar Metro Gate 3",
-        "Karol Bagh Market Gate 1", "Noida Sec 62 B2B Depot", "Mayur Vihar Ph-1 Gate 2",
-        "Laxmi Nagar Vikas Marg", "Chandni Chowk Red Fort Gate"
-    ]
-    drop_labels = [
-        "Karkardooma Court", "Barakhamba Road Metro", "ITO Flyover", "Pocket 2 Market",
-        "Indirapuram Market", "Patel Nagar Metro", "Nehru Place Terminal"
-    ]
-
-    for idx, u in enumerate(cust_res):
+    for user in all_customer_users:
+        profile_and_user = customers_by_user_id.get(user.id)
+        profile = profile_and_user[0] if profile_and_user else None
+        activity = customer_activity.get(profile.id, {"rides": 0, "spend_cents": 0}) if profile else {"rides": 0, "spend_cents": 0}
         formatted_customers.append({
-            "id": str(u.id),
-            "name": u.full_name or "Commuter",
-            "phone": u.phone_number or "+91 98110 00000",
-            "email": u.email or "",
-            "rides": 12 + (idx * 5) % 35,
-            "spend": f"₹{((idx * 380) + 520):,}",
-            "rating": round(4.7 + (idx % 4) * 0.1, 1),
-            "active": bool(u.is_active)
+            "id": str(user.id),
+            "name": user.full_name,
+            "phone": user.phone_number,
+            "email": user.email,
+            "rides": activity["rides"],
+            "spend": f"₹{activity['spend_cents'] / 100.0:,.2f}",
+            "rating": float(profile.rating_average) if profile and profile.rating_count else None,
+            "active": bool(user.is_active),
         })
 
-        if idx < 6:
-            coord = DELHI_COMMAND_ANCHORS[(idx + 2) % len(DELHI_COMMAND_ANCHORS)]
-            formatted_riders.append({
-                "id": f"rdr-{str(u.id)[:6]}",
-                "name": u.full_name or "Commuter",
-                "phone": u.phone_number or "+91 98110 00000",
-                "lat": coord[0] + 0.003,
-                "lng": coord[1] + 0.003,
-                "status": "WAITING",
-                "pickup": pickup_labels[idx % len(pickup_labels)],
-                "targetDrop": drop_labels[idx % len(drop_labels)],
-                "waitMins": round(1.2 + (idx * 0.7) % 4.0, 1),
-                "rating": 4.9
-            })
+    requested_rides = (
+        await db.execute(
+            select(Ride)
+            .where(Ride.status == "REQUESTED")
+            .order_by(Ride.requested_at.asc())
+            .limit(20)
+        )
+    ).scalars().all()
+    now = datetime.now(timezone.utc)
+    formatted_riders = []
+    for ride in requested_rides:
+        customer_record = customers_by_profile_id.get(ride.customer_id)
+        customer_profile, customer_user = customer_record if customer_record else (None, None)
+        requested_at = ride.requested_at
+        if requested_at is not None and requested_at.tzinfo is None:
+            requested_at = requested_at.replace(tzinfo=timezone.utc)
+        wait_minutes = max(0.0, (now - requested_at).total_seconds() / 60.0) if requested_at else None
+        formatted_riders.append({
+            "id": str(ride.id),
+            "name": customer_user.full_name if customer_user else ride.passenger_name,
+            "phone": customer_user.phone_number if customer_user else None,
+            "lat": float(ride.pickup_latitude) if ride.pickup_latitude is not None else None,
+            "lng": float(ride.pickup_longitude) if ride.pickup_longitude is not None else None,
+            "status": ride.status,
+            "pickup": ride.pickup_address,
+            "targetDrop": ride.destination_address,
+            "waitMins": round(wait_minutes, 1) if wait_minutes is not None else None,
+            "rating": float(customer_profile.rating_average) if customer_profile and customer_profile.rating_count else None,
+        })
 
-    # 4. Real Rides from Supabase
-    rides_res = (await db.execute(
-        select(Ride).order_by(Ride.requested_at.desc()).limit(15)
-    )).scalars().all()
-
+    rides_rows = (
+        await db.execute(
+            select(Ride).order_by(Ride.requested_at.desc()).limit(15)
+        )
+    ).scalars().all()
     formatted_rides = []
-    for r in rides_res:
-        fare_val = (r.final_fare_cents or r.estimated_fare_cents or 6000) / 100.0
+    for ride in rides_rows:
+        customer_record = customers_by_profile_id.get(ride.customer_id)
+        customer_user = customer_record[1] if customer_record else None
+        driver_user = users_by_driver_id.get(ride.assigned_driver_id) if ride.assigned_driver_id else None
+        vehicle = vehicles_by_driver.get(ride.assigned_driver_id) if ride.assigned_driver_id else None
+        fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents
         formatted_rides.append({
-            "id": str(r.id),
-            "rider": r.passenger_name or "Verified Commuter",
-            "driver": "Assigned Pilot",
-            "plate": "DL-1ER-4921",
-            "pickup": r.pickup_address or "Delhi Feeder Hub",
-            "drop": r.destination_address or "Metro Station",
-            "fare": f"₹{fare_val:.2f}",
-            "payment": r.payment_method or "UPI Digital",
-            "status": r.status or "COMPLETED"
+            "id": str(ride.id),
+            "rider": ride.passenger_name or (customer_user.full_name if customer_user else None),
+            "driver": driver_user.full_name if driver_user else None,
+            "plate": vehicle.license_plate if vehicle else None,
+            "pickup": ride.pickup_address,
+            "drop": ride.destination_address,
+            "fare": f"₹{fare_cents / 100.0:.2f}" if fare_cents is not None else None,
+            "payment": ride.payment_method,
+            "status": ride.status,
         })
 
-    # 5. Real Vehicle Categories & Fare Rules from Supabase
-    fare_res = await db.execute(select(FareRule).where(FareRule.is_active == True))
-    fares_by_cat = {f.category_id: f for f in fare_res.scalars().all()}
-
+    fare_rows = (
+        await db.execute(
+            select(FareRule).where(FareRule.is_active.is_(True))
+        )
+    ).scalars().all()
+    fares_by_category = {rule.category_id: rule for rule in fare_rows}
     icons_by_code = {
         "E_RICKSHAW_STANDARD": "🛺",
         "E_RICKSHAW_SHARE": "👥",
         "E_AUTO": "⚡",
         "E_CARGO_LOADER": "📦",
-        "BIKE": "🛵"
+        "BIKE": "🛵",
     }
 
     formatted_tariffs = []
-    for c in categories:
-        if c.code == "BIKE":
+    for category in category_rows:
+        if category.code == "BIKE":
             continue
-        rule = fares_by_cat.get(c.id)
-        base_f = rule.base_fare_cents / 100.0 if rule else 20.0
-        per_km = rule.per_km_cents / 100.0 if rule else 10.0
-        per_min = rule.per_minute_cents / 100.0 if rule else 1.0
-        min_f = rule.minimum_fare_cents / 100.0 if rule else 20.0
-
+        rule = fares_by_category.get(category.id)
+        base_fare = rule.base_fare_cents / 100.0 if rule else None
+        per_km = rule.per_km_cents / 100.0 if rule else None
+        per_minute = rule.per_minute_cents / 100.0 if rule else None
+        minimum_fare = rule.minimum_fare_cents / 100.0 if rule else None
         formatted_tariffs.append({
-            "id": c.id,
+            "id": category.id,
             "ruleId": rule.id if rule else None,
-            "code": c.code,
-            "name": c.name,
-            "desc": c.description or "Clean electric mobility",
-            "base": f"₹{base_f:.0f}",
-            "perKm": f"₹{per_km:.1f}/km",
-            "perMin": f"₹{per_min:.1f}/min",
-            "minFare": f"₹{min_f:.0f}",
-            "baseFareRupees": base_f,
+            "code": category.code,
+            "name": category.name,
+            "desc": category.description,
+            "base": f"₹{base_fare:.0f}" if base_fare is not None else None,
+            "perKm": f"₹{per_km:.1f}/km" if per_km is not None else None,
+            "perMin": f"₹{per_minute:.1f}/min" if per_minute is not None else None,
+            "minFare": f"₹{minimum_fare:.0f}" if minimum_fare is not None else None,
+            "baseFareRupees": base_fare,
             "perKmRupees": per_km,
-            "perMinuteRupees": per_min,
-            "minimumFareRupees": min_f,
-            "surgeMultiplier": rule.surge_multiplier if rule else 1.0,
-            "icon": icons_by_code.get(c.code, "🛺"),
-            "active": True
+            "perMinuteRupees": per_minute,
+            "minimumFareRupees": minimum_fare,
+            "surgeMultiplier": rule.surge_multiplier if rule else None,
+            "icon": icons_by_code.get(category.code, "🛺"),
+            "active": bool(rule and rule.is_active),
         })
 
     return {
         "stats": {
-            "online_drivers": max(online_drivers_count, len([d for d in formatted_drivers if d["status"] == "AVAILABLE"])),
-            "active_rides": max(active_rides_count, len([r for r in formatted_rides if r["status"] in ["REQUESTED", "ASSIGNED", "IN_PROGRESS"]])),
+            "online_drivers": int(online_drivers_count),
+            "active_rides": int(active_rides_count),
             "waiting_riders": len(formatted_riders),
             "gross_booking_inr": gross_booking_inr,
-            "pending_kyc": pending_kyc_count,
-            "total_customers": total_customers_count,
-            "total_drivers": total_drivers_count,
-            "total_users": total_users_count,
-            "platform_status": "OPERATIONAL"
+            "pending_kyc": int(pending_kyc_count),
+            "total_customers": int(total_customers_count),
+            "total_drivers": int(total_drivers_count),
+            "total_users": int(total_users_count),
+            "platform_status": "OPERATIONAL",
         },
         "drivers": formatted_drivers,
         "riders": formatted_riders,
         "active_rides": formatted_rides,
         "customers": formatted_customers,
-        "tariffs": formatted_tariffs
+        "tariffs": formatted_tariffs,
     }
 
 @router.get("/shared-rides/analytics")
