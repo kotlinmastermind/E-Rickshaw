@@ -12,7 +12,6 @@ from backend.api.deps import get_current_user
 from backend.domain.models import User
 from backend.infrastructure.security.rate_limiter import auth_rate_limiter, otp_rate_limiter
 from backend.api.schemas.auth import (
-    IdentityLookupPayload,
     OtpRequestPayload,
     OtpVerifyPayload,
     TokenRefreshPayload,
@@ -123,11 +122,6 @@ async def update_user_avatar(
             detail=f"Avatar DB update failed: {str(exc)}"
         )
 
-
-@router.post("/lookup", dependencies=[Depends(auth_rate_limiter)])
-async def lookup_user_identity(payload: IdentityLookupPayload, db: AsyncSession = Depends(get_db)):
-    service = AuthService(db)
-    return await service.lookup_user_identity(payload.identifier, payload.role)
 
 @router.post("/otp/request", dependencies=[Depends(otp_rate_limiter)])
 @router.post("/otp/send", dependencies=[Depends(otp_rate_limiter)])
