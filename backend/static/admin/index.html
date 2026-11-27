@@ -1383,6 +1383,19 @@
                     </div>
                 </div>
 
+                <div class="glass-card p-5 rounded-2xl border border-border space-y-3">
+                    <h3 class="text-sm font-bold text-white">Assign Driver to Operational Service Area</h3>
+                    <p class="text-xs text-slate-400">Only explicitly assigned drivers can receive offers inside an active service area.</p>
+                    <input type="text" id="service-area-driver-id" placeholder="Driver profile ID"
+                        class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white font-mono">
+                    <select id="service-area-driver-zone" class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white">
+                        <option value="">Select active service area</option>
+                    </select>
+                    <button onclick="assignDriverToServiceArea()" class="px-4 py-2 rounded-xl bg-cyan-glow text-black font-bold text-xs">
+                        Assign Driver
+                    </button>
+                </div>
+
                 <!-- Dynamic Surge Scheduler Card -->
                 <div class="glass-card p-5 rounded-2xl border border-border space-y-4">
                     <h3 class="text-sm font-bold text-white flex items-center gap-2">
@@ -5001,12 +5014,46 @@
             const select = document.getElementById('surge-zone-select');
             if (!select) return;
             select.innerHTML = '<option value="">All City Corridors (Citywide)</option>';
+            const serviceAreaSelect = document.getElementById('service-area-driver-zone');
+            if (serviceAreaSelect) {
+                serviceAreaSelect.innerHTML = '<option value="">Select active service area</option>';
+                (STATE.geofences || []).filter(z => z.zone_type === 'SERVICE_AREA' && z.is_active).forEach(z => {
+                    const serviceOption = document.createElement('option');
+                    serviceOption.value = z.id;
+                    serviceOption.innerText = `${z.name} (${z.city_code || 'No city code'})`;
+                    serviceAreaSelect.appendChild(serviceOption);
+                });
+            }
             (STATE.geofences || []).forEach(z => {
                 const opt = document.createElement('option');
                 opt.value = z.id;
                 opt.innerText = `${z.name} (${z.zone_type})`;
                 select.appendChild(opt);
             });
+        }
+
+        async function assignDriverToServiceArea() {
+            const driverId = document.getElementById('service-area-driver-id').value.trim();
+            const zoneId = document.getElementById('service-area-driver-zone').value;
+            if (!driverId || !zoneId) {
+                showToast('Enter a driver profile ID and select a service area', 'error');
+                return;
+            }
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/drivers/${encodeURIComponent(driverId)}/service-areas/${encodeURIComponent(zoneId)}`, {
+                    method: 'PUT', headers
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || 'Driver assignment failed', 'error');
+                    return;
+                }
+                showToast('Driver assigned to service area');
+            } catch (err) {
+                showToast('Network error while assigning driver', 'error');
+            }
         }
 
         function renderGeofencesTable() {
