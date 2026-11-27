@@ -8,7 +8,7 @@ from backend.application.services.commission_service import CommissionService
 from backend.application.services.driver_service import DriverService
 from backend.application.services.driver_financial_service import DriverFinancialService
 from backend.domain.models import (
-    CustomerProfile, DriverProfile, DriverWallet, FareRule, Ride, User, VehicleCategory,
+    CustomerProfile, DriverLedgerEntry, DriverProfile, DriverWallet, FareRule, Ride, User, VehicleCategory,
 )
 
 
@@ -60,6 +60,12 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
             db_session, ride_id=ride.id, snapshot=snapshot, category_id=category.id,
             commission_classification=classification, currency="INR"
         )
+        db_session.add(DriverLedgerEntry(
+            driver_id=driver.id, entry_type="DEBIT",
+            category="COMMISSION_RECEIVABLE" if classification == "RECEIVABLE" else "COMMISSION_PAYABLE",
+            amount_cents=-snapshot.commission_cents, balance_after_cents=10000,
+            reference_id=ride.id, description="Commission accrual ledger entry"
+        ))
     await db_session.commit()
 
     summary = await DriverService(db_session).get_earnings_summary(driver_user.id)
