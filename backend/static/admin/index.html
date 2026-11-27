@@ -2645,6 +2645,8 @@
 
             // 1. Render Drivers
             STATE.drivers.forEach(driver => {
+                if (driver.lat == null || driver.lng == null ||
+                    !Number.isFinite(Number(driver.lat)) || !Number.isFinite(Number(driver.lng))) return;
                 if (STATE.mapFilter === 'available' && driver.status !== 'AVAILABLE') return;
                 if (STATE.mapFilter === 'busy' && driver.status !== 'IN_TRIP') return;
                 if (STATE.mapFilter === 'riders') return;
@@ -2709,7 +2711,7 @@
             STATE.selectedEntity = { type: 'driver', data: driver };
             document.getElementById('drawer-avatar').innerText = '👨‍✈️';
             document.getElementById('drawer-title').innerText = driver.name;
-            document.getElementById('drawer-subtitle').innerText = `${driver.plate} • ${driver.model}`;
+            document.getElementById('drawer-subtitle').innerText = `${driver.plate || 'Vehicle not assigned'} • ${driver.model || 'Model not recorded'}`;
 
             const dot = document.getElementById('drawer-status-dot');
             const statusText = document.getElementById('drawer-status-text');
@@ -2727,13 +2729,13 @@
                 statusText.innerText = 'ALERT: BATTERY RESERVE LOW';
             }
 
-            document.getElementById('drawer-battery').innerText = `${driver.battery}% (~${Math.round(driver.battery * 0.5)} km)`;
-            document.getElementById('drawer-speed').innerText = `${driver.speed} km/h`;
-            document.getElementById('drawer-rating').innerText = `${driver.rating} ★`;
+            document.getElementById('drawer-battery').innerText = driver.battery == null ? 'Not reported' : `${driver.battery}%`;
+            document.getElementById('drawer-speed').innerText = driver.speed == null ? 'Not reported' : `${driver.speed} km/h`;
+            document.getElementById('drawer-rating').innerText = driver.rating == null ? 'Not rated' : `${driver.rating} ★`;
             document.getElementById('drawer-trips').innerText = driver.trips.toLocaleString();
-            document.getElementById('drawer-phone').innerText = driver.phone;
-            document.getElementById('drawer-dl').innerText = driver.dl;
-            document.getElementById('drawer-category').innerText = driver.category;
+            document.getElementById('drawer-phone').innerText = driver.phone || 'Not provided';
+            document.getElementById('drawer-dl').innerText = driver.dl || 'Not recorded';
+            document.getElementById('drawer-category').innerText = driver.category || 'Not assigned';
 
             const tripCard = document.getElementById('drawer-trip-card');
             if (driver.status === 'IN_TRIP' && driver.tripId) {
@@ -2752,7 +2754,7 @@
             }
 
             document.getElementById('inspector-drawer').classList.remove('translate-x-[110%]');
-            STATE.map.panTo([driver.lat, driver.lng]);
+            if (driver.lat != null && driver.lng != null && Number.isFinite(Number(driver.lat)) && Number.isFinite(Number(driver.lng))) STATE.map.panTo([driver.lat, driver.lng]);
             lucide.createIcons();
         }
 
@@ -2771,8 +2773,8 @@
 
             document.getElementById('drawer-battery').innerText = 'N/A (Pedestrian)';
             document.getElementById('drawer-speed').innerText = '0 km/h';
-            document.getElementById('drawer-rating').innerText = `${rider.rating} ★`;
-            document.getElementById('drawer-trips').innerText = '14';
+            document.getElementById('drawer-rating').innerText = rider.rating == null ? 'Not rated' : `${rider.rating} ★`;
+            document.getElementById('drawer-trips').innerText = rider.trips == null ? 'Not available' : rider.trips.toLocaleString();
             document.getElementById('drawer-phone').innerText = rider.phone;
             document.getElementById('drawer-dl').innerText = 'Verified Commuter';
             document.getElementById('drawer-category').innerText = 'Eco-Feeder Pool';
@@ -2782,12 +2784,12 @@
             document.getElementById('drawer-trip-id').innerText = 'DISPATCH MATCHING';
             document.getElementById('drawer-pickup').innerText = rider.pickup;
             document.getElementById('drawer-drop').innerText = rider.targetDrop;
-            document.getElementById('drawer-fare').innerText = 'Est. ₹35.00';
+            document.getElementById('drawer-fare').innerText = 'Not available';
             document.getElementById('drawer-passenger').innerText = rider.name;
 
             clearRoute();
             document.getElementById('inspector-drawer').classList.remove('translate-x-[110%]');
-            STATE.map.panTo([rider.lat, rider.lng]);
+            if (rider.lat != null && rider.lng != null && Number.isFinite(Number(rider.lat)) && Number.isFinite(Number(rider.lng))) STATE.map.panTo([rider.lat, rider.lng]);
             lucide.createIcons();
         }
 
@@ -2908,28 +2910,21 @@
                         if (elConn) elConn.innerText = 'LIVE SUPABASE (AWS-AP-SOUTHEAST-2)';
                     }
 
-                    if (Array.isArray(data.drivers) && data.drivers.length > 0) {
-                        STATE.drivers = data.drivers;
-                    }
-
-                    if (Array.isArray(data.riders) && data.riders.length > 0) {
-                        STATE.riders = data.riders;
-                    }
-
-                    if (Array.isArray(data.active_rides) && data.active_rides.length > 0) {
-                        STATE.activeRides = data.active_rides;
-                    }
-
-                    if (Array.isArray(data.customers) && data.customers.length > 0) {
-                        STATE.customers = data.customers;
-                    }
-
-                    if (Array.isArray(data.tariffs) && data.tariffs.length > 0) {
-                        STATE.categories = data.tariffs;
-                    }
+                    STATE.drivers = Array.isArray(data.drivers) ? data.drivers : [];
+                    STATE.riders = Array.isArray(data.riders) ? data.riders : [];
+                    STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];
+                    STATE.customers = Array.isArray(data.customers) ? data.customers : [];
+                    STATE.categories = Array.isArray(data.tariffs) ? data.tariffs : [];
                 }
             } catch (e) {
-                console.log('Error fetching live Supabase feed:', e);
+                console.error('Admin live feed unavailable:', e);
+                STATE.drivers = [];
+                STATE.riders = [];
+                STATE.activeRides = [];
+                STATE.customers = [];
+                STATE.categories = [];
+                const connectionLabel = document.getElementById('connection-label');
+                if (connectionLabel) connectionLabel.innerText = 'LIVE DATA UNAVAILABLE';
             }
 
             renderMapMarkers();
@@ -2957,7 +2952,9 @@
             tbody.innerHTML = '';
             driversList.forEach(driver => {
                 if (filterStatus !== 'ALL' && driver.status !== filterStatus) return;
-                if (searchTerm && !driver.name.toLowerCase().includes(searchTerm) && !driver.phone.includes(searchTerm) && !driver.plate.toLowerCase().includes(searchTerm)) return;
+                if (searchTerm && !String(driver.name || '').toLowerCase().includes(searchTerm) &&
+                    !String(driver.phone || '').includes(searchTerm) &&
+                    !String(driver.plate || '').toLowerCase().includes(searchTerm)) return;
 
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-surface/50 transition-colors';
@@ -2988,10 +2985,10 @@
                         <span class="text-[10px] text-slate-500">${driver.dl}</span>
                     </td>
                     <td class="py-3.5 px-4">
-                        <span class="font-mono font-bold text-white">${driver.plate}</span>
-                        <div class="text-[10px] text-slate-400">${driver.model}</div>
+                        <span class="font-mono font-bold text-white">${driver.plate || 'Not assigned'}</span>
+                        <div class="text-[10px] text-slate-400">${driver.model || 'Not recorded'}</div>
                     </td>
-                    <td class="py-3.5 px-4 text-cyan-glow">${driver.category}</td>
+                    <td class="py-3.5 px-4 text-cyan-glow">${driver.category || 'Not assigned'}</td>
                     <td class="py-3.5 px-4">${dutyBadge}</td>
                     <td class="py-3.5 px-4">${kycBadge}</td>
                     <td class="py-3.5 px-4 text-right">
@@ -3547,15 +3544,23 @@
         }
 
         function handleLiveWsTelemetry(payload) {
-            if (payload.type === 'DRIVER_LOCATION_UPDATE') {
-                const driver = STATE.drivers.find(d => d.id === payload.driver_id);
-                if (driver) {
-                    driver.lat = payload.latitude;
-                    driver.lng = payload.longitude;
-                    driver.speed = payload.speed_kmh || driver.speed;
-                    renderMapMarkers();
-                }
+            const eventType = payload?.event_type || payload?.type || payload?.event;
+            const eventPayload = payload?.payload && typeof payload.payload === 'object' ? payload.payload : payload;
+            if (eventType !== 'DRIVER_LOCATION_UPDATE') return;
+            const driver = STATE.drivers.find(d => d.id === String(eventPayload.driver_id || ''));
+            if (!driver) return;
+            const latitude = Number(eventPayload.latitude);
+            const longitude = Number(eventPayload.longitude);
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+            driver.lat = latitude;
+            driver.lng = longitude;
+            if (eventPayload.speed_kmh != null && Number.isFinite(Number(eventPayload.speed_kmh))) {
+                driver.speed = Number(eventPayload.speed_kmh);
+            } else if (eventPayload.speed_mps != null && Number.isFinite(Number(eventPayload.speed_mps))) {
+                driver.speed = Number(eventPayload.speed_mps) * 3.6;
             }
+            driver.location_recorded_at = eventPayload.recorded_at || new Date().toISOString();
+            renderMapMarkers();
         }
 
         // Heartbeat Periodic Sync
@@ -3575,28 +3580,31 @@
                         if (data.stats) {
                             STATE.stats = data.stats;
                             const elOnline = document.getElementById('stat-online-drivers');
-                            if (elOnline) elOnline.innerText = data.stats.online_drivers || 0;
+                            if (elOnline) elOnline.innerText = data.stats.online_drivers ?? 0;
                             const elRides = document.getElementById('stat-active-rides');
-                            if (elRides) elRides.innerText = data.stats.active_rides || 0;
+                            if (elRides) elRides.innerText = data.stats.active_rides ?? 0;
                             const elRev = document.getElementById('stat-revenue');
-                            if (elRev) elRev.innerText = `₹${(data.stats.gross_booking_inr || 0).toLocaleString()}`;
+                            if (elRev) elRev.innerText = `₹${Number(data.stats.gross_booking_inr ?? 0).toLocaleString()}`;
                             const elPending = document.getElementById('stat-pending-kyc');
-                            if (elPending) elPending.innerText = data.stats.pending_kyc || 0;
+                            if (elPending) elPending.innerText = data.stats.pending_kyc ?? 0;
                             const elBadge = document.getElementById('badge-pending-kyc');
-                            if (elBadge) elBadge.innerText = data.stats.pending_kyc || 0;
+                            if (elBadge) elBadge.innerText = data.stats.pending_kyc ?? 0;
                         }
+                        STATE.drivers = Array.isArray(data.drivers) ? data.drivers : [];
+                        STATE.riders = Array.isArray(data.riders) ? data.riders : [];
+                        STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];
+                        STATE.customers = Array.isArray(data.customers) ? data.customers : [];
+                        STATE.categories = Array.isArray(data.tariffs) ? data.tariffs : [];
+                        renderMapMarkers();
+                        renderDriverTable();
+                        renderRidesTable();
+                        renderCustomerTable();
+                        renderTariffCards();
                     }
                 } catch (e) { }
             }
 
-            // Keep simulated vehicle movement micro-animations active for real mobility experience
-            STATE.drivers.forEach(d => {
-                if (d.status === 'IN_TRIP') {
-                    d.lat += (Math.random() - 0.48) * 0.0004;
-                    d.lng += (Math.random() - 0.48) * 0.0004;
-                    d.speed = Math.floor(20 + Math.random() * 12);
-                }
-            });
+            // Map positions are updated only by persisted GPS telemetry.
             renderMapMarkers();
         }
 
