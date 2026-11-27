@@ -238,6 +238,13 @@ class DriverFinancialService:
         current_balance = d_wallet.balance_cents if d_wallet else driver.wallet_balance_cents
         currency_code = d_wallet.currency if d_wallet else "INR"
 
+        from backend.application.services.commission_service import CommissionService
+        commission_outstanding_cents = await CommissionService.get_driver_commission_outstanding_cents(
+            self.db,
+            driver.id,
+        )
+        withdrawable_balance_cents = max(0, int(current_balance) - commission_outstanding_cents)
+
         return {
             "driver_id": driver.id,
             "currency": currency_code,
@@ -247,6 +254,9 @@ class DriverFinancialService:
             "commission_snapshot_missing_count": missing_snapshot_count,
             "wallet_balance_cents": current_balance,
             "wallet_balance_rupees": round(current_balance / 100, 2),
+            "commission_outstanding_cents": commission_outstanding_cents,
+            "withdrawable_balance_cents": withdrawable_balance_cents,
+            "withdrawable_balance_rupees": round(withdrawable_balance_cents / 100, 2),
             "today": {
                 "trips_count": len(today_rides),
                 "gross_earnings_cents": today_gross_cents,
