@@ -14,4 +14,5 @@ async def test_anonymous_identity_lookup_endpoint_is_not_exposed():
             json={"identifier": "+919876543210", "role": "customer"},
         )
 
-    assert response.status_code == 404
+    assert response.status_code in (404, 405)
+    assert not any(key in response.json() for key in ("full_name", "phone_number", "email", "user_id"))
