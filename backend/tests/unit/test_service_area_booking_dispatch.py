@@ -28,6 +28,7 @@ from backend.domain.models import (
 @pytest.mark.asyncio
 async def test_driver_from_adjacent_service_area_cannot_receive_or_accept_ride(db_session):
     suffix = uuid.uuid4().hex[:8]
+    phone_suffix = str(uuid.uuid4().int % 100000000).zfill(8)
 
     # Replace the broad test Delhi polygon with two adjacent, non-overlapping
     # operational areas. Both are deliberately close enough for the same H3 rings.
@@ -87,7 +88,7 @@ async def test_driver_from_adjacent_service_area_cannot_receive_or_accept_ride(d
         effective_from=datetime.now(timezone.utc) - timedelta(days=1),
     )
     driver_user = User(
-        phone_number=f"+9197{suffix}",
+        phone_number=f"+9197{phone_suffix}",
         full_name="Area B Test Driver",
         role="driver",
         is_active=True,
@@ -137,7 +138,7 @@ async def test_driver_from_adjacent_service_area_cannot_receive_or_accept_ride(d
     assert candidates == []
 
     customer_user = User(
-        phone_number=f"+9196{suffix}",
+        phone_number=f"+9196{phone_suffix}",
         full_name="Area Isolation Customer",
         role="customer",
         is_active=True,
