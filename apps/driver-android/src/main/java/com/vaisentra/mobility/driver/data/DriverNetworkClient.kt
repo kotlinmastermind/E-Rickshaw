@@ -237,12 +237,10 @@ object DriverNetworkClient {
         }
     }
 
+    // Do not log HTTP headers or bodies: API payloads can contain bearer tokens,
+    // OTPs, passenger PII, location data, and payment information.
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = if (BuildConfig.DEBUG) {
-            HttpLoggingInterceptor.Level.BODY
-        } else {
-            HttpLoggingInterceptor.Level.NONE
-        }
+        level = HttpLoggingInterceptor.Level.NONE
     }
 
     private val okHttpClient: OkHttpClient by lazy {
