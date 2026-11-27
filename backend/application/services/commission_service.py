@@ -25,6 +25,7 @@ from backend.domain.models.extended_models import (
     CommissionRule,
     RideCommissionSnapshot,
 )
+from backend.domain.models.models import DriverCommissionSettlement, DriverLedgerEntry
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,34 @@ class CommissionService:
             "commission_classification": classification,
             "commission_estimate_available": commission_cents is not None,
         }
+
+    @classmethod
+    async def get_driver_commission_outstanding_cents(
+        cls,
+        session: AsyncSession,
+        driver_id: str,
+    ) -> int:
+        """Return unsettled payable/receivable commission from immutable ledger entries."""
+        ledger_total = (
+            await session.execute(
+                select(func.coalesce(func.sum(DriverLedgerEntry.amount_cents), 0)).where(
+                    DriverLedgerEntry.driver_id == driver_id,
+                    DriverLedgerEntry.category.in_([
+                        "COMMISSION_PAYABLE",
+                        "COMMISSION_RECEIVABLE",
+                        "COMMISSION",
+                    ]),
+                )
+            )
+        ).scalar_one()
+        settled_total = (
+            await session.execute(
+                select(func.coalesce(func.sum(DriverCommissionSettlement.amount_cents), 0)).where(
+                    DriverCommissionSettlement.driver_id == driver_id
+                )
+            )
+        ).scalar_one()
+        return max(0, -int(ledger_total or 0) - int(settled_total or 0))
 
     @classmethod
     async def calculate_for_ride(
