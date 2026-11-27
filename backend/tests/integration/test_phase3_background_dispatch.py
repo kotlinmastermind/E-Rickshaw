@@ -731,3 +731,33 @@ async def test_atomic_acceptance_prevents_duplicate_booking(setup_dispatch_envir
     await db_session.refresh(ride)
     assert ride.status == "ASSIGNED"
     assert ride.assigned_driver_id == driver1.id
+
+
+@pytest.mark.asyncio
+async def test_websocket_inflight_database_error_fails_closed(setup_dispatch_environment):
+    """A database outage must not keep an already-open driver dispatch socket authorized."""
+    env = setup_dispatch_environment
+    driver_user = env["driver1_user"]
+    session = env["session1"]
+    driver_profile = env["driver1_profile"]
+
+    token = create_jwt_token(
+        user_id=driver_user.id,
+        role="driver",
+        session_id=session.id
+    )
+
+    class BrokenDatabase:
+        async def execute(self, _statement):
+            raise RuntimeError("simulated database outage")
+
+    from backend.api.routes.ws import verify_inflight_driver_authorization
+    is_valid = await verify_inflight_driver_authorization(
+        user_id=driver_user.id,
+        session_id=session.id,
+        role="driver",
+        driver_id=driver_profile.id,
+        token_str=token,
+        db_session=BrokenDatabase()
+    )
+    assert is_valid is False
