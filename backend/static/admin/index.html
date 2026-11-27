@@ -1394,6 +1394,11 @@
                     <button onclick="assignDriverToServiceArea()" class="px-4 py-2 rounded-xl bg-cyan-glow text-black font-bold text-xs">
                         Assign Driver
                     </button>
+                    <div class="flex gap-2">
+                        <button onclick="revokeDriverFromServiceArea()" class="px-3 py-2 rounded-xl bg-rose-500/15 text-rose-300 font-bold text-xs">Revoke</button>
+                        <button onclick="loadDriverServiceAreas()" class="px-3 py-2 rounded-xl bg-surface text-slate-200 font-bold text-xs">View Assignments</button>
+                    </div>
+                    <div id="service-area-driver-assignments" class="text-[11px] text-slate-400 font-mono"></div>
                 </div>
 
                 <!-- Dynamic Surge Scheduler Card -->
@@ -5053,6 +5058,54 @@
                 showToast('Driver assigned to service area');
             } catch (err) {
                 showToast('Network error while assigning driver', 'error');
+            }
+        }
+
+        async function revokeDriverFromServiceArea() {
+            const driverId = document.getElementById('service-area-driver-id').value.trim();
+            const zoneId = document.getElementById('service-area-driver-zone').value;
+            if (!driverId || !zoneId) {
+                showToast('Enter a driver profile ID and select a service area', 'error');
+                return;
+            }
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/drivers/${encodeURIComponent(driverId)}/service-areas/${encodeURIComponent(zoneId)}`, {
+                    method: 'DELETE', headers
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || 'Driver revocation failed', 'error');
+                    return;
+                }
+                showToast('Driver service-area assignment revoked');
+                await loadDriverServiceAreas();
+            } catch (err) {
+                showToast('Network error while revoking driver assignment', 'error');
+            }
+        }
+
+        async function loadDriverServiceAreas() {
+            const driverId = document.getElementById('service-area-driver-id').value.trim();
+            const target = document.getElementById('service-area-driver-assignments');
+            if (!driverId) {
+                showToast('Enter a driver profile ID', 'error');
+                return;
+            }
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/drivers/${encodeURIComponent(driverId)}/service-areas`, { headers });
+                if (!res.ok) {
+                    const err = await res.json();
+                    showToast(err.detail || 'Could not load assignments', 'error');
+                    return;
+                }
+                const rows = await res.json();
+                target.textContent = rows.length ? rows.map(item => `${item.name} (${item.city_code}) — ${item.is_active ? 'ACTIVE' : 'REVOKED'}`).join(' | ') : 'No service-area assignments';
+            } catch (err) {
+                showToast('Network error while loading driver assignments', 'error');
             }
         }
 
