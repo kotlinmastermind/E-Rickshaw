@@ -337,14 +337,14 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
 
     payout = await DispatchAdvancedService.request_payout(
         session=db_session,
-        driver_id_or_user_id=driver_id,
+        driver_id_or_user_id=driver.id,
         amount_cents=50000,
         payout_account_id=account_id,
         idempotency_key=f"prov_exec_{uuid.uuid4().hex[:12]}",
     )
-    payout_id = payout_id
-    admin_user_id = admin_user_id
-    driver_id = driver_id
+    payout_id = payout.id
+    admin_user_id = admin_user.id
+    driver_id = driver.id
     await AdminAdvancedService.approve_payout(db_session, payout_id, admin_user_id)
     await db_session.commit()
 
