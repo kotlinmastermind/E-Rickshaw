@@ -715,6 +715,10 @@ async def test_atomic_acceptance_prevents_duplicate_booking(setup_dispatch_envir
     db_session.add_all([assign1, assign2])
     await db_session.commit()
 
+    # Driver 1 must have fresh GPS within the ride service area before acceptance.
+    from backend.application.services.live_location_service import LiveLocationService
+    await LiveLocationService(db=db_session).ingest_driver_location(driver1.id, 12.9822, 77.5875, is_online=True)
+
     # Driver 1 accepts
     ride_service = RideService(db_session)
     res1 = await ride_service.accept_ride_atomic(driver1_user.id, ride.id)
