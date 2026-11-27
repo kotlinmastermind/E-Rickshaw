@@ -3455,15 +3455,28 @@
             }
         }
 
-        function handleLiveWsTelemetry(payload) {
-            if (payload.type === 'DRIVER_LOCATION_UPDATE') {
-                const driver = STATE.drivers.find(d => d.id === payload.driver_id);
+        function handleLiveWsTelemetry(message) {
+            const eventType = message?.event_type || message?.type || message?.event;
+            const payload = message?.payload && typeof message.payload === 'object' ? message.payload : message;
+            if (eventType === 'DRIVER_LOCATION_UPDATE') {
+                const driver = (STATE.drivers || []).find(d => d.user_id === payload.driver_id || d.user_id === payload.id || d.id === payload.driver_id);
                 if (driver) {
-                    driver.lat = payload.latitude;
-                    driver.lng = payload.longitude;
-                    driver.speed = payload.speed_kmh || driver.speed;
+                    const latitude = payload.latitude ?? payload.lat;
+                    const longitude = payload.longitude ?? payload.lng;
+                    if (latitude != null && longitude != null && Number.isFinite(Number(latitude)) && Number.isFinite(Number(longitude))) {
+                        driver.lat = Number(latitude);
+                        driver.lng = Number(longitude);
+                    }
+                    if (payload.speed != null) driver.speed = Number(payload.speed);
+                    if (payload.heading != null) driver.heading = Number(payload.heading);
+                    driver.location_recorded_at = payload.last_seen || payload.recorded_at || null;
                     renderMapMarkers();
                 }
+            } else if (eventType === 'DRIVER_OFFLINE') {
+                const driver = (STATE.drivers || []).find(d => d.user_id === payload.driver_id || d.user_id === payload.id || d.id === payload.driver_id);
+                if (driver) { driver.status = 'OFFLINE'; renderMapMarkers(); renderDriverTable(); }
+            } else if (['RIDE_CREATED', 'RIDE_ASSIGNED', 'RIDE_STATE_UPDATE', 'RIDE_COMPLETED', 'RIDE_CANCELLED'].includes(eventType)) {
+                loadInitialData();
             }
         }
 
@@ -3498,14 +3511,6 @@
                 } catch (e) { }
             }
 
-            // Keep simulated vehicle movement micro-animations active for real mobility experience
-            STATE.drivers.forEach(d => {
-                if (d.status === 'IN_TRIP') {
-                    d.lat += (Math.random() - 0.48) * 0.0004;
-                    d.lng += (Math.random() - 0.48) * 0.0004;
-                    d.speed = Math.floor(20 + Math.random() * 12);
-                }
-            });
             renderMapMarkers();
         }
 
