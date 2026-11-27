@@ -73,6 +73,8 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
     assert summary["commission_receivable_cents"] == 750
     assert summary["commission_snapshot_missing_count"] == 1
     assert summary["wallet_balance_cents"] == 10000
+    assert summary["commission_outstanding_cents"] == 2250
+    assert summary["withdrawable_balance_cents"] == 7750
     assert "today_net_cents" not in summary
     legacy_trip = next(item for item in summary["recent_trips"] if item["ride_id"] == legacy_ride.id)
     assert legacy_trip["gross_fare_cents"] == 2000
