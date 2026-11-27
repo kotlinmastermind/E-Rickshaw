@@ -801,6 +801,16 @@ async def test_accept_ride_atomic_validates_category_match(db_session):
     db_session.add(offer2)
     await db_session.commit()
 
+    # An assigned driver with no fresh GPS must not accept the offer.
+    with pytest.raises(Exception) as stale_gps_error:
+        await ride_svc.accept_ride_atomic(d_user2.id, ride.id)
+    assert "Fresh driver GPS" in str(stale_gps_error.value.detail)
+
+    # Fresh GPS must be inside the ride's active service polygon.
+    await LiveLocationService(db=db_session).ingest_driver_location(
+        d_prof2.id, 28.6140, 77.2090, is_online=True
+    )
+
     # 2. Driver 2 (Cab) accepts Cab ride -> SUCCEEDS
     res = await ride_svc.accept_ride_atomic(d_user2.id, ride.id)
     assert res["status"] in ["CONFIRMED", "ACCEPTED", "SCHEDULED", "ASSIGNED"]
