@@ -333,6 +333,17 @@ class AdminGovernanceService:
         user = await self.db.get(User, driver.user_id)
         if not user or not user.is_active:
             raise HTTPException(409, "The selected driver account is inactive.")
+        if not ride.service_area_id:
+            raise HTTPException(409, "Ride has no validated operational service area.")
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_areas = ServiceAreaService(self.db)
+        resolved_area = await service_areas.resolve_route(
+            ride.pickup_latitude, ride.pickup_longitude,
+            ride.destination_latitude, ride.destination_longitude,
+        )
+        if resolved_area.id != ride.service_area_id:
+            raise HTTPException(409, "Ride service area no longer matches its route.")
+        await service_areas.require_driver_assignment(driver.id, ride.service_area_id)
 
         # Re-validate that driver's active vehicle matches the ride's vehicle_category_id
         from backend.domain.models import DriverVehicleAssignment, Vehicle
