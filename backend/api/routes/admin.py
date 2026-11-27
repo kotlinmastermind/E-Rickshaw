@@ -1038,11 +1038,24 @@ async def list_payouts(
     db: AsyncSession = Depends(get_db)
 ):
     payouts = await AdminAdvancedService.list_payout_requests(db, status_filter=status)
+    from backend.domain.models import DriverCommissionSettlement
+    settlements_by_payout = {}
+    if payouts:
+        settlements = (
+            await db.execute(
+                select(DriverCommissionSettlement).where(
+                    DriverCommissionSettlement.payout_request_id.in_([p.id for p in payouts])
+                )
+            )
+        ).scalars().all()
+        settlements_by_payout = {item.payout_request_id: item for item in settlements}
     return [
         {
             "id": p.id,
             "driver_id": p.driver_id,
             "amount_cents": p.amount_cents,
+            "commission_settled_cents": settlements_by_payout[p.id].amount_cents if p.id in settlements_by_payout else 0,
+            "commission_settled_rupees": round(settlements_by_payout[p.id].amount_cents / 100.0, 2) if p.id in settlements_by_payout else 0.0,
             "status": p.status,
             "bank_account_mask": p.bank_account_masked,
             "bank_account_masked": p.bank_account_masked,
