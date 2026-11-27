@@ -655,9 +655,12 @@
                 <div class="flex items-center space-x-3">
                     <select id="ride-status-filter" onchange="renderRidesTable()"
                         class="bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-glow/50 font-mono">
-                        <option value="ALL">All Ride States</option>
-                        <option value="IN_PROGRESS" selected>In-Progress (Active)</option>
+                        <option value="ALL" selected>All Ride States</option>
                         <option value="REQUESTED">Requested & Matching</option>
+                        <option value="ASSIGNED">Assigned</option>
+                        <option value="ARRIVED">Driver Arrived</option>
+                        <option value="IN_PROGRESS">In-Progress</option>
+                        <option value="PAUSED">Paused</option>
                         <option value="COMPLETED">Completed</option>
                         <option value="CANCELLED">Cancelled</option>
                     </select>
@@ -3177,6 +3180,8 @@
 
                 let statusBadge = '<span class="px-2 py-0.5 rounded-md bg-cyan-dim text-cyan-glow font-mono text-[10px] font-bold">IN_PROGRESS</span>';
                 if (ride.status === 'ASSIGNED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">ASSIGNED</span>';
+                if (ride.status === 'ARRIVED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">ARRIVED</span>';
+                if (ride.status === 'PAUSED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">PAUSED</span>';
                 if (ride.status === 'COMPLETED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">COMPLETED</span>';
                 if (ride.status === 'REQUESTED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold animate-pulse">REQUESTED</span>';
 
@@ -3894,7 +3899,19 @@
                     latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return;
                 let rider = STATE.riders.find(item => String(item.ride_id || item.id) === rideId);
                 if (!rider) {
-                    rider = { id: rideId, ride_id: rideId, name: activeRide.rider || null, status: 'IN_RIDE' };
+                    rider = {
+                        id: rideId,
+                        ride_id: rideId,
+                        name: activeRide.rider || null,
+                        phone: null,
+                        rating: null,
+                        trips: null,
+                        waitMins: null,
+                        pickup: activeRide.pickup || null,
+                        targetDrop: activeRide.drop || null,
+                        fare: activeRide.fare || null,
+                        status: 'IN_RIDE'
+                    };
                     STATE.riders.push(rider);
                 }
                 rider.lat = latitude;
