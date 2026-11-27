@@ -355,6 +355,17 @@ class RideService:
         ride_obj = ride_res.scalar_one_or_none()
         if not ride_obj:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+        if not ride_obj.service_area_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride has no validated operational service area.")
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_areas = ServiceAreaService(self.db)
+        resolved_area = await service_areas.resolve_route(
+            ride_obj.pickup_latitude, ride_obj.pickup_longitude,
+            ride_obj.destination_latitude, ride_obj.destination_longitude,
+        )
+        if resolved_area.id != ride_obj.service_area_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride service area no longer matches its route.")
+        await service_areas.require_driver_assignment(driver.id, ride_obj.service_area_id)
 
         from backend.domain.models import DriverVehicleAssignment, Vehicle
         stmt_veh = (
