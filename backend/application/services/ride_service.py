@@ -167,6 +167,35 @@ class RideService:
             stmt_est = select(FareEstimate).where(FareEstimate.id == est_data["estimate_id"])
             estimate = (await self.db.execute(stmt_est)).scalar_one()
 
+        # Re-resolve the complete route at booking time. A stale estimate/price lock
+        # cannot bypass a deactivated or changed service-area boundary.
+        from backend.application.services.service_area_service import ServiceAreaService
+        area_service = ServiceAreaService(self.db)
+        service_area = await area_service.resolve_trip(
+            estimate.pickup_latitude,
+            estimate.pickup_longitude,
+            estimate.destination_latitude,
+            estimate.destination_longitude,
+        )
+        fare_rule = (await self.db.execute(
+            select(FareRule).where(FareRule.id == estimate.fare_rule_id)
+        )).scalars().first()
+        if not fare_rule:
+            raise HTTPException(status_code=400, detail="Fare configuration for this estimate is no longer available.")
+        if fare_rule.city_code and fare_rule.city_code.strip().upper() != service_area.city_code.strip().upper():
+            raise HTTPException(
+                status_code=400,
+                detail="Fare estimate tariff does not belong to the resolved service area. Please recalculate the fare.",
+            )
+        for stop_data in stops or []:
+            stop_lat = stop_data.get("latitude")
+            stop_lng = stop_data.get("longitude")
+            if stop_lat is None or stop_lng is None:
+                raise HTTPException(status_code=400, detail="Every intermediate stop must include valid GPS coordinates.")
+            stop_area = await area_service.resolve_point(stop_lat, stop_lng)
+            if stop_area.id != service_area.id:
+                raise HTTPException(status_code=400, detail="All intermediate stops must remain inside the ride's service area.")
+
         now = datetime.now(timezone.utc)
 
         expires_at = estimate.expires_at if estimate.expires_at.tzinfo else estimate.expires_at.replace(tzinfo=timezone.utc)
@@ -207,6 +236,7 @@ class RideService:
             customer_id=customer.id,
             vehicle_category_id=estimate.category_id,
             fare_rule_id=estimate.fare_rule_id,
+            service_area_id=service_area.id,
             status=RideStatus.REQUESTED.value,
             pickup_address=pickup_address,
             pickup_latitude=estimate.pickup_latitude,
