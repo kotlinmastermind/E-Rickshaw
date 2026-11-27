@@ -335,6 +335,7 @@ class RideService:
             "ride_id": ride.id,
             "status": ride.status,
             "category_id": ride.vehicle_category_id,
+            "service_area_id": ride.service_area_id,
             "start_otp": ride.start_otp,
             "estimated_fare_cents": ride.estimated_fare_cents,
             "pickup_address": ride.pickup_address,
