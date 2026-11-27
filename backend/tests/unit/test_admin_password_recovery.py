@@ -1,4 +1,5 @@
 import json
+from argparse import Namespace
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -10,6 +11,7 @@ from backend.infrastructure.security.crypto import verify_password
 from backend.scripts.recover_admin_password import (
     RecoverySafetyError,
     reset_admin_password,
+    require_execute_confirmation,
 )
 
 
@@ -150,3 +152,13 @@ async def test_admin_recovery_fails_closed_when_mfa_is_not_configured(db_session
     assert user.password_hash == "old-hash"
     assert user.mfa_enabled is False
     assert session.is_revoked is False
+
+
+def test_cli_requires_production_confirmation_even_when_local_environment_is_development():
+    args = Namespace(execute=True, confirm_production=False)
+    with pytest.raises(RecoverySafetyError, match="regardless of local ENVIRONMENT"):
+        require_execute_confirmation(args)
+
+    args.confirm_production = True
+    require_execute_confirmation(args)
+

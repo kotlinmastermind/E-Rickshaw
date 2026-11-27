@@ -4,6 +4,9 @@ Run from the repository root:
   python -m backend.scripts.recover_admin_password --email admin@example.com --check
   python -m backend.scripts.recover_admin_password --email admin@example.com --execute --confirm-email admin@example.com --confirm-production
 
+The --confirm-production flag is mandatory for every execution, including when the local
+ENVIRONMENT is set to development; this prevents a local configuration from weakening
+the operator's explicit acknowledgement when DATABASE_URL points at production.
 The password is read with getpass; never pass it as a CLI argument or environment variable.
 This module intentionally exposes no HTTP endpoint.
 """
@@ -187,6 +190,13 @@ async def reset_admin_password(
         raise
 
 
+def require_execute_confirmation(args: argparse.Namespace) -> None:
+    if args.execute and not args.confirm_production:
+        raise RecoverySafetyError(
+            "Every --execute run requires --confirm-production, regardless of local ENVIRONMENT."
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Secure operator-only Admin password recovery (no HTTP endpoint)."
@@ -209,6 +219,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def async_main(args: argparse.Namespace) -> int:
     try:
+        # Validate the operator acknowledgement before opening a database connection.
+        require_execute_confirmation(args)
         async with async_session_maker() as db:
             if args.check:
                 user, active_sessions = await inspect_admin_target(db, args.email)
