@@ -31,6 +31,47 @@ def upgrade() -> None:
                 )
                 batch_op.create_index("ix_rides_service_area_id", ["service_area_id"])
 
+        # Preserve dispatchability for existing requested rides only when their route
+        # resolves unambiguously to one already-configured active service-area polygon.
+        if "geofence_zones" in tables:
+            zones = bind.execute(sa.text(
+                "SELECT id, coordinates_json FROM geofence_zones "
+                "WHERE is_active = TRUE AND zone_type = 'SERVICE_AREA'"
+            )).mappings().all()
+            pending_rides = bind.execute(sa.text(
+                "SELECT id, pickup_latitude, pickup_longitude, destination_latitude, destination_longitude "
+                "FROM rides WHERE service_area_id IS NULL AND status = 'REQUESTED'"
+            )).mappings().all()
+
+            def inside(lat, lng, polygon):
+                result = False
+                previous = polygon[-1]
+                for current in polygon:
+                    y1, x1 = previous
+                    y2, x2 = current
+                    if (x1 > lng) != (x2 > lng):
+                        intersection = (y2 - y1) * (lng - x1) / (x2 - x1) + y1
+                        if lat < intersection:
+                            result = not result
+                    previous = current
+                return result
+
+            for ride in pending_rides:
+                matching_ids = []
+                for zone in zones:
+                    try:
+                        raw = __import__("json").loads(zone["coordinates_json"])
+                        polygon = [(float(point["lat"]), float(point["lng"])) for point in raw]
+                        if len(polygon) >= 3 and inside(ride["pickup_latitude"], ride["pickup_longitude"], polygon) and inside(ride["destination_latitude"], ride["destination_longitude"], polygon):
+                            matching_ids.append(zone["id"])
+                    except (TypeError, ValueError, KeyError, __import__("json").JSONDecodeError):
+                        continue
+                if len(matching_ids) == 1:
+                    bind.execute(
+                        sa.text("UPDATE rides SET service_area_id = :area_id WHERE id = :ride_id"),
+                        {"area_id": matching_ids[0], "ride_id": ride["id"]},
+                    )
+
     if "driver_service_area_assignments" not in tables:
         op.create_table(
             "driver_service_area_assignments",
