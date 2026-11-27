@@ -803,9 +803,27 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
     await AdminAdvancedService.approve_payout(db_session, p1_id, admin_user.id)
     utr = f"UTR-HDFC-{uuid.uuid4().hex[:10].upper()}"
     await PayoutExecutionService.initiate_manual_transfer(
-        db_session, payout_id=p1_id, admin_user_id=admin_user.id, settlement_reference=utr
+        db_session,
+        payout_id=p1_id,
+        admin_user_id=admin_user.id,
+        settlement_reference=utr,
+        evidence_notes="Test fixture bank transfer confirmation reference for payout one",
     )
-    await AdminAdvancedService.mark_payout_paid(db_session, p1_id, admin_user.id, utr)
+    confirmer = User(
+        phone_number=f"+9196{uuid.uuid4().hex[:8]}",
+        full_name="Independent payout confirmer",
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(confirmer)
+    await db_session.flush()
+    await PayoutExecutionService.confirm_manual_transfer(
+        db_session,
+        payout_id=p1_id,
+        admin_user_id=confirmer.id,
+        confirmation_notes="Independent test review of bank statement and UTR reference",
+    )
 
     p2 = await DispatchAdvancedService.request_payout(
         db_session, driver_prof.id, 15000, payout_account_id=payout_account.id, idempotency_key=f"payout_2_{uuid.uuid4().hex[:12]}"
@@ -813,7 +831,11 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
     await AdminAdvancedService.approve_payout(db_session, p2.id, admin_user.id)
     with pytest.raises(HTTPException) as exc_dup_utr:
         await PayoutExecutionService.initiate_manual_transfer(
-            db_session, payout_id=p2.id, admin_user_id=admin_user.id, settlement_reference=utr
+            db_session,
+            payout_id=p2.id,
+            admin_user_id=admin_user.id,
+            settlement_reference=utr,
+            evidence_notes="Duplicate transfer reference test evidence for payout two",
         )
     assert exc_dup_utr.value.status_code == 409
 
