@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.domain.models import AuditLog, Session
+from backend.infrastructure.cache.redis_client import RedisManager
 from backend.infrastructure.security.crypto import hash_password
 from backend.scripts.recover_admin_mfa import (
     RecoverySafetyError,
@@ -138,3 +139,75 @@ async def test_admin_mfa_recovery_rejects_confirmation_and_production_without_mu
     assert user.mfa_secret == old_secret
     assert user.mfa_enabled is True
     assert session.is_revoked is False
+
+
+
+@pytest.mark.asyncio
+async def test_admin_mfa_recovery_rolls_back_when_redis_revocation_is_unavailable(
+    db_session, monkeypatch
+):
+    user, _, session = await make_admin(db_session)
+    user.password_hash = hash_password("A-current-strong-admin-password-2026")
+    await db_session.commit()
+    old_secret = user.mfa_secret
+
+    async def fail_closed_revoke(session_ids):
+        assert session.id in session_ids
+        raise ConnectionError("Redis is required for this security-sensitive operation.")
+
+    monkeypatch.setattr(
+        "backend.scripts.recover_admin_mfa.revoke_session_cache",
+        fail_closed_revoke,
+    )
+
+    with pytest.raises(ConnectionError, match="Redis is required"):
+        await rotate_admin_mfa(
+            db_session,
+            email=user.email,
+            current_password="A-current-strong-admin-password-2026",
+            confirm_email=user.email,
+            environment="test",
+        )
+
+    await db_session.refresh(user)
+    await db_session.refresh(session)
+    assert user.mfa_secret == old_secret
+    assert user.mfa_enabled is True
+    assert session.is_revoked is False
+
+
+
+@pytest.mark.asyncio
+async def test_redis_set_strict_fails_without_redis_and_never_uses_memory_fallback(
+    monkeypatch,
+):
+    manager = RedisManager()
+
+    async def no_redis():
+        return None
+
+    async def forbidden_fallback(*args, **kwargs):
+        pytest.fail("Security-sensitive writes must never use the in-memory fallback.")
+
+    monkeypatch.setattr(manager, "_get_redis", no_redis)
+    monkeypatch.setattr(manager._fallback, "set", forbidden_fallback)
+
+    with pytest.raises(ConnectionError, match="Redis is required"):
+        await manager.set_strict("revoked_session:test", "true", ex=60)
+
+
+@pytest.mark.asyncio
+async def test_redis_set_strict_requires_server_acknowledgement(monkeypatch):
+    manager = RedisManager()
+
+    class RedisWithoutWriteAcknowledgement:
+        async def set(self, *args, **kwargs):
+            return False
+
+    async def connected_redis():
+        return RedisWithoutWriteAcknowledgement()
+
+    monkeypatch.setattr(manager, "_get_redis", connected_redis)
+
+    with pytest.raises(RuntimeError, match="did not confirm"):
+        await manager.set_strict("revoked_session:test", "true", ex=60)

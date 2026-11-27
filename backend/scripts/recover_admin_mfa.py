@@ -38,7 +38,9 @@ from backend.scripts.recover_admin_password import (
 async def revoke_session_cache(session_ids: list[str]) -> None:
     """Revoke only existing sessions; do not block future logins for this user."""
     for session_id in session_ids:
-        await redis_client.set(f"revoked_session:{session_id}", "true", ex=86400 * 7)
+        await redis_client.set_strict(
+            f"revoked_session:{session_id}", "true", ex=86400 * 7
+        )
 
 
 async def rotate_admin_mfa(
