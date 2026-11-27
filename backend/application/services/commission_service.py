@@ -25,7 +25,7 @@ from backend.domain.models.extended_models import (
     CommissionRule,
     RideCommissionSnapshot,
 )
-from backend.domain.models.models import DriverCommissionSettlement, DriverLedgerEntry
+from backend.domain.models.models import DriverCommissionSettlement, DriverLedgerEntry, Ride
 
 logger = logging.getLogger(__name__)
 
@@ -173,18 +173,35 @@ class CommissionService:
         driver_id: str,
     ) -> int:
         """Return unsettled payable/receivable commission from immutable ledger entries."""
-        ledger_total = (
+        snapshot_total = (
             await session.execute(
-                select(func.coalesce(func.sum(DriverLedgerEntry.amount_cents), 0)).where(
+                select(func.coalesce(func.sum(RideCommissionSnapshot.commission_cents), 0))
+                .join(Ride, Ride.id == RideCommissionSnapshot.ride_id)
+                .where(Ride.assigned_driver_id == driver_id)
+            )
+        ).scalar_one()
+
+        # Preserve pre-snapshot commission entries without double-counting rides
+        # that already have an immutable RideCommissionSnapshot.
+        legacy_ledger_total = (
+            await session.execute(
+                select(func.coalesce(func.sum(DriverLedgerEntry.amount_cents), 0))
+                .outerjoin(
+                    RideCommissionSnapshot,
+                    RideCommissionSnapshot.ride_id == DriverLedgerEntry.reference_id,
+                )
+                .where(
                     DriverLedgerEntry.driver_id == driver_id,
                     DriverLedgerEntry.category.in_([
                         "COMMISSION_PAYABLE",
                         "COMMISSION_RECEIVABLE",
                         "COMMISSION",
                     ]),
+                    RideCommissionSnapshot.id.is_(None),
                 )
             )
         ).scalar_one()
+        legacy_commission_due = max(0, -int(legacy_ledger_total or 0))
         settled_total = (
             await session.execute(
                 select(func.coalesce(func.sum(DriverCommissionSettlement.amount_cents), 0)).where(
@@ -192,7 +209,7 @@ class CommissionService:
                 )
             )
         ).scalar_one()
-        return max(0, -int(ledger_total or 0) - int(settled_total or 0))
+        return max(0, int(snapshot_total or 0) + legacy_commission_due - int(settled_total or 0))
 
     @classmethod
     async def calculate_for_ride(
