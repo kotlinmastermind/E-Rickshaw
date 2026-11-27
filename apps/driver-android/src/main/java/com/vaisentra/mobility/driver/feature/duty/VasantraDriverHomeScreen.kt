@@ -794,6 +794,11 @@ fun VasantraRideRequestCard(
                         color = if (validEarnings != null) Color(0xFF10B981) else Color(0xFFF59E0B),
                         fontWeight = FontWeight.Bold
                     )
+                    Text(
+                        text = offer?.estimatedCommissionCents?.let { amount -> "Commission: ₹${"%.2f".format(amount / 100.0)}" } ?: "Commission: unavailable",
+                        fontSize = 10.sp,
+                        color = Color(0xFF6B7280)
+                    )
                 }
             }
 
