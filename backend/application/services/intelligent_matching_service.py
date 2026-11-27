@@ -155,7 +155,7 @@ class IntelligentMatchingService:
             "eta_score": round(eta_score, 4),
             "distance_score": round(dist_score, 4),
             "freshness_score": round(freshness_score, 4),
-            "rating_score": round(rating_score, 4),
+            "rating_score": round(rating_score, 4) if rating_score is not None else None,
             "heading_score": round(heading_score, 4)
         }
 
