@@ -23,7 +23,7 @@ from fastapi import HTTPException, status
 from backend.domain.models import (
     Ride, RideStop, DriverProfile, DriverAvailability, DriverDailyTarget,
     DriverPayoutRequest, User, CustomerProfile, FareRule, Wallet,
-    DriverWallet, DriverLedgerEntry
+    DriverWallet, DriverLedgerEntry, DriverCommissionSettlement
 )
 from backend.application.services.wallet_service import WalletService
 
@@ -528,10 +528,21 @@ class DispatchAdvancedService:
             session.add(d_wallet)
             await session.flush()
 
-        if d_wallet.balance_cents < amount_cents:
+        from backend.application.services.commission_service import CommissionService
+        commission_due_cents = await CommissionService.get_driver_commission_outstanding_cents(
+            session,
+            driver_prof.id,
+        )
+        withdrawable_cents = max(0, int(d_wallet.balance_cents) - commission_due_cents)
+        if amount_cents > withdrawable_cents:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Insufficient driver wallet balance. Available: ₹{d_wallet.balance_cents / 100:.2f}"
+                detail=(
+                    "Insufficient withdrawable balance after deferred commission settlement. "
+                    f"Wallet: ₹{d_wallet.balance_cents / 100:.2f}; "
+                    f"commission due: ₹{commission_due_cents / 100:.2f}; "
+                    f"withdrawable: ₹{withdrawable_cents / 100:.2f}"
+                )
             )
 
         # Create Payout Record inside savepoint to survive concurrent idempotency_key collision safely
@@ -539,7 +550,7 @@ class DispatchAdvancedService:
             driver_id=driver_prof.id,
             amount_cents=amount_cents,
             status="REQUESTED",
-            bank_account_masked=bank_details.get("account_number_mask", "HDFC *******9988"),
+            bank_account_masked=bank_details.get("account_number_mask") or "Not provided",
             idempotency_key=idempotency_key
         )
         try:
@@ -556,9 +567,32 @@ class DispatchAdvancedService:
                 return existing_payout
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Concurrent payout creation conflict.")
 
-        # Deduct Balance and Record Immutable PAYOUT_HOLD Ledger Entry
+        # Settle outstanding commission first, then place the payout hold atomically.
+        now = datetime.now(timezone.utc)
+        if commission_due_cents > 0:
+            d_wallet.balance_cents -= commission_due_cents
+            d_wallet.updated_at = now
+            session.add(DriverCommissionSettlement(
+                driver_id=driver_prof.id,
+                payout_request_id=payout.id,
+                amount_cents=commission_due_cents,
+                currency=d_wallet.currency or "INR",
+                created_at=now,
+            ))
+            session.add(DriverLedgerEntry(
+                id=str(uuid.uuid4()),
+                driver_id=driver_prof.id,
+                entry_type="DEBIT",
+                category="COMMISSION_SETTLEMENT",
+                amount_cents=-commission_due_cents,
+                balance_after_cents=d_wallet.balance_cents,
+                reference_id=payout.id,
+                description=f"Deferred platform commission settled at payout request ({payout.id[:8]})",
+                created_at=now,
+            ))
+
         d_wallet.balance_cents -= amount_cents
-        d_wallet.updated_at = datetime.now(timezone.utc)
+        d_wallet.updated_at = now
 
         hold_entry = DriverLedgerEntry(
             id=str(uuid.uuid4()),
@@ -569,7 +603,7 @@ class DispatchAdvancedService:
             balance_after_cents=d_wallet.balance_cents,
             reference_id=payout.id,
             description=f"Driver payout request placed under review ({payout.id[:8]})",
-            created_at=datetime.now(timezone.utc)
+            created_at=now
         )
         session.add(hold_entry)
         await session.flush()
