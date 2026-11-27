@@ -209,43 +209,29 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
 // Screen 17: Wallet Auto-Topup Rules
 @Composable
 fun WalletAutoTopupScreen(onNavigate: (String) -> Unit) {
-    var threshold by remember { mutableStateOf("100") }
-    var rechargeAmount by remember { mutableStateOf("500") }
-    var isEnabled by remember { mutableStateOf(true) }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(CanvasBlack)
-            .padding(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        NeoHeader(title = "Auto-Topup Rules", subtitle = "Bank recurring UPI instruction", onBack = { onNavigate("wallet_hub") })
-        Spacer(modifier = Modifier.height(16.dp))
-
-        NeoCard {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = "Enable Auto-Reload", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Switch(checked = isEnabled, onCheckedChange = { isEnabled = it })
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            NeoTextField(value = threshold, onValueChange = { threshold = it }, placeholder = "₹100", label = "Trigger When Balance Falls Below (₹)")
-            Spacer(modifier = Modifier.height(12.dp))
-            NeoTextField(value = rechargeAmount, onValueChange = { rechargeAmount = it }, placeholder = "₹500", label = "Automatic Reload Amount (₹)")
-            Spacer(modifier = Modifier.height(20.dp))
-            NeoButton(text = "Save Auto-Topup Mandate", onClick = {
-                val t = threshold.toIntOrNull() ?: 100
-                val a = rechargeAmount.toIntOrNull() ?: 500
-                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                    RiderRepository.configureAutoTopup(isEnabled, t, a)
-                }
-                DialogController.showToast("Standing mandate saved in Supabase!")
-                onNavigate("wallet_hub")
-            })
+        NeoHeader(title = "Auto-Topup", subtitle = "Payment mandate status", onBack = { onNavigate("wallet_hub") })
+        NeoCard(borderColor = AmberGold, backgroundColor = SurfaceCard) {
+            Text("Automatic top-up is not available yet", color = AmberGold, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "No recurring payment mandate is linked to this wallet. Automatic charges are disabled. This screen will become configurable after verified mandate setup and a backend configuration endpoint are available.",
+                color = TextMuted,
+                fontSize = 12.sp
+            )
         }
+        NeoButton(
+            text = "Back to Wallet",
+            onClick = { onNavigate("wallet_hub") },
+            backgroundColor = ElectricCyan,
+            textColor = CanvasBlack
+        )
     }
 }
 
