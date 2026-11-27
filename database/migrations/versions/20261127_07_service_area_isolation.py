@@ -4,6 +4,7 @@ Revision ID: 20261127_07
 Revises: 20261127_06
 """
 from alembic import op
+import json
 import sqlalchemy as sa
 
 revision = "20261127_07"
@@ -60,11 +61,11 @@ def upgrade() -> None:
                 matching_ids = []
                 for zone in zones:
                     try:
-                        raw = __import__("json").loads(zone["coordinates_json"])
+                        raw = json.loads(zone["coordinates_json"])
                         polygon = [(float(point["lat"]), float(point["lng"])) for point in raw]
                         if len(polygon) >= 3 and inside(ride["pickup_latitude"], ride["pickup_longitude"], polygon) and inside(ride["destination_latitude"], ride["destination_longitude"], polygon):
                             matching_ids.append(zone["id"])
-                    except (TypeError, ValueError, KeyError, __import__("json").JSONDecodeError):
+                    except (TypeError, ValueError, KeyError, json.JSONDecodeError):
                         continue
                 if len(matching_ids) == 1:
                     bind.execute(
