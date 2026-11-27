@@ -3,11 +3,14 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_admin
-from backend.domain.models import VehicleCategory
+from backend.domain.models import (
+    DriverProfile, DriverAvailability, DriverLocation, DriverVehicleAssignment,
+    User, Vehicle, VehicleCategory,
+)
 
 router = APIRouter(prefix="/vehicles", tags=["Vehicles & Categories"])
 
@@ -450,27 +453,47 @@ async def get_nearby_vehicles(
 ):
     from datetime import datetime, timezone
     from sqlalchemy import desc
-    from backend.domain.models import DriverProfile, DriverAvailability, DriverLocation, User
 
     now = datetime.now(timezone.utc)
     stmt = (
-        select(DriverProfile, DriverAvailability, DriverLocation, User)
+        select(DriverProfile, DriverAvailability, DriverLocation, User, Vehicle, VehicleCategory)
         .join(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
         .join(DriverLocation, DriverLocation.driver_id == DriverProfile.id)
-        .outerjoin(User, User.id == DriverProfile.user_id)
+        .join(User, User.id == DriverProfile.user_id)
+        .join(
+            DriverVehicleAssignment,
+            and_(
+                DriverVehicleAssignment.driver_id == DriverProfile.id,
+                DriverVehicleAssignment.is_active.is_(True),
+            ),
+        )
+        .join(
+            Vehicle,
+            and_(
+                Vehicle.id == DriverVehicleAssignment.vehicle_id,
+                Vehicle.is_active.is_(True),
+            ),
+        )
+        .join(VehicleCategory, VehicleCategory.id == Vehicle.category_id)
         .where(
-            DriverAvailability.is_online == True,
-            DriverAvailability.is_busy == False
+            DriverProfile.approval_status == "APPROVED",
+            User.is_active.is_(True),
+            DriverAvailability.is_online.is_(True),
+            DriverAvailability.is_busy.is_(False),
         )
         .order_by(desc(DriverLocation.recorded_at))
     )
+    if category:
+        stmt = stmt.where(
+            or_(VehicleCategory.code == category, VehicleCategory.id == category)
+        )
     res = await db.execute(stmt)
     rows = res.all()
 
     seen_drivers = set()
     vehicles = []
 
-    for prof, avail, loc, user in rows:
+    for prof, avail, loc, user, vehicle, vehicle_category in rows:
         if prof.id in seen_drivers:
             continue
         seen_drivers.add(prof.id)
@@ -496,19 +519,23 @@ async def get_nearby_vehicles(
             eta_mins = max(int(round((dist_km / 22.0) * 60.0)), 2)
             vehicles.append({
                 "id": prof.id,
-                "driver_name": (user.full_name if user and user.full_name else "EV Pilot"),
-                "driver_phone": (user.phone_number if user else None),
-                "rating": round(prof.rating_average or 4.9, 2),
-                "category_code": "E_RICKSHAW_STANDARD",
-                "vehicle_type_name": "E-Rickshaw EV",
-                "model_name": "RiderGo Electric",
-                "license_plate": prof.license_number or "EV-PILOT",
-                "icon_type": "e_rickshaw",
-                "capacity": 4,
+                "driver_name": user.full_name.strip() if user.full_name and user.full_name.strip() else None,
+                "driver_phone": user.phone_number,
+                "rating": (
+                    round(float(prof.rating_average), 2)
+                    if int(prof.rating_count or 0) > 0 and prof.rating_average is not None
+                    else None
+                ),
+                "category_code": vehicle_category.code,
+                "vehicle_type_name": vehicle_category.name,
+                "model_name": " ".join(part for part in (vehicle.make, vehicle.model) if part) or None,
+                "license_plate": vehicle.license_plate,
+                "icon_type": "e_rickshaw" if "RICKSHAW" in vehicle_category.code.upper() else "vehicle",
+                "capacity": vehicle_category.capacity,
                 "latitude": loc.latitude,
                 "longitude": loc.longitude,
-                "bearing": loc.heading or 0.0,
-                "battery_level": 90,
+                "bearing": loc.heading,
+                "battery_level": None,
                 "distance_km": dist_km,
                 "eta_minutes": eta_mins,
                 "status": "AVAILABLE"
