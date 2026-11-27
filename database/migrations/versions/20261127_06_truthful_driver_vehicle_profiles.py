@@ -29,13 +29,13 @@ def upgrade() -> None:
                 "WHERE COALESCE(rating_count, 0) = 0"
             ))
             if not columns["rating_average"]["nullable"]:
-                op.alter_column(
-                    "driver_profiles",
-                    "rating_average",
-                    existing_type=sa.Float(),
-                    existing_nullable=False,
-                    nullable=True,
-                )
+                with op.batch_alter_table("driver_profiles") as batch_op:
+                    batch_op.alter_column(
+                        "rating_average",
+                        existing_type=sa.Float(),
+                        existing_nullable=False,
+                        nullable=True,
+                    )
 
     if "vehicles" in tables:
         columns = {column["name"] for column in inspector.get_columns("vehicles")}
@@ -70,10 +70,10 @@ def downgrade() -> None:
                 "Cannot downgrade truthful driver ratings while unrated profiles contain NULL. "
                 "A manual, evidence-backed rating backfill is required."
             )
-        op.alter_column(
-            "driver_profiles",
-            "rating_average",
-            existing_type=sa.Float(),
-            existing_nullable=True,
-            nullable=False,
-        )
+        with op.batch_alter_table("driver_profiles") as batch_op:
+            batch_op.alter_column(
+                "rating_average",
+                existing_type=sa.Float(),
+                existing_nullable=True,
+                nullable=False,
+            )
