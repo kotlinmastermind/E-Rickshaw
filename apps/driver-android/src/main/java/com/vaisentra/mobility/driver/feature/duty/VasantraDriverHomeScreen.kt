@@ -1263,10 +1263,15 @@ fun VasantraEarningsSummaryCard(
                         color = Color(0xFF374151)
                     )
                     Text(
-                        text = "₹${"%.0f".format(earnings.todayNetRupees)}",
+                        text = "₹${"%.0f".format(earnings.todayGrossRupees)}",
                         fontSize = 24.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF111827)
+                    )
+                    Text(
+                        text = "Commission tracked: ₹${"%.2f".format(earnings.todayCommissionRupees)}",
+                        fontSize = 10.sp,
+                        color = Color(0xFF6B7280)
                     )
                 }
             }
