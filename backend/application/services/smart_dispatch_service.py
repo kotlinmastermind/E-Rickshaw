@@ -367,6 +367,38 @@ class SmartDispatchService:
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
 
+        if driver.approval_status != "APPROVED":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver approval is required to accept this offer.")
+
+        # Dispatch offer acceptance is a separate API path from RideService; repeat
+        # the authoritative area and fresh-location checks here as well.
+        from backend.application.services.service_area_service import ServiceAreaService
+        area_service = ServiceAreaService(self.db)
+        resolved_area = await area_service.resolve_trip(
+            ride.pickup_latitude,
+            ride.pickup_longitude,
+            ride.destination_latitude,
+            ride.destination_longitude,
+        )
+        if ride.service_area_id and ride.service_area_id != resolved_area.id:
+            raise HTTPException(status_code=409, detail="Ride service area is no longer valid. Driver acceptance is blocked.")
+        if not ride.service_area_id:
+            ride.service_area_id = resolved_area.id
+        if not await self.live_loc.is_driver_fresh(driver.id):
+            raise HTTPException(status_code=409, detail="Fresh driver GPS is required to accept this offer.")
+        driver_location = await self.live_loc.get_driver_live_location(driver.id)
+        if (
+            not driver_location
+            or driver_location.get("latitude") is None
+            or driver_location.get("longitude") is None
+            or not await area_service.is_driver_inside(
+                ride.service_area_id,
+                driver_location.get("latitude"),
+                driver_location.get("longitude"),
+            )
+        ):
+            raise HTTPException(status_code=403, detail="Driver is outside this ride's active service area or inside a restricted zone.")
+
         # Validate state transition via authoritative state machine
         RideStateMachine.validate_transition(ride.status, RideStatus.ASSIGNED.value, ActorRole.DRIVER.value)
 
