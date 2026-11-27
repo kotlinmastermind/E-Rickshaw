@@ -3041,6 +3041,20 @@
             }
         }
 
+        function renderServiceAreaOptions() {
+            const select = document.getElementById('tariff-input-city');
+            if (!select) return;
+            const selected = select.value;
+            select.innerHTML = '<option value="">Select configured service area</option>';
+            (STATE.serviceAreas || []).forEach(area => {
+                if (!area.city_code) return;
+                const option = document.createElement('option');
+                option.value = area.city_code;
+                option.textContent = `${area.city_name || area.city_code} (${area.city_code})`;
+                select.appendChild(option);
+            });
+            if (selected && (STATE.serviceAreas || []).some(area => area.city_code === selected)) select.value = selected;
+        }
         // Render Tariff Cards from Supabase Categories
         function renderTariffCards() {
             const grid = document.getElementById('tariff-cards-grid');
@@ -3055,7 +3069,7 @@
                 card.className = 'glass-card p-4 rounded-2xl border border-border flex flex-col justify-between space-y-3';
                 const activeBadge = cat.active ? '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow text-[10px] font-mono font-bold">ACTIVE TARIFF</span>' : '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow text-[10px] font-mono font-bold">NO ACTIVE RULE</span>';
                 card.innerHTML = `
-                    <div><div class="flex items-center justify-between mb-2"><span class="text-2xl">${escapeHtml(cat.icon || '🛺')}</span>${activeBadge}</div><h4 class="text-sm font-bold text-white">${escapeHtml(cat.name || 'Unnamed category')}</h4><p class="text-xs text-slate-400">${escapeHtml(cat.desc || 'Description unavailable')}</p></div>
+                    <div><div class="flex items-center justify-between mb-2"><span class="text-2xl">${escapeHtml(cat.icon || '🛺')}</span>${activeBadge}</div><h4 class="text-sm font-bold text-white">${escapeHtml(cat.name || 'Unnamed category')}</h4><p class="text-xs text-slate-400">${escapeHtml(cat.desc || 'Description unavailable')}</p><p class="text-[10px] text-cyan-glow font-mono mt-1">${escapeHtml(cat.cityName || cat.cityCode || 'Service area not configured')}</p></div>
                     <div class="pt-2 border-t border-border space-y-1.5 text-xs font-mono">
                         <div class="flex justify-between text-slate-300"><span>Base Fare:</span><strong class="text-white">${escapeHtml(cat.base || 'Not configured')}</strong></div>
                         <div class="flex justify-between text-slate-300"><span>Distance Rate:</span><strong class="text-cyan-glow">${escapeHtml(cat.perKm || 'Not configured')}</strong></div>
@@ -3078,6 +3092,7 @@
             document.getElementById('tariff-edit-icon').innerText = cat.icon || '🛺';
             document.getElementById('tariff-edit-name').innerText = `Configure ${cat.name}`;
             document.getElementById('tariff-edit-code').innerText = cat.code || cat.id;
+            document.getElementById('tariff-input-city').value = cat.cityCode || '';
 
             // Leave missing tariff fields empty; never substitute sample prices.
             document.getElementById('tariff-input-base').value = cat.baseFareRupees ?? '';
