@@ -265,7 +265,7 @@ fun GiftCardsHomeScreen(onNavigate: (String) -> Unit) {
                     Text(text = "Redeemed Balance in Wallet", color = TextMuted, fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "₹${wallet.balanceRupees.toInt()}.00",
+                        text = wallet?.displayBalanceRupees?.let { "₹${it.toInt()}.00" } ?: "Unavailable",
                         color = ElectricCyan,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.ExtraBold
