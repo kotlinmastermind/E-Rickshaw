@@ -1,4 +1,5 @@
 import uuid
+import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
@@ -1866,7 +1867,7 @@ async def admin_list_payout_accounts(
             "bank_name": a.bank_name,
             "account_number_mask": a.account_number_mask,
             "ifsc_code": a.ifsc_code,
-            "upi_vpa": a.upi_vpa,
+            "upi_vpa": a.account_number_mask if a.account_type == "UPI" else None,
             "beneficiary_name": a.beneficiary_name,
             "verification_status": a.verification_status,
             "verification_method": a.verification_method,
@@ -1880,6 +1881,49 @@ async def admin_list_payout_accounts(
         }
         for a, _driver, u in rows
     ]
+
+
+@router.get("/payout-accounts/{account_id}/details")
+async def admin_reveal_payout_account_details(
+    account_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reveal sensitive payout destination only to an authenticated admin; every reveal is audited."""
+    from backend.domain.models import DriverPayoutAccount
+    from backend.infrastructure.security.payout_encryption import decrypt_payout_destination
+    account = await db.get(DriverPayoutAccount, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Payout account not found.")
+    encrypted = account.account_number_encrypted if account.account_type == "BANK_ACCOUNT" else account.upi_vpa_encrypted
+    if not encrypted:
+        raise HTTPException(status_code=409, detail="This legacy payout destination has no encrypted full details. Ask the driver to re-register it.")
+    try:
+        destination = decrypt_payout_destination(encrypted)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="Payout destination cannot be decrypted. Verify the configured encryption key.") from exc
+    db.add(AdministrativeAuditLog(
+        admin_user_id=admin.id,
+        action="PAYOUT_DESTINATION_DETAILS_REVEALED",
+        target_resource="driver_payout_accounts",
+        target_id=account.id,
+        changes_json=json.dumps({
+            "account_type": account.account_type,
+            "account_number_mask": account.account_number_mask,
+            "reason": "Admin on-demand payout destination review",
+        }),
+    ))
+    await db.commit()
+    return {
+        "id": account.id,
+        "account_type": account.account_type,
+        "bank_name": account.bank_name,
+        "account_number": destination if account.account_type == "BANK_ACCOUNT" else None,
+        "upi_vpa": destination if account.account_type == "UPI" else None,
+        "ifsc_code": account.ifsc_code,
+        "beneficiary_name": account.beneficiary_name,
+        "verification_status": account.verification_status,
+    }
 
 
 @router.post("/payout-accounts/{account_id}/verify")

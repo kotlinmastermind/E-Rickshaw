@@ -1664,6 +1664,8 @@ class DriverPayoutAccount(Base):
     account_type: Mapped[str] = mapped_column(String(20), default="BANK_ACCOUNT")  # BANK_ACCOUNT, UPI
     bank_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     account_number_mask: Mapped[str] = mapped_column(String(32), nullable=False)
+    account_number_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    upi_vpa_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ifsc_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     upi_vpa: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     beneficiary_name: Mapped[str] = mapped_column(String(128), nullable=False)

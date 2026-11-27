@@ -76,9 +76,15 @@ async def test_add_payout_account_is_pending_without_fake_penny_or_ifsc(db_sessi
 
     bank_acc = await db_session.get(DriverPayoutAccount, bank_res["id"])
     upi_acc = await db_session.get(DriverPayoutAccount, upi_res["id"])
+    assert bank_acc.account_number_encrypted
+    assert bank_acc.account_number_encrypted != "123456789012"
+    assert bank_acc.account_number_mask == "******9012"
     assert bank_acc.penny_drop_reference is None
     assert bank_acc.verification_method is None
     assert bank_acc.verified_by is None
+    assert upi_acc.upi_vpa_encrypted
+    assert upi_acc.upi_vpa is None
+    assert upi_acc.account_number_mask.endswith("axis")
     assert upi_acc.penny_drop_reference is None
     assert upi_acc.ifsc_code is None
 
@@ -177,6 +183,15 @@ async def test_admin_payout_account_verification_rejection_and_payout_enforcemen
         listed = await client.get("/api/v1/admin/payout-accounts?status_filter=PENDING_VERIFICATION")
         assert listed.status_code == 200
         assert any(row["id"] == account_id for row in listed.json())
+        reveal = await client.get(f"/api/v1/admin/payout-accounts/{account_id}/details")
+        assert reveal.status_code == 200, reveal.text
+        assert reveal.json()["account_number"] == "987654321098"
+        assert reveal.json()["ifsc_code"] == "ICIC0004321"
+        reveal_audit = (await db_session.execute(select(AdministrativeAuditLog).where(
+            AdministrativeAuditLog.target_id == account_id,
+            AdministrativeAuditLog.action == "PAYOUT_DESTINATION_DETAILS_REVEALED",
+        ))).scalar_one()
+        assert "987654321098" not in reveal_audit.changes_json
 
         verified_res = await client.post(
             f"/api/v1/admin/payout-accounts/{account_id}/verify",

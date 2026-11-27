@@ -991,7 +991,7 @@ class DriverFinancialService:
                 "bank_name": a.bank_name,
                 "account_number_mask": a.account_number_mask,
                 "ifsc_code": a.ifsc_code,
-                "upi_vpa": a.upi_vpa,
+                "upi_vpa": __import__("backend.infrastructure.security.payout_encryption", fromlist=["decrypt_payout_destination"]).decrypt_payout_destination(a.upi_vpa_encrypted) if a.upi_vpa_encrypted else None,
                 "beneficiary_name": a.beneficiary_name,
                 "verification_status": a.verification_status,
                 "verification_method": a.verification_method,
@@ -1009,7 +1009,9 @@ class DriverFinancialService:
         ifsc = (data.get("ifsc_code") or data.get("routing_number") or "").strip().upper()
         raw_acc = (data.get("account_number") or "").strip()
         upi = (data.get("upi_vpa") or "").strip()
-        holder = (data.get("beneficiary_name") or data.get("account_holder_name") or "").strip() or "Pilot Partner"
+        holder = (data.get("beneficiary_name") or data.get("account_holder_name") or "").strip()
+        if not holder:
+            raise HTTPException(status_code=400, detail="Beneficiary/account-holder name is required; no default name is permitted.")
 
         # Determine Bank Name from IFSC or payload
         inferred_bank = data.get("bank_name")
@@ -1033,16 +1035,14 @@ class DriverFinancialService:
 
         # IFSC validation (RBI standard: 4 alphabets, 0, 6 characters or flexible pilot input)
         if acc_type == "BANK_ACCOUNT":
-            if len(ifsc) < 8 or len(ifsc) > 11:
-                raise HTTPException(status_code=400, detail="Invalid IFSC code format (e.g. PUNB0123400, HDFC0001234).")
-            if len(raw_acc) < 6 or len(raw_acc) > 25:
-                raise HTTPException(status_code=400, detail="Account number must contain between 6 and 25 digits.")
-            acc_mask = f"******{raw_acc[-4:]}" if len(raw_acc) >= 4 else raw_acc
+            import re
+            if not re.fullmatch(r"[A-Z]{4}0[A-Z0-9]{6}", ifsc):
+                raise HTTPException(status_code=400, detail="Invalid IFSC code. Enter the 11-character RBI IFSC.")
+            if not raw_acc.isdigit() or len(raw_acc) < 6 or len(raw_acc) > 25:
+                raise HTTPException(status_code=400, detail="Account number must contain 6 to 25 digits.")
+            acc_mask = f"******{raw_acc[-4:]}"
         else:
-            if "@" not in upi:
-                raise HTTPException(status_code=400, detail="Invalid UPI ID. Format: username@bank (e.g. pilot@okaxis).")
-            acc_mask = upi
-            inferred_bank = "UPI Instant Destination"
+NaN
 
         # Check existing accounts to determine if first
         stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.driver_id == driver.id)
@@ -1050,13 +1050,22 @@ class DriverFinancialService:
         existing = res.scalars().all()
         is_first = len(existing) == 0
 
+        from backend.infrastructure.security.payout_encryption import encrypt_payout_destination
+        try:
+            encrypted_account = encrypt_payout_destination(raw_acc) if acc_type == "BANK_ACCOUNT" else None
+            encrypted_upi = encrypt_payout_destination(upi) if acc_type == "UPI" else None
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail="Payout destination encryption is not configured; account registration is unavailable.") from exc
+
         acc = DriverPayoutAccount(
             driver_id=driver.id,
             account_type=acc_type,
             bank_name=inferred_bank,
             account_number_mask=acc_mask,
+            account_number_encrypted=encrypted_account,
+            upi_vpa_encrypted=encrypted_upi,
             ifsc_code=ifsc if acc_type == "BANK_ACCOUNT" else None,
-            upi_vpa=upi if acc_type == "UPI" else None,
+            upi_vpa=None,
             beneficiary_name=holder,
             verification_status="PENDING_VERIFICATION",
             is_primary=False,

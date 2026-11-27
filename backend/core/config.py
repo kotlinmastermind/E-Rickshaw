@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     # Security (JWT Authentication)
     SECRET_KEY: str = os.getenv("SECRET_KEY", "")
+    PAYOUT_DESTINATION_ENCRYPTION_KEY: Optional[str] = os.getenv("PAYOUT_DESTINATION_ENCRYPTION_KEY", None)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))  # 15 minutes short-lived access token
     REFRESH_TOKEN_GRACE_PERIOD_SECONDS: int = int(os.getenv("REFRESH_TOKEN_GRACE_PERIOD_SECONDS", "10"))
@@ -140,6 +141,8 @@ class Settings(BaseSettings):
                 self.DATABASE_URL_SYNC = "sqlite:///file:testdb?mode=memory&cache=shared&uri=true"
             if not self.SECRET_KEY:
                 self.SECRET_KEY = "test-secret-key-for-unit-testing-purposes"
+            if not self.PAYOUT_DESTINATION_ENCRYPTION_KEY:
+                self.PAYOUT_DESTINATION_ENCRYPTION_KEY = "test-only-payout-destination-key-32-bytes-minimum"
             return self
 
         # Strict production validation
@@ -175,6 +178,12 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "CRITICAL CONFIGURATION ERROR: A secure SECRET_KEY must be provided via environment variables in production (minimum 32 characters)."
                 )
+
+            payout_key = (self.PAYOUT_DESTINATION_ENCRYPTION_KEY or "").strip()
+            if len(payout_key) < 32 or _contains_placeholder(payout_key):
+                raise ValueError("CRITICAL CONFIGURATION ERROR: PAYOUT_DESTINATION_ENCRYPTION_KEY must be configured with at least 32 non-placeholder characters.")
+            if hmac.compare_digest(payout_key.encode("utf-8"), secret.encode("utf-8")):
+                raise ValueError("CRITICAL CONFIGURATION ERROR: PAYOUT_DESTINATION_ENCRYPTION_KEY must be distinct from SECRET_KEY.")
 
             rzp_key_id = (self.RAZORPAY_KEY_ID or "").strip()
             if not rzp_key_id.startswith("rzp_live_") or len(rzp_key_id) < 18 or _contains_placeholder(rzp_key_id):
