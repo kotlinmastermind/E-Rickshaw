@@ -454,24 +454,34 @@ async def test_postgres_concurrent_driver_payout_and_commission_settlement_invar
     st3, pid3 = await _attempt_payout(k3)
     assert st3 == "ok"
 
-    pg_admin_id = None
+    pg_initiator_admin_id = None
+    pg_confirmer_admin_id = None
     async with session_factory() as prep_db:
-        pg_admin = User(
+        pg_initiator = User(
             phone_number=f"+9194{uuid.uuid4().hex[:8]}",
-            full_name="PG Payout Admin",
+            full_name="PG Payout Initiator",
             role="admin",
             is_active=True,
             is_verified=True,
         )
-        prep_db.add(pg_admin)
+        pg_confirmer = User(
+            phone_number=f"+9195{uuid.uuid4().hex[:8]}",
+            full_name="PG Payout Independent Confirmer",
+            role="admin",
+            is_active=True,
+            is_verified=True,
+        )
+        prep_db.add_all([pg_initiator, pg_confirmer])
         await prep_db.flush()
-        pg_admin_id = pg_admin.id
-        await AdminAdvancedService.approve_payout(prep_db, pid3, pg_admin_id)
+        pg_initiator_admin_id = pg_initiator.id
+        pg_confirmer_admin_id = pg_confirmer.id
+        await AdminAdvancedService.approve_payout(prep_db, pid3, pg_initiator_admin_id)
         await PayoutExecutionService.initiate_manual_transfer(
             prep_db,
             payout_id=pid3,
-            admin_user_id=pg_admin_id,
+            admin_user_id=pg_initiator_admin_id,
             settlement_reference=f"PG-UTR-{uuid.uuid4().hex[:10].upper()}",
+            evidence_notes="PostgreSQL integration fixture bank transfer proof reference PG-BANK-STMT-001",
         )
         await prep_db.commit()
 
@@ -479,7 +489,10 @@ async def test_postgres_concurrent_driver_payout_and_commission_settlement_invar
         async with session_factory() as s:
             try:
                 p = await PayoutExecutionService.confirm_manual_transfer(
-                    s, payout_id=pid3, admin_user_id=pg_admin_id
+                    s,
+                    payout_id=pid3,
+                    admin_user_id=pg_confirmer_admin_id,
+                    confirmation_notes="Independent PostgreSQL fixture review of bank statement and UTR",
                 )
                 await s.commit()
                 return ("ok", p.status)
