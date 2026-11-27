@@ -30,8 +30,8 @@ fun PaymentMethodPickerScreen(onNavigate: (String) -> Unit) {
 
     val methods = listOf(
         Triple("UPI", "Instant UPI (Google Pay, PhonePe, Paytm)", "⚡"),
-        Triple("WALLET", "RiderGo Cashless Wallet (₹485.00 Available)", "👛"),
-        Triple("CARD", "Credit / Debit Card (HDFC **** 4812)", "💳"),
+        Triple("WALLET", "RiderGo Cashless Wallet (live balance checked at checkout)", "👛"),
+        Triple("CARD", "Credit / Debit Card (secure payment checkout)", "💳"),
         Triple("CASH", "Cash to Pilot upon Arrival", "💵")
     )
 
@@ -86,10 +86,16 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
     val topupState by RiderRepository.topupState.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = context as? android.app.Activity
+    val refreshScope = rememberCoroutineScope()
+    var walletLoading by remember { mutableStateOf(false) }
+    var walletLoadError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         RiderRepository.restoreCheckoutStates()
-        RiderRepository.fetchWalletBalance()
+        walletLoading = true
+        val result = RiderRepository.fetchWalletBalance()
+        walletLoadError = result.exceptionOrNull()?.message
+        walletLoading = false
     }
 
     Column(
@@ -102,18 +108,47 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
         NeoHeader(title = "RiderGo Wallet", subtitle = "Zero-commission commuter balance", onBack = { onNavigate("map_home") })
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Balance Card
+        // Balance is displayed only after a valid response from the authenticated backend.
         NeoCard(borderColor = BorderFocus, backgroundColor = SurfaceCard) {
             Text(text = "Available Wallet Balance", color = TextMuted, fontSize = 12.sp)
             Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "₹${String.format(java.util.Locale.US, "%.2f", wallet.displayBalanceRupees)}",
-                color = ElectricCyan,
-                fontSize = 38.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
-            Spacer(modifier = Modifier.height(14.dp))
-            NeoBadge(text = "AUTHORITATIVE SUPABASE LEDGER", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+            if (wallet != null) {
+                Text(
+                    text = "₹${String.format(java.util.Locale.US, "%.2f", wallet!!.displayBalanceRupees)}",
+                    color = ElectricCyan,
+                    fontSize = 38.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                NeoBadge(text = "SERVER-VERIFIED WALLET LEDGER", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+            } else {
+                Text(
+                    text = if (walletLoading) "Loading balance..." else "Balance unavailable",
+                    color = AmberGold,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                walletLoadError?.let {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(text = it, color = CrimsonRed, fontSize = 11.sp)
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                NeoButton(
+                    text = if (walletLoading) "Refreshing..." else "Refresh Balance",
+                    onClick = {
+                        if (!walletLoading) {
+                            refreshScope.launch {
+                                walletLoading = true
+                                val result = RiderRepository.fetchWalletBalance()
+                                walletLoadError = result.exceptionOrNull()?.message
+                                walletLoading = false
+                            }
+                        }
+                    },
+                    backgroundColor = AmberGold,
+                    textColor = CanvasBlack
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
