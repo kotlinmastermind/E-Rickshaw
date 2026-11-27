@@ -359,7 +359,12 @@ async def get_live_mobility_feed(
     )).scalars().all()
     fare_rows = (await db.execute(
         select(FareRule)
-        .where(FareRule.is_active.is_(True))
+        .where(
+            FareRule.is_active.is_(True),
+            FareRule.workflow_status.in_(["ACTIVE", "APPROVED"]),
+            FareRule.effective_from <= now,
+            or_(FareRule.effective_until.is_(None), FareRule.effective_until > now)
+        )
         .order_by(FareRule.city_code.asc(), FareRule.effective_from.desc(), FareRule.version.desc())
     )).scalars().all()
     icons_by_code = {
