@@ -35,9 +35,10 @@ from backend.scripts.recover_admin_password import (
 )
 
 
-async def revoke_user_cache(user_id: str) -> None:
-    """Revoke all outstanding tokens at the distributed authorization boundary."""
-    await redis_client.set(f"revoked_user:{user_id}", "true", ex=86400 * 7)
+async def revoke_session_cache(session_ids: list[str]) -> None:
+    """Revoke only existing sessions; do not block future logins for this user."""
+    for session_id in session_ids:
+        await redis_client.set(f"revoked_session:{session_id}", "true", ex=86400 * 7)
 
 
 async def rotate_admin_mfa(
@@ -70,16 +71,28 @@ async def rotate_admin_mfa(
         replacement_secret = generate_mfa_secret()
         user.mfa_secret = replacement_secret
 
+        active_session_ids = list(
+            (
+                await db.execute(
+                    select(Session.id).where(
+                        Session.user_id == user.id,
+                        Session.is_revoked.is_(False),
+                    )
+                )
+            ).scalars().all()
+        )
+
+        # Revoke existing session IDs individually. A user-wide Redis deny-list
+        # would also reject newly created sessions, so it is intentionally avoided.
+        # If Redis is unavailable, fail closed and roll back the DB transaction.
+        await revoke_session_cache(active_session_ids)
+
         revoked_result = await db.execute(
             update(Session)
             .where(Session.user_id == user.id, Session.is_revoked.is_(False))
             .values(is_revoked=True)
         )
         revoked_count = int(revoked_result.rowcount or 0)
-
-        # Set the distributed deny-list before commit. If Redis is unavailable,
-        # fail closed and roll back the database transaction.
-        await revoke_user_cache(user.id)
 
         db.add(
             AuditLog(
