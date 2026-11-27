@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import select
 
 from backend.api.routes.admin import get_live_mobility_feed
+from backend.api.routes.rides import get_current_active_ride, get_ride_history
 from backend.domain.models import (
     CustomerProfile, DriverAvailability, DriverLocation, DriverProfile,
     DriverVehicleAssignment, FareRule, Ride, User, Vehicle, VehicleCategory,
@@ -38,14 +39,16 @@ async def test_admin_live_feed_reports_only_persisted_location_and_vehicle(db_se
     def ride(ride_id, status, final_fare=None, assigned=None):
         return Ride(id=ride_id, customer_id=customer.id, assigned_driver_id=assigned, vehicle_id=vehicle.id if assigned else None, vehicle_category_id=category.id, fare_rule_id=rule.id, status=status, pickup_address="Patna Junction", pickup_latitude=25.61, pickup_longitude=85.12, destination_address="Gandhi Maidan", destination_latitude=25.62, destination_longitude=85.11, start_otp="1234", estimated_distance_km=3.0, estimated_duration_minutes=12.0, estimated_fare_cents=9000, final_fare_cents=final_fare)
     assigned = ride(f"feed-assigned-{suffix}", "IN_PROGRESS", assigned=driver.id)
+    paused = ride(f"feed-paused-{suffix}", "PAUSED", assigned=driver.id)
     waiting = ride(f"feed-waiting-{suffix}", "REQUESTED")
+    waiting.requested_at = now - timedelta(minutes=10)
     completed = ride(f"feed-completed-{suffix}", "COMPLETED", final_fare=12345)
     completed_without_final_fare = ride(f"feed-completed-no-fare-{suffix}", "COMPLETED", final_fare=None)
-    db_session.add_all([assigned, waiting, completed, completed_without_final_fare])
+    db_session.add_all([assigned, paused, waiting, completed, completed_without_final_fare])
     await db_session.commit()
     feed = await get_live_mobility_feed(admin=None, db=db_session)
     assert feed["stats"]["online_drivers"] == 1
-    assert feed["stats"]["active_rides"] == 2
+    assert feed["stats"]["active_rides"] == 3
     assert feed["stats"]["waiting_riders"] == 1
     assert feed["stats"]["gross_booking_inr"] == 123.45
     actual_driver = next(item for item in feed["drivers"] if item["id"] == driver.id)
@@ -55,6 +58,8 @@ async def test_admin_live_feed_reports_only_persisted_location_and_vehicle(db_se
     assert actual_driver["plate"] == vehicle.license_plate
     assert actual_driver["battery"] is None
     assert actual_driver["rating"] is None
+    paused_ride = next(item for item in feed["active_rides"] if item["id"] == paused.id)
+    assert paused_ride["status"] == "PAUSED"
     actual_ride = next(item for item in feed["active_rides"] if item["id"] == assigned.id)
     assert actual_ride["driver"] == "Actual Driver"
     assert actual_ride["plate"] == vehicle.license_plate
@@ -63,6 +68,17 @@ async def test_admin_live_feed_reports_only_persisted_location_and_vehicle(db_se
     assert actual_customer["rides"] == 2
     assert actual_customer["spend"] == "₹123.45"
     assert actual_customer["rating"] is None
+
+    # Active ride polling must retain PAUSED and expose the start OTP only to its customer.
+    customer_active = await get_current_active_ride(user=customer_user, db=db_session)
+    assert customer_active["active_ride"]["status"] in {"IN_PROGRESS", "PAUSED"}
+    assert customer_active["active_ride"]["start_otp"] == "1234"
+    driver_active = await get_current_active_ride(user=user, db=db_session)
+    assert driver_active["active_ride"]["status"] in {"IN_PROGRESS", "PAUSED"}
+    assert driver_active["active_ride"]["start_otp"] is None
+    driver_history = await get_ride_history(limit=50, user=user, db=db_session)
+    assert driver_history
+    assert all(item["otp_code"] is None for item in driver_history)
 
 
 @pytest.mark.asyncio

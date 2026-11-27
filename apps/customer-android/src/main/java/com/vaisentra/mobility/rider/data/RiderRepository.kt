@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
+import java.security.MessageDigest
 import okhttp3.MultipartBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -518,9 +519,16 @@ object RiderRepository {
                 bookingMode = bookingMode,
                 businessCostCenter = businessCostCenter
             )
-            val response = NetworkClient.apiService.requestRide(request)
+            val bookingFingerprint = MessageDigest.getInstance("SHA-256")
+                .digest(request.toString().toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            val bookingIntentKey = "RIDE_BOOKING_${NetworkClient.currentUserId() ?: "unknown"}_$bookingFingerprint"
+            val idempotencyKey = NetworkClient.checkoutSessionStore
+                .getOrCreateScopedIdempotencyKey(bookingIntentKey, "ride_booking")
+            val response = NetworkClient.apiService.requestRide(request, idempotencyKey)
             if (response.isSuccessful && response.body() != null) {
                 val ride = response.body()!!
+                NetworkClient.checkoutSessionStore.clearScopedIdempotencyKey(bookingIntentKey)
                 _activeRide.value = ride
                 RiderWebSocketClient.connectRideTracking(ride.id)
                 startActiveRideSyncLoop(ride.id)
@@ -538,7 +546,7 @@ object RiderRepository {
     private fun startActiveRideSyncLoop(rideId: String) {
         scope.launch {
             while (_activeRide.value != null &&
-                _activeRide.value?.status !in listOf("COMPLETED", "CANCELLED")
+                _activeRide.value?.status !in listOf("COMPLETED", "CANCELLED", "EXPIRED")
             ) {
                 kotlinx.coroutines.delay(4000L)
                 try {
@@ -552,7 +560,7 @@ object RiderRepository {
                             driverRating = updated.driver?.rating ?: updated.driverRating,
                             vehiclePlate = updated.driver?.licenseNumber ?: updated.vehiclePlate
                         )
-                    } else if (res.isSuccessful && (updated == null || updated.status in listOf("COMPLETED", "CANCELLED"))) {
+                    } else if (res.isSuccessful && (updated == null || updated.status in listOf("COMPLETED", "CANCELLED", "EXPIRED"))) {
                         _activeRide.value = null
                     }
                 } catch (_: Exception) {
@@ -566,7 +574,7 @@ object RiderRepository {
             val res = NetworkClient.apiService.getActiveRide()
             if (res.isSuccessful) {
                 val ride = res.body()?.activeRide
-                if (ride != null && ride.status !in listOf("COMPLETED", "CANCELLED")) {
+                if (ride != null && ride.status !in listOf("COMPLETED", "CANCELLED", "EXPIRED")) {
                     val resolved = ride.copy(
                         driverName = ride.driver?.name ?: ride.driverName,
                         driverPhone = ride.driver?.phone ?: ride.driverPhone,
@@ -592,16 +600,17 @@ object RiderRepository {
 
     fun updateActiveRideStatus(newStatus: String) {
         _activeRide.value = _activeRide.value?.copy(status = newStatus)
-        if (newStatus == "COMPLETED" || newStatus == "CANCELLED") {
+        if (newStatus == "COMPLETED" || newStatus == "CANCELLED" || newStatus == "EXPIRED") {
             RiderWebSocketClient.disconnect()
         }
     }
 
-    fun updateDriverLiveLocation(lat: Double, lng: Double, speed: Double) {
+    fun updateDriverLiveLocation(lat: Double, lng: Double, speed: Double?) {
+        if (!lat.isFinite() || !lng.isFinite() || lat !in -90.0..90.0 || lng !in -180.0..180.0) return
         _activeRide.value = _activeRide.value?.copy(
             driverLat = lat,
             driverLng = lng,
-            speedKmh = speed
+            speedKmh = speed?.takeIf { it.isFinite() && it >= 0.0 }
         )
     }
 

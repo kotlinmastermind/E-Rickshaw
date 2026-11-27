@@ -109,7 +109,7 @@ interface DriverApiService {
     @POST("api/v1/drivers/financials/shifts/end")
     suspend fun endShift(@Body request: EndShiftRequest): Response<Map<String, Any>>
 
-    @GET("api/v1/drivers/financials/shifts/status")
+    @GET("api/v1/drivers/financials/shifts/current")
     suspend fun getShiftStatus(): Response<Map<String, Any>>
 
     @POST("api/v1/drivers/duty/vehicle-inspection")

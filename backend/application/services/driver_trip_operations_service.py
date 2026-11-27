@@ -250,6 +250,18 @@ class DriverTripOperationsService:
         )
         self.db.add(event)
         await self.db.commit()
+        try:
+            from backend.api.routes.ws import ws_manager
+            event_type = "TRIP_PAUSED" if pause else "TRIP_RESUMED"
+            await ws_manager.broadcast_ride_update(ride.id, {
+                "event_type": event_type,
+                "ride_id": ride.id,
+                "status": ride.status,
+                "previous_status": previous,
+                "payload": {"ride_id": ride.id, "status": ride.status, "previous_status": previous}
+            })
+        except Exception:
+            pass
         return {"ride_id": ride.id, "status": ride.status}
 
     async def report_no_show(self, ride_id: str, user_id: str, evidence_note: str) -> Dict[str, Any]:

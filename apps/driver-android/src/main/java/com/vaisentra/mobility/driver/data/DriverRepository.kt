@@ -551,7 +551,7 @@ object DriverRepository {
             if (res.isSuccessful) {
                 val ride = res.body()?.activeRide
                 val status = ride?.status?.uppercase() ?: ""
-                val isActive = ride != null && ride.id.isNotBlank() && status in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "STARTED")
+                val isActive = ride != null && ride.id.isNotBlank() && status in listOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED", "STARTED")
                 _activeRide.value = if (isActive) ride else null
                 if (isActive) {
                     _currentRideId.value = ride!!.id

@@ -1,9 +1,12 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import hashlib
+import json
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_user, get_current_customer, get_current_driver
 from backend.domain.models import User, Ride, DriverProfile, DriverLocation, RideStop, CustomerProfile, DriverSafetyPreferences
@@ -11,6 +14,7 @@ from backend.application.services.ride_service import RideService
 from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
 from backend.application.services.booking_advanced_service import BookingAdvancedService
 from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
+from backend.domain.state_machine.ride_state_machine import ACTIVE_RIDE_STATUSES
 
 router = APIRouter(prefix="/rides", tags=["Ride Lifecycle & Booking"])
 
@@ -211,26 +215,44 @@ async def create_ride_request(
     user: User = Depends(get_current_customer),
     db: AsyncSession = Depends(get_db)
 ):
-    if idempotency_key:
-        clean_key = idempotency_key.strip()
-        try:
-            from backend.infrastructure.cache.redis_client import redis_client
-            cached_ride_id = await redis_client.get(f"idempotency:ride:{user.id}:{clean_key}")
-            if cached_ride_id:
-                ride_id_str = cached_ride_id.decode() if isinstance(cached_ride_id, bytes) else str(cached_ride_id)
-                stmt = select(Ride).where(Ride.id == ride_id_str)
-                existing_ride = (await db.execute(stmt)).scalars().first()
-                if existing_ride:
-                    return {
-                        "ride_id": existing_ride.id,
-                        "status": existing_ride.status,
-                        "pickup_address": existing_ride.pickup_address,
-                        "destination_address": existing_ride.destination_address,
-                        "start_otp": existing_ride.start_otp,
-                        "idempotent_replay": True
-                    }
-        except Exception:
-            pass
+    clean_key = idempotency_key.strip() if idempotency_key is not None else None
+    if idempotency_key is not None and (not clean_key or len(clean_key) > 128):
+        raise HTTPException(status_code=400, detail="Idempotency-Key must contain 1 to 128 characters.")
+
+    request_json = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    request_hash = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
+
+    async def find_existing_booking():
+        if not clean_key:
+            return None
+        stmt = (
+            select(Ride)
+            .join(CustomerProfile, Ride.customer_id == CustomerProfile.id)
+            .where(
+                CustomerProfile.user_id == user.id,
+                Ride.booking_idempotency_key == clean_key
+            )
+        )
+        existing = (await db.execute(stmt)).scalars().first()
+        if existing is None:
+            return None
+        if existing.booking_request_hash != request_hash:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This Idempotency-Key was already used for a different booking request."
+            )
+        return {
+            "ride_id": existing.id,
+            "status": existing.status,
+            "pickup_address": existing.pickup_address,
+            "destination_address": existing.destination_address,
+            "start_otp": existing.start_otp,
+            "idempotent_replay": True
+        }
+
+    replay = await find_existing_booking()
+    if replay is not None:
+        return replay
 
     if payload.is_scheduled and payload.scheduled_pickup_time:
         DispatchAdvancedService.validate_schedule_window(payload.scheduled_pickup_time)
@@ -242,31 +264,32 @@ async def create_ride_request(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Vehicle category_id is required. Please select a valid active vehicle category."
         )
-    result = await service.create_ride_request(
-        customer_user_id=user.id,
-        estimate_id=payload.estimate_id,
-        category_id=payload.category_id,
-        pickup_address=payload.pickup_address,
-        destination_address=payload.destination_address,
-        pickup_latitude=payload.pickup_latitude,
-        pickup_longitude=payload.pickup_longitude,
-        destination_latitude=payload.destination_latitude,
-        destination_longitude=payload.destination_longitude,
-        payment_method=payload.payment_method,
-        is_scheduled=payload.is_scheduled,
-        scheduled_pickup_time=payload.scheduled_pickup_time,
-        promo_code=payload.promo_code,
-        stops=stops_data
-    )
-
-    if idempotency_key and isinstance(result, dict) and "ride_id" in result:
-        try:
-            from backend.infrastructure.cache.redis_client import redis_client
-            await redis_client.set(f"idempotency:ride:{user.id}:{idempotency_key.strip()}", result["ride_id"], ex=86400)
-        except Exception:
-            pass
-
-    return result
+    try:
+        return await service.create_ride_request(
+            customer_user_id=user.id,
+            estimate_id=payload.estimate_id,
+            category_id=payload.category_id,
+            pickup_address=payload.pickup_address,
+            destination_address=payload.destination_address,
+            pickup_latitude=payload.pickup_latitude,
+            pickup_longitude=payload.pickup_longitude,
+            destination_latitude=payload.destination_latitude,
+            destination_longitude=payload.destination_longitude,
+            payment_method=payload.payment_method,
+            is_scheduled=payload.is_scheduled,
+            scheduled_pickup_time=payload.scheduled_pickup_time,
+            promo_code=payload.promo_code,
+            stops=stops_data,
+            booking_idempotency_key=clean_key,
+            booking_request_hash=request_hash if clean_key else None
+        )
+    except IntegrityError:
+        await db.rollback()
+        if clean_key:
+            replay = await find_existing_booking()
+            if replay is not None:
+                return replay
+        raise
 
 @router.post("/schedule")
 async def schedule_ride(
@@ -694,7 +717,7 @@ async def get_current_active_ride(
     from sqlalchemy import and_, desc
     from sqlalchemy.orm import joinedload
 
-    active_statuses = ["REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS"]
+    active_statuses = ACTIVE_RIDE_STATUSES
 
     if user.role == "driver":
         stmt = (
@@ -742,10 +765,10 @@ async def get_current_active_ride(
         u = drv.user
         driver_info = {
             "driver_id": drv.id,
-            "name": u.full_name if (u and u.full_name) else "Executive Chauffeur",
+            "name": u.full_name if (u and u.full_name) else None,
             "phone": u.phone_number if (u and u.phone_number) else "",
             "license_number": drv.license_number,
-            "rating": drv.rating_average,
+            "rating": drv.rating_average if drv.rating_count else None,
             "total_trips": drv.total_trips
         }
 
@@ -755,9 +778,9 @@ async def get_current_active_ride(
         u_cust = cust_profile.user
         passenger_info = {
             "customer_id": cust_profile.id,
-            "name": u_cust.full_name if (u_cust and u_cust.full_name) else "Commuter",
+            "name": u_cust.full_name if (u_cust and u_cust.full_name) else None,
             "phone": u_cust.phone_number if (u_cust and u_cust.phone_number) else "",
-            "rating": cust_profile.rating_average or 5.0
+            "rating": cust_profile.rating_average if cust_profile.rating_count else None
         }
 
     return {
@@ -771,7 +794,7 @@ async def get_current_active_ride(
             "destination_address": ride.destination_address,
             "destination_latitude": ride.destination_latitude,
             "destination_longitude": ride.destination_longitude,
-            "start_otp": ride.start_otp,
+            "start_otp": ride.start_otp if user.role == "customer" else None,
             "otp_verified": ride.otp_verified,
             "estimated_fare_cents": ride.estimated_fare_cents,
             "final_fare_cents": ride.final_fare_cents,
@@ -824,11 +847,11 @@ async def get_ride_history(
 
         if r.driver:
             drv = r.driver
-            driver_rating = drv.rating_average or 5.0
+            driver_rating = drv.rating_average if drv.rating_count else None
             vehicle_plate = drv.license_number or None
             u_driver = drv.user
             if u_driver:
-                driver_name = u_driver.full_name or "Verified Pilot"
+                driver_name = u_driver.full_name or None
                 driver_phone = u_driver.phone_number or None
 
         items.append({
@@ -837,7 +860,7 @@ async def get_ride_history(
             "pickup_address": r.pickup_address,
             "destination_address": r.destination_address,
             "total_fare_cents": r.final_fare_cents or r.estimated_fare_cents,
-            "otp_code": r.start_otp,
+            "otp_code": r.start_otp if user.role == "customer" else None,
             "driver_name": driver_name,
             "driver_phone": driver_phone,
             "driver_rating": driver_rating,
@@ -845,7 +868,7 @@ async def get_ride_history(
             "vehicle_model": vehicle_model,
             "driver_lat": r.pickup_latitude,
             "driver_lng": r.pickup_longitude,
-            "speed_kmh": 0.0,
+            "speed_kmh": None,
             "created_at": r.requested_at.isoformat() if r.requested_at else None
         })
     return items
@@ -876,10 +899,10 @@ async def get_ride_details(
         u = drv.user
         driver_info = {
             "driver_id": drv.id,
-            "name": u.full_name if (u and u.full_name) else "Executive Chauffeur",
+            "name": u.full_name if (u and u.full_name) else None,
             "phone": u.phone_number if (u and u.phone_number) else "",
             "license_number": drv.license_number,
-            "rating": drv.rating_average,
+            "rating": drv.rating_average if drv.rating_count else None,
             "total_trips": drv.total_trips
         }
 
@@ -895,7 +918,7 @@ async def get_ride_details(
         "estimated_fare_cents": ride.estimated_fare_cents,
         "final_fare_cents": ride.final_fare_cents,
         "payment_method": ride.payment_method,
-        "start_otp": ride.start_otp if (user.role == "customer" or user.role == "admin") else None,
+        "start_otp": ride.start_otp if user.role == "customer" else None,
         "driver": driver_info,
         "requested_at": ride.requested_at.isoformat(),
         "assigned_at": ride.assigned_at.isoformat() if ride.assigned_at else None,
