@@ -859,6 +859,12 @@ class DriverService:
         ).scalar_one_or_none()
         wallet_balance_cents = int(wallet.balance_cents) if wallet else 0
         currency_code = wallet.currency if wallet else "INR"
+        from backend.application.services.commission_service import CommissionService
+        commission_outstanding_cents = await CommissionService.get_driver_commission_outstanding_cents(
+            self.db,
+            driver.id,
+        )
+        withdrawable_balance_cents = max(0, wallet_balance_cents - commission_outstanding_cents)
 
         missing_snapshot_count = sum(
             1 for ride in rides if ride.id not in snapshots_by_ride
@@ -886,6 +892,9 @@ class DriverService:
             "today_distance_km": today_distance_km,
             "wallet_balance_cents": wallet_balance_cents,
             "wallet_balance_rupees": round(wallet_balance_cents / 100.0, 2),
+            "commission_outstanding_cents": commission_outstanding_cents,
+            "withdrawable_balance_cents": withdrawable_balance_cents,
+            "withdrawable_balance_rupees": round(withdrawable_balance_cents / 100.0, 2),
             "rating_average": float(driver.rating_average or 0.0) if driver.rating_count else 0.0,
             "rating_count": int(driver.rating_count or 0),
             "recent_trips": recent_trips
