@@ -370,6 +370,20 @@ class SmartDispatchService:
         if driver.approval_status != "APPROVED":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver approval is required to accept this offer.")
 
+        from backend.domain.models import DriverVehicleAssignment, Vehicle
+        driver_vehicle = (await self.db.execute(
+            select(Vehicle)
+            .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+            .where(
+                DriverVehicleAssignment.driver_id == driver.id,
+                DriverVehicleAssignment.is_active.is_(True),
+                Vehicle.is_active.is_(True),
+                Vehicle.category_id == ride.vehicle_category_id,
+            )
+        )).scalars().first()
+        if not driver_vehicle:
+            raise HTTPException(status_code=409, detail="Driver has no active assigned vehicle matching this ride category.")
+
         # Dispatch offer acceptance is a separate API path from RideService; repeat
         # the authoritative area and fresh-location checks here as well.
         from backend.application.services.service_area_service import ServiceAreaService
