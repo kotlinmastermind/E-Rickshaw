@@ -22,12 +22,8 @@ def upgrade() -> None:
     if "driver_profiles" in tables:
         columns = {column["name"]: column for column in inspector.get_columns("driver_profiles")}
         if "rating_average" in columns and "rating_count" in columns:
-            # The old ORM default was 5.0 even when no customer had rated the driver.
-            bind.execute(sa.text(
-                "UPDATE driver_profiles "
-                "SET rating_average = NULL "
-                "WHERE COALESCE(rating_count, 0) = 0"
-            ))
+            # PostgreSQL enforces NOT NULL immediately, so relax the constraint
+            # before clearing the fabricated legacy default for unrated drivers.
             if not columns["rating_average"]["nullable"]:
                 with op.batch_alter_table("driver_profiles") as batch_op:
                     batch_op.alter_column(
@@ -36,6 +32,13 @@ def upgrade() -> None:
                         existing_nullable=False,
                         nullable=True,
                     )
+
+            # The old ORM default was 5.0 even when no customer had rated the driver.
+            bind.execute(sa.text(
+                "UPDATE driver_profiles "
+                "SET rating_average = NULL "
+                "WHERE COALESCE(rating_count, 0) = 0"
+            ))
 
     if "vehicles" in tables:
         columns = {column["name"] for column in inspector.get_columns("vehicles")}
