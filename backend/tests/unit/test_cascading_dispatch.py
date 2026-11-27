@@ -342,7 +342,6 @@ async def test_all_drivers_rejecting_leads_to_expired_lifecycle(db_session):
     assert ride.status == "EXPIRED"
 
     # Verify RideStatusEvent recorded
-    from sqlalchemy import select
     event_stmt = select(RideStatusEvent).where(
         RideStatusEvent.ride_id == ride.id,
         RideStatusEvent.new_status == "EXPIRED"
