@@ -859,7 +859,7 @@ class DriverFinancialService:
 
         # Eligibility criteria checklist (Feature 258)
         eligibility_checks = [
-            {"criterion": "Minimum Rating Average", "required": ">= 4.85", "actual": str(driver.rating_average), "passed": driver.rating_average >= 4.85},
+            {"criterion": "Minimum Rating Average", "required": ">= 4.85", "actual": (f"{driver.rating_average:.2f}" if driver.rating_count and driver.rating_average is not None else "Not rated"), "passed": bool(driver.rating_count and driver.rating_average is not None and driver.rating_average >= 4.85)},
             {"criterion": "Offer Acceptance Rate", "required": ">= 90.0%", "actual": "94.2%", "passed": True},
             {"criterion": "Driver Cancellation Rate", "required": "<= 3.0%", "actual": "1.2%", "passed": True},
             {"criterion": "Active Safety Violations", "required": "0 Active", "actual": "0 Active", "passed": True},
