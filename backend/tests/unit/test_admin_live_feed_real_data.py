@@ -50,6 +50,8 @@ async def test_admin_live_feed_reports_only_persisted_location_and_vehicle(db_se
     assert feed["stats"]["gross_booking_inr"] == 123.45
     actual_driver = next(item for item in feed["drivers"] if item["id"] == driver.id)
     assert (actual_driver["lat"], actual_driver["lng"]) == (25.60, 85.14)
+    assert actual_driver["speed"] == 36.0
+    assert actual_driver["location_is_stale"] is False
     assert actual_driver["plate"] == vehicle.license_plate
     assert actual_driver["battery"] is None
     assert actual_driver["rating"] is None
@@ -90,6 +92,14 @@ async def test_admin_live_feed_does_not_count_stale_online_driver_or_fabricate_l
         last_heartbeat=stale,
         updated_at=stale,
     ))
+    orphan_customer = User(
+        email=f"no-profile-{suffix}@example.com",
+        full_name="Customer Without Profile",
+        role="customer",
+        phone_number=f"+9198{suffix[:8]}",
+        is_active=True,
+    )
+    db_session.add(orphan_customer)
     await db_session.commit()
 
     feed = await get_live_mobility_feed(admin=None, db=db_session)
@@ -100,3 +110,7 @@ async def test_admin_live_feed_does_not_count_stale_online_driver_or_fabricate_l
     assert record["lng"] is None
     assert record["battery"] is None
     assert record["plate"] == ""
+    unprofiled = next(item for item in feed["customers"] if item["id"] == orphan_customer.id)
+    assert unprofiled["profile_id"] is None
+    assert unprofiled["rides"] == 0
+    assert unprofiled["rating"] is None
