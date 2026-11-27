@@ -5,10 +5,11 @@ from datetime import datetime, timezone, timedelta
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverDocument,
     Ride, RideStatusEvent, FareRule, VehicleCategory,
-    Payment, Notification, DriverAvailability
+    Payment, Notification, DriverAvailability, Wallet, WalletTransaction
 )
 from backend.application.services.admin_service import AdminService
 from backend.application.services.analytics_bi_service import AnalyticsBiService
+from backend.application.services.admin_finance_support_service import AdminFinanceSupportService
 
 
 @pytest.mark.asyncio
@@ -226,3 +227,95 @@ async def test_vehicle_category_and_fare_rule_management(db_session):
     assert fare_res["per_km_cents"] == 2500
     assert fare_res["is_active"] is True
     assert fare_res["version"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_admin_customer_wallet_overview_and_ledger_are_real_read_only_records(db_session):
+    suffix = uuid.uuid4().hex[:8]
+    customer = User(
+        phone_number=f"+9197{suffix[:8]}",
+        full_name="Wallet Ledger Customer",
+        role="customer",
+        is_active=True,
+    )
+    db_session.add(customer)
+    await db_session.flush()
+    wallet = Wallet(
+        user_id=customer.id,
+        currency="INR",
+        balance_cents=18750,
+        debt_cents=2500,
+    )
+    db_session.add(wallet)
+    await db_session.flush()
+    first = WalletTransaction(
+        wallet_id=wallet.id,
+        transaction_type="CREDIT",
+        amount_cents=20000,
+        balance_after_cents=20000,
+        source="TOP_UP",
+        reference_id="payment-topup-1",
+        idempotency_key=f"admin-ledger-a-{suffix}",
+        description="Verified Razorpay top-up",
+    )
+    second = WalletTransaction(
+        wallet_id=wallet.id,
+        transaction_type="DEBIT",
+        amount_cents=1250,
+        balance_after_cents=18750,
+        source="RIDE_PAYMENT",
+        reference_id="ride-ledger-1",
+        idempotency_key=f"admin-ledger-b-{suffix}",
+        description="Ride payment",
+    )
+    db_session.add_all([first, second])
+    await db_session.commit()
+
+    service = AdminFinanceSupportService(db_session)
+    overview = await service.customer_wallet_overview(admin_id="admin-audit-1", user_id=customer.id)
+    assert overview["customer"]["id"] == customer.id
+    assert overview["wallet_exists"] is True
+    assert overview["wallet"]["balance_cents"] == 18750
+    assert overview["wallet"]["debt_cents"] == 2500
+    assert overview["transaction_count"] == 2
+
+    page = await service.customer_wallet_transactions(
+        admin_id="admin-audit-1", user_id=customer.id, limit=1, offset=0
+    )
+    assert page["total"] == 2
+    assert len(page["transactions"]) == 1
+    assert page["transactions"][0]["id"] == second.id
+    assert page["transactions"][0]["amount_rupees"] == 12.5
+    assert page["transactions"][0]["balance_after_cents"] == 18750
+
+    await db_session.refresh(wallet)
+    assert wallet.balance_cents == 18750
+    assert wallet.debt_cents == 2500
+
+
+@pytest.mark.asyncio
+async def test_admin_customer_wallet_read_does_not_create_missing_wallet(db_session):
+    suffix = uuid.uuid4().hex[:8]
+    customer = User(
+        phone_number=f"+9196{suffix[:8]}",
+        full_name="Customer Without Wallet",
+        role="customer",
+        is_active=True,
+    )
+    db_session.add(customer)
+    await db_session.commit()
+
+    service = AdminFinanceSupportService(db_session)
+    overview = await service.customer_wallet_overview(admin_id="admin-audit-2", user_id=customer.id)
+    page = await service.customer_wallet_transactions(
+        admin_id="admin-audit-2", user_id=customer.id, limit=20, offset=0
+    )
+    assert overview["wallet_exists"] is False
+    assert overview["wallet"] is None
+    assert overview["transaction_count"] == 0
+    assert page["wallet_exists"] is False
+    assert page["transactions"] == []
+    wallet = (await db_session.execute(
+        __import__("sqlalchemy").select(Wallet).where(Wallet.user_id == customer.id)
+    )).scalar_one_or_none()
+    assert wallet is None
