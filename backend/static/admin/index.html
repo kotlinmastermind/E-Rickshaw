@@ -2724,9 +2724,9 @@
                 statusText.className = 'text-xs font-bold text-cyan-glow';
                 statusText.innerText = 'IN-TRIP NAVIGATION';
             } else {
-                dot.className = 'w-2.5 h-2.5 rounded-full bg-crimson-glow animate-pulse';
-                statusText.className = 'text-xs font-bold text-crimson-glow';
-                statusText.innerText = 'ALERT: BATTERY RESERVE LOW';
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-400';
+                statusText.className = 'text-xs font-bold text-slate-400';
+                statusText.innerText = driver.status === 'PENDING' ? 'PENDING APPROVAL' : (driver.status === 'REJECTED' ? 'REJECTED' : (driver.status === 'SUSPENDED' ? 'SUSPENDED' : 'OFFLINE'));
             }
 
             document.getElementById('drawer-battery').innerText = driver.battery == null ? 'Not reported' : `${driver.battery}%`;
@@ -2950,6 +2950,10 @@
             const driversList = STATE.drivers || [];
 
             tbody.innerHTML = '';
+            if (driversList.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500">No driver records available.</td></tr>';
+                return;
+            }
             driversList.forEach(driver => {
                 if (filterStatus !== 'ALL' && driver.status !== filterStatus) return;
                 if (searchTerm && !String(driver.name || '').toLowerCase().includes(searchTerm) &&
@@ -3018,6 +3022,10 @@
             tbody.innerHTML = '';
 
             const rides = STATE.activeRides || [];
+            if (rides.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500">No active ride records available.</td></tr>';
+                return;
+            }
             rides.forEach(ride => {
                 if (filter !== 'ALL' && ride.status !== filter) return;
 
@@ -3060,8 +3068,12 @@
             const documents = STATE.customerKycDocuments || [];
 
             tbody.innerHTML = '';
+            if (customers.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500">No customer records available.</td></tr>';
+                return;
+            }
             customers.forEach(user => {
-                if (search && !user.name.toLowerCase().includes(search) && !user.phone.includes(search)) return;
+                if (search && !String(user.name || '').toLowerCase().includes(search) && !String(user.phone || '').includes(search)) return;
 
                 const customerDocs = documents.filter(doc => doc.customer_id === user.id);
                 const pendingDoc = customerDocs.find(doc => doc.status === 'PENDING_REVIEW');
@@ -3083,7 +3095,7 @@
                     <td class="py-3.5 px-4 font-mono text-slate-300">${user.phone}</td>
                     <td class="py-3.5 px-4 font-mono text-white">${user.rides}</td>
                     <td class="py-3.5 px-4 font-mono font-bold text-emerald-glow">${user.spend}</td>
-                    <td class="py-3.5 px-4 text-amber-glow font-mono">${user.rating} ★</td>
+                    <td class="py-3.5 px-4 text-amber-glow font-mono">${user.rating == null ? 'Not rated' : `${user.rating} ★`}</td>
                     <td class="py-3.5 px-4">
                         <span class="px-2 py-0.5 rounded-md ${user.active ? 'bg-emerald-dim text-emerald-glow' : 'bg-crimson-dim text-crimson-glow'} font-mono text-[10px] font-bold">
                             ${user.active ? 'ACTIVE' : 'SUSPENDED'}
