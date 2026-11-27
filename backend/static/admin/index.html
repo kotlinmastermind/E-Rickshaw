@@ -2714,37 +2714,28 @@
         function openRiderInspector(rider) {
             STATE.selectedEntity = { type: 'rider', data: rider };
             document.getElementById('drawer-avatar').innerText = '🚶';
-            document.getElementById('drawer-title').innerText = rider.name;
-            document.getElementById('drawer-subtitle').innerText = `Commuter • Waiting for Feeder Cab`;
-
+            document.getElementById('drawer-title').innerText = rider.name || `Customer ${String(rider.id).slice(0, 8)}`;
+            document.getElementById('drawer-subtitle').innerText = 'Customer ride request';
             const dot = document.getElementById('drawer-status-dot');
             const statusText = document.getElementById('drawer-status-text');
-            dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-glow animate-ping';
+            dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-glow';
             statusText.className = 'text-xs font-bold text-amber-glow';
-            statusText.innerText = `WAITING (${rider.waitMins} MINS)`;
-
-            document.getElementById('drawer-battery').innerText = 'N/A (Pedestrian)';
-            document.getElementById('drawer-speed').innerText = '0 km/h';
-            document.getElementById('drawer-rating').innerText = `${rider.rating} ★`;
-            document.getElementById('drawer-trips').innerText = '14';
-            document.getElementById('drawer-phone').innerText = rider.phone;
-            document.getElementById('drawer-dl').innerText = 'Verified Commuter';
-            document.getElementById('drawer-category').innerText = 'Eco-Feeder Pool';
-
+            statusText.innerText = rider.waitMins == null ? 'REQUESTED · WAIT TIME UNAVAILABLE' : `REQUESTED · WAITING ${rider.waitMins} MINUTES`;
+            document.getElementById('drawer-battery').innerText = 'Not applicable';
+            document.getElementById('drawer-speed').innerText = 'Not applicable';
+            document.getElementById('drawer-rating').innerText = rider.rating == null ? 'Not rated' : `${Number(rider.rating).toFixed(1)} ★`;
+            document.getElementById('drawer-trips').innerText = 'Not available';
+            document.getElementById('drawer-phone').innerText = rider.phone || 'Not provided';
+            document.getElementById('drawer-dl').innerText = 'Not applicable';
+            document.getElementById('drawer-category').innerText = 'Not applicable';
             const tripCard = document.getElementById('drawer-trip-card');
             tripCard.classList.remove('hidden');
-            document.getElementById('drawer-trip-id').innerText = 'DISPATCH MATCHING';
-            document.getElementById('drawer-pickup').innerText = rider.pickup;
-            document.getElementById('drawer-drop').innerText = rider.targetDrop;
-            document.getElementById('drawer-fare').innerText = 'Est. ₹35.00';
-            document.getElementById('drawer-passenger').innerText = rider.name;
-
-            clearRoute();
-            document.getElementById('inspector-drawer').classList.remove('translate-x-[110%]');
-            STATE.map.panTo([rider.lat, rider.lng]);
-            lucide.createIcons();
+            document.getElementById('drawer-trip-id').innerText = `REQUEST #${String(rider.id).slice(0, 8)}`;
+            document.getElementById('drawer-pickup').innerText = rider.pickup || 'Pickup unavailable';
+            document.getElementById('drawer-drop').innerText = rider.targetDrop || 'Destination unavailable';
+            document.getElementById('drawer-action-btn').classList.add('hidden');
+            document.getElementById('entity-drawer').classList.remove('translate-x-full');
         }
-
         function closeInspectorDrawer() {
             document.getElementById('inspector-drawer').classList.add('translate-x-[110%]');
             clearRoute();
