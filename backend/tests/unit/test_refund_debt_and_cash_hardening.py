@@ -1110,12 +1110,26 @@ async def test_driver_payout_uses_driver_wallet_and_driver_ledger(db_session):
     await db_session.flush()
 
     # Credit DriverWallet with ₹500 (50,000 cents)
+    from backend.domain.models import DriverPayoutAccount
     d_wallet = DriverWallet(
         driver_id=driver_prof.id,
         balance_cents=50000,
         currency="INR"
     )
-    db_session.add(d_wallet)
+    payout_account = DriverPayoutAccount(
+        driver_id=driver_prof.id,
+        account_type="BANK_ACCOUNT",
+        bank_name="HDFC Bank",
+        account_number_mask="HDFC *******1234",
+        ifsc_code="HDFC0001234",
+        beneficiary_name="Driver Payout Test",
+        verification_status="VERIFIED",
+        verification_method="MANUAL_ADMIN_REVIEW",
+        verified_by=driver_user.id,
+        penny_drop_reference="HDFC-ADMIN-VER-001",
+        is_primary=True,
+    )
+    db_session.add_all([d_wallet, payout_account])
     await db_session.commit()
 
     # 1. Request payout of ₹200 (20,000 cents)
@@ -1123,7 +1137,7 @@ async def test_driver_payout_uses_driver_wallet_and_driver_ledger(db_session):
         session=db_session,
         driver_id_or_user_id=driver_prof.id,
         amount_cents=20000,
-        bank_details={"account_number_mask": "HDFC *******1234"},
+        payout_account_id=payout_account.id,
         idempotency_key=f"payout_req_1_{uuid.uuid4().hex[:12]}"
     )
     assert payout.id is not None
@@ -1163,7 +1177,7 @@ async def test_driver_payout_uses_driver_wallet_and_driver_ledger(db_session):
         session=db_session,
         driver_id_or_user_id=driver_prof.id,
         amount_cents=10000,
-        bank_details={"account_number_mask": "HDFC *******1234"},
+        payout_account_id=payout_account.id,
         idempotency_key=f"payout_req_2_{uuid.uuid4().hex[:12]}"
     )
     await db_session.refresh(d_wallet)

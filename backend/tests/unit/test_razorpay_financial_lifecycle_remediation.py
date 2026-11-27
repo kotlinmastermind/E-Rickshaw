@@ -729,7 +729,21 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
         super_role = AdminRole(id=str(uuid.uuid4()), name="Super Administrator", is_superuser=True)
         db_session.add(super_role)
         await db_session.flush()
-    db_session.add_all([d_wallet, sess_d, sess_a, AdminUserRole(user_id=admin_user.id, role_id=super_role.id)])
+    from backend.domain.models import DriverPayoutAccount
+    payout_account = DriverPayoutAccount(
+        driver_id=driver_prof.id,
+        account_type="BANK_ACCOUNT",
+        bank_name="ICICI Bank",
+        account_number_mask="ICICI *******5678",
+        ifsc_code="ICIC0000123",
+        beneficiary_name="Payout Route Driver",
+        verification_status="VERIFIED",
+        verification_method="MANUAL_ADMIN_REVIEW",
+        verified_by=admin_user.id,
+        penny_drop_reference="ICIC-ADMIN-VER-001",
+        is_primary=True,
+    )
+    db_session.add_all([d_wallet, payout_account, sess_d, sess_a, AdminUserRole(user_id=admin_user.id, role_id=super_role.id)])
     await db_session.commit()
 
     driver_token = create_jwt_token(user_id=driver_user.id, role="driver", session_id=sess_d.id)
@@ -742,8 +756,7 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
             "/api/v1/drivers/payouts/request",
             json={
                 "amount_cents": 20000,
-                "account_number_mask": "ICICI *******5678",
-                "ifsc": "ICIC0000123",
+                "payout_account_id": payout_account.id,
                 "idempotency_key": idem_1,
             },
             headers={"Authorization": f"Bearer {driver_token}"},
@@ -759,8 +772,7 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
             "/api/v1/drivers/payouts/request",
             json={
                 "amount_cents": 20000,
-                "account_number_mask": "ICICI *******5678",
-                "ifsc": "ICIC0000123",
+                "payout_account_id": payout_account.id,
                 "idempotency_key": idem_1,
             },
             headers={"Authorization": f"Bearer {driver_token}"},
@@ -776,8 +788,7 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
             "/api/v1/drivers/payouts/request",
             json={
                 "amount_cents": 25000,
-                "account_number_mask": "ICICI *******5678",
-                "ifsc": "ICIC0000123",
+                "payout_account_id": payout_account.id,
                 "idempotency_key": idem_1,
             },
             headers={"Authorization": f"Bearer {driver_token}"},
@@ -791,7 +802,7 @@ async def test_driver_payout_route_idempotency_reversal_and_unique_utr(db_sessio
     await AdminAdvancedService.mark_payout_paid(db_session, p1_id, admin_user.id, utr)
 
     p2 = await DispatchAdvancedService.request_payout(
-        db_session, driver_prof.id, 15000, {"account_number_mask": "ICICI *******5678"}, f"payout_2_{uuid.uuid4().hex[:12]}"
+        db_session, driver_prof.id, 15000, payout_account_id=payout_account.id, idempotency_key=f"payout_2_{uuid.uuid4().hex[:12]}"
     )
     await AdminAdvancedService.approve_payout(db_session, p2.id, admin_user.id)
     with pytest.raises(HTTPException) as exc_dup_utr:

@@ -1042,6 +1042,10 @@
                     class="px-4 py-2 rounded-xl text-xs font-bold transition-all bg-emerald-dim text-emerald-glow border border-emerald-glow/30 flex items-center gap-2">
                     <i data-lucide="arrow-up-right" class="w-4 h-4"></i> Bank Payout Requests (IMPS/UPI)
                 </button>
+                <button onclick="switchPayoutSubtab('accounts')" id="payout-subtab-btn-accounts"
+                    class="px-4 py-2 rounded-xl text-xs font-bold transition-all text-slate-400 hover:text-white flex items-center gap-2">
+                    <i data-lucide="landmark" class="w-4 h-4"></i> Payout Accounts (Manual Verification)
+                </button>
                 <button onclick="switchPayoutSubtab('welfare')" id="payout-subtab-btn-welfare"
                     class="px-4 py-2 rounded-xl text-xs font-bold transition-all text-slate-400 hover:text-white flex items-center gap-2">
                     <i data-lucide="heart-handshake" class="w-4 h-4"></i> Chauffeur Welfare Board (0% APR)
@@ -1088,6 +1092,48 @@
                                 <tr>
                                     <td colspan="8" class="py-6 text-center text-slate-500 font-mono">Loading driver
                                         payout requests from Supabase ledger...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SUBSECTION 1B: PAYOUT ACCOUNTS MANUAL VERIFICATION -->
+            <div id="payout-subpanel-accounts" class="hidden space-y-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-slate-400">Filter by verification status:</span>
+                        <select id="payout-accounts-filter-status" onchange="loadPayoutAccountsData()"
+                            class="bg-card border border-border rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-glow/50 font-mono">
+                            <option value="ALL">All Payout Accounts</option>
+                            <option value="PENDING_VERIFICATION" selected>Pending Verification</option>
+                            <option value="VERIFIED">Verified</option>
+                            <option value="REJECTED">Rejected</option>
+                        </select>
+                    </div>
+                    <span class="text-[11px] text-slate-400 font-mono">Manual Admin Review • Evidence & Audit Required</span>
+                </div>
+
+                <div class="glass-card rounded-2xl overflow-hidden border border-border shadow-xl">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead
+                                class="bg-surface/90 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-border">
+                                <tr>
+                                    <th class="py-3.5 px-4">Driver</th>
+                                    <th class="py-3.5 px-4">Type & Bank</th>
+                                    <th class="py-3.5 px-4">Masked Destination</th>
+                                    <th class="py-3.5 px-4">Beneficiary</th>
+                                    <th class="py-3.5 px-4">Verification Status</th>
+                                    <th class="py-3.5 px-4">Provenance / Audit</th>
+                                    <th class="py-3.5 px-4 text-right">Review Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="payout-accounts-table-body" class="divide-y divide-border text-slate-300">
+                                <tr>
+                                    <td colspan="7" class="py-6 text-center text-slate-500 font-mono">Loading driver
+                                        payout accounts...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -1982,6 +2028,81 @@
         </div>
     </div>
 
+    <!-- Modal: Verify Driver Payout Account (Manual Admin Review) -->
+    <div id="modal-payout-account-verify"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden p-4">
+        <div class="glass-panel w-full max-w-md rounded-2xl border border-border p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-border pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2">
+                    <i data-lucide="shield-check" class="w-5 h-5 text-emerald-glow"></i> Manual Payout Account Verification
+                </h3>
+                <button onclick="closePayoutAccountVerifyModal()"
+                    class="w-8 h-8 rounded-lg bg-surface border border-border flex items-center justify-center text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div class="space-y-3 text-xs">
+                <div class="glass-card p-3 rounded-xl space-y-1">
+                    <p class="text-slate-400">Account ID: <strong id="verify-acct-modal-id" class="text-white font-mono">---</strong></p>
+                    <p class="text-slate-400">Destination: <strong id="verify-acct-modal-dest" class="text-cyan-glow font-mono">---</strong></p>
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-400 mb-1">Verification Evidence / Bank Reference *</label>
+                    <input type="text" id="verify-acct-modal-ref"
+                        placeholder="e.g. HDFC-PASSBOOK-CHK-20261127-01"
+                        class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-emerald-glow/50">
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-400 mb-1">Reviewer Notes (Optional)</label>
+                    <textarea id="verify-acct-modal-notes" rows="2"
+                        placeholder="Matched cancelled cheque / passbook with driver KYC name"
+                        class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-glow/50"></textarea>
+                </div>
+            </div>
+            <div class="flex gap-3 pt-2 border-t border-border">
+                <button onclick="submitPayoutAccountVerify()"
+                    class="flex-1 py-2.5 rounded-xl bg-emerald-glow text-black font-bold text-xs hover:opacity-90 transition-all flex items-center justify-center gap-1.5">
+                    <i data-lucide="check" class="w-4 h-4"></i> Confirm Manual Verification
+                </button>
+                <button onclick="closePayoutAccountVerifyModal()"
+                    class="px-4 py-2.5 rounded-xl bg-surface border border-border text-slate-400 hover:text-white text-xs">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Reject Driver Payout Account -->
+    <div id="modal-payout-account-reject"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden p-4">
+        <div class="glass-panel w-full max-w-md rounded-2xl border border-border p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-border pb-3">
+                <h3 class="text-base font-bold text-white flex items-center gap-2">
+                    <i data-lucide="shield-alert" class="w-5 h-5 text-crimson-glow"></i> Reject Payout Account
+                </h3>
+                <button onclick="closePayoutAccountRejectModal()"
+                    class="w-8 h-8 rounded-lg bg-surface border border-border flex items-center justify-center text-slate-400 hover:text-white">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div class="space-y-3 text-xs">
+                <p class="text-slate-400">Account ID: <strong id="reject-acct-modal-id" class="text-white font-mono">---</strong></p>
+                <div>
+                    <label class="block text-[11px] text-slate-400 mb-1">Mandatory Rejection Reason *</label>
+                    <textarea id="reject-acct-modal-reason" rows="2"
+                        placeholder="e.g. Beneficiary name does not match driver Aadhaar/DL"
+                        class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-crimson-glow/50"></textarea>
+                </div>
+            </div>
+            <div class="flex gap-3 pt-2 border-t border-border">
+                <button onclick="submitPayoutAccountReject()"
+                    class="flex-1 py-2.5 rounded-xl bg-crimson-glow text-white font-bold text-xs hover:opacity-90 transition-all flex items-center justify-center gap-1.5">
+                    <i data-lucide="x" class="w-4 h-4"></i> Reject Payout Account
+                </button>
+                <button onclick="closePayoutAccountRejectModal()"
+                    class="px-4 py-2.5 rounded-xl bg-surface border border-border text-slate-400 hover:text-white text-xs">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Chauffeur Welfare Review -->
     <div id="modal-welfare-review"
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden p-4">
@@ -2267,6 +2388,7 @@
             customerKycDocuments: [],
             categories: [],
             payouts: [],
+            payoutAccounts: [],
             welfare: [],
             commissions: [],
             geofences: [],
@@ -2275,6 +2397,8 @@
             auditLogs: [],
             activeSettlePayout: null,
             activeRejectPayoutId: null,
+            activeVerifyPayoutAccountId: null,
+            activeRejectPayoutAccountId: null,
             activeWelfareReview: null,
             activeDisputeResolve: null,
             selectedEntity: null,
@@ -3642,7 +3766,7 @@
         // DOMAIN: DRIVER PAYOUTS, WELFARE & COMMISSION RULES
         // =========================================================================
         function switchPayoutSubtab(subtabId) {
-            const panels = ['withdrawals', 'welfare', 'commission'];
+            const panels = ['withdrawals', 'accounts', 'welfare', 'commission'];
             panels.forEach(p => {
                 const el = document.getElementById(`payout-subpanel-${p}`);
                 if (el) {
@@ -3660,6 +3784,7 @@
             });
 
             if (subtabId === 'withdrawals') loadPayoutsData();
+            else if (subtabId === 'accounts') loadPayoutAccountsData();
             else if (subtabId === 'welfare') loadWelfareData();
             else if (subtabId === 'commission') loadCommissionsData();
             lucide.createIcons();
@@ -3862,6 +3987,169 @@
                 }
             } catch (err) {
                 showToast('Network error while rejecting payout', 'error');
+            }
+        }
+
+        // --- Payout Accounts Manual Verification Functions ---
+        async function loadPayoutAccountsData() {
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const filter = document.getElementById('payout-accounts-filter-status')?.value || 'ALL';
+                const qs = filter && filter !== 'ALL' ? `?status_filter=${encodeURIComponent(filter)}` : '';
+                const res = await fetch(`/api/v1/admin/payout-accounts${qs}`, { headers });
+                if (res.ok) {
+                    STATE.payoutAccounts = await res.json();
+                    renderPayoutAccountsTable();
+                } else {
+                    showToast('Failed to load payout accounts', 'error');
+                }
+            } catch (err) {
+                console.error('Error loading payout accounts:', err);
+            }
+        }
+
+        function renderPayoutAccountsTable() {
+            const tbody = document.getElementById('payout-accounts-table-body');
+            if (!tbody) return;
+            const accounts = STATE.payoutAccounts || [];
+            tbody.innerHTML = '';
+            if (accounts.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-slate-500 font-mono">No payout accounts found for this filter.</td></tr>`;
+                return;
+            }
+            accounts.forEach(a => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-surface/50 transition-colors';
+                let statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">PENDING_VERIFICATION</span>';
+                if (a.verification_status === 'VERIFIED') {
+                    statusBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">VERIFIED</span>';
+                } else if (a.verification_status === 'REJECTED') {
+                    statusBadge = '<span class="px-2 py-0.5 rounded-md bg-crimson-dim text-crimson-glow font-mono text-[10px] font-bold">REJECTED</span>';
+                }
+
+                const destText = a.upi_vpa || `${a.account_number_mask || '****'}${a.ifsc_code ? ' • ' + a.ifsc_code : ''}`;
+                const provenanceText = a.verification_status === 'VERIFIED'
+                    ? `${a.verification_method || 'MANUAL_ADMIN_REVIEW'} • Ref: ${a.verification_reference || 'N/A'}`
+                    : (a.verification_status === 'REJECTED'
+                        ? `Rejected: ${a.rejection_reason || 'N/A'}`
+                        : 'Awaiting manual admin review');
+
+                let actions = '';
+                if (a.verification_status !== 'VERIFIED') {
+                    actions = `
+                        <div class="flex items-center justify-end gap-1.5">
+                            <button onclick="openPayoutAccountVerifyModal('${a.id}', '${destText.replace(/'/g, '')}')" class="px-2.5 py-1 rounded-lg bg-emerald-glow text-black font-extrabold text-[11px] hover:opacity-90 transition-all">Verify</button>
+                            <button onclick="openPayoutAccountRejectModal('${a.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim hover:bg-crimson-glow hover:text-white text-crimson-glow border border-crimson-glow/30 text-[11px] font-bold transition-all">Reject</button>
+                        </div>
+                    `;
+                } else {
+                    actions = `
+                        <div class="flex items-center justify-end gap-1.5">
+                            ${a.is_primary ? '<span class="text-[10px] text-emerald-glow font-mono font-bold">PRIMARY</span>' : ''}
+                            <button onclick="openPayoutAccountRejectModal('${a.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim hover:bg-crimson-glow hover:text-white text-crimson-glow border border-crimson-glow/30 text-[11px] font-bold transition-all">Revoke</button>
+                        </div>
+                    `;
+                }
+
+                tr.innerHTML = `
+                    <td class="py-3.5 px-4">
+                        <div class="text-white font-medium">${a.driver_name || 'Pilot'}</div>
+                        <span class="text-[10px] text-slate-500 font-mono">${(a.driver_id || '').slice(0, 12)}</span>
+                    </td>
+                    <td class="py-3.5 px-4">
+                        <div class="text-white font-mono text-[11px]">${a.account_type || 'BANK_ACCOUNT'}</div>
+                        <span class="text-[10px] text-slate-400">${a.bank_name || ''}</span>
+                    </td>
+                    <td class="py-3.5 px-4 font-mono text-cyan-glow">${destText}</td>
+                    <td class="py-3.5 px-4 text-slate-300">${a.beneficiary_name || ''}</td>
+                    <td class="py-3.5 px-4">${statusBadge}</td>
+                    <td class="py-3.5 px-4 text-[11px] text-slate-400 font-mono">${provenanceText}</td>
+                    <td class="py-3.5 px-4 text-right">${actions}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            lucide.createIcons();
+        }
+
+        function openPayoutAccountVerifyModal(accountId, destText) {
+            STATE.activeVerifyPayoutAccountId = accountId;
+            document.getElementById('verify-acct-modal-id').innerText = accountId;
+            document.getElementById('verify-acct-modal-dest').innerText = destText;
+            document.getElementById('verify-acct-modal-ref').value = '';
+            document.getElementById('verify-acct-modal-notes').value = '';
+            document.getElementById('modal-payout-account-verify').classList.remove('hidden');
+        }
+
+        function closePayoutAccountVerifyModal() {
+            document.getElementById('modal-payout-account-verify').classList.add('hidden');
+        }
+
+        async function submitPayoutAccountVerify() {
+            const accountId = STATE.activeVerifyPayoutAccountId;
+            const ref = (document.getElementById('verify-acct-modal-ref')?.value || '').trim();
+            const notes = (document.getElementById('verify-acct-modal-notes')?.value || '').trim();
+            if (ref.length < 6) {
+                showToast('Enter a valid verification evidence reference (min 6 chars)', 'error');
+                return;
+            }
+            closePayoutAccountVerifyModal();
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/payout-accounts/${accountId}/verify`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ verification_reference: ref, verification_notes: notes || null })
+                });
+                if (res.ok) {
+                    showToast('Payout account manually verified with audit record!');
+                    await loadPayoutAccountsData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Verification failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error while verifying payout account', 'error');
+            }
+        }
+
+        function openPayoutAccountRejectModal(accountId) {
+            STATE.activeRejectPayoutAccountId = accountId;
+            document.getElementById('reject-acct-modal-id').innerText = accountId;
+            document.getElementById('reject-acct-modal-reason').value = '';
+            document.getElementById('modal-payout-account-reject').classList.remove('hidden');
+        }
+
+        function closePayoutAccountRejectModal() {
+            document.getElementById('modal-payout-account-reject').classList.add('hidden');
+        }
+
+        async function submitPayoutAccountReject() {
+            const accountId = STATE.activeRejectPayoutAccountId;
+            const reason = (document.getElementById('reject-acct-modal-reason')?.value || '').trim();
+            if (reason.length < 6) {
+                showToast('Enter a rejection reason (min 6 chars)', 'error');
+                return;
+            }
+            closePayoutAccountRejectModal();
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/payout-accounts/${accountId}/reject`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ rejection_reason: reason })
+                });
+                if (res.ok) {
+                    showToast('Payout account rejected with audit record.');
+                    await loadPayoutAccountsData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Rejection failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error while rejecting payout account', 'error');
             }
         }
 

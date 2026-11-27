@@ -1668,6 +1668,10 @@ class DriverPayoutAccount(Base):
     upi_vpa: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     beneficiary_name: Mapped[str] = mapped_column(String(128), nullable=False)
     verification_status: Mapped[str] = mapped_column(String(30), default="PENDING_VERIFICATION")  # PENDING_VERIFICATION, VERIFIED, REJECTED
+    verification_method: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)  # MANUAL_ADMIN_REVIEW
+    verified_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_notes: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     rejection_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
     penny_drop_reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

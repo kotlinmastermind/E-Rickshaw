@@ -994,6 +994,8 @@ class DriverFinancialService:
                 "upi_vpa": a.upi_vpa,
                 "beneficiary_name": a.beneficiary_name,
                 "verification_status": a.verification_status,
+                "verification_method": a.verification_method,
+                "verified_at": a.verified_at.isoformat() if a.verified_at else None,
                 "rejection_reason": a.rejection_reason,
                 "is_primary": a.is_primary,
                 "created_at": a.created_at.isoformat()

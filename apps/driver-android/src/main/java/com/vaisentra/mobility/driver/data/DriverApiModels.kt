@@ -640,7 +640,10 @@ data class PayoutAccountDto(
     @SerializedName("ifsc_code") val ifscCode: String? = null,
     @SerializedName("upi_vpa") val upiVpa: String? = null,
     @SerializedName("beneficiary_name") val beneficiaryName: String? = null,
-    @SerializedName("verification_status") val verificationStatus: String = "PENDING",
+    @SerializedName("verification_status") val verificationStatus: String = "PENDING_VERIFICATION",
+    @SerializedName("verification_method") val verificationMethod: String? = null,
+    @SerializedName("verified_at") val verifiedAt: String? = null,
+    @SerializedName("rejection_reason") val rejectionReason: String? = null,
     @SerializedName("is_primary") val isPrimary: Boolean = false
 )
 

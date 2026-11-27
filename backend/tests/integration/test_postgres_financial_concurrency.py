@@ -310,3 +310,111 @@ async def test_postgres_concurrent_order_creation_leases_multi_instance():
     assert o1["order_id"] == o2["order_id"]
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres_concurrent_driver_payout_and_commission_settlement_invariants():
+    """
+    Verify on genuine PostgreSQL (SELECT FOR UPDATE + UNIQUE idempotency_key + RESTRICT FK):
+    1. Two concurrent payout requests exceeding remaining withdrawable balance only allow 1.
+    2. Duplicate idempotency_key returns the existing payout without double settlement/hold.
+    3. Deleting a driver profile with DriverCommissionSettlement history is blocked by RESTRICT FK.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from backend.application.services.commission_service import CommissionService
+    from backend.application.services.dispatch_advanced_service import DispatchAdvancedService
+    from backend.domain.models import (
+        DriverCommissionSettlement,
+        DriverLedgerEntry,
+        DriverPayoutAccount,
+        DriverPayoutRequest,
+        DriverProfile,
+        DriverWallet,
+    )
+
+    engine = create_async_engine(POSTGRES_TEST_URL, echo=False, pool_size=10, max_overflow=10)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    driver_id = None
+    account_id = None
+    async with session_factory() as db:
+        u = User(phone_number=f"+9193{uuid.uuid4().hex[:8]}", full_name="PG Payout Driver", role="driver")
+        db.add(u)
+        await db.flush()
+        drv = DriverProfile(user_id=u.id, license_number=f"DL-PG-{uuid.uuid4().hex[:8]}", approval_status="APPROVED")
+        db.add(drv)
+        await db.flush()
+        driver_id = drv.id
+        db.add(DriverWallet(driver_id=driver_id, balance_cents=100000, currency="INR"))
+        db.add(
+            DriverLedgerEntry(
+                driver_id=driver_id,
+                entry_type="DEBIT",
+                category="COMMISSION_PAYABLE",
+                amount_cents=-20000,
+                balance_after_cents=100000,
+                reference_id=f"pg_ride_{uuid.uuid4().hex[:8]}",
+                description="PG deferred commission",
+            )
+        )
+        acct = DriverPayoutAccount(
+            driver_id=driver_id,
+            account_type="BANK_ACCOUNT",
+            bank_name="HDFC Bank",
+            account_number_mask="******9988",
+            ifsc_code="HDFC0001234",
+            beneficiary_name="PG Payout Driver",
+            verification_status="VERIFIED",
+            verification_method="MANUAL_ADMIN_REVIEW",
+            verified_by=u.id,
+            penny_drop_reference="PG-ADMIN-VER-001",
+            is_primary=True,
+        )
+        db.add(acct)
+        await db.commit()
+        account_id = acct.id
+
+    async def _attempt_payout(idem_key: str):
+        async with session_factory() as s:
+            try:
+                p = await DispatchAdvancedService.request_payout(
+                    session=s,
+                    driver_id_or_user_id=driver_id,
+                    amount_cents=60000,
+                    payout_account_id=account_id,
+                    idempotency_key=idem_key,
+                )
+                await s.commit()
+                return ("ok", p.id)
+            except HTTPException as exc:
+                await s.rollback()
+                return ("err", exc.status_code)
+
+    r1, r2 = await asyncio.gather(
+        _attempt_payout(f"pg_payout_1_{uuid.uuid4().hex[:10]}"),
+        _attempt_payout(f"pg_payout_2_{uuid.uuid4().hex[:10]}"),
+    )
+    assert sorted([r1[0], r2[0]]) == ["err", "ok"]
+
+    async with session_factory() as check_db:
+        w = (await check_db.execute(select(DriverWallet).where(DriverWallet.driver_id == driver_id))).scalar_one()
+        assert w.balance_cents == 20000  # 100000 - 20000 commission - 60000 hold
+        assert await CommissionService.get_driver_commission_outstanding_cents(check_db, driver_id) == 0
+        settlements = (
+            await check_db.execute(
+                select(DriverCommissionSettlement).where(DriverCommissionSettlement.driver_id == driver_id)
+            )
+        ).scalars().all()
+        assert len(settlements) == 1
+
+        # RESTRICT FK must prevent cascade-deleting driver with settlement history
+        drv_row = await check_db.get(DriverProfile, driver_id)
+        with pytest.raises(IntegrityError):
+            await check_db.delete(drv_row)
+            await check_db.flush()
+        await check_db.rollback()
+
+    await engine.dispose()

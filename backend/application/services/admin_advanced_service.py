@@ -354,21 +354,32 @@ class AdminAdvancedService:
         account_id: str,
         admin_user_id: str,
         verification_reference: str,
+        verification_notes: Optional[str] = None,
     ):
         from backend.domain.models import DriverPayoutAccount
         clean_ref = (verification_reference or "").strip()
-        if len(clean_ref) < 4:
+        clean_notes = (verification_notes or "").strip() or None
+        if len(clean_ref) < 6 or clean_ref.upper().startswith("PENNY-") or clean_ref.lower() in {"verified", "test", "manual", "approved"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A valid verification_reference (at least 4 characters) is required.",
+                detail="A valid external/manual verification evidence reference (min 6 chars, non-placeholder) is required.",
             )
         stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.id == account_id).with_for_update()
         account = (await session.execute(stmt)).scalar_one_or_none()
         if not account:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout account not found.")
+        if account.verification_status == "VERIFIED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Payout account is already verified.",
+            )
 
         now = datetime.now(timezone.utc)
         account.verification_status = "VERIFIED"
+        account.verification_method = "MANUAL_ADMIN_REVIEW"
+        account.verified_by = admin_user_id
+        account.verified_at = now
+        account.verification_notes = clean_notes
         account.rejection_reason = None
         account.penny_drop_reference = clean_ref
         account.updated_at = now
@@ -388,12 +399,15 @@ class AdminAdvancedService:
 
         session.add(AdministrativeAuditLog(
             admin_user_id=admin_user_id,
-            action="PAYOUT_ACCOUNT_VERIFIED",
+            action="PAYOUT_ACCOUNT_MANUAL_VERIFIED",
             target_resource="driver_payout_accounts",
             target_id=account.id,
             changes_json=json.dumps({
                 "driver_id": account.driver_id,
+                "verification_method": "MANUAL_ADMIN_REVIEW",
                 "verification_reference": clean_ref,
+                "verification_notes": clean_notes,
+                "verified_by": admin_user_id,
                 "verified_at": now.isoformat(),
             }),
         ))
@@ -409,10 +423,10 @@ class AdminAdvancedService:
     ):
         from backend.domain.models import DriverPayoutAccount
         clean_reason = (rejection_reason or "").strip()
-        if len(clean_reason) < 4:
+        if len(clean_reason) < 6:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A valid rejection_reason (at least 4 characters) is required.",
+                detail="A valid rejection_reason (at least 6 characters) is required.",
             )
         stmt = select(DriverPayoutAccount).where(DriverPayoutAccount.id == account_id).with_for_update()
         account = (await session.execute(stmt)).scalar_one_or_none()
@@ -421,19 +435,25 @@ class AdminAdvancedService:
 
         now = datetime.now(timezone.utc)
         account.verification_status = "REJECTED"
+        account.verification_method = "MANUAL_ADMIN_REVIEW"
+        account.verified_by = admin_user_id
+        account.verified_at = now
         account.rejection_reason = clean_reason
+        account.penny_drop_reference = None
         account.is_primary = False
         account.updated_at = now
 
         session.add(AdministrativeAuditLog(
             admin_user_id=admin_user_id,
-            action="PAYOUT_ACCOUNT_REJECTED",
+            action="PAYOUT_ACCOUNT_MANUAL_REJECTED",
             target_resource="driver_payout_accounts",
             target_id=account.id,
             changes_json=json.dumps({
                 "driver_id": account.driver_id,
+                "verification_method": "MANUAL_ADMIN_REVIEW",
                 "rejection_reason": clean_reason,
-                "rejected_at": now.isoformat(),
+                "reviewed_by": admin_user_id,
+                "reviewed_at": now.isoformat(),
             }),
         ))
         await session.flush()

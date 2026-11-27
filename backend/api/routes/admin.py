@@ -1831,11 +1831,12 @@ async def admin_review_customer_kyc_document(
 
 
 class AdminPayoutAccountVerifyPayload(BaseModel):
-    verification_reference: str = Field(..., min_length=4, max_length=64)
+    verification_reference: str = Field(..., min_length=6, max_length=64)
+    verification_notes: Optional[str] = Field(None, max_length=255)
 
 
 class AdminPayoutAccountRejectPayload(BaseModel):
-    rejection_reason: str = Field(..., min_length=4, max_length=255)
+    rejection_reason: str = Field(..., min_length=6, max_length=255)
 
 
 @router.get("/payout-accounts")
@@ -1844,15 +1845,23 @@ async def admin_list_payout_accounts(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    from backend.domain.models import DriverPayoutAccount
-    stmt = select(DriverPayoutAccount).order_by(DriverPayoutAccount.created_at.desc()).limit(200)
-    if status_filter:
+    from backend.domain.models import DriverPayoutAccount, DriverProfile
+    stmt = (
+        select(DriverPayoutAccount, DriverProfile, User)
+        .join(DriverProfile, DriverProfile.id == DriverPayoutAccount.driver_id)
+        .join(User, User.id == DriverProfile.user_id)
+        .order_by(DriverPayoutAccount.created_at.desc())
+        .limit(200)
+    )
+    if status_filter and status_filter.strip().upper() != "ALL":
         stmt = stmt.where(DriverPayoutAccount.verification_status == status_filter.strip().upper())
-    accounts = (await db.execute(stmt)).scalars().all()
+    rows = (await db.execute(stmt)).all()
     return [
         {
             "id": a.id,
             "driver_id": a.driver_id,
+            "driver_name": u.full_name,
+            "driver_email": u.email,
             "account_type": a.account_type,
             "bank_name": a.bank_name,
             "account_number_mask": a.account_number_mask,
@@ -1860,12 +1869,16 @@ async def admin_list_payout_accounts(
             "upi_vpa": a.upi_vpa,
             "beneficiary_name": a.beneficiary_name,
             "verification_status": a.verification_status,
+            "verification_method": a.verification_method,
+            "verified_by": a.verified_by,
+            "verified_at": a.verified_at.isoformat() if a.verified_at else None,
+            "verification_notes": a.verification_notes,
             "rejection_reason": a.rejection_reason,
             "is_primary": a.is_primary,
             "verification_reference": a.penny_drop_reference,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         }
-        for a in accounts
+        for a, _driver, u in rows
     ]
 
 
@@ -1882,12 +1895,17 @@ async def admin_verify_payout_account(
         account_id=account_id,
         admin_user_id=admin.id,
         verification_reference=payload.verification_reference,
+        verification_notes=payload.verification_notes,
     )
     await db.commit()
     return {
         "id": account.id,
         "driver_id": account.driver_id,
         "verification_status": account.verification_status,
+        "verification_method": account.verification_method,
+        "verified_by": account.verified_by,
+        "verified_at": account.verified_at.isoformat() if account.verified_at else None,
+        "verification_notes": account.verification_notes,
         "is_primary": account.is_primary,
         "verification_reference": account.penny_drop_reference,
     }
@@ -1912,6 +1930,9 @@ async def admin_reject_payout_account(
         "id": account.id,
         "driver_id": account.driver_id,
         "verification_status": account.verification_status,
+        "verification_method": account.verification_method,
+        "verified_by": account.verified_by,
+        "verified_at": account.verified_at.isoformat() if account.verified_at else None,
         "is_primary": account.is_primary,
         "rejection_reason": account.rejection_reason,
     }

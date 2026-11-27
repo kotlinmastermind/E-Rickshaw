@@ -890,15 +890,28 @@ fun  PayoutAccountsScreen(
                                     color = CockpitTextSecondary,
                                     fontSize = 12.sp
                                 )
+                                val statusColor = when (acc.verificationStatus) {
+                                    "VERIFIED" -> EmeraldPrimary
+                                    "REJECTED" -> CrimsonRed
+                                    else -> AmberGold
+                                }
                                 Text(
                                     "${acc.beneficiaryName ?: ""} • ${acc.verificationStatus}",
-                                    color = CockpitTextMuted,
-                                    fontSize = 11.sp
+                                    color = statusColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
+                                if (acc.verificationStatus == "REJECTED" && !acc.rejectionReason.isNullOrBlank()) {
+                                    Text(
+                                        "Reason: ${acc.rejectionReason}",
+                                        color = CrimsonRed,
+                                        fontSize = 10.sp
+                                    )
+                                }
                             }
-                            if (acc.isPrimary) {
+                            if (acc.isPrimary && acc.verificationStatus == "VERIFIED") {
                                 CockpitBadge("PRIMARY", EmeraldPrimary)
-                            } else {
+                            } else if (acc.verificationStatus == "VERIFIED") {
                                 OutlinedButton(
                                     onClick = {
                                         scope.launch {
@@ -919,6 +932,11 @@ fun  PayoutAccountsScreen(
                                 ) {
                                     Text("Set Primary", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
+                            } else {
+                                CockpitBadge(
+                                    if (acc.verificationStatus == "REJECTED") "REJECTED" else "PENDING",
+                                    if (acc.verificationStatus == "REJECTED") CrimsonRed else AmberGold
+                                )
                             }
                         }
                     }
@@ -948,10 +966,11 @@ fun InstantPayoutScreen(
         DriverRepository.fetchPayoutAccounts()
     }
 
-    val primaryAccount = accounts.firstOrNull { it.isPrimary && it.verificationStatus == "VERIFIED" }
+    val verifiedAccounts = accounts.filter { it.verificationStatus == "VERIFIED" }
+    val primaryAccount = verifiedAccounts.firstOrNull { it.isPrimary } ?: verifiedAccounts.firstOrNull()
     val resolvedMask = primaryAccount?.upiVpa?.takeIf { it.isNotBlank() } ?: primaryAccount?.accountNumberMask.orEmpty()
     val resolvedIfsc = primaryAccount?.ifscCode.orEmpty()
-    val hasValidDestination = primaryAccount != null && primaryAccount.id.isNotBlank()
+    val hasValidDestination = primaryAccount != null && primaryAccount.id.isNotBlank() && primaryAccount.isPrimary
     var attemptNonce by remember(withdrawAmount, primaryAccount?.id) { mutableStateOf(0) }
     val pendingIdempotencyKey = remember(withdrawAmount, primaryAccount?.id, attemptNonce) {
         "payout_${java.util.UUID.randomUUID()}"
@@ -1025,9 +1044,15 @@ fun InstantPayoutScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val destStatusText = when {
+                            hasValidDestination -> "Verified Primary: $resolvedMask${if (resolvedIfsc.isNotBlank()) " ($resolvedIfsc)" else ""}"
+                            verifiedAccounts.isNotEmpty() -> "Select a verified account as Primary in Payout Accounts before withdrawing"
+                            accounts.any { it.verificationStatus == "PENDING_VERIFICATION" } -> "Payout account pending admin verification"
+                            else -> "Add and verify a payout account before requesting a payout"
+                        }
                         Text(
-                            if (hasValidDestination) "Destination: $resolvedMask ($resolvedIfsc)" else "Add a verified payout account before requesting a payout",
-                            color = CockpitTextSecondary,
+                            destStatusText,
+                            color = if (hasValidDestination) CockpitTextSecondary else AmberGold,
                             fontSize = 11.sp
                         )
                         Text("Table: driver_payout_requests", color = ElectricCyan, fontSize = 10.sp)

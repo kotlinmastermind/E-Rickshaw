@@ -22,6 +22,7 @@ def upgrade() -> None:
     existing_tables = set(inspector.get_table_names())
 
     if "driver_payout_accounts" in existing_tables:
+        acct_cols = {c["name"] for c in inspector.get_columns("driver_payout_accounts")}
         with op.batch_alter_table("driver_payout_accounts") as batch_op:
             batch_op.alter_column(
                 "ifsc_code",
@@ -33,13 +34,22 @@ def upgrade() -> None:
                 existing_type=sa.String(length=30),
                 server_default=sa.text("'PENDING_VERIFICATION'"),
             )
-        # Demote legacy fake-verified accounts (PENNY-* or missing provider reference)
+            if "verification_method" not in acct_cols:
+                batch_op.add_column(sa.Column("verification_method", sa.String(length=40), nullable=True))
+            if "verified_by" not in acct_cols:
+                batch_op.add_column(sa.Column("verified_by", sa.String(length=36), nullable=True))
+            if "verified_at" not in acct_cols:
+                batch_op.add_column(sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True))
+            if "verification_notes" not in acct_cols:
+                batch_op.add_column(sa.Column("verification_notes", sa.String(length=255), nullable=True))
+        # Demote any legacy VERIFIED account lacking real audited verification provenance
         op.execute(
             sa.text(
                 "UPDATE driver_payout_accounts "
-                "SET verification_status = 'PENDING_VERIFICATION', penny_drop_reference = NULL "
+                "SET verification_status = 'PENDING_VERIFICATION', is_primary = FALSE, penny_drop_reference = NULL "
                 "WHERE verification_status = 'VERIFIED' "
-                "AND (penny_drop_reference IS NULL OR penny_drop_reference LIKE 'PENNY-%')"
+                "AND (verified_by IS NULL OR verification_method IS NULL "
+                "OR penny_drop_reference IS NULL OR penny_drop_reference LIKE 'PENNY-%')"
             )
         )
 
@@ -120,3 +130,10 @@ def downgrade() -> None:
                 if "ix_driver_payout_requests_payout_account_id" in idxs:
                     batch_op.drop_index("ix_driver_payout_requests_payout_account_id")
                 batch_op.drop_column("payout_account_id")
+
+    if "driver_payout_accounts" in existing_tables:
+        acct_cols = {c["name"] for c in inspector.get_columns("driver_payout_accounts")}
+        with op.batch_alter_table("driver_payout_accounts") as batch_op:
+            for col in ("verification_notes", "verified_at", "verified_by", "verification_method"):
+                if col in acct_cols:
+                    batch_op.drop_column(col)
