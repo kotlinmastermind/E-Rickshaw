@@ -243,6 +243,7 @@ data class DispatchOfferDto(
     @SerializedName("estimated_commission_cents") val estimatedCommissionCents: Long? = null,
     @SerializedName("estimated_commission_percentage") val estimatedCommissionPercentage: Double? = null,
     @SerializedName("commission_classification") val commissionClassification: String? = null,
+    @SerializedName("commission_estimate_available") val commissionEstimateAvailable: Boolean = false,
     @SerializedName("payment_mode") val paymentMode: String = "UPI",
     @SerializedName("expires_at") val expiresAt: String? = null,
     @SerializedName("escalation_level") val escalationLevel: Int = 0,
