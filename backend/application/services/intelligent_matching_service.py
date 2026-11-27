@@ -159,10 +159,10 @@ class IntelligentMatchingService:
             "heading_score": round(heading_score, 4)
         }
 
+        rating_label = f"{rating:.1f}★" if rating is not None else "unrated"
         explanation = (
             f"Score: {total_score:.3f} | ETA: {road_eta_min:.1f}m | "
-            f"Dist: {road_dist_km:.2f}km | "
-            f"Rating: {f'{rating:.1f}★' if rating is not None else 'unrated'} | Ring: {candidate.ring_index}"
+            f"Dist: {road_dist_km:.2f}km | Rating: {rating_label} | Ring: {candidate.ring_index}"
         )
 
         return ScoredCandidate(
