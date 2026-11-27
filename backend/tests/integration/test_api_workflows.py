@@ -5,6 +5,7 @@ import json
 import httpx
 from httpx import ASGITransport
 from backend.main import app
+from backend.domain.models import GeofenceZone, DriverServiceAreaAssignment
 from backend.core.config import settings
 
 @pytest.mark.asyncio
@@ -211,6 +212,17 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             drv2_prof = (await db_session.execute(select(DriverProfile).where(DriverProfile.user_id == drv2_signup.json()["user"]["id"]))).scalar_one()
             drv1_prof.approval_status = "APPROVED"
             drv2_prof.approval_status = "APPROVED"
+            service_area = (await db_session.execute(
+                select(GeofenceZone).where(
+                    GeofenceZone.city_code == "MUMBAI",
+                    GeofenceZone.zone_type == "SERVICE_AREA",
+                    GeofenceZone.is_active.is_(True),
+                )
+            )).scalars().one()
+            db_session.add_all([
+                DriverServiceAreaAssignment(driver_id=drv1_prof.id, service_area_id=service_area.id),
+                DriverServiceAreaAssignment(driver_id=drv2_prof.id, service_area_id=service_area.id),
+            ])
             db_session.add_all([
                 RideAssignment(ride_id=ride_id, driver_id=drv1_prof.id, status="OFFERED", expires_at=datetime.now(timezone.utc) + timedelta(minutes=10)),
                 RideAssignment(ride_id=ride_id, driver_id=drv2_prof.id, status="OFFERED", expires_at=datetime.now(timezone.utc) + timedelta(minutes=10)),
