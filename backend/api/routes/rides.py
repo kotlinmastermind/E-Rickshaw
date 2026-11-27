@@ -768,7 +768,7 @@ async def get_current_active_ride(
             "name": u.full_name if (u and u.full_name) else None,
             "phone": u.phone_number if (u and u.phone_number) else "",
             "license_number": drv.license_number,
-            "rating": drv.rating_average,
+            "rating": drv.rating_average if drv.rating_count else None,
             "total_trips": drv.total_trips
         }
 
@@ -902,7 +902,7 @@ async def get_ride_details(
             "name": u.full_name if (u and u.full_name) else None,
             "phone": u.phone_number if (u and u.phone_number) else "",
             "license_number": drv.license_number,
-            "rating": drv.rating_average,
+            "rating": drv.rating_average if drv.rating_count else None,
             "total_trips": drv.total_trips
         }
 
