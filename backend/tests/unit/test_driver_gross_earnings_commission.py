@@ -3,7 +3,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
 
 from backend.application.services.commission_service import CommissionService
 from backend.application.services.driver_service import DriverService
