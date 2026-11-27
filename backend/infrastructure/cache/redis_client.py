@@ -373,6 +373,17 @@ class RedisManager:
 
         return await self._fallback.set(key, value, ex=ex, nx=nx)
 
+    async def set_strict(self, key: str, value: str, ex: Optional[int] = None) -> bool:
+        """Write to Redis only; never report process-local fallback as durable revocation."""
+        client = await self._get_redis()
+        if client is None:
+            raise ConnectionError("Redis is required for this security-sensitive operation.")
+        self.stats.record_set()
+        stored = await client.set(key, value, ex=ex)
+        if not stored:
+            raise RuntimeError("Redis did not confirm the security-sensitive write.")
+        return True
+
     async def set_json(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
         return await self.set(key, json.dumps(value), ex=ex)
 
