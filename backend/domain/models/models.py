@@ -1694,8 +1694,8 @@ class DriverLedgerEntry(Base):
             "category",
             "reference_id",
             unique=True,
-            sqlite_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION') AND reference_id IS NOT NULL"),
-            postgresql_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION') AND reference_id IS NOT NULL"),
+            sqlite_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION', 'COMMISSION_SETTLEMENT') AND reference_id IS NOT NULL"),
+            postgresql_where=text("category IN ('TRIP_EARNING', 'PAYOUT_HOLD', 'PAYOUT_REVERSAL', 'COMMISSION', 'COMMISSION_SETTLEMENT') AND reference_id IS NOT NULL"),
         ),
     )
 
