@@ -168,12 +168,22 @@ class RideService:
             estimate = (await self.db.execute(stmt_est)).scalar_one()
 
         from backend.application.services.service_area_service import ServiceAreaService
-        service_area = await ServiceAreaService(self.db).resolve_route(
+        service_areas = ServiceAreaService(self.db)
+        service_area = await service_areas.resolve_route(
             pickup_lat=estimate.pickup_latitude,
             pickup_lng=estimate.pickup_longitude,
             destination_lat=estimate.destination_latitude,
             destination_lng=estimate.destination_longitude,
         )
+        for stop_data in stops or []:
+            try:
+                stop_lat = float(stop_data["latitude"])
+                stop_lng = float(stop_data["longitude"])
+            except (KeyError, TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Each intermediate stop requires valid latitude and longitude coordinates.")
+            if not (-90 <= stop_lat <= 90 and -180 <= stop_lng <= 180):
+                raise HTTPException(status_code=400, detail="Intermediate stop coordinates are outside valid geographic ranges.")
+            await service_areas.require_point_in_area(service_area.id, stop_lat, stop_lng)
 
         now = datetime.now(timezone.utc)
 
