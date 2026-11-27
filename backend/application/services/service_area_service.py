@@ -72,14 +72,24 @@ class ServiceAreaService:
         service_areas = []
         restricted_areas = []
         for zone in zones:
+            zone_type = str(zone.zone_type or "").upper()
+            if zone_type not in ("SERVICE_AREA", "RESTRICTED", "RESTRICTED_ZONE"):
+                continue
             try:
                 polygon = self.parse_polygon(zone.coordinates_json)
-            except ValueError:
-                # A malformed active SERVICE_AREA cannot authorize coverage.
-                continue
-            if zone.zone_type == "SERVICE_AREA" and zone.city_code and zone.city_code.strip():
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Active geofence '{zone.name}' has invalid polygon data. Serviceability checks are blocked until Admin repairs it.",
+                ) from exc
+            if zone_type == "SERVICE_AREA":
+                if not zone.city_code or not zone.city_code.strip():
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=f"Active service area '{zone.name}' has no city code. Booking and dispatch are blocked until Admin configures it.",
+                    )
                 service_areas.append((zone, polygon))
-            elif str(zone.zone_type or "").upper() in ("RESTRICTED", "RESTRICTED_ZONE"):
+            else:
                 restricted_areas.append((zone, polygon))
         if not service_areas:
             raise HTTPException(
