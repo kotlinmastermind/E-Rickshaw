@@ -1055,6 +1055,10 @@
                     class="px-4 py-2 rounded-xl text-xs font-bold transition-all text-slate-400 hover:text-white flex items-center gap-2">
                     <i data-lucide="percent" class="w-4 h-4"></i> Commission Rules Versioning
                 </button>
+                <button onclick="switchPayoutSubtab('earnings')" id="payout-subtab-btn-earnings"
+                    class="px-4 py-2 rounded-xl text-xs font-bold transition-all text-slate-400 hover:text-white flex items-center gap-2">
+                    <i data-lucide="chart-no-axes-combined" class="w-4 h-4"></i> Driver Earnings
+                </button>
             </div>
 
             <!-- SUBSECTION 1: BANK PAYOUTS -->
@@ -1246,6 +1250,40 @@
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SUBSECTION 4: DRIVER GROSS EARNINGS & DEFERRED COMMISSION -->
+            <div id="payout-subpanel-earnings" class="hidden space-y-4">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <h3 class="text-sm font-bold text-white">Driver Earnings & Deferred Commission</h3>
+                        <p class="text-xs text-slate-400 mt-1">Gross ride earnings are shown separately. Accrued commission is not deducted from gross earnings.</p>
+                    </div>
+                    <button onclick="loadDriverEarningsData()" class="px-3 py-2 rounded-xl bg-card border border-border text-xs text-slate-300 hover:text-cyan-glow flex items-center gap-2">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Refresh
+                    </button>
+                </div>
+                <div class="glass-card rounded-2xl overflow-hidden border border-border shadow-xl">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-surface/90 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-border">
+                                <tr>
+                                    <th class="py-3 px-4">Driver</th>
+                                    <th class="py-3 px-4">Gross Earnings</th>
+                                    <th class="py-3 px-4">Commission Accrued</th>
+                                    <th class="py-3 px-4">Commission Outstanding</th>
+                                    <th class="py-3 px-4">Wallet Balance</th>
+                                    <th class="py-3 px-4">Withdrawable</th>
+                                    <th class="py-3 px-4">Payable / Receivable</th>
+                                    <th class="py-3 px-4">Trips / Missing Snapshots</th>
+                                </tr>
+                            </thead>
+                            <tbody id="driver-earnings-table-body" class="divide-y divide-border text-slate-300">
+                                <tr><td colspan="8" class="py-6 text-center text-slate-500 font-mono">Select Driver Earnings to load authoritative financial summaries.</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
@@ -2424,7 +2462,8 @@
             payoutAccounts: [],
             welfare: [],
             commissions: [],
-            geofences: [],
+            driverEarnings: [],
+            geofences: []
             surgeRules: [],
             disputes: [],
             auditLogs: [],
@@ -4055,7 +4094,7 @@
         // DOMAIN: DRIVER PAYOUTS, WELFARE & COMMISSION RULES
         // =========================================================================
         function switchPayoutSubtab(subtabId) {
-            const panels = ['withdrawals', 'accounts', 'welfare', 'commission'];
+            const panels = ['withdrawals', 'accounts', 'welfare', 'commission', 'earnings'];
             panels.forEach(p => {
                 const el = document.getElementById(`payout-subpanel-${p}`);
                 if (el) {
@@ -4076,6 +4115,7 @@
             else if (subtabId === 'accounts') loadPayoutAccountsData();
             else if (subtabId === 'welfare') loadWelfareData();
             else if (subtabId === 'commission') loadCommissionsData();
+            else if (subtabId === 'earnings') loadDriverEarningsData();
             lucide.createIcons();
         }
 
@@ -4684,6 +4724,62 @@
             } catch (err) {
                 showToast('Network error during welfare review', 'error');
             }
+        }
+
+        // --- Driver Gross Earnings & Deferred Commission ---
+        async function loadDriverEarningsData() {
+            const tbody = document.getElementById('driver-earnings-table-body');
+            if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500 font-mono">Loading driver financial summaries...</td></tr>';
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch('/api/v1/admin/driver-earnings?limit=100&offset=0', { headers });
+                if (!res.ok) throw new Error(`Driver earnings request failed: HTTP ${res.status}`);
+                const payload = await res.json();
+                STATE.driverEarnings = Array.isArray(payload.items) ? payload.items : [];
+                renderDriverEarningsTable();
+            } catch (err) {
+                if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-rose-400 font-mono">Driver earnings could not be loaded.</td></tr>';
+                console.error('Error loading driver earnings:', err);
+            }
+        }
+
+        function renderDriverEarningsTable() {
+            const tbody = document.getElementById('driver-earnings-table-body');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            const rows = STATE.driverEarnings || [];
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="py-6 text-center text-slate-500 font-mono">No active driver financial records found.</td></tr>';
+                return;
+            }
+            rows.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-surface/50 transition-colors';
+                const money = cents => new Intl.NumberFormat('en-IN', {
+                    style: 'currency', currency: item.currency || 'INR', minimumFractionDigits: 2
+                }).format((Number.isFinite(Number(cents)) ? Number(cents) : 0) / 100);
+                const cells = [
+                    `${item.driver_name || 'Driver'} · #${String(item.driver_id || '').slice(0, 8)}`,
+                    money(item.gross_earnings_cents),
+                    money(item.commission_accrued_cents),
+                    money(item.commission_outstanding_cents),
+                    money(item.wallet_balance_cents),
+                    money(item.withdrawable_balance_cents),
+                    `Payable: ${money(item.commission_payable_cents)} · Receivable: ${money(item.commission_receivable_cents)}`,
+                    `${Number(item.completed_trips) || 0} trips · ${Number(item.commission_snapshot_missing_count) || 0} missing`
+                ];
+                cells.forEach((value, index) => {
+                    const td = document.createElement('td');
+                    td.className = 'py-3 px-4 font-mono text-slate-300';
+                    td.textContent = value;
+                    if (index === 1 || index === 5) td.classList.add('text-emerald-glow', 'font-bold');
+                    if (index === 2 || index === 3) td.classList.add('text-amber-glow');
+                    if (index === 7 && Number(item.commission_snapshot_missing_count) > 0) td.classList.add('text-amber-glow');
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
         }
 
         // --- Commission Rules Functions ---
