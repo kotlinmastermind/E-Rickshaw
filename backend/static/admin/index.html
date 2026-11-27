@@ -5047,9 +5047,12 @@
                         </span>
                     </td>
                     <td class="py-3 px-4 text-right">
-                        <button onclick="switchTab('map'); showToast('Previewing ${z.name} boundary on live map')" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
-                            View Map
-                        </button>
+                        <div class="inline-flex gap-1.5">
+                            <button onclick="switchTab('map'); showToast('Previewing ${z.name} boundary on live map')" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
+                                View Map
+                            </button>
+                            ${z.is_active ? `<button onclick="deactivateGeofence('${z.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim border border-crimson-glow/30 text-crimson-glow text-[11px]">Deactivate</button>` : ''}
+                        </div>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -5111,6 +5114,27 @@
                 }
             } catch (err) {
                 showToast('Network error while deploying geofence', 'error');
+            }
+        }
+
+        async function deactivateGeofence(zoneId) {
+            if (!confirm('Deactivate this geofence? New bookings and dispatches will no longer use this active coverage zone.')) return;
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
+                const res = await fetch(`/api/v1/admin/geofences/${encodeURIComponent(zoneId)}`, {
+                    method: 'DELETE',
+                    headers
+                });
+                if (res.ok) {
+                    showToast('Geofence deactivated. New bookings and dispatches will revalidate coverage.');
+                    await loadGeofencesData();
+                } else {
+                    const err = await res.json();
+                    showToast(err.detail || 'Geofence deactivation failed', 'error');
+                }
+            } catch (err) {
+                showToast('Network error while deactivating geofence', 'error');
             }
         }
 
