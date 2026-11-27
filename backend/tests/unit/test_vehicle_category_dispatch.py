@@ -73,6 +73,43 @@ async def test_ride_request_preserves_selected_category_in_db(db_session):
     db_session.add(c_prof)
     await db_session.flush()
 
+    # Booking is permitted only when a real approved, online, category-matched
+    # driver with fresh GPS exists inside the pickup service area.
+    d_user = User(
+        phone_number=f"+91990{suffix}11",
+        full_name="Available Auto Pilot",
+        role="driver",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(d_user)
+    await db_session.flush()
+    d_profile = DriverProfile(
+        id=f"dp_auto_book_{suffix}",
+        user_id=d_user.id,
+        license_number=f"DL-AUTO-BOOK-{suffix}",
+        approval_status="APPROVED",
+    )
+    d_vehicle = Vehicle(
+        id=f"v_auto_book_{suffix}",
+        category_id=cat_auto.id,
+        make="Bajaj",
+        model="RE E-Auto",
+        year=2025,
+        license_plate=f"DL-AUTO-{suffix}",
+        is_active=True,
+    )
+    db_session.add_all([d_profile, d_vehicle])
+    await db_session.flush()
+    db_session.add_all([
+        DriverAvailability(driver_id=d_profile.id, is_online=True, is_busy=False),
+        DriverVehicleAssignment(driver_id=d_profile.id, vehicle_id=d_vehicle.id, is_active=True),
+    ])
+    await db_session.commit()
+    await LiveLocationService(db=db_session).ingest_driver_location(
+        d_profile.id, 28.6475, 77.3150, is_online=True
+    )
+
     # Customer books ride choosing cat_auto.id with mock/fallback estimate
     ride_svc = RideService(db_session)
     res = await ride_svc.create_ride_request(
