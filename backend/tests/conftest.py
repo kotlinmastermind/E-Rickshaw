@@ -1,4 +1,5 @@
 import os
+import json
 os.environ["TESTING"] = "1"
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///file:testdb?mode=memory&cache=shared&uri=true"
 os.environ["REDIS_URL"] = os.getenv("REDIS_TEST_URL", "")
@@ -12,7 +13,7 @@ settings.REDIS_URL = os.getenv("REDIS_TEST_URL") or None
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from backend.domain.models import VehicleCategory, FareRule
+from backend.domain.models import VehicleCategory, FareRule, GeofenceZone
 from backend.infrastructure.database.session import async_session_maker, init_db
 
 import sqlite3
@@ -40,6 +41,32 @@ async def _seed_test_data(session):
             FareRule(category_id=sedan.id, city_code="MUMBAI", version=1, base_fare_cents=4000, per_km_cents=1400, per_minute_cents=150, minimum_fare_cents=4000, cancellation_fee_cents=2000, surge_multiplier=1.0, is_active=True),
         ]
         session.add_all(rules)
+        await session.commit()
+
+    existing_areas = (await session.execute(
+        select(GeofenceZone).where(
+            GeofenceZone.zone_type == "SERVICE_AREA",
+            GeofenceZone.is_active.is_(True),
+        )
+    )).scalars().all()
+    if not existing_areas:
+        test_areas = [
+            ("TEST_DELHI_NCR", [{"lat": 27.0, "lng": 76.0}, {"lat": 27.0, "lng": 78.0}, {"lat": 29.5, "lng": 78.0}, {"lat": 29.5, "lng": 76.0}]),
+            ("TEST_MUMBAI", [{"lat": 17.5, "lng": 72.0}, {"lat": 17.5, "lng": 74.0}, {"lat": 20.0, "lng": 74.0}, {"lat": 20.0, "lng": 72.0}]),
+            ("TEST_BENGALURU", [{"lat": 11.5, "lng": 76.5}, {"lat": 11.5, "lng": 78.5}, {"lat": 14.0, "lng": 78.5}, {"lat": 14.0, "lng": 76.5}]),
+            ("TEST_PATNA", [{"lat": 24.5, "lng": 84.0}, {"lat": 24.5, "lng": 86.0}, {"lat": 26.5, "lng": 86.0}, {"lat": 26.5, "lng": 84.0}]),
+            ("TEST_LUCKNOW", [{"lat": 25.5, "lng": 80.0}, {"lat": 25.5, "lng": 82.0}, {"lat": 28.0, "lng": 82.0}, {"lat": 28.0, "lng": 80.0}]),
+        ]
+        session.add_all([
+            GeofenceZone(
+                name=f"Test coverage {city_code}",
+                city_code=city_code,
+                zone_type="SERVICE_AREA",
+                coordinates_json=json.dumps(points),
+                is_active=True,
+            )
+            for city_code, points in test_areas
+        ])
         await session.commit()
 
 @pytest_asyncio.fixture(scope="function", loop_scope="function", autouse=True)
