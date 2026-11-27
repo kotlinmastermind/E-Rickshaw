@@ -142,6 +142,7 @@ def test_production_settings_reject_missing_merchant_id(monkeypatch):
             DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/prod_db",
             DATABASE_URL_SYNC="postgresql+psycopg2://user:pass@localhost:5432/prod_db",
             SECRET_KEY="S3cureJwtProdSecretValue_AtLeast32Chars!!",
+            PAYOUT_DESTINATION_ENCRYPTION_KEY="TestOnlyPayoutEncryptionKey_AtLeast32Chars!!",
             RAZORPAY_KEY_ID="rzp_live_1234567890abcd",
             RAZORPAY_KEY_SECRET="live_secret_value_at_least_16_chars",
             RAZORPAY_WEBHOOK_SECRET="live_webhook_secret_at_least_16",

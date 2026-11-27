@@ -38,6 +38,7 @@ def test_production_succeeds_with_valid_configuration(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://user:pass@host:5432/db")
     monkeypatch.setenv("DATABASE_URL_SYNC", "postgresql+psycopg2://user:pass@host:5432/db")
     monkeypatch.setenv("SECRET_KEY", "production-cryptographically-secure-key-99887766")
+    monkeypatch.setenv("PAYOUT_DESTINATION_ENCRYPTION_KEY", "test-only-payout-encryption-key-alpha-99887766")
     monkeypatch.setenv("RAZORPAY_KEY_ID", "rzp_live_12345678901234")
     monkeypatch.setenv("RAZORPAY_KEY_SECRET", "production_secret_key_12345678")
     monkeypatch.setenv("RAZORPAY_WEBHOOK_SECRET", "production_webhook_secret_123456")

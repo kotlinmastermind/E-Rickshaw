@@ -34,13 +34,26 @@ def upgrade() -> None:
         "WHERE account_number_encrypted IS NULL AND upi_vpa_encrypted IS NULL"
     ))
     # Older releases stored UPI IDs in both columns in plaintext. Retain only a masked suffix.
-    op.execute(sa.text(
-        "UPDATE driver_payout_accounts "
-        "SET account_number_mask = CASE WHEN length(upi_vpa) > 4 "
-        "THEN repeat('*', greatest(4, length(upi_vpa) - 4)) || right(upi_vpa, 4) "
-        "ELSE '****' END, upi_vpa = NULL "
-        "WHERE account_type = 'UPI' AND upi_vpa IS NOT NULL"
-    ))
+    upi_rows = bind.execute(
+        sa.text(
+            "SELECT id, upi_vpa FROM driver_payout_accounts "
+            "WHERE account_type = 'UPI' AND upi_vpa IS NOT NULL"
+        )
+    ).fetchall()
+    for row_id, upi_vpa in upi_rows:
+        cleaned = (upi_vpa or "").strip()
+        if len(cleaned) > 4:
+            masked = ("*" * min(28, max(4, len(cleaned) - 4))) + cleaned[-4:]
+        else:
+            masked = "****"
+        bind.execute(
+            sa.text(
+                "UPDATE driver_payout_accounts "
+                "SET account_number_mask = :masked, upi_vpa = NULL "
+                "WHERE id = :row_id"
+            ),
+            {"masked": masked, "row_id": row_id},
+        )
 
 
 def downgrade() -> None:
