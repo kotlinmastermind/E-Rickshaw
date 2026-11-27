@@ -30,8 +30,8 @@ fun PaymentMethodPickerScreen(onNavigate: (String) -> Unit) {
 
     val methods = listOf(
         Triple("UPI", "Instant UPI (Google Pay, PhonePe, Paytm)", "⚡"),
-        Triple("WALLET", "RiderGo Cashless Wallet (₹485.00 Available)", "👛"),
-        Triple("CARD", "Credit / Debit Card (HDFC **** 4812)", "💳"),
+        Triple("WALLET", "RiderGo Cashless Wallet (verify live balance)", "👛"),
+        Triple("CARD", "Credit / Debit Card (select securely at checkout)", "💳"),
         Triple("CASH", "Cash to Pilot upon Arrival", "💵")
     )
 
@@ -83,7 +83,10 @@ fun PaymentMethodPickerScreen(onNavigate: (String) -> Unit) {
 @Composable
 fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
     val wallet by RiderRepository.wallet.collectAsState()
+    val walletLoaded by RiderRepository.walletLoaded.collectAsState()
+    val walletError by RiderRepository.walletError.collectAsState()
     val topupState by RiderRepository.topupState.collectAsState()
+    val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     val activity = context as? android.app.Activity
 
@@ -106,14 +109,34 @@ fun CashlessWalletHubScreen(onNavigate: (String) -> Unit) {
         NeoCard(borderColor = BorderFocus, backgroundColor = SurfaceCard) {
             Text(text = "Available Wallet Balance", color = TextMuted, fontSize = 12.sp)
             Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "₹${String.format(java.util.Locale.US, "%.2f", wallet.displayBalanceRupees)}",
-                color = ElectricCyan,
-                fontSize = 38.sp,
-                fontWeight = FontWeight.ExtraBold
-            )
+            if (!walletLoaded) {
+                Text("Balance not verified", color = AmberGold, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            } else {
+                Text(
+                    text = "₹${String.format(java.util.Locale.US, "%.2f", wallet.displayBalanceRupees)}",
+                    color = ElectricCyan,
+                    fontSize = 38.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
             Spacer(modifier = Modifier.height(14.dp))
-            NeoBadge(text = "AUTHORITATIVE SUPABASE LEDGER", backgroundColor = EmeraldGlow, textColor = EmeraldGreen)
+            if (walletError != null) {
+                Text("Could not refresh wallet balance. The last verified value may be stale.", color = AmberGold, fontSize = 11.sp)
+            }
+            NeoBadge(
+                text = if (walletLoaded && walletError == null) "BACKEND BALANCE VERIFIED" else "BALANCE NOT VERIFIED",
+                backgroundColor = if (walletLoaded && walletError == null) EmeraldGlow else AmberGold,
+                textColor = if (walletLoaded && walletError == null) EmeraldGreen else CanvasBlack
+            )
+            if (!walletLoaded || walletError != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                NeoButton(
+                    text = "Retry Balance Verification",
+                    onClick = { scope.launch { RiderRepository.fetchWalletBalance() } },
+                    backgroundColor = AmberGold,
+                    textColor = CanvasBlack
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
