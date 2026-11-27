@@ -469,9 +469,8 @@
                             👨‍✈️
                         </div>
                         <div>
-                            <h3 id="drawer-title" class="text-sm font-bold text-white">Pilot Ramesh Kumar</h3>
-                            <p id="drawer-subtitle" class="text-xs text-slate-400 font-mono">DL-1ER-4921 • Mahindra Treo
-                            </p>
+                            <h3 id="drawer-title" class="text-sm font-bold text-white">Entity details</h3>
+                            <p id="drawer-subtitle" class="text-xs text-slate-400 font-mono">Select a live entity to inspect</p>
                         </div>
                     </div>
                     <button onclick="closeInspectorDrawer()"
@@ -951,40 +950,9 @@
                                 <th class="py-3.5 px-4 text-right">Dispatch Control</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-border text-slate-300">
-                            <tr>
-                                <td class="py-3.5 px-4 font-bold text-amber-glow flex items-center gap-2">
-                                    <i data-lucide="alert-circle" class="w-4 h-4"></i> Route Deviation Watchdog
-                                </td>
-                                <td class="py-3.5 px-4">Pilot Mukesh S. (DL-1ER-2201)</td>
-                                <td class="py-3.5 px-4 font-mono text-slate-200">Vikas Marg (+340m off course)</td>
-                                <td class="py-3.5 px-4 text-slate-400 font-mono">4 mins ago</td>
-                                <td class="py-3.5 px-4">
-                                    <span
-                                        class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px]">REASON
-                                        LOGGED: WATERLOGGING</span>
-                                </td>
-                                <td class="py-3.5 px-4 text-right">
-                                    <button onclick="showToast('Pilot contacted via masked security proxy')"
-                                        class="px-2.5 py-1 rounded-lg bg-surface border border-border text-xs text-white hover:text-cyan-glow">Call
-                                        Pilot</button>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td class="py-3.5 px-4 font-bold text-emerald-glow flex items-center gap-2">
-                                    <i data-lucide="mic" class="w-4 h-4"></i> Audio Safety Shield Closed
-                                </td>
-                                <td class="py-3.5 px-4">Rider Priya S. (#TRP-8812)</td>
-                                <td class="py-3.5 px-4 font-mono text-slate-200">Mayur Vihar Metro Corridor</td>
-                                <td class="py-3.5 px-4 text-slate-400 font-mono">1h ago</td>
-                                <td class="py-3.5 px-4">
-                                    <span
-                                        class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px]">ENCRYPTED
-                                        AES-256 STORED</span>
-                                </td>
-                                <td class="py-3.5 px-4 text-right">
-                                    <button onclick="showToast('Audit report dispatched to safety auditor')"
-                                        class="px-2.5 py-1 rounded-lg bg-surface border border-border text-xs text-white hover:text-cyan-glow">Audit</button>
+                        <tbody class="divide-y divide-border text-slate-300">                            <tr>
+                                <td colspan="6" class="py-8 text-center text-slate-500 font-mono text-xs">
+                                    No live route-deviation or safety alerts are currently supplied by the backend.
                                 </td>
                             </tr>
                         </tbody>
@@ -4269,7 +4237,7 @@
             const scopeKey = `${paymentId}:${amountCents}:${reason.trim()}`;
             let idem = _inflightAdminRefundKeys.get(scopeKey);
             if (!idem) {
-                idem = `adm_${paymentId.slice(0, 12)}_${amountCents}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`.slice(0, 128);
+                idem = `adm_${crypto.randomUUID()}`.slice(0, 128);
                 _inflightAdminRefundKeys.set(scopeKey, idem);
             }
             if (btnEl) btnEl.disabled = true;
