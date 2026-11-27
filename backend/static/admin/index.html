@@ -2929,7 +2929,7 @@
                 if (driver.status === 'AVAILABLE') dutyBadge = '<span class="text-emerald-glow font-mono">🟢 AVAILABLE</span>';
                 if (driver.status === 'BUSY') dutyBadge = '<span class="text-cyan-glow font-mono">🔵 BUSY</span>';
                 if (driver.status === 'PENDING') dutyBadge = '<span class="text-amber-glow font-mono">🟡 PENDING REVIEW</span>';
-                if (driver.status === 'REJECTED' || driver.status === 'SUSPENDED') dutyBadge = '<span class="text-crimson-glow font-mono">🔴 ${escapeHtml(driver.status)}</span>';
+                if (driver.status === 'REJECTED' || driver.status === 'SUSPENDED') dutyBadge = `<span class="text-crimson-glow font-mono">🔴 ${escapeHtml(driver.status)}</span>`;
 
                 const encoded = [driver.id, name, phone, category].map(value => encodeURIComponent(String(value ?? '')));
                 tr.innerHTML = `
