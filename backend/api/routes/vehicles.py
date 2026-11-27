@@ -519,7 +519,12 @@ async def get_nearby_vehicles(
             eta_mins = max(int(round((dist_km / 22.0) * 60.0)), 2)
             vehicles.append({
                 "id": prof.id,
-                "driver_name": user.full_name.strip() if user.full_name and user.full_name.strip() else None,
+                "driver_name": (
+                    user.full_name.strip()
+                    if user.full_name and user.full_name.strip()
+                    and user.full_name.strip().casefold() != "distinguished guest"
+                    else None
+                ),
                 "driver_phone": user.phone_number,
                 "rating": (
                     round(float(prof.rating_average), 2)
