@@ -149,6 +149,17 @@ async def test_ride_cannot_have_multiple_accepted_drivers(db_session):
     db_session.add_all([d_prof1, d_prof2])
     await db_session.flush()
 
+    driver_vehicle = Vehicle(
+        id=str(uuid.uuid4()), category_id=cat.id, make="Test", model="E-Rickshaw",
+        year=2025, license_plate=f"DL-MULTI-{suffix}", is_active=True
+    )
+    db_session.add(driver_vehicle)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=d_prof1.id, vehicle_id=driver_vehicle.id, is_active=True))
+    await LiveLocationService(db=db_session).ingest_driver_location(
+        d_prof1.id, 28.6140, 77.2091, is_online=True
+    )
+
     now = datetime.now(timezone.utc)
     assign1 = RideAssignment(ride_id=ride.id, driver_id=d_prof1.id, status="OFFERED", expires_at=now + timedelta(seconds=20))
     db_session.add(assign1)
