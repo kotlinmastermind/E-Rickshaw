@@ -41,6 +41,7 @@ async def test_admin_live_feed_reports_only_persisted_location_and_vehicle(db_se
     assigned = ride(f"feed-assigned-{suffix}", "IN_PROGRESS", assigned=driver.id)
     paused = ride(f"feed-paused-{suffix}", "PAUSED", assigned=driver.id)
     waiting = ride(f"feed-waiting-{suffix}", "REQUESTED")
+    waiting.requested_at = now - timedelta(minutes=10)
     completed = ride(f"feed-completed-{suffix}", "COMPLETED", final_fare=12345)
     completed_without_final_fare = ride(f"feed-completed-no-fare-{suffix}", "COMPLETED", final_fare=None)
     db_session.add_all([assigned, paused, waiting, completed, completed_without_final_fare])
