@@ -187,6 +187,12 @@ async def test_driver_from_adjacent_service_area_cannot_receive_or_accept_ride(d
     assert exc.value.status_code == 403
     assert "outside this ride's active service area" in exc.value.detail
 
+    # The separate /dispatch/offer/{ride_id}/accept path must enforce the same rule.
+    from backend.application.services.smart_dispatch_service import SmartDispatchService
+    with pytest.raises(HTTPException) as dispatch_exc:
+        await SmartDispatchService(db_session).accept_offer(driver_user.id, ride.id)
+    assert dispatch_exc.value.status_code == 403
+
     await db_session.refresh(ride)
     assert ride.status == "REQUESTED"
     assert ride.assigned_driver_id is None
