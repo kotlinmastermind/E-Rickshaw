@@ -3078,21 +3078,13 @@
             document.getElementById('tariff-edit-name').innerText = `Configure ${cat.name}`;
             document.getElementById('tariff-edit-code').innerText = cat.code || cat.id;
 
-            // Extract numeric defaults
-            const parseNum = (str, fallback) => {
-                if (typeof str === 'number') return str;
-                if (!str) return fallback;
-                const m = str.match(/[\d.]+/);
-                return m ? parseFloat(m[0]) : fallback;
-            };
-
-            document.getElementById('tariff-input-base').value = cat.baseFareRupees ?? parseNum(cat.base, 20);
-            document.getElementById('tariff-input-per-km').value = cat.perKmRupees ?? parseNum(cat.perKm, 10);
-            document.getElementById('tariff-input-per-min').value = cat.perMinuteRupees ?? parseNum(cat.perMin, 1);
-            document.getElementById('tariff-input-min-fare').value = cat.minimumFareRupees ?? parseNum(cat.minFare, 20);
-            document.getElementById('tariff-input-surge').value = cat.surgeMultiplier ?? 1.0;
-            document.getElementById('tariff-input-cancellation').value = 10;
-            document.getElementById('tariff-input-reason').value = '';
+            // Leave missing tariff fields empty; never substitute sample prices.
+            document.getElementById('tariff-input-base').value = cat.baseFareRupees ?? '';
+            document.getElementById('tariff-input-per-km').value = cat.perKmRupees ?? '';
+            document.getElementById('tariff-input-per-min').value = cat.perMinuteRupees ?? '';
+            document.getElementById('tariff-input-min-fare').value = cat.minimumFareRupees ?? '';
+            document.getElementById('tariff-input-surge').value = cat.surgeMultiplier ?? '';
+            document.getElementById('tariff-input-cancellation').value = cat.cancellationFeeRupees ?? '';            document.getElementById('tariff-input-reason').value = '';
 
             document.getElementById('modal-tariff-edit').classList.remove('hidden');
             if (window.lucide) lucide.createIcons();
