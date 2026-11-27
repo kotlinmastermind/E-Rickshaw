@@ -1111,6 +1111,48 @@ async def create_geofence(
     })
     return {**result, "status": "CREATED", "zone_id": result["id"]}
 
+@router.put("/geofences/{zone_id}")
+async def update_geofence(
+    zone_id: str,
+    payload: GeofencePayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    existing = await db.get(GeofenceZone, zone_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Geofence zone not found.")
+    result = await AdminGovernanceService(db).save_geofence(admin.id, zone_id, {
+        "name": payload.name,
+        "zone_type": payload.zone_type,
+        "city_code": payload.city_code,
+        "coordinates": payload.coordinates,
+        "surge_multiplier": payload.surge_multiplier,
+        "is_active": True,
+    })
+    return {**result, "status": "UPDATED", "zone_id": result["id"]}
+
+
+@router.delete("/geofences/{zone_id}")
+async def deactivate_geofence(
+    zone_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    existing = await db.get(GeofenceZone, zone_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Geofence zone not found.")
+    import json
+    result = await AdminGovernanceService(db).save_geofence(admin.id, zone_id, {
+        "name": existing.name,
+        "zone_type": existing.zone_type,
+        "city_code": existing.city_code,
+        "coordinates": json.loads(existing.coordinates_json),
+        "surge_multiplier": existing.surge_multiplier,
+        "is_active": False,
+    })
+    return {**result, "status": "DEACTIVATED", "zone_id": result["id"]}
+
+
 @router.get("/geofences")
 async def list_geofences(
     admin: User = Depends(get_current_admin),
@@ -1143,6 +1185,11 @@ async def assign_driver_to_service_area(
     zone = await db.get(GeofenceZone, service_area_id)
     if not driver:
         raise HTTPException(status_code=404, detail="Driver profile not found.")
+    if driver.approval_status != "APPROVED":
+        raise HTTPException(status_code=409, detail="Only approved drivers can be assigned to an operational service area.")
+    driver_user = await db.get(User, driver.user_id)
+    if not driver_user or not driver_user.is_active:
+        raise HTTPException(status_code=409, detail="Inactive driver accounts cannot be assigned to a service area.")
     if not zone or not zone.is_active or zone.zone_type != "SERVICE_AREA":
         raise HTTPException(status_code=404, detail="Active operational service area not found.")
     assignment = (await db.execute(select(DriverServiceAreaAssignment).where(
