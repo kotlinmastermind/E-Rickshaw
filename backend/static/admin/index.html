@@ -2656,35 +2656,39 @@
         function openDriverInspector(driver) {
             STATE.selectedEntity = { type: 'driver', data: driver };
             document.getElementById('drawer-avatar').innerText = '👨‍✈️';
-            document.getElementById('drawer-title').innerText = driver.name;
-            document.getElementById('drawer-subtitle').innerText = `${driver.plate} • ${driver.model}`;
+            document.getElementById('drawer-title').innerText = driver.name || `Driver ${String(driver.id).slice(0, 8)}`;
+            document.getElementById('drawer-subtitle').innerText = [driver.plate, driver.model].filter(Boolean).join(' • ') || 'Vehicle assignment unavailable';
 
             const dot = document.getElementById('drawer-status-dot');
             const statusText = document.getElementById('drawer-status-text');
             if (driver.status === 'AVAILABLE') {
-                dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-glow animate-pulse';
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-glow';
                 statusText.className = 'text-xs font-bold text-emerald-glow';
                 statusText.innerText = 'AVAILABLE FOR DISPATCH';
-            } else if (driver.status === 'IN_TRIP') {
-                dot.className = 'w-2.5 h-2.5 rounded-full bg-cyan-glow animate-pulse';
+            } else if (driver.status === 'BUSY') {
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-cyan-glow';
                 statusText.className = 'text-xs font-bold text-cyan-glow';
-                statusText.innerText = 'IN-TRIP NAVIGATION';
+                statusText.innerText = 'BUSY ON RIDE';
+            } else if (driver.status === 'PENDING') {
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-glow';
+                statusText.className = 'text-xs font-bold text-amber-glow';
+                statusText.innerText = 'PENDING APPROVAL';
             } else {
-                dot.className = 'w-2.5 h-2.5 rounded-full bg-crimson-glow animate-pulse';
-                statusText.className = 'text-xs font-bold text-crimson-glow';
-                statusText.innerText = 'ALERT: BATTERY RESERVE LOW';
+                dot.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+                statusText.className = 'text-xs font-bold text-slate-400';
+                statusText.innerText = driver.status || 'OFFLINE';
             }
 
-            document.getElementById('drawer-battery').innerText = `${driver.battery}% (~${Math.round(driver.battery * 0.5)} km)`;
-            document.getElementById('drawer-speed').innerText = `${driver.speed} km/h`;
-            document.getElementById('drawer-rating').innerText = `${driver.rating} ★`;
-            document.getElementById('drawer-trips').innerText = driver.trips.toLocaleString();
-            document.getElementById('drawer-phone').innerText = driver.phone;
-            document.getElementById('drawer-dl').innerText = driver.dl;
-            document.getElementById('drawer-category').innerText = driver.category;
+            document.getElementById('drawer-battery').innerText = driver.battery == null ? 'Telemetry unavailable' : `${driver.battery}%`;
+            document.getElementById('drawer-speed').innerText = driver.speed == null ? 'Telemetry unavailable' : `${driver.speed} km/h`;
+            document.getElementById('drawer-rating').innerText = driver.rating == null ? 'Not rated' : `${Number(driver.rating).toFixed(1)} ★`;
+            document.getElementById('drawer-trips').innerText = Number(driver.trips || 0).toLocaleString();
+            document.getElementById('drawer-phone').innerText = driver.phone || 'Not provided';
+            document.getElementById('drawer-dl').innerText = driver.dl || 'Not available';
+            document.getElementById('drawer-category').innerText = driver.category || 'Not assigned';
 
             const tripCard = document.getElementById('drawer-trip-card');
-            if (driver.status === 'IN_TRIP' && driver.tripId) {
+            if (driver.status === 'BUSY' && driver.tripId) {
                 tripCard.classList.remove('hidden');
                 document.getElementById('drawer-trip-id').innerText = `#${driver.tripId}`;
                 document.getElementById('drawer-pickup').innerText = driver.pickup;
