@@ -26,7 +26,7 @@ async def test_admin_mfa_recovery_rotates_secret_keeps_mfa_enabled_and_revokes_s
 
     monkeypatch.setattr(
         "backend.scripts.recover_admin_mfa.revoke_session_cache",
-        fake_revoke_user_cache,
+        fake_revoke_session_cache,
     )
 
     result = await rotate_admin_mfa(
@@ -77,7 +77,7 @@ async def test_admin_mfa_recovery_rejects_wrong_password_without_mutation(
         pytest.fail("Cache revocation must not run for invalid credentials.")
 
     monkeypatch.setattr(
-        "backend.scripts.recover_admin_mfa.revoke_user_cache",
+        "backend.scripts.recover_admin_mfa.revoke_session_cache",
         unexpected_cache_revoke,
     )
 
