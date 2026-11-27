@@ -287,6 +287,9 @@ data class DriverEarningsSummaryDto(
     @SerializedName("today_distance_km") val todayDistanceKm: Double = 0.0,
     @SerializedName("wallet_balance_cents") val walletBalanceCents: Long = 0L,
     @SerializedName("wallet_balance_rupees") val directWalletBalanceRupees: Double? = null,
+    @SerializedName("commission_outstanding_cents") val commissionOutstandingCents: Long = 0L,
+    @SerializedName("withdrawable_balance_cents") val withdrawableBalanceCents: Long = 0L,
+    @SerializedName("withdrawable_balance_rupees") val directWithdrawableBalanceRupees: Double? = null,
     @SerializedName("rating_average") val ratingAverage: Double = 0.0,
     @SerializedName("rating_count") val ratingCount: Int = 0,
     @SerializedName("commission_accrued_cents") val commissionAccruedCents: Long = 0L,
@@ -309,8 +312,11 @@ data class DriverEarningsSummaryDto(
     val commissionPayableRupees: Double get() = commissionPayableCents / 100.0
     val commissionReceivableRupees: Double get() = commissionReceivableCents / 100.0
     val walletBalanceRupees: Double get() = directWalletBalanceRupees ?: (walletBalanceCents / 100.0)
+    val commissionOutstandingRupees: Double get() = commissionOutstandingCents / 100.0
+    val withdrawableBalanceRupees: Double get() = directWithdrawableBalanceRupees ?: (withdrawableBalanceCents / 100.0)
     val displayTodayNetRupees: Double get() = todayGrossRupees
     val displayWalletBalanceRupees: Double get() = walletBalanceRupees
+    val displayWithdrawableBalanceRupees: Double get() = withdrawableBalanceRupees
     val completedTripsToday: Int get() = totalCompletedTrips
 }
 
