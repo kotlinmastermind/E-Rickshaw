@@ -1132,8 +1132,8 @@ object DriverRepository {
 
     fun requestInstantWithdrawal(
         amountRupees: Double,
-        accountNumberMask: String = "**** 9988",
-        ifsc: String = "HDFC0001234",
+        accountNumberMask: String,
+        ifsc: String,
         idempotencyKey: String? = null,
         onResult: (Boolean) -> Unit = {}
     ) {
