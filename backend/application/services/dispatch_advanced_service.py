@@ -89,6 +89,17 @@ class DispatchAdvancedService:
 
         driver_prof = await DispatchAdvancedService._resolve_driver_profile(session, driver_id_or_user_id)
         drv_id = driver_prof.id if driver_prof else driver_id_or_user_id
+        if not ride.service_area_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Scheduled ride has no validated operational service area.")
+        from backend.application.services.service_area_service import ServiceAreaService
+        service_areas = ServiceAreaService(session)
+        resolved_area = await service_areas.resolve_route(
+            ride.pickup_latitude, ride.pickup_longitude,
+            ride.destination_latitude, ride.destination_longitude,
+        )
+        if resolved_area.id != ride.service_area_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Scheduled ride service area no longer matches its route.")
+        await service_areas.require_driver_assignment(drv_id, ride.service_area_id)
 
         sched_time = ride.scheduled_pickup_time
         start_conflict = sched_time - timedelta(minutes=60)
