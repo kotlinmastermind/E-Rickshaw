@@ -94,13 +94,22 @@ async def get_driver_profile(user: User = Depends(get_current_driver), db: Async
         "id": driver.id,
         "driver_id": driver.id,
         "user_id": user.id,
-        "full_name": user.full_name,
+        "full_name": (
+            user.full_name
+            if user.full_name and user.full_name.strip()
+            and user.full_name.strip().casefold() != "distinguished guest"
+            else ""
+        ),
         "phone_number": user.phone_number,
         "email": user.email,
         "license_number": driver.license_number,
         "approval_status": driver.approval_status,
-        "rating_average": driver.rating_average,
-        "rating_count": driver.rating_count,
+        "rating_average": (
+            driver.rating_average
+            if int(driver.rating_count or 0) > 0 and driver.rating_average is not None
+            else None
+        ),
+        "rating_count": int(driver.rating_count or 0),
         "total_trips": driver.total_trips,
         "wallet_balance_cents": driver.wallet_balance_cents,
         "avatar_url": user.avatar_url
