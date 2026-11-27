@@ -328,11 +328,8 @@
                         <div>
                             <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Available Drivers
                             </p>
-                            <h3 id="stat-online-drivers" class="text-xl font-extrabold text-white font-mono">24</h3>
-                            <p class="text-[10px] text-emerald-glow font-medium flex items-center gap-1">
-                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-glow animate-ping"></span> 100% Feeder
-                                Ready
-                            </p>
+                            <h3 id="stat-online-drivers" class="text-xl font-extrabold text-white font-mono">0</h3>
+                            <p class="text-[10px] text-emerald-glow font-medium">Approved drivers currently online</p>
                         </div>
                     </div>
 
@@ -344,8 +341,8 @@
                         </div>
                         <div>
                             <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Running Rides</p>
-                            <h3 id="stat-active-rides" class="text-xl font-extrabold text-white font-mono">8</h3>
-                            <p class="text-[10px] text-cyan-glow font-medium">In-Trip Navigation</p>
+                            <h3 id="stat-active-rides" class="text-xl font-extrabold text-white font-mono">0</h3>
+                            <p class="text-[10px] text-cyan-glow font-medium">Persisted active ride records</p>
                         </div>
                     </div>
 
@@ -358,8 +355,8 @@
                         <div>
                             <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Waiting Riders
                             </p>
-                            <h3 id="stat-waiting-riders" class="text-xl font-extrabold text-white font-mono">5</h3>
-                            <p class="text-[10px] text-amber-glow font-medium">Avg Pickup: 2.4 min</p>
+                            <h3 id="stat-waiting-riders" class="text-xl font-extrabold text-white font-mono">0</h3>
+                            <p class="text-[10px] text-amber-glow font-medium">Open ride requests</p>
                         </div>
                     </div>
 
@@ -371,10 +368,10 @@
                             <i data-lucide="indian-rupee" class="w-5 h-5"></i>
                         </div>
                         <div>
-                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Today's Revenue
+                            <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Completed Ride Fares
                             </p>
-                            <h3 id="stat-revenue" class="text-xl font-extrabold text-white font-mono">₹48,250</h3>
-                            <p class="text-[10px] text-emerald-glow font-medium">+18.4% vs Yesterday</p>
+                            <h3 id="stat-revenue" class="text-xl font-extrabold text-white font-mono">₹0</h3>
+                            <p class="text-[10px] text-emerald-glow font-medium">Finalized fares from completed rides</p>
                         </div>
                     </div>
 
@@ -388,8 +385,8 @@
                         <div>
                             <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Peak Multiplier
                             </p>
-                            <h3 id="stat-surge" class="text-xl font-extrabold text-white font-mono">1.8x</h3>
-                            <p class="text-[10px] text-purple-400 font-medium">Anand Vihar ISBT</p>
+                            <h3 id="stat-surge" class="text-xl font-extrabold text-white font-mono">N/A</h3>
+                            <p class="text-[10px] text-purple-400 font-medium">No live surge data</p>
                         </div>
                     </div>
 
@@ -401,7 +398,7 @@
                         </div>
                         <div>
                             <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Pending KYC</p>
-                            <h3 id="stat-pending-kyc" class="text-xl font-extrabold text-white font-mono">2</h3>
+                            <h3 id="stat-pending-kyc" class="text-xl font-extrabold text-white font-mono">0</h3>
                             <p class="text-[10px] text-amber-glow font-medium">Action Required</p>
                         </div>
                     </div>
@@ -421,15 +418,15 @@
 
                 <button onclick="filterMap('all')" id="filter-all"
                     class="map-filter-btn px-3 py-1 rounded-xl text-xs font-semibold bg-cyan-glow text-black font-mono shadow-sm">
-                    All (37)
+                    All
                 </button>
                 <button onclick="filterMap('available')" id="filter-available"
                     class="map-filter-btn px-3 py-1 rounded-xl text-xs font-semibold bg-surface hover:bg-card text-emerald-glow border border-emerald-glow/30 font-mono">
-                    🟢 Available (24)
+                    🟢 Available
                 </button>
                 <button onclick="filterMap('busy')" id="filter-busy"
                     class="map-filter-btn px-3 py-1 rounded-xl text-xs font-semibold bg-surface hover:bg-card text-cyan-glow border border-cyan-glow/30 font-mono">
-                    🔵 In-Trip (8)
+                    🔵 In-Trip
                 </button>
                 <button onclick="filterMap('riders')" id="filter-riders"
                     class="map-filter-btn px-3 py-1 rounded-xl text-xs font-semibold bg-surface hover:bg-card text-amber-glow border border-amber-glow/30 font-mono">
@@ -721,7 +718,7 @@
                                 <th class="py-3.5 px-4">User ID & Name</th>
                                 <th class="py-3.5 px-4">Mobile Number</th>
                                 <th class="py-3.5 px-4">Completed Trips</th>
-                                <th class="py-3.5 px-4">Lifetime Spend</th>
+                                <th class="py-3.5 px-4">Completed Ride Fares</th>
                                 <th class="py-3.5 px-4">Rating</th>
                                 <th class="py-3.5 px-4">Account Status</th>
                                 <th class="py-3.5 px-4">Customer KYC</th>
@@ -2763,7 +2760,7 @@
             STATE.selectedEntity = { type: 'rider', data: rider };
             document.getElementById('drawer-avatar').innerText = '🚶';
             document.getElementById('drawer-title').innerText = rider.name;
-            document.getElementById('drawer-subtitle').innerText = `Commuter • Waiting for Feeder Cab`;
+            document.getElementById('drawer-subtitle').innerText = `Customer • Requested ride`;
 
             const dot = document.getElementById('drawer-status-dot');
             const statusText = document.getElementById('drawer-status-text');
@@ -2775,13 +2772,13 @@
             document.getElementById('drawer-speed').innerText = '0 km/h';
             document.getElementById('drawer-rating').innerText = rider.rating == null ? 'Not rated' : `${rider.rating} ★`;
             document.getElementById('drawer-trips').innerText = rider.trips == null ? 'Not available' : rider.trips.toLocaleString();
-            document.getElementById('drawer-phone').innerText = rider.phone;
-            document.getElementById('drawer-dl').innerText = 'Verified Commuter';
-            document.getElementById('drawer-category').innerText = 'Eco-Feeder Pool';
+            document.getElementById('drawer-phone').innerText = rider.phone || 'Not provided';
+            document.getElementById('drawer-dl').innerText = 'Customer record';
+            document.getElementById('drawer-category').innerText = 'Ride request';
 
             const tripCard = document.getElementById('drawer-trip-card');
             tripCard.classList.remove('hidden');
-            document.getElementById('drawer-trip-id').innerText = 'DISPATCH MATCHING';
+            document.getElementById('drawer-trip-id').innerText = `#${rider.ride_id || rider.id}`;
             document.getElementById('drawer-pickup').innerText = rider.pickup;
             document.getElementById('drawer-drop').innerText = rider.targetDrop;
             document.getElementById('drawer-fare').innerText = 'Not available';
@@ -2907,7 +2904,7 @@
                         if (elWaiting) elWaiting.innerText = data.stats.waiting_riders || 0;
 
                         const elConn = document.getElementById('connection-label');
-                        if (elConn) elConn.innerText = 'LIVE SUPABASE (AWS-AP-SOUTHEAST-2)';
+                        if (elConn) elConn.innerText = 'LIVE DATABASE FEED';
                     }
 
                     STATE.drivers = Array.isArray(data.drivers) ? data.drivers : [];
