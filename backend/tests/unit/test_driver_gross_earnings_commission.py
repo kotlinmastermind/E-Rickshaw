@@ -6,6 +6,7 @@ import pytest
 
 from backend.application.services.commission_service import CommissionService
 from backend.application.services.driver_service import DriverService
+from backend.application.services.driver_financial_service import DriverFinancialService
 from backend.domain.models import (
     CustomerProfile, DriverProfile, DriverWallet, FareRule, Ride, User, VehicleCategory,
 )
@@ -77,3 +78,22 @@ async def test_driver_earnings_summary_uses_gross_fares_and_per_ride_commission_
     assert legacy_trip["gross_fare_cents"] == 2000
     assert legacy_trip["commission_cents"] is None
     assert legacy_trip["commission_snapshot_available"] is False
+
+    # A later rate change must not rewrite the rate attached to an earlier ride.
+    await CommissionService.create_and_activate_rule(
+        db_session, category_id=category.id, percentage=20.0, admin_user_id=None, reason="Later rate change test"
+    )
+    estimate = await CommissionService.estimate_for_ride(db_session, digital_ride)
+    assert estimate["estimated_driver_earnings_cents"] == 10000
+    assert estimate["estimated_commission_cents"] == 2000
+    assert estimate["estimated_commission_percentage"] == 20.0
+
+    breakdown = await DriverFinancialService(db_session).get_ride_earnings_breakdown(driver_user.id, digital_ride.id)
+    assert breakdown["driver_gross_earnings_cents"] == 10000
+    assert breakdown["deductions_and_supplements"]["platform_commission_cents"] == 1500
+    assert breakdown["deductions_and_supplements"]["platform_commission_percentage"] == 15.0
+    assert breakdown["fare_breakdown"]["components_available"] is False
+
+    legacy_breakdown = await DriverFinancialService(db_session).get_ride_earnings_breakdown(driver_user.id, legacy_ride.id)
+    assert legacy_breakdown["deductions_and_supplements"]["platform_commission_cents"] is None
+    assert legacy_breakdown["settlement_status"] == "COMMISSION_SNAPSHOT_UNAVAILABLE"
