@@ -47,6 +47,7 @@ class RideService:
             math.sin(delta_lat / 2) ** 2
             + math.cos(lat_a) * math.cos(lat_b) * math.sin(delta_lon / 2) ** 2
         )
+        haversine = min(1.0, max(0.0, haversine))
         return 6371.0 * 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
 
     @classmethod
@@ -187,6 +188,17 @@ class RideService:
 
                     # Bind both route endpoints to the stored price lock. A pickup-only
                     # check allowed a changed destination to reuse an unrelated fare.
+                    supplied_coordinates = (
+                        pickup_latitude, pickup_longitude,
+                        destination_latitude, destination_longitude,
+                    )
+                    if any(value is not None for value in supplied_coordinates) and any(
+                        value is None for value in supplied_coordinates
+                    ):
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Pickup and destination coordinates must be supplied together when booking with a price lock.",
+                        )
                     for label, requested_lat, requested_lng, locked_lat, locked_lng in (
                         ("Pickup", pickup_latitude, pickup_longitude, candidate_lock.pickup_latitude, candidate_lock.pickup_longitude),
                         ("Destination", destination_latitude, destination_longitude, candidate_lock.destination_latitude, candidate_lock.destination_longitude),
