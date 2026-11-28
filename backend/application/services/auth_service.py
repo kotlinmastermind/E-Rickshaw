@@ -40,7 +40,7 @@ class AuthService:
 
         # Reserve the resend window atomically before contacting Twilio. A separate
         # EXISTS followed by SET allows concurrent workers to send duplicate SMS.
-        cooldown_key = f"otp_cooldown:{hashlib.sha256(norm_phone.encode("utf-8")).hexdigest()}"
+        cooldown_key = f"otp_cooldown:{hashlib.sha256(norm_phone.encode('utf-8')).hexdigest()}"
         try:
             reserved = await redis_client.set_nx_strict(
                 cooldown_key,
