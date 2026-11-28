@@ -457,8 +457,9 @@ async def test_dispatch_offer_acceptance_revalidates_current_driver_eligibility(
     elif eligibility_change == "location":
         await LiveLocationService(db=db_session).ingest_driver_location(
             driver_id=driver.id,
-            latitude=28.0,
-            longitude=77.0,
+            # Use a point unambiguously outside the Delhi operational polygon.
+            latitude=0.0,
+            longitude=0.0,
             is_online=True,
             is_busy=False,
         )
