@@ -1,6 +1,7 @@
 import json
 import asyncio
 import logging
+import math
 import time
 import uuid
 from typing import Dict, Set, Optional, Any
@@ -778,8 +779,11 @@ async def location_telemetry_websocket(
     ticket: Optional[str] = Query(None)
 ):
     """
-    Real-time high-frequency GPS stream for Drivers and Commuters.
-    Requires Authorization: Bearer <token> header or ?ticket=<uuid>.
+    Compatibility GPS stream.
+
+    Driver ride IDs are always resolved from the driver's assigned active ride.
+    Customer location is accepted only for a ride owned by that customer.
+    Session/account authorization is revalidated while the socket is alive.
     """
     raw_token = extract_ws_token(websocket)
     if not raw_token:
@@ -792,113 +796,205 @@ async def location_telemetry_websocket(
         return
 
     user_id = payload.get("user_id") or payload.get("sub")
-    role = str(payload.get("role") or "").lower()
+    role = str(payload.get("role") or "").strip().lower()
     session_id = payload.get("session_id", "")
-    if not user_id or not session_id:
+    if not user_id or not session_id or role not in ("driver", "customer"):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    if await redis_client.exists(f"revoked_session:{session_id}") or await redis_client.exists(f"revoked_user:{user_id}"):
+    async def current_session_is_valid() -> bool:
+        if not raw_token.startswith("TICKET:"):
+            try:
+                token_payload = decode_jwt_token(raw_token)
+                exp = token_payload.get("exp")
+                if exp and datetime.now(timezone.utc).timestamp() >= float(exp):
+                    return False
+            except Exception:
+                return False
+
+        if (
+            await redis_client.exists(f"revoked_session:{session_id}")
+            or await redis_client.exists(f"revoked_user:{user_id}")
+        ):
+            return False
+
+        try:
+            async with async_session_maker() as db:
+                user = (await db.execute(
+                    select(User).where(User.id == user_id, User.is_active.is_(True))
+                )).scalar_one_or_none()
+                session = (await db.execute(
+                    select(Session).where(
+                        Session.id == session_id,
+                        Session.user_id == user_id,
+                        Session.is_revoked.is_(False),
+                        Session.expires_at > datetime.now(timezone.utc)
+                    )
+                )).scalar_one_or_none()
+                return bool(
+                    user
+                    and str(user.role or "").strip().lower() == role
+                    and session
+                )
+        except Exception:
+            logger.exception("Location WebSocket session revalidation failed for user %s.", user_id)
+            return False
+
+    if not await current_session_is_valid():
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
     await websocket.accept()
     last_update_ts = 0.0
-    MIN_UPDATE_INTERVAL = 0.5  # 500ms throttling to avoid event bus saturation
+    min_update_interval = 0.5
+    reauth_interval = max(5, int(getattr(settings, "RIDE_TRACKING_WS_REAUTH_SECONDS", 30)))
+    last_reauth_time = time.monotonic()
 
     try:
         while True:
-            data = await websocket.receive_text()
+            try:
+                data = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=reauth_interval
+                )
+            except asyncio.TimeoutError:
+                data = None
+
+            now_monotonic = time.monotonic()
+            if data is None or data == "ping" or now_monotonic - last_reauth_time >= reauth_interval:
+                if not await current_session_is_valid():
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    break
+                last_reauth_time = now_monotonic
+
+            if data is None:
+                continue
             if data == "ping":
                 await websocket.send_text("pong")
                 continue
 
-            # Task 072: Throttle location updates to at most once per 500ms
             now_ts = time.time()
-            if (now_ts - last_update_ts) < MIN_UPDATE_INTERVAL:
+            if (now_ts - last_update_ts) < min_update_interval:
                 continue
 
             try:
                 msg = json.loads(data)
-                lat = float(msg.get("latitude", 0.0))
-                lng = float(msg.get("longitude", 0.0))
-                heading = float(msg.get("heading") or 0.0)
-                speed = float(msg.get("speed_mps") or msg.get("speed") or 0.0)
-                source = str(msg.get("source", "GPS"))
-                ride_id = msg.get("ride_id")
+                if not isinstance(msg, dict):
+                    continue
+                lat = float(msg.get("latitude"))
+                lng = float(msg.get("longitude"))
+                heading_raw = msg.get("heading")
+                speed_raw = msg.get("speed_mps", msg.get("speed"))
+                heading = float(heading_raw) if heading_raw is not None else None
+                speed_mps = float(speed_raw) if speed_raw is not None else None
+                source = str(msg.get("source", "GPS")).upper()
 
-                now_iso = datetime.now(timezone.utc).isoformat()
+                if (
+                    not math.isfinite(lat) or not math.isfinite(lng)
+                    or not -90 <= lat <= 90 or not -180 <= lng <= 180
+                    or (heading is not None and (not math.isfinite(heading) or not 0 <= heading <= 360))
+                    or (speed_mps is not None and (not math.isfinite(speed_mps) or not 0 <= speed_mps <= 100))
+                    or source not in {"GPS", "NETWORK", "PASSIVE", "MANUAL", "GNSS", "FUSED"}
+                ):
+                    continue
 
-                if -90 <= lat <= 90 and -180 <= lng <= 180:
-                    last_update_ts = now_ts
-                    cache_key = f"driver_loc:{user_id}" if role == "driver" else f"customer_loc:{user_id}"
-                    loc_data = {
-                        "latitude": lat,
-                        "longitude": lng,
-                        "heading": heading,
-                        "speed_mps": speed,
-                        "source": source,
-                        "updated_at": now_iso
-                    }
-                    try:
-                        await redis_client.set_json(cache_key, loc_data, ex=120)
-                    except Exception:
-                        pass
-
-                    if ride_id:
-                        event_type = "DRIVER_LOCATION_UPDATE" if role == "driver" else "CUSTOMER_LOCATION_UPDATE"
-                        broadcast_payload = {
-                            "event_type": event_type,
-                            "ride_id": ride_id,
-                            "driver_latitude": lat if role == "driver" else None,
-                            "driver_longitude": lng if role == "driver" else None,
-                            "payload": {
-                                "user_id": user_id,
-                                "latitude": lat,
-                                "longitude": lng,
-                                "heading": heading,
-                                "speed_mps": speed,
-                                "source": source,
-                                "updated_at": now_iso
-                            }
-                        }
-                        await ws_manager.broadcast_ride_update(ride_id, broadcast_payload)
+                async with async_session_maker() as db:
+                    user = (await db.execute(
+                        select(User).where(User.id == user_id, User.is_active.is_(True))
+                    )).scalar_one_or_none()
+                    session = (await db.execute(
+                        select(Session).where(
+                            Session.id == session_id,
+                            Session.user_id == user_id,
+                            Session.is_revoked.is_(False),
+                            Session.expires_at > datetime.now(timezone.utc)
+                        )
+                    )).scalar_one_or_none()
+                    if not user or not session or str(user.role or "").strip().lower() != role:
+                        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                        break
 
                     if role == "driver":
-                        admin_payload = {
-                            "event_type": "DRIVER_LOCATION_UPDATE",
-                            "payload": {
-                                "id": user_id,
-                                "driver_id": user_id,
-                                "latitude": lat,
-                                "longitude": lng,
-                                "heading": heading,
-                                "speed": speed,
-                                "last_seen": now_iso
-                            }
+                        from backend.domain.models import DriverAvailability
+                        driver = (await db.execute(
+                            select(DriverProfile).where(DriverProfile.user_id == user_id)
+                        )).scalar_one_or_none()
+                        if not driver or driver.approval_status != "APPROVED":
+                            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                            break
+
+                        availability = (await db.execute(
+                            select(DriverAvailability).where(DriverAvailability.driver_id == driver.id)
+                        )).scalar_one_or_none()
+                        active_ride_ids = (await db.execute(
+                            select(Ride.id).where(
+                                Ride.assigned_driver_id == driver.id,
+                                Ride.status.in_(("ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED"))
+                            ).limit(2)
+                        )).scalars().all()
+                        if len(active_ride_ids) > 1:
+                            logger.error("Driver %s has multiple active rides; location broadcast denied.", driver.id)
+                            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+                            break
+
+                        from backend.application.services.live_location_service import LiveLocationService
+                        await LiveLocationService(db=db).ingest_driver_location(
+                            driver_id=driver.id,
+                            latitude=lat,
+                            longitude=lng,
+                            heading=heading,
+                            speed_mps=speed_mps,
+                            location_source=source,
+                            is_online=bool(availability and availability.is_online),
+                            is_busy=bool(availability and availability.is_busy),
+                            active_ride_id=active_ride_ids[0] if active_ride_ids else None
+                        )
+                    else:
+                        customer = (await db.execute(
+                            select(CustomerProfile).where(CustomerProfile.user_id == user_id)
+                        )).scalar_one_or_none()
+                        ride_id = str(msg.get("ride_id") or "").strip()
+                        if not customer or not ride_id:
+                            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                            break
+
+                        customer_ride = (await db.execute(
+                            select(Ride).where(
+                                Ride.id == ride_id,
+                                Ride.customer_id == customer.id,
+                                Ride.status.in_(("REQUESTED", "ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED"))
+                            )
+                        )).scalar_one_or_none()
+                        if not customer_ride:
+                            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                            break
+
+                        now_iso = datetime.now(timezone.utc).isoformat()
+                        location_data = {
+                            "user_id": user_id,
+                            "latitude": lat,
+                            "longitude": lng,
+                            "heading": heading,
+                            "speed_mps": speed_mps,
+                            "source": source,
+                            "updated_at": now_iso
                         }
-                        await ws_manager.broadcast_admin(admin_payload)
+                        await redis_client.set_json(f"customer_loc:{user_id}", location_data, ex=120)
+                        await ws_manager.broadcast_ride_update(ride_id, {
+                            "event_type": "CUSTOMER_LOCATION_UPDATE",
+                            "ride_id": ride_id,
+                            "payload": location_data
+                        })
+
+                last_update_ts = now_ts
+            except WebSocketDisconnect:
+                raise
             except Exception:
-                pass
+                logger.exception("Rejected or failed location telemetry update for user %s.", user_id)
+                # Invalid telemetry is dropped; authorization and persistence errors fail closed.
+                continue
     except WebSocketDisconnect:
         pass
-    finally:
-        # Task 073: Clean up driver location cache on disconnect
-        if role == "driver":
-            try:
-                await redis_client.delete(f"driver_loc:{user_id}")
-                await ws_manager.broadcast_admin({
-                    "event_type": "DRIVER_OFFLINE",
-                    "payload": {
-                        "id": user_id,
-                        "driver_id": user_id,
-                        "status": "OFFLINE",
-                        "disconnected_at": datetime.now(timezone.utc).isoformat()
-                    }
-                })
-            except Exception:
-                pass
-
 
 # ---------------------------------------------------------------------------
 # WEBSOCKET ROUTE: /admin/telemetry
