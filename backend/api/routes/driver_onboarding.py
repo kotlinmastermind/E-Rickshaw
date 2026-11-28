@@ -465,6 +465,63 @@ async def submit_driver_service_area_request(
         raise HTTPException(status_code=422, detail="State, district, and locality are required.")
     request = DriverServiceAreaRequest(driver_id=driver.id, **values)
     db.add(request)
+    await db.flush()
+
+    # Existing fully configured areas can onboard an already-approved driver
+    # immediately. New/unknown localities remain pending until a real polygon
+    # and active tariff are configured by an administrator.
+    if driver.approval_status == "APPROVED" and user.is_active:
+        from sqlalchemy import or_
+        from backend.domain.models import (
+            DriverServiceAreaAssignment, FareRule, VehicleCategory, GeofenceZoneAudit,
+        )
+        from backend.application.services.service_area_service import ServiceAreaService
+        try:
+            zone = await ServiceAreaService(db).resolve_point(payload.latitude, payload.longitude)
+            now = datetime.now(timezone.utc)
+            tariff_id = (await db.execute(
+                select(FareRule.id)
+                .join(VehicleCategory, VehicleCategory.id == FareRule.category_id)
+                .where(
+                    FareRule.city_code == zone.city_code,
+                    FareRule.is_active.is_(True),
+                    FareRule.workflow_status.in_(["ACTIVE", "APPROVED"]),
+                    FareRule.effective_from <= now,
+                    or_(FareRule.effective_until.is_(None), FareRule.effective_until > now),
+                    VehicleCategory.is_active.is_(True),
+                )
+                .limit(1)
+            )).scalar_one_or_none()
+            if tariff_id:
+                assignment = (await db.execute(
+                    select(DriverServiceAreaAssignment).where(
+                        DriverServiceAreaAssignment.driver_id == driver.id,
+                        DriverServiceAreaAssignment.service_area_id == zone.id,
+                    )
+                )).scalar_one_or_none()
+                if assignment is None:
+                    db.add(DriverServiceAreaAssignment(
+                        driver_id=driver.id,
+                        service_area_id=zone.id,
+                        is_active=True,
+                    ))
+                else:
+                    assignment.is_active = True
+                    assignment.revoked_at = None
+                request.status = "APPROVED"
+                request.service_area_id = zone.id
+                request.admin_response = "Automatically assigned to an existing active service area with a configured tariff."
+                request.reviewed_at = now
+                db.add(GeofenceZoneAudit(
+                    zone_id=zone.id,
+                    action="AREA_AUTO_ASSIGNED",
+                    new_state_json=json.dumps({"request_id": request.id, "driver_id": driver.id}),
+                ))
+            else:
+                request.admin_response = "Pending review: an active tariff is not configured for this locality."
+        except HTTPException as area_error:
+            request.admin_response = f"Pending review: {area_error.detail}"
+
     from sqlalchemy.exc import IntegrityError
     try:
         await db.commit()
