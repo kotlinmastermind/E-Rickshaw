@@ -533,7 +533,7 @@ async def test_driver_registration_binds_dynamic_category(db_session):
     assignment = (await db_session.execute(
         select(DriverVehicleAssignment).where(DriverVehicleAssignment.driver_id == d_prof.id)
     )).scalar_one_or_none()
-    assert assignment is None.upper()
+    assert assignment is None
 
 
 @pytest.mark.asyncio
