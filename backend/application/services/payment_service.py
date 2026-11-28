@@ -2173,15 +2173,19 @@ class PaymentService:
                     "payment_id": payment.id,
                     "message": f"Cannot downgrade {payment.status} payment on payment.failed.",
                 }
-            transition_payment_status(payment, "FAILED", context="webhook payment.failed")
-            if not payment.provider_payment_id:
-                payment.provider_payment_id = provider_payment_id
-            if order_id:
-                await self.db.execute(
-                    update(PaymentOrderAttempt)
-                    .where(PaymentOrderAttempt.provider_order_id == order_id)
-                    .values(status="FAILED")
-                )
+
+            # Razorpay emits payment.failed for an individual checkout attempt, not
+            # necessarily for the whole order. A customer may retry the same order and
+            # succeed with a different payment_id. Keep the parent Payment intent open;
+            # reconciliation marks it FAILED only after Razorpay confirms every attempt
+            # for the order has failed. Never bind a failed attempt's ID to the parent
+            # Payment, which must retain the ID of the eventual captured payment.
+            logger.info(
+                "Razorpay payment attempt %s failed for order %s; keeping payment intent %s open for retry.",
+                provider_payment_id,
+                order_id,
+                payment.id,
+            )
 
         elif webhook_event == "payment.authorized":
             if gw_amount is not None and gw_amount != payment.amount_cents:
@@ -2291,7 +2295,13 @@ class PaymentService:
             PaymentEvent(
                 payment_id=payment.id,
                 event_type=webhook_event.upper().replace(".", "_"),
-                payload_json=json.dumps({"inbox_id": inbox.id, "digest": inbox.event_digest}),
+                payload_json=json.dumps({
+                    "inbox_id": inbox.id,
+                    "digest": inbox.event_digest,
+                    "provider_payment_id": provider_payment_id,
+                    "order_id": order_id,
+                    "gateway_attempt_status": "FAILED" if webhook_event == "payment.failed" else None,
+                }),
             )
         )
         inbox.status = "PROCESSED"
