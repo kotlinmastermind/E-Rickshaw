@@ -7,7 +7,7 @@ from fastapi.responses import Response as FastApiResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.api.deps import get_current_driver, get_current_user
+from backend.api.deps import get_current_driver, get_current_user, get_current_admin
 from backend.domain.models import User
 from backend.infrastructure.database.session import get_db
 from backend.application.services.driver_inspection_service import DriverInspectionService
@@ -24,6 +24,28 @@ class SubmitInspectionPayload(BaseModel):
     odometer_reading: float = Field(..., ge=0, le=999999.0, description="Odometer reading in kilometers")
     checklist_results: Dict[str, Any] = Field(..., description="Checklist item statuses: PASS, FAIL, NOT_APPLICABLE")
     driver_remarks: Optional[str] = Field(None, max_length=1000)
+
+
+class AdminInspectionReviewPayload(BaseModel):
+    action: str = Field(..., pattern="^(APPROVE|REJECT)$")
+    reason: Optional[str] = Field(None, min_length=8, max_length=1000)
+
+
+@router.put("/admin/{inspection_id}/review")
+async def review_vehicle_inspection(
+    inspection_id: str,
+    payload: AdminInspectionReviewPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Admin-only review; driver submission never marks an inspection approved."""
+    service = DriverInspectionService(db)
+    return await service.review_inspection_by_admin(
+        inspection_id=inspection_id,
+        admin_user_id=admin.id,
+        action=payload.action,
+        reason=payload.reason
+    )
 
 
 @router.post("/start")
