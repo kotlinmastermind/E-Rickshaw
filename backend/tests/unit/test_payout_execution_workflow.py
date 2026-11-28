@@ -326,6 +326,10 @@ async def test_manual_transfer_two_step_workflow_and_illegal_transitions(client,
             )
         ).scalars().all()
         assert len(audits) >= 3
+        recorded_transfer = next(a for a in audits if a.action == "PAYOUT_MANUAL_TRANSFER_RECORDED")
+        confirmed_transfer = next(a for a in audits if a.action == "PAYOUT_MANUAL_TRANSFER_CONFIRMED")
+        assert json.loads(recorded_transfer.changes_json)["evidence_notes"] == "NEFT batch #42"
+        assert json.loads(confirmed_transfer.changes_json)["confirmation_notes"] == "Bank statement independently verified"
         for a in audits:
             assert "445566778899" not in (a.changes_json or "")
     finally:
