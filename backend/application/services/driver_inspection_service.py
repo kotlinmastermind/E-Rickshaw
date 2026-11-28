@@ -674,6 +674,26 @@ class DriverInspectionService:
         insp = res.scalar_one_or_none()
         if not insp:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found.")
+        if (insp.inspection_status or "").upper() != "SUBMITTED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only a submitted vehicle inspection can be reviewed by Admin."
+            )
+
+        if action_clean == "APPROVE":
+            required_photo_urls = [
+                insp.photo_front_url,
+                insp.photo_rear_url,
+                insp.photo_left_url,
+                insp.photo_right_url,
+                insp.photo_interior_front_url,
+                insp.photo_interior_rear_url,
+            ]
+            if not insp.checklist_json or not all(required_photo_urls):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Inspection evidence is incomplete; all checklist results and six vehicle photos are required."
+                )
 
         now = datetime.now(timezone.utc)
         insp.verified_by = admin_user_id
