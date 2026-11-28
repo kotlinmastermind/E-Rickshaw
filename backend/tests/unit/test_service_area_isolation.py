@@ -150,7 +150,7 @@ async def test_admin_approval_assigns_driver_only_inside_configured_area(db_sess
     driver = DriverProfile(
         user_id=driver_user.id,
         license_number="AREA-REQUEST-002",
-        approval_status="APPROVED",
+        approval_status="PENDING",
     )
     area = GeofenceZone(
         name="Test Locality Service Area",
@@ -201,6 +201,7 @@ async def test_admin_approval_assigns_driver_only_inside_configured_area(db_sess
         driver_user,
         db_session,
     )
+    driver.approval_status = "APPROVED"
     result = await approve_driver_service_area_request(
         created["request_id"],
         DriverServiceAreaRequestApprovalPayload(service_area_id=area.id),
