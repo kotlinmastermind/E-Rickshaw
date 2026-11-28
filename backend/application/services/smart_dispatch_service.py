@@ -236,7 +236,7 @@ class SmartDispatchService:
             # Schedule background watchdog for automated timeout cascade
             try:
                 asyncio.create_task(
-                    self._schedule_timeout_watchdog(ride.id, candidate.driver_id, safety_ttl)
+                    self._schedule_timeout_watchdog(ride.id, candidate.driver_id, assignment.id, safety_ttl)
                 )
             except RuntimeError:
                 pass
@@ -333,7 +333,12 @@ class SmartDispatchService:
         })
         return None
 
-    async def accept_offer(self, driver_user_id: str, ride_id: str) -> Dict[str, Any]:
+    async def accept_offer(
+        self,
+        driver_user_id: str,
+        ride_id: str,
+        assignment_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Processes driver acceptance of a dispatch offer:
         1. Validates assignment state and prevents double acceptance.
@@ -352,9 +357,19 @@ class SmartDispatchService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver approval is no longer active; this offer cannot be accepted.")
 
         # Row-level lock on assignment
+        assign_filters = [
+            RideAssignment.ride_id == ride_id,
+            RideAssignment.driver_id == driver.id,
+        ]
+        if assignment_id:
+            assign_filters.append(RideAssignment.id == assignment_id)
+        else:
+            assign_filters.append(RideAssignment.status.in_(["OFFERED", "ACCEPTED"]))
         assign_stmt = (
             select(RideAssignment)
-            .where(RideAssignment.ride_id == ride_id, RideAssignment.driver_id == driver.id)
+            .where(*assign_filters)
+            .order_by(RideAssignment.offered_at.desc())
+            .limit(1)
             .with_for_update()
         )
         res = await self.db.execute(assign_stmt)
@@ -548,7 +563,8 @@ class SmartDispatchService:
         self,
         driver_user_id: str,
         ride_id: str,
-        reason: str
+        reason: str,
+        assignment_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Handles driver rejection (or timeout):
@@ -562,9 +578,18 @@ class SmartDispatchService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found.")
 
         # Row-level lock on assignment
+        assign_filters = [
+            RideAssignment.ride_id == ride_id,
+            RideAssignment.driver_id == driver.id,
+            RideAssignment.status == "OFFERED",
+        ]
+        if assignment_id:
+            assign_filters.append(RideAssignment.id == assignment_id)
         assign_stmt = (
             select(RideAssignment)
-            .where(RideAssignment.ride_id == ride_id, RideAssignment.driver_id == driver.id)
+            .where(*assign_filters)
+            .order_by(RideAssignment.offered_at.desc())
+            .limit(1)
             .with_for_update()
         )
         res = await self.db.execute(assign_stmt)
@@ -618,21 +643,32 @@ class SmartDispatchService:
             "message": "Offer declined. Cascading to next candidate."
         }
 
-    async def _schedule_timeout_watchdog(self, ride_id: str, driver_id: str, delay_sec: int) -> None:
-        """Background task that triggers auto-expiration and cascade if offer isn't answered."""
+    async def _schedule_timeout_watchdog(
+        self, ride_id: str, driver_id: str, assignment_id: str, delay_sec: int
+    ) -> None:
+        """Background task that expires this exact persisted offer if it remains unanswered."""
         await asyncio.sleep(delay_sec)
-        await self._handle_timeout(ride_id, driver_id)
+        await self._handle_timeout(ride_id, driver_id, assignment_id)
 
     @staticmethod
-    async def _handle_timeout(ride_id: str, driver_id: str) -> None:
+    async def _handle_timeout(ride_id: str, driver_id: str, assignment_id: Optional[str] = None) -> None:
         """Expire one offer only after its persisted deadline and while its ride is still unassigned."""
         try:
             from backend.infrastructure.database.session import async_session_maker
             async with async_session_maker() as session:
-                assign_stmt = select(RideAssignment).where(
+                assign_filters = [
                     RideAssignment.ride_id == ride_id,
-                    RideAssignment.driver_id == driver_id
-                ).with_for_update()
+                    RideAssignment.driver_id == driver_id,
+                ]
+                if assignment_id:
+                    assign_filters.append(RideAssignment.id == assignment_id)
+                assign_stmt = (
+                    select(RideAssignment)
+                    .where(*assign_filters)
+                    .order_by(RideAssignment.offered_at.desc())
+                    .limit(1)
+                    .with_for_update()
+                )
                 res = await session.execute(assign_stmt)
                 assignment = res.scalar_one_or_none()
 
@@ -692,7 +728,7 @@ async def run_dispatch_expiry_reaper_loop(poll_interval_seconds: int = 5, batch_
         try:
             async with async_session_maker() as session:
                 expired_result = await session.execute(
-                    select(RideAssignment.ride_id, RideAssignment.driver_id)
+                    select(RideAssignment.id, RideAssignment.ride_id, RideAssignment.driver_id)
                     .where(
                         RideAssignment.status == "OFFERED",
                         or_(
@@ -705,10 +741,10 @@ async def run_dispatch_expiry_reaper_loop(poll_interval_seconds: int = 5, batch_
                 )
                 expired_offers = expired_result.all()
 
-            # _handle_timeout takes a row lock and rechecks both expiry and ride
-            # state, so concurrent API workers/reaper instances cannot cascade twice.
-            for ride_id, driver_id in expired_offers:
-                await SmartDispatchService._handle_timeout(ride_id, driver_id)
+            # _handle_timeout takes the exact assignment row lock and rechecks
+            # expiry and ride state, so workers cannot cascade the same offer twice.
+            for assignment_id, ride_id, driver_id in expired_offers:
+                await SmartDispatchService._handle_timeout(ride_id, driver_id, assignment_id)
         except asyncio.CancelledError:
             raise
         except Exception:
