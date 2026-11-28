@@ -83,14 +83,13 @@ class CustomerSignupPayload(BaseModel):
     username: Optional[str] = Field(default=None)
 
 class DriverSignupPayload(BaseModel):
-    phone_number: Optional[str] = Field(default=None)
+    phone_number: str = Field(..., min_length=10, description="OTP-verifiable mobile number.")
     email: Optional[str] = Field(default=None)
-    full_name: str = Field(default="Driver Partner")
+    full_name: str = Field(..., min_length=2, max_length=128)
     password: str = Field(..., min_length=12, description="Password must contain at least 12 characters.")
     username: Optional[str] = Field(default=None)
-    vehicle_type: str = Field(default="E_RICKSHAW_STANDARD")
-    vehicle_name: Optional[str] = Field(default="Electric Rickshaw")
-    vehicle_no: Optional[str] = Field(default="DL-01-ER-1001")
+    license_number: str = Field(..., min_length=6, max_length=50, description="Actual driving licence number.")
+    vehicle_type: str = Field(..., min_length=1, description="ID or code of an existing active vehicle category.")
 
 class UnifiedLoginPayload(BaseModel):
     login_type: str = Field(default="PASSWORD")
