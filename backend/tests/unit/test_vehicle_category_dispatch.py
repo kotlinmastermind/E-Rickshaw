@@ -515,7 +515,7 @@ async def test_driver_registration_binds_dynamic_category(db_session):
 
     auth_svc = AuthService(db_session)
     reg_res = await auth_svc.register_driver_account(
-        phone_number=f"+91{int(suffix, 16) % 1_000_000_0000:010d}",
+        phone_number=f"+91{6_000_000_000 + (int(suffix, 16) % 4_000_000_000):010d}",
         full_name="Bike Captain",
         password="ValidPassword123!",
         license_number=f"DL-BIKE-{suffix}",
