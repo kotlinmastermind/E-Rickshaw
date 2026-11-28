@@ -202,7 +202,9 @@ class GiftCardService:
                 amount_cents=amount_cents,
                 source="GIFT_CARD_PURCHASE",
                 description=f"Purchased Gift Card for {recipient_name or 'Friend'}",
-                idempotency_key=f"gift_card_purchase:{purchaser_user_id}:{clean_idem}"[:128],
+                idempotency_key="gc_" + hashlib.sha256(
+                    f"{purchaser_user_id}:{clean_idem}".encode("utf-8")
+                ).hexdigest(),
             )
             purchase_ledger_reference = wallet_tx.id
 
@@ -222,6 +224,21 @@ class GiftCardService:
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Gift card purchase exists but its card record cannot be safely resolved.",
+                    )
+                same_intent = (
+                    existing_card.initial_value_cents == amount_cents
+                    and existing_card.card_design == card_design
+                    and existing_card.recipient_name == recipient_name
+                    and existing_card.recipient_email == recipient_email
+                    and existing_card.recipient_phone == recipient_phone
+                    and existing_card.sender_name == sender_name
+                    and existing_card.message == message
+                    and existing_card.delivery_method == delivery_method
+                )
+                if not same_intent:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Gift-card idempotency key was already used for a different purchase request.",
                     )
                 return self._purchase_response(existing_card)
 
