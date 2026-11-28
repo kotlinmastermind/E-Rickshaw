@@ -448,12 +448,15 @@ class RideService:
             driver_user_id=driver_user_id,
             ride_id=ride_id,
         )
+        ride = await self.get_ride_by_id(ride_id)
         # Preserve the established /rides/{ride_id}/accept response contract.
         return {
             "ride_id": result["ride_id"],
             "status": RideStatus.ASSIGNED.value,
             "assigned_driver_id": result["driver_id"],
             "assigned_at": result["assigned_at"],
+            "pickup_address": ride.pickup_address,
+            "destination_address": ride.destination_address,
         }
 
     async def driver_arrived(
