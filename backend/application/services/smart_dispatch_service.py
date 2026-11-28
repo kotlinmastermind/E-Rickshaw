@@ -363,12 +363,13 @@ class SmartDispatchService:
         ]
         if assignment_id:
             assign_filters.append(RideAssignment.id == assignment_id)
-        else:
-            assign_filters.append(RideAssignment.status.in_(["OFFERED", "ACCEPTED"]))
+        # Resolve the latest persisted attempt even when it is already terminal.
+        # This lets a late retry receive a deterministic 409/410 instead of a
+        # misleading 404; an explicitly supplied assignment ID remains exact.
         assign_stmt = (
             select(RideAssignment)
             .where(*assign_filters)
-            .order_by(RideAssignment.offered_at.desc())
+            .order_by(RideAssignment.offered_at.desc(), RideAssignment.created_at.desc())
             .limit(1)
             .with_for_update()
         )
