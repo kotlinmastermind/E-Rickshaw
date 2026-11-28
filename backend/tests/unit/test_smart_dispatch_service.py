@@ -2,6 +2,8 @@
 Unit and lifecycle tests for SmartDispatchService.
 """
 import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 from datetime import datetime, timezone
@@ -494,3 +496,68 @@ async def test_smart_dispatch_excludes_inactive_driver_accounts(db_session):
         )
     ).scalars().all()
     assert assignments == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_offer_uses_canonical_cross_worker_delivery_contract(db_session, monkeypatch):
+    from backend.application.services.commission_service import CommissionService
+    from backend.application.services import smart_dispatch_service as dispatch_module
+
+    async def commission_estimate(_db, _ride):
+        return {
+            "estimated_driver_earnings_cents": 9000,
+            "estimated_commission_cents": 1000,
+            "estimated_commission_percentage": 10.0,
+            "commission_classification": "DEFERRED"
+        }
+
+    publish = AsyncMock(return_value=1)
+    broadcast_to_ride = AsyncMock()
+    monkeypatch.setattr(CommissionService, "estimate_for_ride", staticmethod(commission_estimate))
+    monkeypatch.setattr(dispatch_module.redis_client, "publish", publish)
+    monkeypatch.setattr(dispatch_module.ws_manager, "broadcast_to_ride", broadcast_to_ride)
+
+    now = datetime.now(timezone.utc)
+    ride = SimpleNamespace(
+        id="ride-dispatch-contract",
+        final_fare_cents=None,
+        estimated_fare_cents=10000,
+        estimated_distance_km=4.5,
+        estimated_duration_minutes=16,
+        pickup_address="Pickup",
+        pickup_latitude=28.61,
+        pickup_longitude=77.20,
+        destination_address="Destination",
+        destination_latitude=28.62,
+        destination_longitude=77.21,
+    )
+    candidate = SimpleNamespace(
+        driver_id="driver-profile-1",
+        user_id="driver-user-1",
+        road_eta_minutes=3.5,
+        road_distance_km=1.2,
+    )
+    assignment = SimpleNamespace(
+        id="assignment-1",
+        expires_at=now + timedelta(seconds=18),
+    )
+
+    await SmartDispatchService(db_session)._broadcast_offer(
+        ride, candidate, None, assignment, timeout_seconds=20
+    )
+
+    assert publish.await_count == 2
+    calls = {call.args[0]: call.args[1] for call in publish.await_args_list}
+    assert set(calls) == {
+        "driver:dispatch:driver-profile-1",
+        "driver:dispatch:driver-user-1",
+    }
+    payload = calls["driver:dispatch:driver-profile-1"]
+    assert payload["event"] == "DISPATCH_OFFER"
+    assert payload["ride_id"] == ride.id
+    assert payload["assignment_id"] == assignment.id
+    assert payload["timeout_seconds"] <= 18
+    assert payload["expires_at"] == assignment.expires_at.isoformat()
+    assert payload["pickup_distance_km"] == 1.2
+    assert payload["estimated_trip_distance_km"] == 4.5
+    broadcast_to_ride.assert_awaited_once()
