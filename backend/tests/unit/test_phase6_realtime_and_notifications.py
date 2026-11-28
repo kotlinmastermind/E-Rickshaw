@@ -20,6 +20,8 @@ from backend.api.routes.ws import (
 from backend.application.services.cascading_dispatch_service import CascadingDispatchService
 from backend.application.services.safety_advanced_service import SafetyAdvancedService
 from backend.domain.models import User, EmergencyContact, Ride
+from fastapi import HTTPException
+from backend.api.routes.driver_safety import driver_for
 
 
 # ===========================================================================
@@ -312,3 +314,23 @@ async def test_emergency_sos_alerting_workflow(db_session):
     assert sos_res["contacts_notified_count"] >= 1
     assert "track" in sos_res["emergency_share_url"]
 
+
+
+@pytest.mark.asyncio
+async def test_driver_safety_rejects_customer_without_role_mutation_or_profile_creation():
+    customer = User(
+        id="customer-user-001",
+        phone_number="+919876543210",
+        role="customer",
+        is_active=True,
+    )
+    db = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await driver_for(customer, db)
+
+    assert exc_info.value.status_code == 403
+    assert customer.role == "customer"
+    db.execute.assert_not_awaited()
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
