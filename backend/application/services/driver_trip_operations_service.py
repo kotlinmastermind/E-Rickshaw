@@ -172,6 +172,10 @@ class DriverTripOperationsService:
             commission_estimate = await CommissionService.estimate_for_ride(self.db, ride)
             earnings_cents = commission_estimate["estimated_driver_earnings_cents"] or 0
 
+            expires_at_utc = assignment.expires_at
+            if expires_at_utc and expires_at_utc.tzinfo is None:
+                expires_at_utc = expires_at_utc.replace(tzinfo=timezone.utc)
+
             response.append({
                 "ride_id": ride.id,
                 "assignment_id": assignment.id,
@@ -189,8 +193,8 @@ class DriverTripOperationsService:
                 "pickup_duration_minutes": pickup_eta,
                 "estimated_trip_distance_km": ride.estimated_distance_km,
                 "trip_duration_minutes": trip_eta,
-                "expires_at": assignment.expires_at.isoformat() if assignment.expires_at else None,
-                "timeout_seconds": max(0, int((assignment.expires_at - now).total_seconds())) if assignment.expires_at else 0,
+                "expires_at": expires_at_utc.isoformat() if expires_at_utc else None,
+                "timeout_seconds": max(0, int((expires_at_utc - now).total_seconds())) if expires_at_utc else 0,
                 "payment_mode": ride.payment_method,
                 "escalation_level": assignment.escalation_level
             })
