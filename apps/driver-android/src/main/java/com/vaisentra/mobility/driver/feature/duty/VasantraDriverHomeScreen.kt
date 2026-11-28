@@ -920,7 +920,7 @@ fun VasantraRideRequestCard(
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = offer?.pickupAddress?.ifBlank { "Pickup Spot Address" } ?: "Commuter Pickup Spot",
+                                text = offer?.pickupAddress?.takeIf { it.isNotBlank() } ?: "Pickup address unavailable",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF0F172A),
@@ -928,7 +928,7 @@ fun VasantraRideRequestCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "📍 ${"%.1f".format(pickupDistKm)} km away • $pickupTimeMin min away",
+                                text = "📍 " + pickupSummary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF059669)
@@ -966,7 +966,7 @@ fun VasantraRideRequestCard(
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = offer?.destinationAddress?.ifBlank { "Destination Area" } ?: "Drop Location Area",
+                                text = offer?.destinationAddress?.takeIf { it.isNotBlank() } ?: "Destination address unavailable",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF0F172A),
@@ -974,7 +974,7 @@ fun VasantraRideRequestCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "🏁 ${"%.1f".format(tripDistKm)} km trip • $tripTimeMin min drive",
+                                text = "🏁 " + tripSummary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF2563EB)
