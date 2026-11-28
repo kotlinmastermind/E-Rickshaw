@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 
 from backend.main import app
 from backend.domain.models import (
-    User, CustomerProfile, DriverProfile, DriverAvailability, Vehicle, VehicleCategory,
+    User, CustomerProfile, DriverProfile, DriverAvailability, Vehicle, VehicleCategory, Wallet,
     FareRule, FareEstimate, Ride, RideAssignment, RideOperationalEvent, Session, DriverVehicleAssignment,
     GeofenceZone, DriverServiceAreaAssignment
 )
@@ -50,6 +50,9 @@ async def test_customer_registration_login_profile_transactional(db_session):
 
     cust_prof = (await db_session.execute(select(CustomerProfile).where(CustomerProfile.user_id == user_id))).scalar_one_or_none()
     assert cust_prof is not None
+
+    wallet = (await db_session.execute(select(Wallet).where(Wallet.user_id == user_id))).scalar_one()
+    assert wallet.balance_cents == 0
 
     # 3. Duplicate phone registration rejected -> 409
     with pytest.raises(Exception) as exc_info:
