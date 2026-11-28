@@ -410,11 +410,11 @@ async def generate_upi_checkout(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    service = SettlementAdvancedService(db)
-    return await service.generate_upi_deep_link(
-        ride_id=payload.ride_id,
-        amount_cents=payload.amount_cents,
-        custom_vpa=payload.custom_vpa
+    # Static UPI deep links cannot prove that funds reached the merchant account.
+    # Fail closed until provider-backed dynamic QR creation and reconciliation exist.
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Direct UPI QR collection is unavailable because payment capture cannot be verified. Ask the customer to pay through the in-app Razorpay checkout or use the supported cash collection flow.",
     )
 
 @router.post("/upi-retry")
@@ -478,6 +478,15 @@ async def process_partial_refund(
     )
 
 
+RIDE_PAYMENT_SETTLED_STATES = frozenset({"CAPTURED", "PAID", "SETTLED", "SUCCESS"})
+
+
+def is_ride_payment_settled(status_value: Optional[str], amount_cents: int, refunded_amount_cents: int) -> bool:
+    normalized = str(status_value or "").strip().upper()
+    amount = max(0, int(amount_cents or 0))
+    refunded = max(0, int(refunded_amount_cents or 0))
+    return normalized in RIDE_PAYMENT_SETTLED_STATES and amount > 0 and refunded < amount
+
 @router.get("/ride/{ride_id}/status")
 async def get_ride_payment_status(
     ride_id: str,
@@ -510,20 +519,34 @@ async def get_ride_payment_status(
             "provider_order_id": None,
             "provider_payment_id": None,
             "gateway_verified": False,
+            "settlement_confirmed": False,
+            "refund_state": "NONE",
         }
 
-    settled_states = {"CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED", "SUCCESS"}
+    refunded_amount = int(payment.refunded_amount_cents or 0)
+    amount = int(payment.amount_cents or 0)
+    normalized_status = str(payment.status or "").strip().upper()
+    refund_state = (
+        "FULLY_REFUNDED"
+        if normalized_status == "REFUNDED" or (amount > 0 and refunded_amount >= amount)
+        else "PARTIALLY_REFUNDED"
+        if normalized_status == "PARTIALLY_REFUNDED" or refunded_amount > 0
+        else "NONE"
+    )
+    settled = is_ride_payment_settled(normalized_status, amount, refunded_amount)
     return {
         "ride_id": ride_id,
         "payment_id": payment.id,
-        "status": payment.status,
+        "status": normalized_status,
         "payment_method": payment.payment_method,
         "provider_name": payment.provider_name,
-        "amount_cents": payment.amount_cents,
-        "refunded_amount_cents": int(payment.refunded_amount_cents or 0),
+        "amount_cents": amount,
+        "refunded_amount_cents": refunded_amount,
+        "refund_state": refund_state,
         "provider_order_id": payment.provider_order_id,
         "provider_payment_id": payment.provider_payment_id,
-        "gateway_verified": payment.status in settled_states,
+        "gateway_verified": settled,
+        "settlement_confirmed": settled,
     }
 
 @router.get("/refunds/{refund_id}/status")

@@ -703,6 +703,16 @@ async def test_admin_finance_endpoints_rbac_refund_execution_and_driver_ride_sta
         assert adm_ref.json()["status"] == "PROCESSED"
         assert adm_ref.json()["arn_reference"] == "ARN_ADM_1"
 
+        # A partial refund must not be exposed as successful full fare settlement.
+        partial_status = await ac.get(f"/api/v1/payments/ride/{ride.id}/status", headers={"Authorization": f"Bearer {drv_token}"})
+        assert partial_status.status_code == 200
+        assert partial_status.json()["gateway_verified"] is False
+        assert partial_status.json()["settlement_confirmed"] is False
+        assert partial_status.json()["refund_state"] == "PARTIALLY_REFUNDED"
+
+        # Static UPI intents cannot be reconciled to a confirmed gateway capture.
+        disabled_upi = await ac.post("/api/v1/payments/upi-intent", headers={"Authorization": f"Bearer {drv_token}"}, json={"ride_id": ride.id, "amount_cents": 12000})
+        assert disabled_upi.status_code == 503
         # 4. Admin creates a refund request & approves it via /admin/refunds/{id}/review -> executes second partial refund
         fin_svc = AdminFinanceSupportService(db_session)
         req_row = await fin_svc.create_refund_request(admin_user.id, pay.id, 6000, "Remaining fare dispute approved")
@@ -719,6 +729,13 @@ async def test_admin_finance_endpoints_rbac_refund_execution_and_driver_ride_sta
         assert rev_res.status_code == 200
         assert rev_res.json()["status"] == "PROCESSED"
         assert rev_res.json()["arn_reference"] == "ARN_ADM_2"
+
+        # A fully refunded payment must not be reported as a settled fare.
+        full_status = await ac.get(f"/api/v1/payments/ride/{ride.id}/status", headers={"Authorization": f"Bearer {drv_token}"})
+        assert full_status.status_code == 200
+        assert full_status.json()["gateway_verified"] is False
+        assert full_status.json()["settlement_confirmed"] is False
+        assert full_status.json()["refund_state"] == "FULLY_REFUNDED"
 
 
 @pytest.mark.asyncio

@@ -754,6 +754,18 @@ data class AddPayoutAccountRequest(
     @SerializedName("bank_name") val bankName: String? = null
 )
 
+data class RidePaymentStatusDto(
+    @SerializedName("ride_id") val rideId: String = "",
+    @SerializedName("payment_id") val paymentId: String? = null,
+    @SerializedName("status") val status: String = "UNPAID",
+    @SerializedName("payment_method") val paymentMethod: String? = null,
+    @SerializedName("amount_cents") val amountCents: Int = 0,
+    @SerializedName("refunded_amount_cents") val refundedAmountCents: Int = 0,
+    @SerializedName("refund_state") val refundState: String = "NONE",
+    @SerializedName("gateway_verified") val gatewayVerified: Boolean = false,
+    @SerializedName("settlement_confirmed") val settlementConfirmed: Boolean = false
+)
+
 data class GenerateUpiRequest(
     @SerializedName("ride_id") val rideId: String,
     @SerializedName("amount_cents") val amountCents: Int

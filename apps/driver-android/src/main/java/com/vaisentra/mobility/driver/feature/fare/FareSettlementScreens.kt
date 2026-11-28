@@ -285,145 +285,74 @@ fun UpiSettlementScreen(
         ?.takeIf { it > 0.0 }
         ?: offer?.estimatedFareRupees
         ?: 0.0
-    var upiIntentUrl by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf("Customer must complete payment through the in-app Razorpay checkout.") }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(rideId) {
-        if (rideId.isNotBlank()) {
-            DriverRepository.fetchRideBreakdown(rideId)
-            val res = DriverRepository.generateDynamicUpi(rideId, totalBill.coerceAtLeast(1.0))
-            upiIntentUrl = res.getOrNull()
-        }
+        if (rideId.isNotBlank()) DriverRepository.fetchRideBreakdown(rideId)
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CockpitBackground)
-            .statusBarsPadding()
+        modifier = Modifier.fillMaxSize().background(CockpitBackground).statusBarsPadding()
     ) {
-        CockpitHeader(
-            title = "Dynamic UPI QR",
-            subtitle = "Direct instant settlement to your bank account",
-            onBack = onNavigateBack
-        )
-
+        CockpitHeader(title = "UPI Payment Verification", subtitle = "Only backend-confirmed capture can settle this ride", onBack = onNavigateBack)
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             CockpitCard(glow = true) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text("AMOUNT TO PAY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("FARE TO VERIFY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
                     Text("₹${"%.2f".format(totalBill)}", color = EmeraldPrimary, fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(14.dp))
-
-                    val displayPayload = upiIntentUrl ?: "upi://pay?pa=billing@vaisentra&pn=VaisentraMobility&am=${"%.2f".format(totalBill)}&tr=${rideId}&cu=INR"
-                    val qrBitmap = remember(displayPayload) { generateQrBitmap(displayPayload) }
-
-                    Box(
-                        modifier = Modifier
-                            .size(200.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White)
-                            .padding(8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (qrBitmap != null) {
-                            Image(
-                                bitmap = qrBitmap.asImageBitmap(),
-                                contentDescription = "Scannable Dynamic UPI QR Code",
-                                modifier = Modifier.size(184.dp)
-                            )
-                        } else {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.QrCode2, contentDescription = null, tint = Color.Black, modifier = Modifier.size(150.dp))
-                                Text(
-                                    if (upiIntentUrl != null) "UPI READY" else "GENERATING QR...",
-                                    color = Color.DarkGray,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
+                    Text("Direct UPI QR collection is disabled until the payment provider can confirm the exact merchant capture. Do not accept a screenshot or customer-side success screen as proof.", color = CockpitTextMuted, fontSize = 13.sp)
                     Spacer(Modifier.height(12.dp))
-                    Text(upiIntentUrl ?: "Waiting for UPI intent...", color = ElectricCyan, fontSize = 11.sp, maxLines = 1)
+                    Text(statusMessage, color = ElectricCyan, fontSize = 12.sp)
                 }
             }
-
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 CockpitButton(
-                    text = when {
-                        isLoading -> "CHECKING..."
-                        upiIntentUrl == null -> "GENERATE UPI QR"
-                        else -> "VERIFY CAPTURED STATUS"
-                    },
-                    enabled = !isLoading,
+                    text = if (isLoading) "CHECKING..." else "VERIFY CUSTOMER PAYMENT",
+                    enabled = !isLoading && rideId.isNotBlank(),
                     onClick = {
-                        if (rideId.isBlank()) {
-                            onShowToast("No active ride ID.")
-                            return@CockpitButton
-                        }
                         isLoading = true
                         scope.launch {
-                            if (upiIntentUrl == null) {
-                                val res = DriverRepository.generateDynamicUpi(rideId, totalBill.coerceAtLeast(1.0))
-                                isLoading = false
-                                if (res.isSuccess) {
-                                    upiIntentUrl = res.getOrNull()
-                                    onShowToast("UPI QR ready. Ask rider to scan & pay, then verify capture.")
-                                } else {
-                                    onShowToast("UPI error: ${res.exceptionOrNull()?.message}")
-                                }
+                            val result = DriverRepository.verifyRideUpiPaymentStatus(rideId)
+                            isLoading = false
+                            val payment = result.getOrNull()
+                            if (result.isFailure || payment == null) {
+                                statusMessage = "Payment status could not be verified. Do not mark this ride as paid."
+                                onShowToast("Verification failed: ${result.exceptionOrNull()?.message ?: "No authoritative status"}")
                             } else {
-                                val statusRes = DriverRepository.verifyRideUpiPaymentStatus(rideId)
-                                isLoading = false
-                                if (statusRes.isSuccess && statusRes.getOrNull() == true) {
-                                    onShowToast("Backend confirmed CAPTURED payment!")
-                                    onPaymentConfirmed()
-                                } else if (statusRes.isSuccess) {
-                                    onShowToast("Payment not captured yet on gateway. Wait or collect cash.")
-                                } else {
-                                    onShowToast("Verification check failed: ${statusRes.exceptionOrNull()?.message}")
+                                when {
+                                    payment.settlementConfirmed && payment.gatewayVerified -> {
+                                        statusMessage = "Backend confirms captured payment."
+                                        onShowToast("Backend confirmed captured payment.")
+                                        onPaymentConfirmed()
+                                    }
+                                    payment.refundState == "FULLY_REFUNDED" || payment.status == "REFUNDED" -> {
+                                        statusMessage = "This payment was fully refunded. It is not a settled fare."
+                                        onShowToast("Payment is refunded. Admin review is required.")
+                                    }
+                                    payment.refundState == "PARTIALLY_REFUNDED" || payment.status == "PARTIALLY_REFUNDED" -> {
+                                        statusMessage = "This payment has a partial refund. Do not close fare settlement as fully paid."
+                                        onShowToast("Partial refund detected. Admin review is required.")
+                                    }
+                                    else -> {
+                                        statusMessage = "No confirmed capture yet. Wait for backend confirmation or use the supported cash collection flow."
+                                        onShowToast("Payment is not captured yet.")
+                                    }
                                 }
                             }
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
-                if (upiIntentUrl != null) {
-                    CockpitButton(
-                        text = "Refresh UPI QR",
-                        enabled = !isLoading,
-                        onClick = {
-                            isLoading = true
-                            scope.launch {
-                                val res = DriverRepository.generateDynamicUpi(rideId, totalBill.coerceAtLeast(1.0))
-                                isLoading = false
-                                if (res.isSuccess) {
-                                    upiIntentUrl = res.getOrNull()
-                                    onShowToast("UPI QR refreshed.")
-                                } else {
-                                    onShowToast("UPI error: ${res.exceptionOrNull()?.message}")
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        isOutlined = true
-                    )
-                }
                 CockpitButton(
-                    text = "Switch to Cash Collection",
+                    text = "Back to supported settlement options",
                     onClick = onNavigateBack,
                     modifier = Modifier.fillMaxWidth(),
                     isOutlined = true

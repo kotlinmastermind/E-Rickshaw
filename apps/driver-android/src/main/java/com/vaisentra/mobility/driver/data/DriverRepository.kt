@@ -1466,16 +1466,13 @@ object DriverRepository {
         }
     }
 
-    suspend fun verifyRideUpiPaymentStatus(rideId: String): Result<Boolean> {
+    suspend fun verifyRideUpiPaymentStatus(rideId: String): Result<RidePaymentStatusDto> {
         if (rideId.isBlank()) return Result.failure(IllegalStateException("No active ride"))
         return try {
             val res = DriverNetworkClient.apiService.getRidePaymentStatus(rideId)
             val body = res.body()
             if (res.isSuccessful && body != null) {
-                val gatewayVerified = body["gateway_verified"] as? Boolean ?: false
-                val statusStr = (body["status"] as? String ?: "UNPAID").uppercase()
-                val settled = gatewayVerified || statusStr in setOf("CAPTURED", "PAID", "SETTLED", "PARTIALLY_REFUNDED", "REFUNDED")
-                Result.success(settled)
+                Result.success(body)
             } else {
                 Result.failure(IllegalStateException("Payment status check failed: HTTP ${res.code()}"))
             }
