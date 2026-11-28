@@ -1136,7 +1136,7 @@ async def test_notification_webhooks_diagnostic_sync_concurrent_refunds_and_dup_
             p1, p2 = await asyncio.gather(_try_partial(35000), _try_partial(35000))
 
         outcomes = [p1, p2]
-        assert sum(1 for o in outcomes if o.get("status") == "PROCESSED") == 1
+        assert sum(1 for o in outcomes if o.get("status") == "PROCESSED") == 1, f"Concurrent refund outcomes: {outcomes!r}; gateway calls: {ref_count}"
         # A concurrent request may observe the exhausted refund ceiling (400) or the
         # active DB reservation lease (409); both are safe fail-closed outcomes.
         assert sum(1 for o in outcomes if o.get("error_status") in {400, 409}) == 1
