@@ -164,3 +164,76 @@ async def test_driver_freshness_threshold():
     assert await service.is_driver_fresh(driver_id, max_age_seconds=60) is False
     assert await service.is_driver_fresh(driver_id, max_age_seconds=180) is True
 
+
+
+@pytest.mark.asyncio
+async def test_inflight_ride_websocket_rejects_revoked_session(monkeypatch):
+    from backend.api.routes import ws
+
+    async def revoked_exists(key):
+        return key == "revoked_session:session_revoked"
+
+    monkeypatch.setattr(ws.redis_client, "exists", revoked_exists)
+    monkeypatch.setattr(
+        ws,
+        "decode_jwt_token",
+        lambda token: {"exp": time.time() + 60},
+    )
+
+    class UnusedDatabase:
+        async def execute(self, statement):
+            raise AssertionError("Database must not be queried after revocation")
+
+    authorized = await ws.verify_inflight_driver_authorization(
+        user_id="user_revoked",
+        session_id="session_revoked",
+        role="customer",
+        driver_id="",
+        token_str="valid.jwt.token",
+        db_session=UnusedDatabase(),
+    )
+
+    assert authorized is False
+
+
+@pytest.mark.asyncio
+async def test_inflight_ride_websocket_rejects_driver_after_approval_removed(monkeypatch):
+    from backend.api.routes import ws
+
+    async def not_revoked(key):
+        return False
+
+    monkeypatch.setattr(ws.redis_client, "exists", not_revoked)
+    monkeypatch.setattr(
+        ws,
+        "decode_jwt_token",
+        lambda token: {"exp": time.time() + 60},
+    )
+
+    class ScalarResult:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class DriverApprovalDatabase:
+        def __init__(self):
+            self.calls = 0
+
+        async def execute(self, statement):
+            self.calls += 1
+            return ScalarResult(True if self.calls == 1 else "PENDING")
+
+    db = DriverApprovalDatabase()
+    authorized = await ws.verify_inflight_driver_authorization(
+        user_id="user_driver",
+        session_id="session_driver",
+        role="driver",
+        driver_id="driver_profile",
+        token_str="valid.jwt.token",
+        db_session=db,
+    )
+
+    assert authorized is False
+    assert db.calls == 2
