@@ -4135,8 +4135,67 @@
             }
         }
 
+        // Ride lifecycle WebSocket messages are invalidation signals, not an
+        // authoritative state store. Reconcile them against the authenticated DB feed.
+        let _adminRideSnapshotRefreshTimer = null;
+        let _adminRideSnapshotRefreshInFlight = false;
+        let _adminRideSnapshotRefreshPending = false;
+
+        function scheduleAdminRideSnapshotRefresh() {
+            if (!STATE.adminToken) return;
+            if (_adminRideSnapshotRefreshTimer) clearTimeout(_adminRideSnapshotRefreshTimer);
+            _adminRideSnapshotRefreshTimer = setTimeout(async () => {
+                _adminRideSnapshotRefreshTimer = null;
+                if (_adminRideSnapshotRefreshInFlight) {
+                    _adminRideSnapshotRefreshPending = true;
+                    return;
+                }
+
+                _adminRideSnapshotRefreshInFlight = true;
+                try {
+                    const response = await _nativeFetch('/api/v1/admin/live-feed', {
+                        headers: { 'Authorization': `Bearer ${STATE.adminToken}` }
+                    });
+                    if (!response.ok) {
+                        throw new Error(`Admin ride reconciliation failed (HTTP ${response.status}).`);
+                    }
+                    const data = await response.json();
+                    if (!STATE.adminToken) return;
+
+                    STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];
+                    STATE.riders = Array.isArray(data.riders) ? data.riders : [];
+                    if (data.stats) {
+                        STATE.stats = { ...(STATE.stats || {}), ...data.stats };
+                        const activeEl = document.getElementById('stat-active-rides');
+                        if (activeEl) activeEl.innerText = data.stats.active_rides ?? 0;
+                        const activeRideBadge = document.getElementById('badge-active-rides-tab');
+                        if (activeRideBadge) activeRideBadge.innerText = data.stats.active_rides ?? 0;
+                        const waitingEl = document.getElementById('stat-waiting-riders');
+                        if (waitingEl) waitingEl.innerText = data.stats.waiting_riders ?? 0;
+                    }
+                    renderMapMarkers();
+                    renderRidesTable();
+                } catch (error) {
+                    console.warn('Admin ride state reconciliation failed; periodic sync remains available.', error);
+                } finally {
+                    _adminRideSnapshotRefreshInFlight = false;
+                    if (_adminRideSnapshotRefreshPending) {
+                        _adminRideSnapshotRefreshPending = false;
+                        scheduleAdminRideSnapshotRefresh();
+                    }
+                }
+            }, 150);
+        }
+
         function handleLiveWsTelemetry(payload) {
-            const eventType = payload?.event_type || payload?.type || payload?.event;
+            const rawEventType = String(payload?.event_type || payload?.type || payload?.event || '').trim();
+            const eventAliases = {
+                'DRIVER.LOCATION.UPDATED': 'DRIVER_LOCATION_UPDATE',
+                'CUSTOMER.LOCATION.UPDATED': 'CUSTOMER_LOCATION_UPDATE',
+                'DRIVER.OFFLINE': 'DRIVER_OFFLINE',
+                'RIDE.STATUS.UPDATED': 'RIDE_STATUS_UPDATE'
+            };
+            const eventType = eventAliases[rawEventType.toUpperCase()] || rawEventType.toUpperCase();
             const eventPayload = payload?.payload && typeof payload.payload === 'object' ? payload.payload : payload;
             const driverId = String(eventPayload.driver_id || eventPayload.id || eventPayload.user_id || '');
 
@@ -4147,6 +4206,11 @@
                 const longitude = Number(eventPayload.longitude ?? eventPayload.driver_longitude);
                 if (!Number.isFinite(latitude) || !Number.isFinite(longitude) ||
                     latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return;
+                const recordedAt = eventPayload.recorded_at || eventPayload.last_seen || eventPayload.updated_at || eventPayload.timestamp;
+                const incomingTimestamp = recordedAt ? Date.parse(recordedAt) : NaN;
+                const currentTimestamp = driver.location_recorded_at ? Date.parse(driver.location_recorded_at) : NaN;
+                if (Number.isFinite(incomingTimestamp) && Number.isFinite(currentTimestamp) &&
+                    incomingTimestamp < currentTimestamp) return;
                 driver.lat = latitude;
                 driver.lng = longitude;
                 if (eventPayload.speed_kmh != null && Number.isFinite(Number(eventPayload.speed_kmh))) {
@@ -4156,7 +4220,6 @@
                 } else if (eventPayload.speed != null && Number.isFinite(Number(eventPayload.speed))) {
                     driver.speed = Number(eventPayload.speed) * 3.6;
                 }
-                const recordedAt = eventPayload.recorded_at || eventPayload.last_seen || eventPayload.updated_at;
                 if (recordedAt) driver.location_recorded_at = recordedAt;
                 renderMapMarkers();
                 return;
@@ -4222,40 +4285,12 @@
             };
             const nextStatus = String(eventPayload.status || payload?.status || rideEventStatuses[eventType] || '').toUpperCase();
             const knownRideStatuses = ['REQUESTED', 'ASSIGNED', 'ARRIVED', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'CANCELLED', 'EXPIRED'];
-            if (!knownRideStatuses.includes(nextStatus)) return;
             const rideId = String(payload?.ride_id || eventPayload.ride_id || '');
-            if (!rideId) return;
-            const ride = STATE.activeRides.find(item => String(item.id) === rideId);
-            if (!ride) return;
-
-            const activeStatuses = ['REQUESTED', 'ASSIGNED', 'ARRIVED', 'IN_PROGRESS', 'PAUSED'];
-            const wasActive = activeStatuses.includes(String(ride.status || '').toUpperCase());
-            const wasWaiting = String(ride.status || '').toUpperCase() === 'REQUESTED';
-            ride.status = String(nextStatus).toUpperCase();
-            const isActive = activeStatuses.includes(ride.status);
-            const isWaiting = ride.status === 'REQUESTED';
-
-            if (STATE.stats && wasActive !== isActive) {
-                STATE.stats.active_rides = Math.max(0, Number(STATE.stats.active_rides || 0) + (isActive ? 1 : -1));
-                const activeEl = document.getElementById('stat-active-rides');
-                if (activeEl) activeEl.innerText = STATE.stats.active_rides;
-                const activeRideBadge = document.getElementById('badge-active-rides-tab');
-                if (activeRideBadge) activeRideBadge.innerText = STATE.stats.active_rides;
+            if (rideId && knownRideStatuses.includes(nextStatus)) {
+                // Handles newly-created rides, missing rows, duplicate events and out-of-order
+                // lifecycle messages using the database's committed state as authority.
+                scheduleAdminRideSnapshotRefresh();
             }
-            if (STATE.stats && wasWaiting !== isWaiting) {
-                STATE.stats.waiting_riders = Math.max(0, Number(STATE.stats.waiting_riders || 0) + (isWaiting ? 1 : -1));
-                const waitingEl = document.getElementById('stat-waiting-riders');
-                if (waitingEl) waitingEl.innerText = STATE.stats.waiting_riders;
-            }
-
-            if (!isWaiting) {
-                STATE.riders = STATE.riders.filter(item => String(item.ride_id || item.id) !== rideId);
-            }
-            if (!isActive) {
-                STATE.activeRides = STATE.activeRides.filter(item => String(item.id) !== rideId);
-            }
-            renderMapMarkers();
-            renderRidesTable();
         }
 
         // Heartbeat Periodic Sync
