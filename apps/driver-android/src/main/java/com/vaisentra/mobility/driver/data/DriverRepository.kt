@@ -982,12 +982,12 @@ object DriverRepository {
             onComplete(false)
             return
         }
+        val assignmentId = _activeOffer.value
+            ?.takeIf { it.rideId == rideId }
+            ?.assignmentId
+            ?.takeIf { it.isNotBlank() }
         scope.launch {
             try {
-                val assignmentId = _activeOffer.value
-                    ?.takeIf { it.rideId == rideId }
-                    ?.assignmentId
-                    ?.takeIf { it.isNotBlank() }
                 val res = DriverNetworkClient.apiService.acceptRide(rideId, assignmentId)
                 if (res.isSuccessful) {
                     _currentRideId.value = rideId
