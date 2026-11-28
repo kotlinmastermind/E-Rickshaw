@@ -29,17 +29,15 @@ class DriverApplication : Application() {
         super.onCreate()
         instance = this
 
-        // Initialize persistent secure preferences
+        // Restore a saved custom endpoint, or retain DEFAULT_RENDER_URL when none is configured.
         DriverNetworkClient.init(this)
         com.vaisentra.mobility.driver.data.DriverRepository.initProfilePhoto()
         com.vaisentra.mobility.driver.data.DriverLocationManager.init(this)
         com.vaisentra.mobility.driver.fcm.DriverFcmManager.init(this)
-
-        // Configure default backend endpoint pointing to FastAPI server
-        DriverNetworkClient.baseUrl = DriverNetworkClient.DEFAULT_RENDER_URL
         com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated(this)
 
-        // Asynchronous non-blocking warm-up ping to wake up sleeping Render container immediately on startup
+        // Retrofit and WebSocket clients both read DriverNetworkClient.baseUrl.
+        // Never overwrite a persisted custom endpoint during application startup.
         warmupAndKeepAliveBackend(DriverNetworkClient.baseUrl)
     }
 
@@ -65,10 +63,9 @@ class DriverApplication : Application() {
                 } catch (e: Exception) {
                     Log.w("DriverApp", "Backend warmup ping pending or retry: ${e.message}")
                 }
-                // Ping every 9 minutes (Render free tier spins down after 15 minutes of inactivity)
+                // Ping every 9 minutes (Render free tier spins down after 15 minutes of inactivity).
                 delay(9 * 60 * 1000L)
             }
         }
     }
 }
-
