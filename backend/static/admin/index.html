@@ -3836,9 +3836,14 @@
                         const status = String(doc.verification_status || 'PENDING').toUpperCase();
                         const row = renderKycRecordRow(docsContainer, doc.document_type || 'Document', status,
                             (doc.file_name || 'File') + ' · ' + (doc.uploaded_at || 'Upload time unavailable'));
+                        const actions = document.createElement('div');
+                        actions.className = 'flex gap-2 mt-2';
+                        const view = document.createElement('button');
+                        view.className = 'px-2 py-1 rounded bg-surface border border-border text-white text-[10px] font-bold';
+                        view.textContent = 'View File';
+                        view.addEventListener('click', () => openDriverDocumentContent(doc.id));
+                        actions.appendChild(view);
                         if (status === 'PENDING') {
-                            const actions = document.createElement('div');
-                            actions.className = 'flex gap-2 mt-2';
                             const verify = document.createElement('button');
                             verify.className = 'px-2 py-1 rounded bg-emerald-glow text-black text-[10px] font-bold';
                             verify.textContent = 'Verify';
@@ -3848,8 +3853,8 @@
                             reject.textContent = 'Reject';
                             reject.addEventListener('click', () => submitDriverDocumentReview(driverId, doc.id, 'REJECTED'));
                             actions.append(verify, reject);
-                            row.querySelector('div').appendChild(actions);
                         }
+                        row.querySelector('div').appendChild(actions);
                     });
                 }
 
@@ -3888,6 +3893,27 @@
             } catch (error) {
                 docsContainer.textContent = error.message || 'Driver KYC records could not be loaded.';
                 inspectionsContainer.textContent = 'Inspection records unavailable.';
+            }
+        }
+
+        async function openDriverDocumentContent(documentId) {
+            const previewWindow = window.open('about:blank', '_blank');
+            try {
+                const headers = {};
+                if (STATE.adminToken) headers['Authorization'] = 'Bearer ' + STATE.adminToken;
+                const response = await fetch('/api/v1/admin/driver-documents/' +
+                    encodeURIComponent(documentId) + '/content', { headers });
+                if (!response.ok) {
+                    if (previewWindow) previewWindow.close();
+                    const result = await response.json().catch(() => ({}));
+                    throw new Error(result.detail || 'Private document content is unavailable.');
+                }
+                const blob = await response.blob();
+                const objectUrl = URL.createObjectURL(blob);
+                if (previewWindow) previewWindow.location = objectUrl;
+                else window.location.href = objectUrl;
+            } catch (error) {
+                showToast(error.message || 'Document preview failed.', 'error');
             }
         }
 
