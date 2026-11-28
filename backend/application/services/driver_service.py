@@ -22,39 +22,25 @@ class DriverService:
         self.storage = get_storage_provider()
 
     async def get_or_create_profile(self, user_id: str) -> DriverProfile:
+        """Return the already-registered driver profile; never invent identity credentials."""
         stmt = select(DriverProfile).where(DriverProfile.user_id == user_id)
         res = await self.db.execute(stmt)
         driver = res.scalar_one_or_none()
         if not driver:
-            driver = DriverProfile(
-                user_id=user_id,
-                license_number=f"DL-{user_id[:8].upper()}",
-                approval_status="PENDING"
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Driver profile not found. Complete driver registration before using driver services."
             )
-            self.db.add(driver)
-            await self.db.flush()
 
-            wallet = DriverWallet(driver_id=driver.id, balance_cents=0, currency="INR")
-            self.db.add(wallet)
+        w_stmt = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
+        w_res = await self.db.execute(w_stmt)
+        if not w_res.scalar_one_or_none():
+            self.db.add(DriverWallet(driver_id=driver.id, balance_cents=0, currency="INR"))
 
-            avail = DriverAvailability(driver_id=driver.id, is_online=False, is_busy=False)
-            self.db.add(avail)
-            await self.db.commit()
-            await self.db.refresh(driver)
-        else:
-            w_stmt = select(DriverWallet).where(DriverWallet.driver_id == driver.id)
-            w_res = await self.db.execute(w_stmt)
-            if not w_res.scalar_one_or_none():
-                wallet = DriverWallet(driver_id=driver.id, balance_cents=0, currency="INR")
-                self.db.add(wallet)
-                await self.db.flush()
-
-            avail_stmt = select(DriverAvailability).where(DriverAvailability.driver_id == driver.id)
-            avail_res = await self.db.execute(avail_stmt)
-            if not avail_res.scalar_one_or_none():
-                avail = DriverAvailability(driver_id=driver.id, is_online=False, is_busy=False)
-                self.db.add(avail)
-                await self.db.flush()
+        avail_stmt = select(DriverAvailability).where(DriverAvailability.driver_id == driver.id)
+        avail_res = await self.db.execute(avail_stmt)
+        if not avail_res.scalar_one_or_none():
+            self.db.add(DriverAvailability(driver_id=driver.id, is_online=False, is_busy=False))
         return driver
 
     async def upload_document(self, user_id: str, document_type: str, file: UploadFile) -> Dict[str, Any]:
