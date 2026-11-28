@@ -213,8 +213,8 @@ async def test_admin_approval_lifecycle_and_non_admin_rejection(db_session):
                 json={"approval_status": "APPROVED"},
                 headers={"Authorization": f"Bearer {admin_token}"}
             )
-            assert res_auth.status_code == 200, res_auth.text
-            assert res_auth.json()["approval_status"] == "APPROVED"
+            assert res_auth.status_code == 409, res_auth.text
+            assert "identity proof" in res_auth.text.lower()
         finally:
             app.dependency_overrides.pop(get_current_admin, None)
 
