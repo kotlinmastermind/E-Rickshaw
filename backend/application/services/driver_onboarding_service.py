@@ -169,10 +169,10 @@ class DriverOnboardingService:
         docs = docs_res.scalars().all()
         doc_types = {d.document_type: d for d in docs}
 
-        has_license = "DRIVING_LICENSE" in doc_types and doc_types["DRIVING_LICENSE"].verification_status == "APPROVED"
-        has_rc = "VEHICLE_REGISTRATION" in doc_types and doc_types["VEHICLE_REGISTRATION"].verification_status == "APPROVED"
-        has_insurance = "INSURANCE" in doc_types and doc_types["INSURANCE"].verification_status == "APPROVED"
-        has_id = "IDENTITY_PROOF" in doc_types and doc_types["IDENTITY_PROOF"].verification_status == "APPROVED"
+        has_license = "DRIVING_LICENSE" in doc_types and doc_types["DRIVING_LICENSE"].verification_status in {"VERIFIED", "APPROVED"}
+        has_rc = "VEHICLE_REGISTRATION" in doc_types and doc_types["VEHICLE_REGISTRATION"].verification_status in {"VERIFIED", "APPROVED"}
+        has_insurance = "INSURANCE" in doc_types and doc_types["INSURANCE"].verification_status in {"VERIFIED", "APPROVED"}
+        has_id = "IDENTITY_PROOF" in doc_types and doc_types["IDENTITY_PROOF"].verification_status in {"VERIFIED", "APPROVED"}
         all_docs_verified = has_license and has_rc and has_insurance and has_id
 
         # Training progress
@@ -198,7 +198,7 @@ class DriverOnboardingService:
         policy_acknowledged = driver.policy_acknowledged_at is not None
 
         # Calculate completeness percentage
-        completeness = 10  # Base profile
+        completeness = 0  # No onboarding credit until a real step is completed
         if driver.identity_verified or has_id:
             completeness += 20
         if all_docs_verified:
@@ -234,7 +234,7 @@ class DriverOnboardingService:
         elif len(docs) > 0:
             current_step = "DOCUMENTS_UNDER_AUDIT"
         else:
-            current_step = "IDENTITY_SUBMITTED"
+            current_step = "DOCUMENTS_PENDING"
 
         driver.onboarding_step = current_step
         await self.db.commit()
@@ -286,7 +286,7 @@ class DriverOnboardingService:
 
         return {
             "driver_id": driver.id,
-            "full_name": user.full_name if user else "Executive Chauffeur",
+            "full_name": user.full_name if user else "",
             "phone_number": user.phone_number if user else "",
             "preferred_operating_zones": [value for value in driver.preferred_operating_zones.split(",") if value],
             "preferred_vehicle_categories": [value for value in driver.preferred_vehicle_categories.split(",") if value],
