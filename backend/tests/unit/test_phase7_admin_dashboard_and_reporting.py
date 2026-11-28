@@ -206,7 +206,10 @@ async def test_admin_driver_approval_workflow_and_notification(db_session):
     db_session.add(DriverVehicleInspection(
         driver_id=driver_profile.id,
         vehicle_id=vehicle.id,
-        inspection_status="PASSED",
+        inspection_status="APPROVED",
+        verification_status="VERIFIED",
+        verified_by=f"admin_{suffix}",
+        verified_at=datetime.now(timezone.utc),
         overall_result="PASS",
         inspected_at=datetime.now(timezone.utc)
     ))
