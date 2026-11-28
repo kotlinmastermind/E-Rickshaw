@@ -231,7 +231,7 @@ class SmartDispatchService:
             selected_assignment = assignment
 
             # Broadcast WebSocket offer events
-            await self._broadcast_offer(ride, candidate, matching_scored, offer_timeout_sec)
+            await self._broadcast_offer(ride, candidate, matching_scored, assignment, offer_timeout_sec)
 
             # Schedule background watchdog for automated timeout cascade
             try:
@@ -258,18 +258,23 @@ class SmartDispatchService:
         ride: Ride,
         candidate: Any,
         scored: Any,
+        assignment: RideAssignment,
         timeout_seconds: int
     ) -> None:
-        """Sends real-time WebSocket payloads to passenger and driver."""
+        """Publishes one canonical, persisted offer event to the driver's cross-worker channels."""
         fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else (ride.estimated_fare_cents or 0)
-        road_eta = getattr(candidate, "road_eta_minutes", 5.0)
+        road_eta = getattr(candidate, "road_eta_minutes", None)
         from backend.application.services.commission_service import CommissionService
         commission_estimate = await CommissionService.estimate_for_ride(self.db, ride)
+        expires_at = ensure_utc(assignment.expires_at)
+        remaining_seconds = max(0, int((expires_at - utc_now()).total_seconds())) if expires_at else timeout_seconds
 
-        # 1. Event to driver
+        # Keep this event name aligned with ConnectionManager's Pub/Sub allowlist
+        # and the driver's durable reconnect reconciliation payload.
         driver_payload = {
-            "event": "DISPATCH_OFFER_RECEIVED",
+            "event": "DISPATCH_OFFER",
             "ride_id": ride.id,
+            "assignment_id": assignment.id,
             "pickup_address": ride.pickup_address,
             "pickup_latitude": ride.pickup_latitude,
             "pickup_longitude": ride.pickup_longitude,
@@ -277,15 +282,22 @@ class SmartDispatchService:
             "destination_latitude": ride.destination_latitude,
             "destination_longitude": ride.destination_longitude,
             "estimated_fare_cents": fare_cents,
+            "estimated_trip_distance_km": ride.estimated_distance_km,
+            "trip_duration_minutes": ride.estimated_duration_minutes,
+            "pickup_distance_km": getattr(candidate, "road_distance_km", None),
+            "pickup_duration_minutes": road_eta,
             **commission_estimate,
-            "road_eta_minutes": road_eta,
-            "expires_in_seconds": timeout_seconds,
+            "timeout_seconds": remaining_seconds,
+            "expires_at": expires_at.isoformat() if expires_at else None,
             "timestamp": utc_now().isoformat()
         }
 
-        # Send to driver personal channel
-        target_user = candidate.user_id or candidate.driver_id
-        await ws_manager.send_personal_message(driver_payload, target_user)
+        # Publish to both identifiers because clients may authenticate with either
+        # the DriverProfile ID or the owning User ID. Each worker's subscriber
+        # forwards the event to its locally connected socket.
+        await redis_client.publish(f"driver:dispatch:{candidate.driver_id}", driver_payload)
+        if candidate.user_id and candidate.user_id != candidate.driver_id:
+            await redis_client.publish(f"driver:dispatch:{candidate.user_id}", driver_payload)
 
         # 2. Event to passenger ride channel
         passenger_payload = {
