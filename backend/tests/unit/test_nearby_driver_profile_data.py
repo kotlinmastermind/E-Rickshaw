@@ -25,6 +25,24 @@ class FakeDb:
         return FakeResult(self.rows)
 
 
+def stub_service_area(monkeypatch):
+    zone = SimpleNamespace(id="area-1", name="Test Locality", city_code="TEST_CITY")
+
+    async def resolve_point(_self, _latitude, _longitude):
+        return zone
+
+    async def load_area_boundary(_self, _service_area_id):
+        return zone, [(28.0, 77.0), (29.0, 77.0), (29.0, 78.0)], []
+
+    monkeypatch.setattr(ServiceAreaService, "resolve_point", resolve_point)
+    monkeypatch.setattr(ServiceAreaService, "load_area_boundary", load_area_boundary)
+    monkeypatch.setattr(
+        ServiceAreaService,
+        "location_is_inside_boundary",
+        staticmethod(lambda *_args: True),
+    )
+
+
 @pytest.mark.asyncio
 async def test_nearby_feed_uses_real_vehicle_fields_and_hides_unrated_placeholder_profile(monkeypatch):
     stub_service_area(monkeypatch)
