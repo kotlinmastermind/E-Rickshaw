@@ -26,8 +26,8 @@ async def test_driver_signup_defaults_to_pending_and_unverified(db_session):
             "phone_number": driver_phone,
             "email": driver_email,
             "password": "StrongPassword123!",
-            "vehicle_name": "Mahindra Treo",
-            "vehicle_no": f"DL-01-PT-{str(unique_suffix)[-4:]}"
+            "license_number": f"DL-APPLICANT-{str(unique_suffix)[-6:]}",
+            "vehicle_type": "SEDAN"
         })
         assert res.status_code == 200, res.text
         data = res.json()
