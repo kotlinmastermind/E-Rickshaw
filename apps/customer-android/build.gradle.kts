@@ -46,7 +46,7 @@ android {
         }
         create("prod") {
             dimension = "env"
-            buildConfigField("String", "API_BASE_URL", "\"https://e-rickshaw-z32z.onrender.com/\"")
+            buildConfigField("String", "API_BASE_URL", "\"https://api.vaisentratechnologies.in/\"")
         }
     }
 
