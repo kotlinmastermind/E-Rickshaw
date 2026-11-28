@@ -219,6 +219,49 @@ async def test_redis_recovery_and_rebuild_from_authoritative_postgres(db_session
 
 
 @pytest.mark.asyncio
+async def test_stale_online_gps_snapshot_cannot_reindex_offline_driver(db_session):
+    """A delayed GPS request must honor the committed DB availability state."""
+    suffix = uuid.uuid4().hex[:6]
+    user = User(
+        phone_number=f"+91987{suffix}03",
+        full_name="Offline GPS Race Driver",
+        role="driver",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    profile = DriverProfile(
+        id=str(uuid.uuid4()),
+        user_id=user.id,
+        license_number=f"DL-OFFLINE-{suffix}",
+        approval_status="APPROVED",
+    )
+    db_session.add(profile)
+    await db_session.flush()
+    db_session.add(DriverAvailability(driver_id=profile.id, is_online=False, is_busy=False))
+    await db_session.commit()
+
+    live_loc = LiveLocationService(db=db_session)
+    result = await live_loc.ingest_driver_location(
+        driver_id=profile.id,
+        latitude=28.6139,
+        longitude=77.2090,
+        is_online=True,  # stale snapshot captured before the driver went offline
+        is_busy=False,
+    )
+
+    assert result["status"] == "RECORDED"
+    cached = await live_loc.get_driver_live_location(profile.id)
+    assert cached is not None
+    assert cached["is_online"] is False
+    assert cached["is_busy"] is False
+    assert profile.id not in await redis_client.smembers(f"h3:drivers:{result['h3_cell']}")
+    assert await redis_client.get(f"driver:h3_cell:{profile.id}") is None
+
+
+@pytest.mark.asyncio
 async def test_offline_cleanup_removes_from_h3_index(db_session):
     """
     Task 2: Verify that when a driver goes offline, they are immediately
