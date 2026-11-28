@@ -279,6 +279,12 @@ interface DriverApiService {
     @GET("api/v1/driver-onboarding/training/curriculum")
     suspend fun getTrainingCurriculum(): Response<List<TrainingModuleDto>>
 
+    @GET("api/v1/driver-onboarding/service-area-requests")
+    suspend fun getDriverServiceAreaRequests(): Response<List<DriverServiceAreaRequestDto>>
+
+    @POST("api/v1/driver-onboarding/service-area-requests")
+    suspend fun submitDriverServiceAreaRequest(@Body body: CreateDriverServiceAreaRequest): Response<Map<String, Any>>
+
     @GET("api/v1/driver-onboarding/tickets")
     suspend fun getDriverTickets(): Response<List<DriverTicketDto>>
 
