@@ -595,8 +595,9 @@ class SmartDispatchService:
         await asyncio.sleep(delay_sec)
         await self._handle_timeout(ride_id, driver_id)
 
-    async def _handle_timeout(self, ride_id: str, driver_id: str) -> None:
-        """Inspects if offer is still pending OFFERED; if so, marks REJECTED and cascades."""
+    @staticmethod
+    async def _handle_timeout(ride_id: str, driver_id: str) -> None:
+        """Expire one offer only after its persisted deadline and while its ride is still unassigned."""
         try:
             from backend.infrastructure.database.session import async_session_maker
             async with async_session_maker() as session:
@@ -607,7 +608,17 @@ class SmartDispatchService:
                 res = await session.execute(assign_stmt)
                 assignment = res.scalar_one_or_none()
 
-                if assignment and assignment.status == "OFFERED":
+                if (
+                    assignment
+                    and assignment.status == "OFFERED"
+                    and assignment.expires_at is not None
+                    and ensure_utc(assignment.expires_at) <= utc_now()
+                ):
+                    ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
+                    ride = (await session.execute(ride_stmt)).scalar_one_or_none()
+                    if not ride or ride.status != RideStatus.REQUESTED.value or ride.assigned_driver_id is not None:
+                        return
+
                     now = utc_now()
                     assignment.status = "REJECTED"
                     assignment.is_accepted = False
@@ -638,3 +649,34 @@ class SmartDispatchService:
                 await svc.search_and_dispatch(ride_id)
         except Exception as e:
             logger.error(f"Background cascade failed for ride {ride_id}: {e}", exc_info=True)
+
+ 
+async def run_dispatch_expiry_reaper_loop(poll_interval_seconds: int = 5, batch_size: int = 100) -> None:
+    """Recover expired dispatch offers after worker restarts using persisted PostgreSQL deadlines."""
+    from backend.infrastructure.database.session import async_session_maker
+
+    while True:
+        try:
+            async with async_session_maker() as session:
+                expired_result = await session.execute(
+                    select(RideAssignment.ride_id, RideAssignment.driver_id)
+                    .where(
+                        RideAssignment.status == "OFFERED",
+                        RideAssignment.expires_at.is_not(None),
+                        RideAssignment.expires_at <= utc_now(),
+                    )
+                    .order_by(RideAssignment.expires_at.asc())
+                    .limit(batch_size)
+                )
+                expired_offers = expired_result.all()
+
+            # _handle_timeout takes a row lock and rechecks both expiry and ride
+            # state, so concurrent API workers/reaper instances cannot cascade twice.
+            for ride_id, driver_id in expired_offers:
+                await SmartDispatchService._handle_timeout(ride_id, driver_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Dispatch expiry reaper cycle failed")
+
+        await asyncio.sleep(max(1, poll_interval_seconds))
