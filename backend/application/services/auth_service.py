@@ -62,12 +62,25 @@ class AuthService:
         sms_provider = get_sms_provider()
         try:
             await sms_provider.send_verification_otp(norm_phone)
-        except Exception:
-            # Do not strand a user behind a cooldown when Twilio did not accept the request.
-            try:
-                await redis_client.delete_strict(cooldown_key)
-            except Exception:
-                logger.warning("Unable to release OTP cooldown after provider failure; TTL will expire naturally.")
+        except Exception as provider_error:
+            # Release only when the provider definitively rejected the request. A timeout,
+            # connection reset, or 5xx can happen after Twilio accepted the SMS; retaining
+            # the reservation prevents a retry from charging/sending a duplicate message.
+            definitive_rejection = (
+                isinstance(provider_error, HTTPException)
+                and provider_error.status_code in {
+                    status.HTTP_400_BAD_REQUEST,
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                }
+            )
+            if definitive_rejection:
+                try:
+                    await redis_client.delete_strict(cooldown_key)
+                except Exception:
+                    logger.warning("Unable to release OTP cooldown after definitive provider rejection; TTL will expire naturally.")
+            else:
+                logger.warning("OTP send outcome is ambiguous; retaining cooldown to prevent duplicate SMS.")
             raise
 
         phone_masked = f"{norm_phone[-4:].rjust(len(norm_phone), '*')}"
