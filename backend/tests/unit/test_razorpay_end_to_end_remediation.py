@@ -1091,7 +1091,25 @@ async def test_notification_webhooks_diagnostic_sync_concurrent_refunds_and_dup_
         await db_session.refresh(pay)
         assert pay.status == "CAPTURED"
 
-        # 3. Concurrent partial refunds respect ceiling (only one 35000 refund succeeds out of 50000)
+        # 3. Concurrent partial refunds respect ceiling (only one 35000 refund succeeds out of 50000).
+        # Use a separate captured ride payment: section 2 intentionally exercises a WALLET_TOPUP
+        # refund-failure/clawback reversal, and that wallet-specific ledger lifecycle must not
+        # become hidden setup state for this independent payment-refund concurrency scenario.
+        concurrent_pay = Payment(
+            user_id=user.id,
+            amount_cents=50000,
+            currency="INR",
+            purpose="RIDE_FARE",
+            status="CAPTURED",
+            payment_method="RAZORPAY",
+            provider_name="RAZORPAY",
+            provider_order_id=f"order_concurrent_refund_{uuid.uuid4().hex[:8]}",
+            provider_payment_id=f"pay_concurrent_refund_{uuid.uuid4().hex[:8]}",
+            idempotency_key=f"idem_concurrent_refund_{uuid.uuid4().hex[:8]}",
+        )
+        db_session.add(concurrent_pay)
+        await db_session.commit()
+
         from backend.infrastructure.database.session import async_session_maker
         ref_count = 0
 
@@ -1106,7 +1124,7 @@ async def test_notification_webhooks_diagnostic_sync_concurrent_refunds_and_dup_
             async with async_session_maker() as s:
                 try:
                     return await SettlementAdvancedService(s).create_refund(
-                        payment_id=pay.id,
+                        payment_id=concurrent_pay.id,
                         amount_cents=amt,
                         reason="Concurrent partial refund test",
                         is_partial=True,
