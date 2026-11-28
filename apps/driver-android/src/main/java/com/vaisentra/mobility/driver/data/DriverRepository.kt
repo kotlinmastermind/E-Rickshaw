@@ -1886,7 +1886,7 @@ object DriverRepository {
         postalCode: String?,
         latitude: Double,
         longitude: Double
-    ): Result<Boolean> {
+    ): Result<DriverServiceAreaRequestSubmitResponse> {
         return try {
             val response = DriverNetworkClient.apiService.submitDriverServiceAreaRequest(
                 CreateDriverServiceAreaRequest(
@@ -1898,8 +1898,9 @@ object DriverRepository {
                     longitude = longitude
                 )
             )
-            if (response.isSuccessful) {
-                Result.success(true)
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body)
             } else {
                 val detail = response.errorBody()?.string()?.take(240)
                 Result.failure(IllegalStateException(detail ?: "Locality request failed: HTTP ${response.code()}"))
