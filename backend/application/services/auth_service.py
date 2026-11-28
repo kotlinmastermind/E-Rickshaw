@@ -159,6 +159,8 @@ class AuthService:
         else:
             if not user.is_active:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated. Please contact support.")
+            # A successful Twilio Verify check is authoritative for the phone number.
+            user.is_verified = True
             if (user.role or "").lower() in ("admin", "superadmin", "super administrator"):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
