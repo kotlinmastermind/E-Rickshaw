@@ -261,6 +261,10 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
                 "category_id": "nonexistent_cat_99999",
                 "pickup_address": "The Taj Mahal Palace, Colaba",
                 "destination_address": "Chhatrapati Shivaji Maharaj T2 VIP Terminal",
+                "pickup_latitude": 18.9220,
+                "pickup_longitude": 72.8330,
+                "destination_latitude": 19.0896,
+                "destination_longitude": 72.8656,
                 "payment_method": "UPI"
             }, headers=cust_headers)
             assert bad_req_inv.status_code == 404
