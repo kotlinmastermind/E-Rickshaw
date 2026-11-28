@@ -27,6 +27,26 @@ class TrackingAdvancedService:
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found")
 
+        # Telemetry is restricted to the ride participants (or Admin). The start
+        # OTP is a customer-only secret and must never be returned to drivers/Admin.
+        role = (current_user.role or "").lower()
+        if role == "customer":
+            participant = (await self.db.execute(
+                select(CustomerProfile).where(CustomerProfile.user_id == current_user.id)
+            )).scalar_one_or_none()
+            if participant is None or ride.customer_id != participant.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
+        elif role == "driver":
+            participant = (await self.db.execute(
+                select(DriverProfile).where(DriverProfile.user_id == current_user.id)
+            )).scalar_one_or_none()
+            if participant is None or ride.assigned_driver_id != participant.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
+        elif role != "admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ride participant access required")
+
+        customer_can_view_otp = role == "customer"
+
         # Telemetry coordinates
         driver_lat = ride.pickup_latitude
         driver_lng = ride.pickup_longitude
@@ -155,7 +175,9 @@ class TrackingAdvancedService:
         traffic_note = "Minor congestion on Senapati Bapat Marg (+2 mins adjusted)"
 
         # Feature 121: Accessibility Announcement text
-        announcement = f"Driver is {base_eta} minutes away. {plate_label}. OTP passcode is {ride.start_otp}."
+        announcement = f"Driver is {base_eta} minutes away. {plate_label}."
+        if customer_can_view_otp:
+            announcement = f"{announcement} OTP passcode is {ride.start_otp}."
         if ride.status == "ARRIVED":
             announcement = f"Your driver has arrived at {ride.pickup_address}. {vehicle_label}, {plate_label}."
         elif ride.status == "IN_PROGRESS":
@@ -174,7 +196,7 @@ class TrackingAdvancedService:
             "destination_latitude": ride.destination_latitude,
             "destination_longitude": ride.destination_longitude,
             "destination_address": ride.destination_address,
-            "start_otp": ride.start_otp,
+            "start_otp": ride.start_otp if customer_can_view_otp else None,
             # Feature 102 & 103
             "eta_minutes": base_eta,
             "eta_range_min": eta_min,

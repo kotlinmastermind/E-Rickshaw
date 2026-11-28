@@ -54,6 +54,21 @@ async def test_part5_telemetry_and_confidence_range(db_session):
     assert len(telemetry["timeline"]) == 5
     assert telemetry["masked_virtual_number"] == "+91 22 6900 4820"
 
+    # The assigned driver may see trip telemetry but never the customer start OTP.
+    driver_telemetry = await service.get_advanced_tracking_telemetry(ride.id, driver_user)
+    assert driver_telemetry["start_otp"] is None
+    assert "8492" not in driver_telemetry["accessibility_announcement"]
+
+    # A different customer must not be able to inspect this ride's telemetry.
+    outsider = User(phone_number=f"+91982{u_suffix}7", full_name="Unrelated Customer", role="customer", is_active=True)
+    db_session.add(outsider)
+    await db_session.flush()
+    db_session.add(CustomerProfile(user_id=outsider.id))
+    await db_session.commit()
+    with pytest.raises(HTTPException) as denied:
+        await service.get_advanced_tracking_telemetry(ride.id, outsider)
+    assert denied.value.status_code == 403
+
 @pytest.mark.asyncio
 async def test_part5_trip_share_link_and_privacy_shield(db_session):
     u_suffix = uuid.uuid4().hex[:6]
