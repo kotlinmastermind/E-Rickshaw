@@ -183,15 +183,13 @@ async def test_admin_payout_account_verification_rejection_and_payout_enforcemen
         listed = await client.get("/api/v1/admin/payout-accounts?status_filter=PENDING_VERIFICATION")
         assert listed.status_code == 200
         assert any(row["id"] == account_id for row in listed.json())
+        # Full bank/UPI destinations must never be revealed through a generic Admin endpoint.
+        # Decryption is permitted only inside the authorized payout execution workflow.
         reveal = await client.get(f"/api/v1/admin/payout-accounts/{account_id}/details")
-        assert reveal.status_code == 200, reveal.text
-        assert reveal.json()["account_number"] == "987654321098"
-        assert reveal.json()["ifsc_code"] == "ICIC0004321"
-        reveal_audit = (await db_session.execute(select(AdministrativeAuditLog).where(
-            AdministrativeAuditLog.target_id == account_id,
-            AdministrativeAuditLog.action == "PAYOUT_DESTINATION_DETAILS_REVEALED",
-        ))).scalar_one()
-        assert "987654321098" not in reveal_audit.changes_json
+        assert reveal.status_code == 404
+        listed_text = json.dumps(listed.json())
+        assert "987654321098" not in listed_text
+        assert "secretpilot@okhdfcbank" not in listed_text
 
         verified_res = await client.post(
             f"/api/v1/admin/payout-accounts/{account_id}/verify",
