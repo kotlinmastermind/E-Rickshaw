@@ -20,7 +20,7 @@ from backend.api.routes import (
     auth, customer, customer_kyc, driver, vehicles, location,
     fares, rides, payments, admin, ws, health,
     wallets, promos, support, chat, favorites, pools, user_governance,
-    safety, loyalty_feedback, driver_onboarding, driver_safety, driver_financials,
+    safety, loyalty_feedback, driver_onboarding, driver_safety, driver_financials, driver_inspection,
     notifications, analytics_bi, dispatch, corporate, audio_recording, gift_cards
 )
 from sqlalchemy import func, select
@@ -321,6 +321,7 @@ app.include_router(user_governance.router, prefix=settings.API_V1_STR)
 app.include_router(safety.router, prefix=settings.API_V1_STR)
 app.include_router(loyalty_feedback.router, prefix=settings.API_V1_STR)
 app.include_router(driver_onboarding.router, prefix=settings.API_V1_STR)
+app.include_router(driver_inspection.router, prefix=settings.API_V1_STR)
 app.include_router(driver_safety.router, prefix=settings.API_V1_STR)
 app.include_router(driver_financials.router, prefix=settings.API_V1_STR)
 app.include_router(analytics_bi.router, prefix=settings.API_V1_STR)
