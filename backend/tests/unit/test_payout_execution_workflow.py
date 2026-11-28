@@ -453,7 +453,7 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     await db_session.refresh(wallet)
     assert wallet.balance_cents == 40000
 
-    retry_reference_id = f"{payout_id}:retry:1"
+    retry_reference_id = f"r1-{payout_id.replace('-', '')}"
     ok_post = MagicMock(status_code=201)
     ok_post.json.return_value = {"id": "pout_rx_002", "status": "processing", "reference_id": retry_reference_id}
     post_mock = AsyncMock(return_value=ok_post)
