@@ -40,6 +40,14 @@ services:
         sync: false
       - key: SECRET_KEY
         generateValue: true
+      - key: PAYOUT_DESTINATION_ENCRYPTION_KEY
+        sync: false
+      - key: PAYOUT_DESTINATION_ENCRYPTION_KEY_PREVIOUS
+        sync: false
+      - key: PAYOUT_EXECUTION_MODE
+        value: MANUAL_TRANSFER
+      - key: RAZORPAYX_ACCOUNT_NUMBER
+        sync: false
       - key: ALGORITHM
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES

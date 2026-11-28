@@ -58,7 +58,7 @@ scratch/
 release-apks/
 uploads/
 *.png
-*.xml
+window_dump.xml
 *~
 
 .env
