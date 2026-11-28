@@ -560,6 +560,7 @@ async def test_dispatch_offer_uses_canonical_cross_worker_delivery_contract(db_s
         destination_address="Destination",
         destination_latitude=28.62,
         destination_longitude=77.21,
+        payment_method="UPI",
     )
     candidate = SimpleNamespace(
         driver_id="driver-profile-1",
@@ -587,4 +588,5 @@ async def test_dispatch_offer_uses_canonical_cross_worker_delivery_contract(db_s
     assert payload["expires_at"] == assignment.expires_at.isoformat()
     assert payload["pickup_distance_km"] == 1.2
     assert payload["estimated_trip_distance_km"] == 4.5
+    assert payload["payment_mode"] == "UPI"
     broadcast_to_ride.assert_awaited_once()
