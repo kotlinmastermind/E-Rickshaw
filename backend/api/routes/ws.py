@@ -503,11 +503,20 @@ async def driver_dispatch_websocket(
                 reconciled_offer = {
                     "event": "DISPATCH_OFFER",
                     "ride_id": ride.id,
+                    "assignment_id": assignment.id,
                     "pickup_address": ride.pickup_address,
+                    "pickup_latitude": ride.pickup_latitude,
+                    "pickup_longitude": ride.pickup_longitude,
                     "destination_address": ride.destination_address,
+                    "destination_latitude": ride.destination_latitude,
+                    "destination_longitude": ride.destination_longitude,
                     "estimated_fare_cents": fare_cents,
+                    "estimated_trip_distance_km": ride.estimated_distance_km,
+                    "trip_duration_minutes": ride.estimated_duration_minutes,
+                    "payment_mode": ride.payment_method,
                     **commission_estimate,
                     "pickup_distance_km": None,
+                    "pickup_duration_minutes": None,
                     "timeout_seconds": remaining_seconds,
                     "expires_at": assignment.expires_at.isoformat() if assignment.expires_at else None
                 }
