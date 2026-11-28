@@ -669,30 +669,50 @@ class DriverInspectionService:
         if action_clean not in ["APPROVE", "REJECT"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Action must be 'APPROVE' or 'REJECT'.")
 
-        stmt = select(DriverVehicleInspection).where(DriverVehicleInspection.id == inspection_id)
+        stmt = (
+            select(DriverVehicleInspection)
+            .options(selectinload(DriverVehicleInspection.photos))
+            .where(DriverVehicleInspection.id == inspection_id)
+        )
         res = await self.db.execute(stmt)
         insp = res.scalar_one_or_none()
         if not insp:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found.")
-        if (insp.inspection_status or "").upper() != "SUBMITTED":
+        if (insp.inspection_status or "").upper() not in {"SUBMITTED", "PENDING_VERIFICATION"}:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Only a submitted vehicle inspection can be reviewed by Admin."
+                detail="Only a submitted or pending-verification vehicle inspection can be reviewed by Admin."
             )
 
         if action_clean == "APPROVE":
-            required_photo_urls = [
+            mandatory_categories = set(MANDATORY_PHOTO_CATEGORIES)
+            uploaded_categories = {
+                (photo.photo_category or "").upper()
+                for photo in insp.photos
+                if (photo.upload_status or "").upper() == "COMPLETED"
+            }
+            daily_inspection_evidence = mandatory_categories.issubset(uploaded_categories)
+            onboarding_inspection_evidence = all([
                 insp.photo_front_url,
                 insp.photo_rear_url,
                 insp.photo_left_url,
                 insp.photo_right_url,
                 insp.photo_interior_front_url,
                 insp.photo_interior_rear_url,
-            ]
-            if not insp.checklist_json or not all(required_photo_urls):
+            ])
+            daily_photo_url_evidence = all([
+                insp.odometer_photo_url,
+                insp.photo_front_url,
+                insp.photo_rear_url,
+                insp.photo_left_url,
+                insp.photo_right_url,
+            ])
+            if not insp.checklist_json or not (
+                daily_inspection_evidence or onboarding_inspection_evidence or daily_photo_url_evidence
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Inspection evidence is incomplete; all checklist results and six vehicle photos are required."
+                    detail="Inspection evidence is incomplete; submit the full checklist and all mandatory inspection photographs."
                 )
 
         now = datetime.now(timezone.utc)
