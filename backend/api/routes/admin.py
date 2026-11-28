@@ -2507,7 +2507,12 @@ async def approve_driver_service_area_request(
     active_tariff_id = (await db.execute(
         select(FareRule.id)
         .join(VehicleCategory, VehicleCategory.id == FareRule.category_id)
+        .join(Vehicle, Vehicle.category_id == VehicleCategory.id)
+        .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
         .where(
+            DriverVehicleAssignment.driver_id == driver.id,
+            DriverVehicleAssignment.is_active.is_(True),
+            Vehicle.is_active.is_(True),
             FareRule.city_code == zone.city_code,
             FareRule.is_active.is_(True),
             FareRule.workflow_status.in_(["ACTIVE", "APPROVED"]),
