@@ -162,6 +162,12 @@ class AdminService:
             driver = await self.db.get(DriverProfile, driver_id)
             if not driver:
                 raise HTTPException(status_code=404, detail="Driver record not found.")
+            driver_user = await self.db.get(User, driver.user_id)
+            if not driver_user or not driver_user.is_verified:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot approve driver until the registered mobile number has been verified through Twilio OTP."
+                )
 
             documents = (await self.db.execute(
                 select(DriverDocument).where(DriverDocument.driver_id == driver_id)
