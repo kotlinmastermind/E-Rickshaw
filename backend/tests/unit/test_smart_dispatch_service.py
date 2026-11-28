@@ -418,15 +418,15 @@ async def _create_dispatch_fixture(db_session):
         is_online=True,
         is_busy=False,
     )
-    return driver_user, driver, vehicle, availability, ride
+    return driver_user, driver, category, vehicle, availability, ride
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("eligibility_change", ["approval", "vehicle", "availability"])
+@pytest.mark.parametrize("eligibility_change", ["approval", "vehicle", "category", "availability"])
 async def test_dispatch_offer_acceptance_revalidates_current_driver_eligibility(
     db_session, eligibility_change
 ):
-    driver_user, driver, vehicle, availability, ride = await _create_dispatch_fixture(db_session)
+    driver_user, driver, category, vehicle, availability, ride = await _create_dispatch_fixture(db_session)
     dispatch = SmartDispatchService(db_session)
     offer = await dispatch.search_and_dispatch(ride.id, max_rings=2)
 
@@ -438,6 +438,8 @@ async def test_dispatch_offer_acceptance_revalidates_current_driver_eligibility(
         driver.approval_status = "PENDING"
     elif eligibility_change == "vehicle":
         vehicle.is_active = False
+    elif eligibility_change == "category":
+        category.is_active = False
     else:
         availability.is_online = False
     await db_session.commit()
@@ -455,7 +457,7 @@ async def test_dispatch_offer_acceptance_revalidates_current_driver_eligibility(
 
 @pytest.mark.asyncio
 async def test_smart_dispatch_excludes_inactive_driver_accounts(db_session):
-    driver_user, driver, _, _, ride = await _create_dispatch_fixture(db_session)
+    driver_user, driver, _, _, _, ride = await _create_dispatch_fixture(db_session)
     driver_user.is_active = False
     await db_session.commit()
 
