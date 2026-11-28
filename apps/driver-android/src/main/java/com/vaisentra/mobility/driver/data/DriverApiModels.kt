@@ -227,7 +227,7 @@ data class EndShiftRequest(
 data class DispatchOfferDto(
     @SerializedName("ride_id") val rideId: String = "",
     @SerializedName("assignment_id") val assignmentId: String = "",
-    @SerializedName("passenger_name") val passengerName: String = "Commuter Passenger",
+    @SerializedName("passenger_name") val passengerName: String = "",
     @SerializedName("passenger_phone") val passengerPhone: String = "",
     @SerializedName("passenger_rating") val passengerRating: Double = 0.0,
     @SerializedName("pickup_address") val pickupAddress: String = "",
@@ -243,10 +243,10 @@ data class DispatchOfferDto(
     @SerializedName("estimated_commission_percentage") val estimatedCommissionPercentage: Double? = null,
     @SerializedName("commission_classification") val commissionClassification: String? = null,
     @SerializedName("commission_estimate_available") val commissionEstimateAvailable: Boolean = false,
-    @SerializedName("payment_mode") val paymentMode: String = "UPI",
+    @SerializedName("payment_mode") val paymentMode: String = "",
     @SerializedName("expires_at") val expiresAt: String? = null,
     @SerializedName("escalation_level") val escalationLevel: Int = 0,
-    @SerializedName("timeout_seconds") val timeoutSeconds: Int = 25
+    @SerializedName("timeout_seconds") val timeoutSeconds: Int = 0
 ) {
     val estimatedFareRupees: Double
         get() = estimatedFareCents / 100.0
@@ -257,17 +257,17 @@ data class DispatchOfferDto(
     val pickupDistanceMeters: Int
         get() = ((pickupDistanceKm ?: 0.0) * 1000.0).toInt()
 
-    val effectivePickupDistanceKm: Double
-        get() = pickupDistanceKm ?: 0.8
+    val effectivePickupDistanceKm: Double?
+        get() = pickupDistanceKm
 
-    val effectivePickupDurationMinutes: Int
-        get() = pickupDurationMinutes ?: maxOf(1, kotlin.math.round((effectivePickupDistanceKm / 20.0) * 60).toInt())
+    val effectivePickupDurationMinutes: Int?
+        get() = pickupDurationMinutes
 
-    val effectiveTripDistanceKm: Double
-        get() = if (distanceKm > 0.0) distanceKm else 3.5
+    val effectiveTripDistanceKm: Double?
+        get() = distanceKm.takeIf { it > 0.0 }
 
-    val effectiveTripDurationMinutes: Int
-        get() = tripDurationMinutes ?: maxOf(2, kotlin.math.round((effectiveTripDistanceKm / 22.0) * 60).toInt())
+    val effectiveTripDurationMinutes: Int?
+        get() = tripDurationMinutes
 }
 
 data class CashCollectRequest(
