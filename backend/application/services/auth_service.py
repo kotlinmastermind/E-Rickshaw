@@ -133,7 +133,12 @@ class AuthService:
         is_new_user = False
 
         if not user:
-            # Auto-create user account seamlessly
+            if target_role == "driver":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Driver accounts must complete the driver registration form before OTP sign-in."
+                )
+            # Customer OTP registration remains supported.
             is_new_user = True
             default_name = (full_name or "").strip()
             if not default_name:
@@ -528,68 +533,77 @@ class AuthService:
         }
 
     async def register_driver_account(
-        self, phone_number: Optional[str] = None, email: Optional[str] = None, full_name: str = "Driver Partner",
-        password: str = "", username: Optional[str] = None,
-        vehicle_type: str = "E_RICKSHAW_STANDARD", vehicle_name: str = "Electric Rickshaw", vehicle_no: str = "DL-01-ER-1001",
-        ip_address: Optional[str] = None, user_agent: Optional[str] = None
+        self,
+        phone_number: str,
+        full_name: str,
+        password: str,
+        license_number: str,
+        vehicle_type: str,
+        email: Optional[str] = None,
+        username: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
     ) -> Dict[str, Any]:
         phone_raw = (phone_number or "").strip()
         email_raw = (email or "").strip().lower()
-        plate_clean = vehicle_no.strip().upper() if vehicle_no else "DL-01-ER-1001"
+        name_clean = (full_name or "").strip()
+        license_clean = (license_number or "").strip().upper()
+        category_input = (vehicle_type or "").strip()
 
-        if not phone_raw and not email_raw:
-            raise HTTPException(status_code=400, detail="Either mobile phone number or email address is required.")
+        phone_digits = "".join(filter(str.isdigit, phone_raw))
+        if len(phone_digits) != 10:
+            raise HTTPException(status_code=400, detail="A valid 10-digit Indian mobile number is required.")
+        phone = f"+91{phone_digits}"
+        if len(name_clean) < 2:
+            raise HTTPException(status_code=400, detail="Enter the driver's full legal name.")
+        if not license_clean or len(license_clean) < 6:
+            raise HTTPException(status_code=400, detail="A valid driving licence number is required.")
+        if email_raw and "@" not in email_raw:
+            raise HTTPException(status_code=400, detail="Enter a valid email address or leave it blank.")
+        if not category_input:
+            raise HTTPException(status_code=400, detail="Select an active vehicle category.")
+
         try:
             validate_password_strength(password)
         except ValueError as err:
             raise HTTPException(status_code=400, detail=str(err))
 
-        # Normalize phone
-        phone_digits = "".join(filter(str.isdigit, phone_raw))
-        if len(phone_digits) >= 10:
-            phone = f"+91{phone_digits[-10:]}"
-        elif phone_raw:
-            phone = phone_raw
-        else:
-            phone = f"+91{phone_digits if phone_digits else '0000000000'}"
-
-        # Normalize email
-        if email_raw and "@" in email_raw:
-            email_clean = email_raw
-        else:
-            clean_digits = phone_digits[-10:] if len(phone_digits) >= 10 else "driver"
-            email_clean = f"driver_{clean_digits}@erickshaw.in"
-
+        email_clean = email_raw or None
         username_clean = (username or "").strip().lower()
         if not username_clean or len(username_clean) < 3:
-            username_clean = email_clean.split("@")[0] if "@" in email_clean else f"driver_{phone[-4:]}"
+            username_clean = f"driver_{phone_digits}"
 
-        # Check existing user
-        stmt_check = select(User).where(
-            or_(User.phone_number == phone, User.email == email_clean, User.username == username_clean)
-        )
-        res_check = await self.db.execute(stmt_check)
-        existing = res_check.scalars().first()
+        conditions = [User.phone_number == phone, User.username == username_clean]
+        if email_clean:
+            conditions.append(User.email == email_clean)
+        existing = (await self.db.execute(select(User).where(or_(*conditions)))).scalars().first()
         if existing:
             if existing.phone_number == phone:
                 raise HTTPException(status_code=409, detail="A user with this mobile phone number already exists.")
-            if existing.email == email_clean:
+            if email_clean and existing.email == email_clean:
                 raise HTTPException(status_code=409, detail="A user with this email address already exists.")
-            if existing.username == username_clean:
-                raise HTTPException(status_code=409, detail="This username is already taken. Please choose another.")
+            raise HTTPException(status_code=409, detail="This username is already taken. Please choose another.")
 
-        # Check existing vehicle plate
-        stmt_veh = select(Vehicle).where(Vehicle.license_plate == plate_clean)
-        res_veh = await self.db.execute(stmt_veh)
-        if res_veh.scalars().first():
-            raise HTTPException(status_code=409, detail=f"Vehicle number '{plate_clean}' is already registered on the platform.")
+        duplicate_license = (await self.db.execute(
+            select(DriverProfile).where(DriverProfile.license_number == license_clean)
+        )).scalar_one_or_none()
+        if duplicate_license:
+            raise HTTPException(status_code=409, detail="This driving licence number is already registered.")
 
-        # Create Driver User
+        category = (await self.db.execute(
+            select(VehicleCategory).where(
+                VehicleCategory.is_active == True,
+                or_(VehicleCategory.code == category_input.upper(), VehicleCategory.id == category_input)
+            )
+        )).scalars().first()
+        if not category:
+            raise HTTPException(status_code=422, detail="Selected vehicle category is unavailable. Refresh categories and try again.")
+
         user = User(
             phone_number=phone,
             email=email_clean,
             username=username_clean,
-            full_name=full_name,
+            full_name=name_clean,
             password_hash=hash_password(password),
             role="driver",
             is_active=True,
@@ -601,64 +615,25 @@ class AuthService:
 
         driver_prof = DriverProfile(
             user_id=user.id,
-            license_number=f"DL-{user.id[:8].upper()}",
+            license_number=license_clean,
             approval_status="PENDING",
-            onboarding_step="DOCUMENTS_PENDING"
+            onboarding_step="DOCUMENTS_PENDING",
+            profile_completeness_percentage=0,
+            preferred_vehicle_categories=category.code,
+            preferred_operating_zones=""
         )
         self.db.add(driver_prof)
         await self.db.flush()
 
-        avail = DriverAvailability(driver_id=driver_prof.id, is_online=False, is_busy=False)
-        self.db.add(avail)
-        await self.db.flush()
+        self.db.add(DriverAvailability(driver_id=driver_prof.id, is_online=False, is_busy=False))
 
-        # Find or create Vehicle Category
-        v_type_clean = vehicle_type.strip() if vehicle_type else ""
-        cat_code = v_type_clean.upper() if v_type_clean else "E_RICKSHAW_STANDARD"
-        stmt_cat = select(VehicleCategory).where(
-            or_(VehicleCategory.code == cat_code, VehicleCategory.id == v_type_clean)
-        )
-        res_cat = await self.db.execute(stmt_cat)
-        category = res_cat.scalars().first()
-        if not category:
-            stmt_cat_any = select(VehicleCategory).where(VehicleCategory.is_active == True).order_by(VehicleCategory.sort_order.asc())
-            res_cat_any = await self.db.execute(stmt_cat_any)
-            category = res_cat_any.scalars().first()
-            if not category:
-                category = VehicleCategory(code="E_RICKSHAW_STANDARD", name="Standard E-Rickshaw", description="Default E-Rickshaw Category", capacity=4)
-                self.db.add(category)
-                await self.db.flush()
-
-        # Create Vehicle
-        vehicle = Vehicle(
-            category_id=category.id,
-            make="Grand Chauffeur",
-            model=vehicle_name.strip(),
-            year=2025,
-            license_plate=plate_clean,
-            color="Obsidian Black",
-            is_active=True
-        )
-        self.db.add(vehicle)
-        await self.db.flush()
-
-        # Create Driver-Vehicle Assignment
-        assignment = DriverVehicleAssignment(
-            driver_id=driver_prof.id,
-            vehicle_id=vehicle.id,
-            is_active=True
-        )
-        self.db.add(assignment)
-
-        # Session token with single-use refresh token binding
         session_id = str(uuid.uuid4())
         access_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="access")
         refresh_token = create_jwt_token(user_id=user.id, role=user.role, session_id=session_id, token_type="refresh")
-        token_hash = hash_secret(refresh_token)
         session = Session(
             id=session_id,
             user_id=user.id,
-            token_hash=token_hash,
+            token_hash=hash_secret(refresh_token),
             ip_address=ip_address,
             user_agent=user_agent,
             is_revoked=False,
@@ -668,7 +643,7 @@ class AuthService:
         await self.db.commit()
 
         return {
-            "message": "Driver and vehicle registered successfully.",
+            "message": "Driver registration submitted. Upload the required documents; vehicle onboarding and assignment are completed through fleet review.",
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "bearer",
@@ -681,11 +656,11 @@ class AuthService:
                 "full_name": user.full_name,
                 "role": user.role
             },
-            "vehicle": {
-                "id": vehicle.id,
-                "vehicle_name": vehicle.model,
-                "vehicle_no": vehicle.license_plate,
-                "vehicle_type": category.code
+            "vehicle": None,
+            "requested_vehicle_category": {
+                "id": category.id,
+                "code": category.code,
+                "name": category.name
             }
         }
 
