@@ -12,7 +12,7 @@ from backend.api.deps import get_current_user, get_current_driver
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
     VehicleCategory, FareRule, Ride, Vehicle, DriverVehicleAssignment,
-    GeofenceZone, DriverServiceAreaAssignment
+    GeofenceZone, DriverServiceAreaAssignment, RideAssignment
 )
 
 
@@ -113,6 +113,18 @@ async def test_dispatch_api_endpoints(db_session):
     db_session.add(cust_profile)
     await db_session.flush()
 
+    other_customer_user = User(
+        phone_number=f"+91981{suffix}07",
+        full_name="Unrelated Customer",
+        role="customer",
+        is_active=True,
+        is_verified=True
+    )
+    db_session.add(other_customer_user)
+    await db_session.flush()
+    db_session.add(CustomerProfile(user_id=other_customer_user.id))
+    await db_session.flush()
+
     # Ride
     ride = Ride(
         service_area_id=service_area.id,
@@ -181,6 +193,13 @@ async def test_dispatch_api_endpoints(db_session):
             status_data = resp_status.json()
             assert status_data["ride_status"] == "REQUESTED"
             assert status_data["current_offer"]["status"] == "OFFERED"
+            assert status_data["current_offer"]["assignment_id"]
+
+            # A different authenticated customer cannot inspect this ride by UUID.
+            app.dependency_overrides[get_current_user] = lambda: other_customer_user
+            unauthorized_status = await client.get(f"/api/v1/dispatch/status/{ride.id}")
+            assert unauthorized_status.status_code == 404
+            app.dependency_overrides[get_current_user] = lambda: cust_user
 
             # 5. Driver Accepts Offer
             resp_accept = await client.post(f"/api/v1/dispatch/offer/{ride.id}/accept")
@@ -191,7 +210,15 @@ async def test_dispatch_api_endpoints(db_session):
 
             # Verify Ride is now ASSIGNED
             resp_status_after = await client.get(f"/api/v1/dispatch/status/{ride.id}")
-            assert resp_status_after.json()["ride_status"] == "ASSIGNED"
+            status_after = resp_status_after.json()
+            assert status_after["ride_status"] == "ASSIGNED"
+            assert status_after["current_offer"] is None
+            assert status_after["latest_assignment"]["status"] == "ACCEPTED"
+
+            # Admin timeline includes the authoritative offer response history.
+            timeline = await AdminGovernanceService(db_session).ride_timeline(ride.id)
+            assert timeline["offer_history"]
+            assert timeline["offer_history"][-1]["status"] == "ACCEPTED"
 
     finally:
         app.dependency_overrides.clear()
