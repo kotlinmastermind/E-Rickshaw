@@ -329,6 +329,12 @@ object DriverRepository {
     private val _payoutHistory = MutableStateFlow<List<PayoutHistoryItemDto>>(emptyList())
     val payoutHistory: StateFlow<List<PayoutHistoryItemDto>> = _payoutHistory.asStateFlow()
 
+    private val _payoutHistoryLoading = MutableStateFlow(false)
+    val payoutHistoryLoading: StateFlow<Boolean> = _payoutHistoryLoading.asStateFlow()
+
+    private val _payoutHistoryError = MutableStateFlow<String?>(null)
+    val payoutHistoryError: StateFlow<String?> = _payoutHistoryError.asStateFlow()
+
     private val _weeklyGoal = MutableStateFlow(WeeklyGoalDto())
     val weeklyGoal: StateFlow<WeeklyGoalDto> = _weeklyGoal.asStateFlow()
 
@@ -1995,14 +2001,22 @@ object DriverRepository {
 
     fun fetchPayoutHistory() {
         scope.launch {
+            _payoutHistoryLoading.value = true
+            _payoutHistoryError.value = null
             try {
                 val res = DriverNetworkClient.apiService.getPayoutHistory()
                 val body = res.body()
                 if (res.isSuccessful && body != null) {
                     _payoutHistory.value = body
+                } else {
+                    _payoutHistoryError.value = "Payout history could not be loaded (HTTP ${res.code()})."
+                    Log.w(TAG, "fetchPayoutHistory failed: HTTP ${res.code()}")
                 }
             } catch (e: Exception) {
+                _payoutHistoryError.value = "Network error while loading payout history. Please retry."
                 Log.e(TAG, "fetchPayoutHistory error: ${e.message}")
+            } finally {
+                _payoutHistoryLoading.value = false
             }
         }
     }
