@@ -678,10 +678,19 @@ class DriverInspectionService:
         insp = res.scalar_one_or_none()
         if not insp:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found.")
-        if (insp.inspection_status or "").upper() not in {"SUBMITTED", "PENDING_VERIFICATION"}:
+        current_inspection_status = (insp.inspection_status or "").upper()
+        current_verification_status = (insp.verification_status or "").upper()
+        reviewable = (
+            current_inspection_status in {"SUBMITTED", "PENDING_VERIFICATION"}
+            or (
+                current_inspection_status == "APPROVED"
+                and current_verification_status == "AUTO_APPROVED"
+            )
+        )
+        if not reviewable:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Only a submitted or pending-verification vehicle inspection can be reviewed by Admin."
+                detail="Only a submitted, pending-verification, or system-approved inspection can be reviewed by Admin."
             )
 
         if action_clean == "APPROVE":
