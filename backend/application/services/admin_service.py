@@ -211,12 +211,11 @@ class AdminService:
                 )
                 .order_by(DriverVehicleInspection.inspected_at.desc())
             )).scalars().first()
-            if (
-                not inspection
-                or (inspection.inspection_status or "").upper() != "APPROVED"
-                or (inspection.verification_status or "").upper() != "VERIFIED"
-                or not inspection.verified_by
-            ):
+            inspection_status = (inspection.inspection_status or "").upper() if inspection else ""
+            inspection_verification = (inspection.verification_status or "").upper() if inspection else ""
+            admin_verified = inspection_verification == "VERIFIED" and bool(inspection and inspection.verified_by)
+            system_verified = inspection_verification == "AUTO_APPROVED"
+            if not inspection or inspection_status != "APPROVED" or not (admin_verified or system_verified):
                 raise HTTPException(
                     status_code=409,
                     detail="Cannot approve driver until an Admin has reviewed and approved the assigned vehicle inspection."
