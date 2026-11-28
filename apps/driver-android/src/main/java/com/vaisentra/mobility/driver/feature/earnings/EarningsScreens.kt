@@ -793,14 +793,16 @@ fun PilotEarningsScreen(
  * Screen 40: Payout Bank & UPI Accounts (GET/POST /api/v1/drivers/financials/payout-accounts)
  */
 @Composable
-fun  PayoutAccountsScreen(
+fun PayoutAccountsScreen(
     onNavigateBack: () -> Unit = {},
     onShowToast: (String) -> Unit = {}
 ) {
     val accounts by DriverRepository.payoutAccounts.collectAsState()
     val scope = rememberCoroutineScope()
+    var accountType by remember { mutableStateOf("BANK_ACCOUNT") }
     var accountNo by remember { mutableStateOf("") }
     var ifsc by remember { mutableStateOf("") }
+    var upiVpa by remember { mutableStateOf("") }
     var holderName by remember { mutableStateOf("") }
     var isSaving by remember { mutableStateOf(false) }
 
@@ -816,7 +818,7 @@ fun  PayoutAccountsScreen(
     ) {
         CockpitHeader(
             title = "Payout Accounts",
-            subtitle = "Manage settlement bank accounts and UPI IDs",
+            subtitle = "Manage verified bank accounts and UPI IDs",
             onBack = onNavigateBack
         )
 
@@ -826,33 +828,90 @@ fun  PayoutAccountsScreen(
         ) {
             item {
                 CockpitCard {
-                    Text("LINK NEW BANK ACCOUNT", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("ADD PAYOUT DESTINATION", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(10.dp))
-                    CockpitTextField(value = holderName, onValueChange = { holderName = it }, placeholder = "Account Holder Name", label = "Beneficiary Name")
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        listOf("BANK_ACCOUNT" to "Bank Account", "UPI" to "UPI ID").forEach { (type, label) ->
+                            Button(
+                                onClick = { accountType = type },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (accountType == type) ElectricCyan else CockpitSurfaceHighlight
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    label,
+                                    color = if (accountType == type) Color.Black else CockpitTextPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    CockpitTextField(
+                        value = holderName,
+                        onValueChange = { holderName = it },
+                        placeholder = "Account holder / beneficiary name",
+                        label = "Beneficiary Name"
+                    )
                     Spacer(Modifier.height(8.dp))
-                    CockpitTextField(value = accountNo, onValueChange = { accountNo = it }, placeholder = "Account Number", label = "Account Number")
-                    Spacer(Modifier.height(8.dp))
-                    CockpitTextField(value = ifsc, onValueChange = { ifsc = it }, placeholder = "e.g. HDFC0001234", label = "IFSC Code")
+                    if (accountType == "BANK_ACCOUNT") {
+                        CockpitTextField(
+                            value = accountNo,
+                            onValueChange = { accountNo = it.filter(Char::isDigit).take(25) },
+                            placeholder = "Account Number",
+                            label = "Account Number"
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        CockpitTextField(
+                            value = ifsc,
+                            onValueChange = { ifsc = it.uppercase().take(11) },
+                            placeholder = "e.g. HDFC0001234",
+                            label = "IFSC Code"
+                        )
+                    } else {
+                        CockpitTextField(
+                            value = upiVpa,
+                            onValueChange = { upiVpa = it.trim() },
+                            placeholder = "name@bank",
+                            label = "UPI ID"
+                        )
+                    }
                     Spacer(Modifier.height(12.dp))
                     CockpitButton(
-                        text = if (isSaving) "Linking..." else "+ Link Bank Account",
-                        enabled = !isSaving && holderName.isNotBlank() && accountNo.isNotBlank() && ifsc.isNotBlank(),
+                        text = if (isSaving) "Submitting..." else if (accountType == "BANK_ACCOUNT") "+ Link Bank Account" else "+ Link UPI ID",
+                        enabled = !isSaving && holderName.isNotBlank() &&
+                            if (accountType == "BANK_ACCOUNT") accountNo.length in 6..25 && ifsc.length == 11
+                            else upiVpa.isNotBlank(),
                         onClick = {
                             isSaving = true
                             scope.launch {
-                                val res = DriverRepository.addPayoutBankAccount(accountNo, ifsc, holderName)
+                                val res = if (accountType == "BANK_ACCOUNT") {
+                                    DriverRepository.addPayoutBankAccount(accountNo, ifsc, holderName)
+                                } else {
+                                    DriverRepository.addPayoutUpiAccount(upiVpa, holderName)
+                                }
                                 isSaving = false
                                 if (res.isSuccess) {
-                                    onShowToast("Bank account linked for verification!")
+                                    onShowToast("Payout destination submitted for Admin verification.")
                                     accountNo = ""
                                     ifsc = ""
+                                    upiVpa = ""
                                     holderName = ""
                                 } else {
-                                    onShowToast("Failed: ${res.exceptionOrNull()?.message}")
+                                    onShowToast("Failed: ${res.exceptionOrNull()?.message ?: "Unable to submit destination"}")
                                 }
                             }
                         },
                         modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "New destinations remain unavailable for withdrawal until Admin verification is complete.",
+                        color = CockpitTextMuted,
+                        fontSize = 11.sp
                     )
                 }
             }
@@ -864,7 +923,7 @@ fun  PayoutAccountsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("SAVED PAYOUT ACCOUNTS (${accounts.size})", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text("Table: driver_payout_accounts", color = ElectricCyan, fontSize = 10.sp)
+                    Text("Persisted destinations", color = ElectricCyan, fontSize = 10.sp)
                 }
             }
 
@@ -884,13 +943,13 @@ fun  PayoutAccountsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    acc.bankName ?: acc.accountType,
+                                    if (acc.accountType == "UPI") "UPI payout destination" else (acc.bankName ?: "Bank account"),
                                     color = CockpitTextPrimary,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )
                                 Text(
-                                    "${acc.accountNumberMask ?: "****"}${if (!acc.ifscCode.isNullOrBlank()) " • ${acc.ifscCode}" else ""}",
+                                    "${acc.accountNumberMask ?: "****"}${if (acc.accountType == "BANK_ACCOUNT" && !acc.ifscCode.isNullOrBlank()) " • ${acc.ifscCode}" else ""}",
                                     color = CockpitTextSecondary,
                                     fontSize = 12.sp
                                 )
@@ -906,11 +965,7 @@ fun  PayoutAccountsScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 if (acc.verificationStatus == "REJECTED" && !acc.rejectionReason.isNullOrBlank()) {
-                                    Text(
-                                        "Reason: ${acc.rejectionReason}",
-                                        color = CrimsonAlert,
-                                        fontSize = 10.sp
-                                    )
+                                    Text("Reason: ${acc.rejectionReason}", color = CrimsonAlert, fontSize = 10.sp)
                                 }
                             }
                             if (acc.isPrimary && acc.verificationStatus == "VERIFIED") {
@@ -963,7 +1018,6 @@ fun InstantPayoutScreen(
     val accounts by DriverRepository.payoutAccounts.collectAsState()
     val payoutHistory by DriverRepository.payoutHistory.collectAsState()
     var withdrawAmount by remember { mutableStateOf("") }
-    var payoutMethod by remember { mutableStateOf("IMPS Instant") }
     var isSubmitting by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -973,10 +1027,15 @@ fun InstantPayoutScreen(
     }
 
     val verifiedAccounts = accounts.filter { it.verificationStatus == "VERIFIED" }
-    val primaryAccount = verifiedAccounts.firstOrNull { it.isPrimary } ?: verifiedAccounts.firstOrNull()
+    val primaryAccount = verifiedAccounts.firstOrNull { it.isPrimary }
     val resolvedMask = primaryAccount?.accountNumberMask.orEmpty()
     val resolvedIfsc = primaryAccount?.ifscCode.orEmpty()
-    val hasValidDestination = primaryAccount != null && primaryAccount.id.isNotBlank() && primaryAccount.isPrimary
+    val hasValidDestination = primaryAccount?.id?.isNotBlank() == true
+    val transferRail = when (primaryAccount?.accountType) {
+        "UPI" -> "UPI transfer"
+        "BANK_ACCOUNT" -> "IMPS bank transfer"
+        else -> "Unavailable"
+    }
     var attemptNonce by remember(withdrawAmount, primaryAccount?.id) { mutableStateOf(0) }
     val pendingIdempotencyKey = remember(withdrawAmount, primaryAccount?.id, attemptNonce) {
         "payout_${java.util.UUID.randomUUID()}"
@@ -989,8 +1048,8 @@ fun InstantPayoutScreen(
             .statusBarsPadding()
     ) {
         CockpitHeader(
-            title = "Instant Cashout",
-            subtitle = "Bank payout request · subject to verification and settlement",
+            title = "Payout Request",
+            subtitle = "Transfer route is determined by your verified primary destination",
             onBack = onNavigateBack
         )
 
@@ -1001,75 +1060,53 @@ fun InstantPayoutScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                CockpitCard(glow = true) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("MAX WITHDRAWABLE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("₹${"%.2f".format(earnings.withdrawableBalanceRupees)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                        }
-                        CockpitBadge(if (hasValidDestination) "ACCOUNT LINKED" else "ACCOUNT REQUIRED", if (hasValidDestination) ElectricCyan else AmberWarning)
+            CockpitCard(glow = true) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("MAX WITHDRAWABLE", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("₹${"%.2f".format(earnings.withdrawableBalanceRupees)}", color = EmeraldPrimary, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                     }
-                }
-
-                CockpitTextField(
-                    value = withdrawAmount,
-                    onValueChange = { withdrawAmount = it },
-                    label = "Withdrawal Amount (₹)",
-                    placeholder = "Enter amount"
-                )
-
-                CockpitCard {
-                    Text("SELECT SETTLEMENT METHOD", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        listOf("IMPS Instant", "UPI Direct").forEach { method ->
-                            Button(
-                                onClick = { payoutMethod = method },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (payoutMethod == method) ElectricCyan else CockpitSurfaceHighlight
-                                ),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text(
-                                    method,
-                                    color = if (payoutMethod == method) Color.Black else CockpitTextPrimary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val destStatusText = when {
-                            hasValidDestination -> "Verified Primary: $resolvedMask${if (resolvedIfsc.isNotBlank()) " ($resolvedIfsc)" else ""}"
-                            verifiedAccounts.isNotEmpty() -> "Select a verified account as Primary in Payout Accounts before withdrawing"
-                            accounts.any { it.verificationStatus == "PENDING_VERIFICATION" } -> "Payout account pending admin verification"
-                            else -> "Add and verify a payout account before requesting a payout"
-                        }
-                        Text(
-                            destStatusText,
-                            color = if (hasValidDestination) CockpitTextSecondary else AmberWarning,
-                            fontSize = 11.sp
-                        )
-                        Text("Table: driver_payout_requests", color = ElectricCyan, fontSize = 10.sp)
-                    }
+                    CockpitBadge(if (hasValidDestination) "ACCOUNT VERIFIED" else "ACCOUNT REQUIRED", if (hasValidDestination) ElectricCyan else AmberWarning)
                 }
             }
 
+            CockpitTextField(
+                value = withdrawAmount,
+                onValueChange = { withdrawAmount = it.filter { ch -> ch.isDigit() || ch == '.' }.take(12) },
+                label = "Withdrawal Amount (₹)",
+                placeholder = "Enter amount"
+            )
+
+            CockpitCard {
+                Text("VERIFIED PRIMARY DESTINATION", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    transferRail,
+                    color = if (hasValidDestination) CockpitTextPrimary else AmberWarning,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+                Spacer(Modifier.height(6.dp))
+                val destStatusText = when {
+                    primaryAccount == null && verifiedAccounts.isNotEmpty() -> "Set one verified account as Primary in Payout Accounts before withdrawing"
+                    primaryAccount != null -> "${if (primaryAccount.accountType == "UPI") "UPI destination" else "Bank destination"}: $resolvedMask${if (resolvedIfsc.isNotBlank()) " ($resolvedIfsc)" else ""}"
+                    accounts.any { it.verificationStatus == "PENDING_VERIFICATION" } -> "Payout account pending Admin verification"
+                    else -> "Add and verify a bank account or UPI ID before requesting a payout"
+                }
+                Text(destStatusText, color = if (hasValidDestination) CockpitTextSecondary else AmberWarning, fontSize = 11.sp)
+                Spacer(Modifier.height(6.dp))
+                Text("The backend selects UPI or IMPS from the verified destination type.", color = CockpitTextMuted, fontSize = 10.sp)
+            }
+
             CockpitButton(
-                text = if (isSubmitting) "PROCESSING..." else "CONFIRM WITHDRAWAL OF ₹${withdrawAmount.ifBlank { "0" }}",
-                enabled = !isSubmitting && hasValidDestination && (withdrawAmount.toDoubleOrNull() ?: 0.0) >= 100.0 && (withdrawAmount.toDoubleOrNull() ?: 0.0) * 100.0 <= earnings.withdrawableBalanceCents.toDouble(),
+                text = if (isSubmitting) "SUBMITTING..." else "REQUEST PAYOUT OF ₹${withdrawAmount.ifBlank { "0" }}",
+                enabled = !isSubmitting && hasValidDestination &&
+                    (withdrawAmount.toDoubleOrNull() ?: 0.0) >= 100.0 &&
+                    (withdrawAmount.toDoubleOrNull() ?: 0.0) * 100.0 <= earnings.withdrawableBalanceCents.toDouble(),
                 onClick = {
                     val amt = withdrawAmount.toDoubleOrNull() ?: 0.0
                     isSubmitting = true
@@ -1081,10 +1118,10 @@ fun InstantPayoutScreen(
                         isSubmitting = false
                         if (ok) {
                             attemptNonce++
-                            onShowToast("Payout request of ₹$amt submitted!")
+                            onShowToast("Payout request of ₹$amt submitted for review.")
                             onPayoutSuccess()
                         } else {
-                            onShowToast("Payout failed. Check available balance and payout account.")
+                            onShowToast("Payout request failed. Check balance and verified primary destination.")
                         }
                     }
                 },
