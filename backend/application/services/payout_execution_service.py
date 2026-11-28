@@ -51,6 +51,11 @@ def _sanitize_provider_payload(payload: Optional[Dict[str, Any]]) -> str:
     sanitized = {k: payload[k] for k in allowed_keys if k in payload and payload[k] is not None}
     return json.dumps(sanitized, ensure_ascii=False)
 
+def _provider_reference_id(payout: DriverPayoutRequest) -> str:
+    """Return an attempt-scoped provider reference so delayed events cannot settle a later retry."""
+    retry_count = int(payout.retry_count or 0)
+    return payout.id if retry_count == 0 else f"{payout.id}:retry:{retry_count}"
+
 
 class PayoutExecutionService:
     """Narrowly scoped service owning payout destination decryption and settlement transitions."""
@@ -508,7 +513,7 @@ class PayoutExecutionService:
             "purpose": "payout",
             "fund_account": fund_account,
             "queue_if_low_balance": False,
-            "reference_id": payout.id,
+            "reference_id": _provider_reference_id(payout),
         }
 
         try:
@@ -632,21 +637,22 @@ class PayoutExecutionService:
                 item = resp.json() if resp.status_code == 200 else None
             else:
                 x_acct = (getattr(settings, "RAZORPAYX_ACCOUNT_NUMBER", None) or "").strip()
+                current_reference_id = _provider_reference_id(payout)
                 resp = await client.get(
                     "https://api.razorpay.com/v1/payouts",
-                    params={"account_number": x_acct, "reference_id": payout.id},
+                    params={"account_number": x_acct, "reference_id": current_reference_id},
                     auth=(settings.RAZORPAY_KEY_ID or "", settings.RAZORPAY_KEY_SECRET or ""),
                 )
                 items = (resp.json() or {}).get("items", []) if resp.status_code == 200 else []
                 item = next(
-                    (candidate for candidate in items if candidate.get("reference_id") == payout.id),
+                    (candidate for candidate in items if candidate.get("reference_id") == current_reference_id),
                     None,
                 )
 
         if not item:
             return payout
 
-        if (item.get("reference_id") or "").strip() != payout.id:
+        if (item.get("reference_id") or "").strip() != _provider_reference_id(payout):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Provider reconciliation returned a payout with a different reference; no wallet or payout state was changed.",
@@ -966,9 +972,10 @@ class PayoutExecutionService:
                 )
             ).scalar_one_or_none()
         if not payout and reference_id:
+            payout_id_from_reference = reference_id.split(":retry:", 1)[0]
             payout = (
                 await session.execute(
-                    select(DriverPayoutRequest).where(DriverPayoutRequest.id == reference_id).with_for_update()
+                    select(DriverPayoutRequest).where(DriverPayoutRequest.id == payout_id_from_reference).with_for_update()
                 )
             ).scalar_one_or_none()
 
@@ -978,9 +985,9 @@ class PayoutExecutionService:
             await session.commit()
             return {"status": "IGNORED_UNKNOWN_PAYOUT", "digest": digest}
 
-        if reference_id and reference_id != payout.id:
+        if reference_id and reference_id != _provider_reference_id(payout):
             inbox.status = "FAILED"
-            inbox.last_error = "Provider payout id and reference id resolve to different payout requests."
+            inbox.last_error = "Provider payout reference does not match the current payout execution attempt."
             await session.commit()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
