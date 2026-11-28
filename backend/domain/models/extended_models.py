@@ -1263,6 +1263,7 @@ class DriverServiceAreaRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
 
     __table_args__ = (
+        Index("uq_driver_area_request_one_pending_per_driver", "driver_id", unique=True, postgresql_where=text("status = 'PENDING'"), sqlite_where=text("status = 'PENDING'")),
         Index("ix_driver_area_request_driver_status", "driver_id", "status"),
         Index("ix_driver_area_request_status_created", "status", "created_at"),
     )
