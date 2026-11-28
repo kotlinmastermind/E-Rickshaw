@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from unittest.mock import AsyncMock
 
 import pytest
@@ -78,4 +79,4 @@ async def test_definitive_provider_rejection_releases_reserved_cooldown(monkeypa
         await AuthService(db=None).request_otp("+919876543210")
 
     assert exc.value.status_code == 400
-    release.assert_awaited_once_with("otp_cooldown:+919876543210")
+    release.assert_awaited_once_with(f"otp_cooldown:{hashlib.sha256('+919876543210'.encode('utf-8')).hexdigest()}")
