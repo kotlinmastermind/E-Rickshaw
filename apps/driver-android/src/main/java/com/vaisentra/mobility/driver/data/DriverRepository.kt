@@ -555,7 +555,7 @@ object DriverRepository {
                 _activeRide.value = if (isActive) ride else null
                 if (isActive) {
                     _currentRideId.value = ride!!.id
-                    DriverWebSocketClient.connectRideTracking(ride.id)
+                    DriverWebSocketClient.connectRideTracking(ride!!.id)
                 } else {
                     _currentRideId.value = ""
                     DriverWebSocketClient.disconnectRideTracking()
