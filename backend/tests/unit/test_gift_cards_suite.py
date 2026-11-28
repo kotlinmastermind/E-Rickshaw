@@ -105,7 +105,7 @@ async def test_wallet_gift_card_purchase_retry_is_idempotent(db_session):
     await WalletService.credit_wallet(
         session=db_session,
         user_id=purchaser.id,
-        amount_cents=100000,
+        amount_cents=50000,
         source="TEST_SEED",
         idempotency_key=f"gift_seed_{uuid.uuid4().hex[:12]}",
     )
@@ -130,7 +130,7 @@ async def test_wallet_gift_card_purchase_retry_is_idempotent(db_session):
     wallet = (await db_session.execute(
         select(Wallet).where(Wallet.user_id == purchaser.id)
     )).scalar_one()
-    assert wallet.balance_cents == 50000
+    assert wallet.balance_cents == 0
 
     cards = (await db_session.execute(
         select(GiftCard).where(GiftCard.purchased_by_user_id == purchaser.id)
