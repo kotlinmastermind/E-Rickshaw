@@ -291,7 +291,7 @@ async def get_dispatch_status(
             remaining_sec = int((exp_utc - now).total_seconds())
             offer_is_live = (
                 latest_assign.status == "OFFERED"
-                and ride.status == RideStatus.REQUESTED.value
+                and ride.status == "REQUESTED"
                 and ride.assigned_driver_id is None
             )
 
