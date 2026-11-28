@@ -498,11 +498,15 @@ class SmartDispatchService:
 
         # Broadcast acceptance
         accept_payload = {
-            "event": "RIDE_ASSIGNED",
+            "event_type": "RIDE_ACCEPTED",
             "ride_id": ride.id,
-            "status": "ASSIGNED",
-            "driver_id": driver.id,
-            "driver_rating": driver.rating_average,
+            "status": RideStatus.ASSIGNED.value,
+            "payload": {
+                "ride_id": ride.id,
+                "status": RideStatus.ASSIGNED.value,
+                "driver_id": driver.id,
+                "driver_rating": driver.rating_average,
+            },
             "timestamp": now.isoformat()
         }
         await ws_manager.broadcast_to_ride(ride.id, accept_payload)
