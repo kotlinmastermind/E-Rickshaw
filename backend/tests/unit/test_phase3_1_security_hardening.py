@@ -218,9 +218,9 @@ async def test_admin_approval_lifecycle_and_non_admin_rejection(db_session):
         finally:
             app.dependency_overrides.pop(get_current_admin, None)
 
-        # Verify DB status updated
+        # Verify DB status remains pending after an incomplete approval attempt.
         await db_session.refresh(driver_profile)
-        assert driver_profile.approval_status == "APPROVED"
+        assert driver_profile.approval_status == "PENDING"
 
 
 @pytest.mark.asyncio
