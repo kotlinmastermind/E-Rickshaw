@@ -442,20 +442,34 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     assert wallet.balance_cents == 40000
 
     # Execute provider payout on retry (APPROVED -> PROCESSING, NOT PAID until webhook)
+    # A delayed success event from the previous attempt must not settle the new retry.
+    stale_body = json.dumps({
+        "event": "payout.processed",
+        "payload": {"payout": {"entity": {"id": "pout_rx_001", "reference_id": payout_id, "utr": "UTR_OLD_ATTEMPT"}}},
+    }).encode()
+    stale_sig = hmac.new(wh_secret.encode(), stale_body, hashlib.sha256).hexdigest()
+    stale_wh = await client.post("/api/v1/payments/payouts/webhook", content=stale_body, headers={"X-Razorpay-Signature": stale_sig})
+    assert stale_wh.status_code == 409
+    await db_session.refresh(wallet)
+    assert wallet.balance_cents == 40000
+
+    retry_reference_id = f"{payout_id}:retry:1"
     ok_post = MagicMock(status_code=201)
-    ok_post.json.return_value = {"id": "pout_rx_002", "status": "processing", "reference_id": payout_id}
-    with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=ok_post)):
+    ok_post.json.return_value = {"id": "pout_rx_002", "status": "processing", "reference_id": retry_reference_id}
+    post_mock = AsyncMock(return_value=ok_post)
+    with patch("httpx.AsyncClient.post", new=post_mock):
         proc = await PayoutExecutionService.execute_provider_payout(
             db_session, payout_id=payout_id, admin_user_id=admin_user_id
         )
         assert proc.status == "PROCESSING"
         assert proc.provider_payout_id == "pout_rx_002"
+        assert post_mock.await_args.kwargs["json"]["reference_id"] == retry_reference_id
         await db_session.commit()
 
     # 6. payout.processed webhook transitions PROCESSING -> PAID
     paid_body = json.dumps({
         "event": "payout.processed",
-        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": payout_id, "utr": "UTR_RX_99887766"}}},
+        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": retry_reference_id, "utr": "UTR_RX_99887766"}}},
     }).encode()
     paid_sig = hmac.new(wh_secret.encode(), paid_body, hashlib.sha256).hexdigest()
     paid_wh = await client.post("/api/v1/payments/payouts/webhook", content=paid_body, headers={"X-Razorpay-Signature": paid_sig})
@@ -465,7 +479,7 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     # 7. Out-of-order late payout.queued webhook after PAID does not regress state
     late_body = json.dumps({
         "event": "payout.queued",
-        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": payout_id}}},
+        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": retry_reference_id}}},
     }).encode()
     late_sig = hmac.new(wh_secret.encode(), late_body, hashlib.sha256).hexdigest()
     late_wh = await client.post("/api/v1/payments/payouts/webhook", content=late_body, headers={"X-Razorpay-Signature": late_sig})
