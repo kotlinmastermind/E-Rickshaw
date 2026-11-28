@@ -422,7 +422,7 @@ async def _create_dispatch_fixture(db_session):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("eligibility_change", ["approval", "vehicle", "category", "availability"])
+@pytest.mark.parametrize("eligibility_change", ["account", "approval", "vehicle", "category", "availability", "service_area", "location"])
 async def test_dispatch_offer_acceptance_revalidates_current_driver_eligibility(
     db_session, eligibility_change
 ):
@@ -434,14 +434,34 @@ async def test_dispatch_offer_acceptance_revalidates_current_driver_eligibility(
     assert offer.driver_id == driver.id
     assert offer.status == "OFFERED"
 
-    if eligibility_change == "approval":
+    if eligibility_change == "account":
+        driver_user.is_active = False
+    elif eligibility_change == "approval":
         driver.approval_status = "PENDING"
     elif eligibility_change == "vehicle":
         vehicle.is_active = False
     elif eligibility_change == "category":
         category.is_active = False
-    else:
+    elif eligibility_change == "availability":
         availability.is_online = False
+    elif eligibility_change == "service_area":
+        area_assignment = (
+            await db_session.execute(
+                select(DriverServiceAreaAssignment).where(
+                    DriverServiceAreaAssignment.driver_id == driver.id,
+                    DriverServiceAreaAssignment.service_area_id == ride.service_area_id,
+                )
+            )
+        ).scalars().one()
+        area_assignment.is_active = False
+    elif eligibility_change == "location":
+        await LiveLocationService(db=db_session).ingest_driver_location(
+            driver_id=driver.id,
+            latitude=28.0,
+            longitude=77.0,
+            is_online=True,
+            is_busy=False,
+        )
     await db_session.commit()
 
     with pytest.raises(HTTPException) as exc_info:
