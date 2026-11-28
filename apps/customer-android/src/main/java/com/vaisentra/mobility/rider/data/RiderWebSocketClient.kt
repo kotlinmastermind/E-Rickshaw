@@ -111,14 +111,16 @@ object RiderWebSocketClient {
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "WebSocket closed for ride $rideId")
-                if (activeRideId == rideId) {
+                if (this@RiderWebSocketClient.webSocket === webSocket && activeRideId == rideId) {
                     this@RiderWebSocketClient.webSocket = null
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "WebSocket failure on ride $rideId: ${t.message}")
-                this@RiderWebSocketClient.webSocket = null
+                if (this@RiderWebSocketClient.webSocket === webSocket && activeRideId == rideId) {
+                    this@RiderWebSocketClient.webSocket = null
+                }
             }
         })
     }

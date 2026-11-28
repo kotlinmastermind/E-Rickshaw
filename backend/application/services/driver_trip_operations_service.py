@@ -238,31 +238,58 @@ class DriverTripOperationsService:
         return {"stop_id": stop.id, "status": stop.status, "action_at": (stop.arrived_at if action == "ARRIVED" else stop.completed_at).isoformat()}
 
     async def pause_or_resume(self, ride_id: str, user_id: str, pause: bool, reason: str) -> Dict[str, Any]:
-        ride = await self.record_event(ride_id, user_id, "TRIP_PAUSED" if pause else "TRIP_RESUMED", {"reason": reason})
+        driver = await self._driver(user_id)
+        # Serialize concurrent pause/resume attempts against the same ride.
+        ride_result = await self.db.execute(
+            select(Ride).where(Ride.id == ride_id).with_for_update()
+        )
+        ride = ride_result.scalar_one_or_none()
+        if ride is None:
+            raise HTTPException(404, "Ride not found.")
+        if ride.assigned_driver_id != driver.id:
+            raise HTTPException(403, "Only the assigned driver can perform this trip action.")
+
+        previous = str(ride.status or "").upper()
+        target = "PAUSED" if pause else "IN_PROGRESS"
         expected = "IN_PROGRESS" if pause else "PAUSED"
-        if ride.status != expected:
+        if previous != expected or not RideStateMachine.can_transition(previous, target, "DRIVER"):
             raise HTTPException(409, f"Trip must be {expected.lower().replace('_', ' ')} for this action.")
-        previous = ride.status
-        ride.status = "PAUSED" if pause else "IN_PROGRESS"
+
+        event_type = "TRIP_PAUSED" if pause else "TRIP_RESUMED"
+        self.db.add(RideOperationalEvent(
+            ride_id=ride.id,
+            actor_user_id=user_id,
+            action=event_type,
+            details_json=json.dumps({"reason": reason}, ensure_ascii=False)
+        ))
+        ride.status = target
         event = __import__("backend.domain.models", fromlist=["RideStatusEvent"]).RideStatusEvent(
-            ride_id=ride.id, previous_status=previous, new_status=ride.status,
+            ride_id=ride.id, previous_status=previous, new_status=target,
             triggered_by_user_id=user_id, trigger_actor="DRIVER", notes=reason
         )
         self.db.add(event)
         await self.db.commit()
+
+        # Keep one envelope contract for Rider, Driver and Admin consumers.
         try:
             from backend.api.routes.ws import ws_manager
-            event_type = "TRIP_PAUSED" if pause else "TRIP_RESUMED"
+            payload = {
+                "ride_id": ride.id,
+                "status": target,
+                "previous_status": previous
+            }
             await ws_manager.broadcast_ride_update(ride.id, {
                 "event_type": event_type,
+                "event": event_type,
+                "type": event_type,
                 "ride_id": ride.id,
-                "status": ride.status,
+                "status": target,
                 "previous_status": previous,
-                "payload": {"ride_id": ride.id, "status": ride.status, "previous_status": previous}
+                "payload": payload
             })
         except Exception:
             pass
-        return {"ride_id": ride.id, "status": ride.status}
+        return {"ride_id": ride.id, "status": target}
 
     async def report_no_show(self, ride_id: str, user_id: str, evidence_note: str) -> Dict[str, Any]:
         ride = await self.record_event(ride_id, user_id, "PASSENGER_NO_SHOW", {"evidence_note": evidence_note})

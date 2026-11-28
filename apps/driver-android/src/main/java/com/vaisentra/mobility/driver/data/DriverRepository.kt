@@ -555,8 +555,10 @@ object DriverRepository {
                 _activeRide.value = if (isActive) ride else null
                 if (isActive) {
                     _currentRideId.value = ride!!.id
+                    DriverWebSocketClient.connectRideTracking(ride!!.id)
                 } else {
                     _currentRideId.value = ""
+                    DriverWebSocketClient.disconnectRideTracking()
                 }
                 Result.success(_activeRide.value)
             } else {
@@ -574,6 +576,26 @@ object DriverRepository {
     fun clearActiveRide() {
         _activeRide.value = null
         _currentRideId.value = ""
+    }
+
+    fun updateActiveRideStatus(rideId: String, status: String) {
+        val normalizedStatus = status.trim().uppercase()
+        if (rideId.isBlank() || normalizedStatus.isBlank()) return
+        val currentRide = _activeRide.value
+        if (currentRide == null || currentRide.id != rideId) {
+            // The WebSocket snapshot may arrive before the REST active-ride fetch.
+            scope.launch { fetchActiveRide() }
+            return
+        }
+        if (normalizedStatus in setOf("COMPLETED", "CANCELLED", "EXPIRED")) {
+            clearActiveRide()
+            DriverWebSocketClient.disconnectRideTracking()
+            return
+        }
+        if (normalizedStatus in setOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED")) {
+            _activeRide.value = currentRide.copy(status = normalizedStatus)
+            _currentRideId.value = rideId
+        }
     }
 
     suspend fun fetchUnreadNotificationsCount(): Result<Int> {

@@ -20,6 +20,7 @@ object DriverWebSocketClient {
     private const val TAG = "DriverWebSocket"
     private var dispatchWebSocket: WebSocket? = null
     private var rideTrackingWebSocket: WebSocket? = null
+    private var activeTrackingRideId: String? = null
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -146,7 +147,9 @@ object DriverWebSocketClient {
             Log.w(TAG, "Cannot connect Ride Tracking WebSocket: authToken is null/blank.")
             return
         }
+        if (rideTrackingWebSocket != null && activeTrackingRideId == rideId) return
         disconnectRideTracking()
+        activeTrackingRideId = rideId
 
         val targetUrl = "${buildWsBaseUrl()}/api/v1/ws/rides/$rideId/tracking"
         val request = Request.Builder()
@@ -164,26 +167,59 @@ object DriverWebSocketClient {
                 if (text == "pong") return
                 try {
                     val json = JSONObject(text)
-                    val status = json.optString("status", "").uppercase()
-                    val event = json.optString("event", json.optString("event_type", json.optString("type", ""))).uppercase()
-                    if (status in listOf("CANCELLED", "COMPLETED", "DROPPED", "FINISHED") || event in listOf("RIDE_CANCELLED", "RIDE_COMPLETED")) {
-                        DriverRepository.clearActiveRide()
+                    val eventPayload = json.optJSONObject("payload") ?: json
+                    val event = json.optString("event_type")
+                        .ifBlank { json.optString("event") }
+                        .ifBlank { json.optString("type") }
+                        .uppercase()
+                    if (event == "SESSION_REVOKED") {
+                        Log.w(TAG, "Ride tracking session revoked by backend.")
+                        disconnectAll()
+                        return
+                    }
+
+                    val rideId = eventPayload.optString("ride_id")
+                        .ifBlank { json.optString("ride_id") }
+                    val status = eventPayload.optString("status")
+                        .ifBlank { json.optString("status") }
+                        .ifBlank {
+                            when (event) {
+                                "RIDE_ACCEPTED" -> "ASSIGNED"
+                                "DRIVER_ARRIVED" -> "ARRIVED"
+                                "TRIP_STARTED", "TRIP_RESUMED" -> "IN_PROGRESS"
+                                "TRIP_PAUSED" -> "PAUSED"
+                                "TRIP_COMPLETED", "RIDE_COMPLETED" -> "COMPLETED"
+                                "RIDE_CANCELLED" -> "CANCELLED"
+                                "RIDE_EXPIRED" -> "EXPIRED"
+                                else -> ""
+                            }
+                        }
+                        .uppercase()
+
+                    if (rideId.isNotBlank() && status.isNotBlank()) {
+                        DriverRepository.updateActiveRideStatus(rideId, status)
                         if (status == "CANCELLED" || event == "RIDE_CANCELLED") {
                             DriverRepository.handleRideCancelledByPassenger()
                         }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error in ride tracking message: ${e.message}")
+                    Log.e(TAG, "Error in ride tracking message: ${e.message}", e)
                 }
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                rideTrackingWebSocket = null
+                if (rideTrackingWebSocket === webSocket && activeTrackingRideId == rideId) {
+                    rideTrackingWebSocket = null
+                    activeTrackingRideId = null
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "Ride tracking WebSocket failure: ${t.message}")
-                rideTrackingWebSocket = null
+                if (activeTrackingRideId == rideId) {
+                    rideTrackingWebSocket = null
+                    activeTrackingRideId = null
+                }
             }
         })
     }
@@ -193,6 +229,7 @@ object DriverWebSocketClient {
             rideTrackingWebSocket?.close(1000, "Trip concluded")
         } catch (_: Exception) {}
         rideTrackingWebSocket = null
+        activeTrackingRideId = null
     }
 
     fun disconnectAll() {
