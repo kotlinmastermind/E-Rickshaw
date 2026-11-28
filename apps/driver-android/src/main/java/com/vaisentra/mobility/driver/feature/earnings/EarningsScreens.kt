@@ -1017,6 +1017,8 @@ fun InstantPayoutScreen(
     val earnings by DriverRepository.earnings.collectAsState()
     val accounts by DriverRepository.payoutAccounts.collectAsState()
     val payoutHistory by DriverRepository.payoutHistory.collectAsState()
+    val payoutHistoryLoading by DriverRepository.payoutHistoryLoading.collectAsState()
+    val payoutHistoryError by DriverRepository.payoutHistoryError.collectAsState()
     var withdrawAmount by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
 
@@ -1076,7 +1078,15 @@ fun InstantPayoutScreen(
 
             CockpitTextField(
                 value = withdrawAmount,
-                onValueChange = { withdrawAmount = it.filter { ch -> ch.isDigit() || ch == '.' }.take(12) },
+                onValueChange = { raw ->
+                    val candidate = raw.filter { ch -> ch.isDigit() || ch == '.' }.take(12)
+                    val decimalIndex = candidate.indexOf('.')
+                    if (candidate.count { it == '.' } <= 1 &&
+                        (decimalIndex < 0 || candidate.length - decimalIndex - 1 <= 2)
+                    ) {
+                        withdrawAmount = candidate
+                    }
+                },
                 label = "Withdrawal Amount (₹)",
                 placeholder = "Enter amount"
             )
@@ -1128,15 +1138,46 @@ fun InstantPayoutScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            if (payoutHistory.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    "RECENT PAYOUT REQUESTS (${payoutHistory.size})",
+                    "PAYOUT REQUEST HISTORY",
                     color = CockpitTextMuted,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
-                payoutHistory.take(5).forEach { item ->
+                TextButton(
+                    onClick = { DriverRepository.fetchPayoutHistory() },
+                    enabled = !payoutHistoryLoading
+                ) {
+                    Text(if (payoutHistoryLoading) "Loading..." else "Refresh")
+                }
+            }
+
+            if (payoutHistoryLoading && payoutHistory.isEmpty()) {
+                CockpitCard {
+                    Text("Loading payout history...", color = CockpitTextSecondary, fontSize = 12.sp)
+                }
+            } else if (payoutHistoryError != null && payoutHistory.isEmpty()) {
+                CockpitCard {
+                    Text(payoutHistoryError.orEmpty(), color = CrimsonAlert, fontSize = 12.sp)
+                    TextButton(onClick = { DriverRepository.fetchPayoutHistory() }) {
+                        Text("Try again")
+                    }
+                }
+            } else if (payoutHistory.isEmpty()) {
+                CockpitCard {
+                    Text("No payout requests yet.", color = CockpitTextSecondary, fontSize = 12.sp)
+                }
+            } else {
+                if (payoutHistoryError != null) {
+                    Text(payoutHistoryError.orEmpty(), color = CrimsonAlert, fontSize = 11.sp)
+                }
+                payoutHistory.take(10).forEach { item ->
                     val statusTint = when (item.status) {
                         "PAID" -> EmeraldPrimary
                         "FAILED", "REJECTED" -> CrimsonAlert
@@ -1161,6 +1202,15 @@ fun InstantPayoutScreen(
                                     ?: item.settlementReference?.let { "Ref: $it" }
                                     ?: item.requestedAt.take(19).replace("T", " ")
                                 Text(detailNote, color = CockpitTextMuted, fontSize = 11.sp)
+                                if (item.retryCount > 0) {
+                                    Text("Retry attempt: ${item.retryCount}", color = CockpitTextMuted, fontSize = 10.sp)
+                                }
+                                item.paidAt?.let {
+                                    Text("Paid: ${it.take(19).replace("T", " ")}", color = EmeraldPrimary, fontSize = 10.sp)
+                                }
+                                item.failedAt?.let {
+                                    Text("Failed: ${it.take(19).replace("T", " ")}", color = CrimsonAlert, fontSize = 10.sp)
+                                }
                             }
                             CockpitBadge(item.status, statusTint)
                         }

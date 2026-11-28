@@ -293,6 +293,15 @@ async def test_manual_transfer_two_step_workflow_and_illegal_transitions(client,
         assert conf_res.status_code == 200
         assert conf_res.json()["status"] == "PAID"
 
+        # A manually confirmed transfer is terminal; the generic failure endpoint cannot reverse it.
+        manual_paid_fail = await client.post(
+            f"/api/v1/admin/payouts/{payout_id}/fail",
+            json={"failure_reason": "Attempted manual reversal after confirmation"},
+        )
+        assert manual_paid_fail.status_code == 409
+        await db_session.refresh(wallet)
+        assert wallet.balance_cents == 35000
+
         # Duplicate manual confirmation rejected
         dup_conf = await client.post(f"/api/v1/admin/payouts/{payout_id}/confirm-manual-transfer", json={})
         assert dup_conf.status_code == 400
@@ -317,6 +326,10 @@ async def test_manual_transfer_two_step_workflow_and_illegal_transitions(client,
             )
         ).scalars().all()
         assert len(audits) >= 3
+        recorded_transfer = next(a for a in audits if a.action == "PAYOUT_MANUAL_TRANSFER_RECORDED")
+        confirmed_transfer = next(a for a in audits if a.action == "PAYOUT_MANUAL_TRANSFER_CONFIRMED")
+        assert json.loads(recorded_transfer.changes_json)["evidence_notes"] == "NEFT batch #42"
+        assert json.loads(confirmed_transfer.changes_json)["confirmation_notes"] == "Bank statement independently verified"
         for a in audits:
             assert "445566778899" not in (a.changes_json or "")
     finally:
@@ -442,20 +455,34 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     assert wallet.balance_cents == 40000
 
     # Execute provider payout on retry (APPROVED -> PROCESSING, NOT PAID until webhook)
+    # A delayed success event from the previous attempt must not settle the new retry.
+    stale_body = json.dumps({
+        "event": "payout.processed",
+        "payload": {"payout": {"entity": {"id": "pout_rx_001", "reference_id": payout_id, "utr": "UTR_OLD_ATTEMPT"}}},
+    }).encode()
+    stale_sig = hmac.new(wh_secret.encode(), stale_body, hashlib.sha256).hexdigest()
+    stale_wh = await client.post("/api/v1/payments/payouts/webhook", content=stale_body, headers={"X-Razorpay-Signature": stale_sig})
+    assert stale_wh.status_code == 409
+    await db_session.refresh(wallet)
+    assert wallet.balance_cents == 40000
+
+    retry_reference_id = f"r1-{payout_id.replace('-', '')}"
     ok_post = MagicMock(status_code=201)
-    ok_post.json.return_value = {"id": "pout_rx_002", "status": "processing", "reference_id": payout_id}
-    with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=ok_post)):
+    ok_post.json.return_value = {"id": "pout_rx_002", "status": "processing", "reference_id": retry_reference_id}
+    post_mock = AsyncMock(return_value=ok_post)
+    with patch("httpx.AsyncClient.post", new=post_mock):
         proc = await PayoutExecutionService.execute_provider_payout(
             db_session, payout_id=payout_id, admin_user_id=admin_user_id
         )
         assert proc.status == "PROCESSING"
         assert proc.provider_payout_id == "pout_rx_002"
+        assert post_mock.await_args.kwargs["json"]["reference_id"] == retry_reference_id
         await db_session.commit()
 
     # 6. payout.processed webhook transitions PROCESSING -> PAID
     paid_body = json.dumps({
         "event": "payout.processed",
-        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": payout_id, "utr": "UTR_RX_99887766"}}},
+        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": retry_reference_id, "utr": "UTR_RX_99887766"}}},
     }).encode()
     paid_sig = hmac.new(wh_secret.encode(), paid_body, hashlib.sha256).hexdigest()
     paid_wh = await client.post("/api/v1/payments/payouts/webhook", content=paid_body, headers={"X-Razorpay-Signature": paid_sig})
@@ -465,7 +492,7 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     # 7. Out-of-order late payout.queued webhook after PAID does not regress state
     late_body = json.dumps({
         "event": "payout.queued",
-        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": payout_id}}},
+        "payload": {"payout": {"entity": {"id": "pout_rx_002", "reference_id": retry_reference_id}}},
     }).encode()
     late_sig = hmac.new(wh_secret.encode(), late_body, hashlib.sha256).hexdigest()
     late_wh = await client.post("/api/v1/payments/payouts/webhook", content=late_body, headers={"X-Razorpay-Signature": late_sig})
@@ -473,7 +500,37 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     assert late_wh.json()["status"] == "IGNORED_OUT_OF_ORDER"
     assert late_wh.json()["payout_status"] == "PAID"
 
+    # A later bank/clearing-house reversal after PAID must restore the held payout amount once.
+    reversed_body = json.dumps({
+        "event": "payout.reversed",
+        "payload": {"payout": {"entity": {
+            "id": "pout_rx_002",
+            "reference_id": retry_reference_id,
+            "status": "reversed",
+            "failure_reason": "Beneficiary bank returned the transfer",
+        }}},
+    }).encode()
+    reversed_sig = hmac.new(wh_secret.encode(), reversed_body, hashlib.sha256).hexdigest()
+    reversed_wh = await client.post(
+        "/api/v1/payments/payouts/webhook",
+        content=reversed_body,
+        headers={"X-Razorpay-Signature": reversed_sig},
+    )
+    assert reversed_wh.status_code == 200
+    assert reversed_wh.json()["payout_status"] == "FAILED"
+
+    # Duplicate reversal delivery cannot credit the DriverWallet twice.
+    duplicate_reversal = await client.post(
+        "/api/v1/payments/payouts/webhook",
+        content=reversed_body,
+        headers={"X-Razorpay-Signature": reversed_sig},
+    )
+    assert duplicate_reversal.status_code == 200
+    assert duplicate_reversal.json()["status"] == "ALREADY_PROCESSED"
+    await db_session.refresh(wallet)
+    assert wallet.balance_cents == 90000
+
     inv = await PayoutExecutionService.reconcile_payout_invariants(db_session, payout_id)
     assert inv["is_balanced"] is True
     assert inv["commission_settlement_count"] == 1
-    assert inv["wallet_balance_cents"] == 40000
+    assert inv["wallet_balance_cents"] == 90000

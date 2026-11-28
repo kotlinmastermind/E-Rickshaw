@@ -2103,8 +2103,12 @@
                         RRN) *</label>
                     <input type="text" id="settle-modal-utr" placeholder="e.g. UTR409827110948"
                         class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-glow/50 font-mono">
-                    <p class="text-[10px] text-slate-500 mt-1">This reference will be permanently stored on the
-                        immutable ledger entry for RBI compliance.</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Record the actual bank transfer reference; it is retained with the payout audit trail.</p>
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-400 mb-1">Transfer evidence notes (minimum 12 characters) *</label>
+                    <textarea id="settle-modal-evidence" rows="3" maxlength="240" placeholder="Bank statement / transfer confirmation details"
+                        class="w-full bg-card border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-glow/50"></textarea>
                 </div>
             </div>
             <div class="flex gap-3 pt-2 border-t border-border">
@@ -4711,6 +4715,7 @@
             document.getElementById('settle-modal-amount').innerText = `₹${amount}`;
             document.getElementById('settle-modal-bank').innerText = bank;
             document.getElementById('settle-modal-utr').value = '';
+            document.getElementById('settle-modal-evidence').value = '';
             document.getElementById('modal-payout-settle').classList.remove('hidden');
             lucide.createIcons();
         }
@@ -4721,8 +4726,13 @@
 
         async function submitPayoutSettleConfirm() {
             const utr = document.getElementById('settle-modal-utr').value.trim();
+            const evidenceNotes = document.getElementById('settle-modal-evidence').value.trim();
             if (utr.length < 8) {
                 showToast('Bank IMPS/UPI UTR (min 8 chars) is mandatory for transfer record', 'error');
+                return;
+            }
+            if (evidenceNotes.length < 12) {
+                showToast('Transfer evidence notes (min 12 characters) are required', 'error');
                 return;
             }
             const payoutId = STATE.activeSettlePayout.id;
@@ -4734,7 +4744,7 @@
                 const res = await fetch(`/api/v1/admin/payouts/${payoutId}/manual-transfer`, {
                     method: 'POST',
                     headers: headers,
-                    body: JSON.stringify({ settlement_reference: utr })
+                    body: JSON.stringify({ settlement_reference: utr, evidence_notes: evidenceNotes })
                 });
                 if (res.ok) {
                     showToast(`Manual transfer recorded (AWAITING_MANUAL_TRANSFER). Confirm completion once bank clears.`);
@@ -4749,13 +4759,18 @@
         }
 
         async function confirmManualTransfer(payoutId) {
+            const confirmationNotes = window.prompt('Enter independent bank-statement / transfer confirmation evidence (minimum 12 characters):');
+            if (!confirmationNotes || confirmationNotes.trim().length < 12) {
+                if (confirmationNotes !== null) showToast('Independent transfer evidence (min 12 characters) is required', 'error');
+                return;
+            }
             try {
                 const headers = { 'Content-Type': 'application/json' };
                 if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
                 const res = await fetch(`/api/v1/admin/payouts/${payoutId}/confirm-manual-transfer`, {
                     method: 'POST',
                     headers,
-                    body: JSON.stringify({ confirmation_notes: 'Confirmed by admin after bank clearance' })
+                    body: JSON.stringify({ confirmation_notes: confirmationNotes.trim() })
                 });
                 if (res.ok) {
                     showToast(`Payout #${payoutId.slice(0, 8)} confirmed PAID!`);
@@ -4932,7 +4947,6 @@
 
                 let actions = `
                     <div class="flex items-center justify-end gap-1.5">
-                        <button onclick="revealPayoutAccountDetails('${a.id}')" class="px-2.5 py-1 rounded-lg bg-cyan-glow/15 text-cyan-glow border border-cyan-glow/30 text-[11px] font-bold">View details</button>
                         ${a.verification_status === 'VERIFIED'
                             ? `<button onclick="openPayoutAccountRejectModal('${a.id}')" class="px-2.5 py-1 rounded-lg bg-crimson-dim text-crimson-glow border border-crimson-glow/30 text-[11px] font-bold">${a.is_primary ? 'Revoke' : 'Reject'}</button>`
                             : `<button onclick="openPayoutAccountVerifyModal('${a.id}', '${destText.replace(/'/g, '')}')" class="px-2.5 py-1 rounded-lg bg-emerald-glow text-black font-extrabold text-[11px]">Verify</button>
@@ -4957,32 +4971,6 @@
                 tbody.appendChild(tr);
             });
             lucide.createIcons();
-        }
-
-        async function revealPayoutAccountDetails(accountId) {
-            try {
-                const headers = {};
-                if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
-                const res = await fetch(`/api/v1/admin/payout-accounts/${accountId}/details`, { headers });
-                const data = await res.json();
-                if (!res.ok) {
-                    showToast(data.detail || 'Unable to reveal payout destination', 'error');
-                    return;
-                }
-                const lines = [
-                    `Beneficiary: ${data.beneficiary_name || 'Not supplied'}`,
-                    `Type: ${data.account_type}`,
-                    `Bank: ${data.bank_name || 'N/A'}`,
-                    data.account_number ? `Account number: ${data.account_number}` : `UPI ID: ${data.upi_vpa || 'N/A'}`,
-                    `IFSC: ${data.ifsc_code || 'N/A'}`,
-                    `Verification: ${data.verification_status}`,
-                    '',
-                    'This reveal was recorded in the admin audit log.'
-                ];
-                window.alert(lines.join('\\n'));
-            } catch (err) {
-                showToast('Network error while retrieving payout destination', 'error');
-            }
         }
 
         function openPayoutAccountVerifyModal(accountId, destText) {

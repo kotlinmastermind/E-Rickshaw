@@ -34,8 +34,8 @@ ALLOWED_PAYOUT_TRANSITIONS = {
     "APPROVED": {"AWAITING_MANUAL_TRANSFER", "PROCESSING", "PAID", "FAILED", "REJECTED"},
     "AWAITING_MANUAL_TRANSFER": {"PAID", "FAILED"},
     "PROCESSING": {"PAID", "FAILED"},
+    "PAID": {"FAILED"},  # RazorpayX may reverse a processed payout after bank reconciliation.
     "FAILED": {"APPROVED"},
-    "PAID": set(),
     "REJECTED": set(),
 }
 
@@ -50,6 +50,26 @@ def _sanitize_provider_payload(payload: Optional[Dict[str, Any]]) -> str:
     allowed_keys = ("id", "entity", "status", "mode", "purpose", "utr", "reference_id", "failure_reason", "created_at")
     sanitized = {k: payload[k] for k in allowed_keys if k in payload and payload[k] is not None}
     return json.dumps(sanitized, ensure_ascii=False)
+
+def _provider_reference_id(payout: DriverPayoutRequest) -> str:
+    """Return an attempt-scoped provider reference within Razorpay's 40-character limit."""
+    retry_count = int(payout.retry_count or 0)
+    return payout.id if retry_count == 0 else f"r{retry_count}-{payout.id.replace('-', '')}"
+
+
+def _payout_id_from_provider_reference(reference_id: str) -> Optional[str]:
+    """Resolve the payout UUID from either its initial or compact retry-scoped reference."""
+    if len(reference_id) == 36:
+        return reference_id
+    if not reference_id.startswith("r") or "-" not in reference_id:
+        return None
+    attempt, compact_id = reference_id[1:].split("-", 1)
+    if not attempt.isdigit() or len(compact_id) != 32 or any(ch not in "0123456789abcdef" for ch in compact_id.lower()):
+        return None
+    return (
+        f"{compact_id[0:8]}-{compact_id[8:12]}-{compact_id[12:16]}-"
+        f"{compact_id[16:20]}-{compact_id[20:32]}"
+    )
 
 
 class PayoutExecutionService:
@@ -354,6 +374,7 @@ class PayoutExecutionService:
                 "execution_mode": "MANUAL_TRANSFER",
                 "amount_cents": payout.amount_cents,
                 "masked_destination": dest["masked_destination"],
+                "evidence_notes": clean_evidence[:240],
                 "initiated_at": now.isoformat(),
             }),
         ))
@@ -508,7 +529,7 @@ class PayoutExecutionService:
             "purpose": "payout",
             "fund_account": fund_account,
             "queue_if_low_balance": False,
-            "reference_id": payout.id,
+            "reference_id": _provider_reference_id(payout),
         }
 
         try:
@@ -620,7 +641,9 @@ class PayoutExecutionService:
         ).scalar_one_or_none()
         if not payout:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout request not found.")
-        if payout.status in TERMINAL_PAYOUT_STATUSES:
+        if payout.status in TERMINAL_PAYOUT_STATUSES and not (
+            payout.status == "PAID" and payout.execution_mode == "RAZORPAYX"
+        ):
             return payout
 
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -632,21 +655,22 @@ class PayoutExecutionService:
                 item = resp.json() if resp.status_code == 200 else None
             else:
                 x_acct = (getattr(settings, "RAZORPAYX_ACCOUNT_NUMBER", None) or "").strip()
+                current_reference_id = _provider_reference_id(payout)
                 resp = await client.get(
                     "https://api.razorpay.com/v1/payouts",
-                    params={"account_number": x_acct, "reference_id": payout.id},
+                    params={"account_number": x_acct, "reference_id": current_reference_id},
                     auth=(settings.RAZORPAY_KEY_ID or "", settings.RAZORPAY_KEY_SECRET or ""),
                 )
                 items = (resp.json() or {}).get("items", []) if resp.status_code == 200 else []
                 item = next(
-                    (candidate for candidate in items if candidate.get("reference_id") == payout.id),
+                    (candidate for candidate in items if candidate.get("reference_id") == current_reference_id),
                     None,
                 )
 
         if not item:
             return payout
 
-        if (item.get("reference_id") or "").strip() != payout.id:
+        if (item.get("reference_id") or "").strip() != _provider_reference_id(payout):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Provider reconciliation returned a payout with a different reference; no wallet or payout state was changed.",
@@ -730,15 +754,22 @@ class PayoutExecutionService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout request not found.")
         if payout.status == "FAILED":
             return payout
-        if payout.status not in {"APPROVED", "AWAITING_MANUAL_TRANSFER", "PROCESSING"}:
+        if payout.status not in {"APPROVED", "AWAITING_MANUAL_TRANSFER", "PROCESSING", "PAID"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot mark payout FAILED from status {payout.status}.",
             )
 
         provider_meta = json.loads(payout.provider_metadata_json or "{}") if payout.provider_metadata_json else {}
+        if payout.status == "PAID" and (
+            payout.execution_mode != "RAZORPAYX" or not provider_meta.get("provider_failure_confirmed")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A paid payout can only be reversed after authoritative RazorpayX reversal confirmation.",
+            )
         if payout.execution_mode == "RAZORPAYX" and (
-            (payout.status == "PROCESSING" or provider_meta.get("uncertain_outcome"))
+            (payout.status in {"PROCESSING", "PAID"} or provider_meta.get("uncertain_outcome"))
             and not provider_meta.get("provider_failure_confirmed")
         ):
             raise HTTPException(
@@ -966,11 +997,13 @@ class PayoutExecutionService:
                 )
             ).scalar_one_or_none()
         if not payout and reference_id:
-            payout = (
-                await session.execute(
-                    select(DriverPayoutRequest).where(DriverPayoutRequest.id == reference_id).with_for_update()
-                )
-            ).scalar_one_or_none()
+            payout_id_from_reference = _payout_id_from_provider_reference(reference_id)
+            if payout_id_from_reference:
+                payout = (
+                    await session.execute(
+                        select(DriverPayoutRequest).where(DriverPayoutRequest.id == payout_id_from_reference).with_for_update()
+                    )
+                ).scalar_one_or_none()
 
         if not payout:
             inbox.status = "PROCESSED"
@@ -978,9 +1011,9 @@ class PayoutExecutionService:
             await session.commit()
             return {"status": "IGNORED_UNKNOWN_PAYOUT", "digest": digest}
 
-        if reference_id and reference_id != payout.id:
+        if reference_id and reference_id != _provider_reference_id(payout):
             inbox.status = "FAILED"
-            inbox.last_error = "Provider payout id and reference id resolve to different payout requests."
+            inbox.last_error = "Provider payout reference does not match the current payout execution attempt."
             await session.commit()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -995,8 +1028,11 @@ class PayoutExecutionService:
                 detail="Stale or mismatched provider payout event rejected.",
             )
 
-        # Out-of-order / terminal protection
-        if payout.status in TERMINAL_PAYOUT_STATUSES:
+        # A processed payout may later be reversed by the beneficiary bank/clearing house.
+        # All other events after a terminal state remain out-of-order and are ignored.
+        if payout.status in TERMINAL_PAYOUT_STATUSES and not (
+            payout.status == "PAID" and event_name == "payout.reversed"
+        ):
             inbox.status = "PROCESSED"
             inbox.processed_at = now
             await session.commit()
@@ -1021,7 +1057,10 @@ class PayoutExecutionService:
                     },
                 )
         elif event_name in {"payout.failed", "payout.reversed", "payout.rejected"}:
-            if payout.status in {"APPROVED", "PROCESSING"}:
+            eligible_statuses = {"APPROVED", "PROCESSING"}
+            if event_name == "payout.reversed":
+                eligible_statuses.add("PAID")
+            if payout.status in eligible_statuses:
                 payout.provider_payout_id = provider_payout_id or payout.provider_payout_id
                 confirmed_meta = json.loads(_sanitize_provider_payload(entity))
                 confirmed_meta["provider_failure_confirmed"] = True
