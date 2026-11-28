@@ -276,6 +276,17 @@ async def test_admin_inspection_management_and_approval(db_session):
         file = UploadFile(filename=f"{category.lower()}.png", file=io.BytesIO(png_bytes), headers={"content-type": "image/png"})
         await service.upload_inspection_photo(user.id, insp_id, category, file)
 
+    # Submit the complete mandatory photo set and explicit checklist before Admin review.
+    from backend.application.services.driver_inspection_service import STANDARD_CHECKLIST_ITEMS
+    submit_result = await service.submit_inspection(
+        user_id=user.id,
+        inspection_id=insp_id,
+        odometer_reading=125.0,
+        checklist_results={key: "PASS" for key in STANDARD_CHECKLIST_ITEMS},
+        driver_remarks="All required safety checks passed."
+    )
+    assert submit_result["status"] in {"APPROVED", "PENDING_VERIFICATION"}
+
     # 1. Admin gets inspection stats
     stats = await service.get_admin_inspection_stats()
     assert "today_inspections" in stats
