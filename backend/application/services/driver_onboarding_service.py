@@ -150,21 +150,10 @@ class DriverOnboardingService:
         res = await self.db.execute(stmt)
         driver = res.scalar_one_or_none()
         if not driver:
-            driver = DriverProfile(
-                user_id=user_id,
-                license_number=f"DL-{user_id[:8].upper()}",
-                approval_status="PENDING",
-                onboarding_step="IDENTITY_SUBMITTED",
-                profile_completeness_percentage=10,
-                preferred_operating_zones="AIRPORT_CORRIDOR,SOUTH_MUMBAI,BKC_FINANCIAL",
-                preferred_vehicle_categories="EXECUTIVE_SEDAN,PRESTIGE_SUV",
-                languages_spoken="English, Hindi, Marathi",
-                service_etiquette_level="Black Sovereign Executive",
-                cabin_music_preference="Classical & Soft Jazz",
-                cabin_temp_celsius=21
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Driver profile not found. Complete driver registration before starting onboarding."
             )
-            self.db.add(driver)
-            await self.db.flush()
         return driver
 
     # =========================================================================
@@ -895,7 +884,7 @@ class DriverOnboardingService:
             "rating_average": driver.rating_average,
             "total_trips": driver.total_trips,
             "years_experience": None,
-            "languages_spoken": driver.languages_spoken.split(", ") if driver.languages_spoken else ["English", "Hindi"],
+            "languages_spoken": [value.strip() for value in driver.languages_spoken.split(",") if value.strip()] if driver.languages_spoken else [],
             "service_etiquette_level": driver.service_etiquette_level,
             "cabin_music_preference": driver.cabin_music_preference,
             "cabin_temp_celsius": driver.cabin_temp_celsius,
