@@ -20,7 +20,7 @@ async def test_driver_signup_defaults_to_pending_and_unverified(db_session):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         unique_suffix = uuid.uuid4().int % 100000000
-        driver_phone = f"+9198{str(unique_suffix)[-8:]}"
+        driver_phone = f"+9198{unique_suffix:08d}"
         driver_email = f"pending_driver_{unique_suffix}@erickshaw.in"
 
         res = await ac.post("/api/v1/auth/signup/driver", json={
