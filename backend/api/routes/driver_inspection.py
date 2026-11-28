@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.deps import get_current_driver, get_current_user, get_current_admin
 from backend.domain.models import User, DriverProfile, DriverVehicleInspection, Vehicle
 from backend.infrastructure.database.session import get_db
-from backend.application.services.driver_inspection_service import DriverInspectionService
+from backend.application.services.driver_inspection_service import DriverInspectionService, MANDATORY_PHOTO_CATEGORIES
 from backend.integrations.storage.provider import verify_signed_url_token, get_storage_provider
 
 router = APIRouter(prefix="/drivers/vehicle-inspections", tags=["Driver Vehicle Inspection"])
@@ -66,14 +66,28 @@ async def list_driver_inspections_for_admin(
             "submitted_at": inspection.submitted_at.isoformat() if inspection.submitted_at else None,
             "inspected_at": inspection.inspected_at.isoformat() if inspection.inspected_at else None,
             "rejection_reason": inspection.rejection_reason,
-            "photos_complete": all([
-                inspection.photo_front_url,
-                inspection.photo_rear_url,
-                inspection.photo_left_url,
-                inspection.photo_right_url,
-                inspection.photo_interior_front_url,
-                inspection.photo_interior_rear_url,
-            ]),
+            "photos_complete": (
+                set(MANDATORY_PHOTO_CATEGORIES).issubset({
+                    (photo.photo_category or "").upper()
+                    for photo in inspection.photos
+                    if (photo.upload_status or "").upper() == "COMPLETED"
+                })
+                or all([
+                    inspection.photo_front_url,
+                    inspection.photo_rear_url,
+                    inspection.photo_left_url,
+                    inspection.photo_right_url,
+                    inspection.photo_interior_front_url,
+                    inspection.photo_interior_rear_url,
+                ])
+                or all([
+                    inspection.odometer_photo_url,
+                    inspection.photo_front_url,
+                    inspection.photo_rear_url,
+                    inspection.photo_left_url,
+                    inspection.photo_right_url,
+                ])
+            ),
             "has_checklist": bool(inspection.checklist_json),
         })
     return {"driver_id": driver_id, "inspections": inspections}
