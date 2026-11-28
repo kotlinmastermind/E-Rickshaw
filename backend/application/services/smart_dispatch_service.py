@@ -611,8 +611,10 @@ class SmartDispatchService:
                 if (
                     assignment
                     and assignment.status == "OFFERED"
-                    and assignment.expires_at is not None
-                    and ensure_utc(assignment.expires_at) <= utc_now()
+                    and (
+                        assignment.expires_at is None
+                        or ensure_utc(assignment.expires_at) <= utc_now()
+                    )
                 ):
                     ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
                     ride = (await session.execute(ride_stmt)).scalar_one_or_none()
@@ -662,8 +664,10 @@ async def run_dispatch_expiry_reaper_loop(poll_interval_seconds: int = 5, batch_
                     select(RideAssignment.ride_id, RideAssignment.driver_id)
                     .where(
                         RideAssignment.status == "OFFERED",
-                        RideAssignment.expires_at.is_not(None),
-                        RideAssignment.expires_at <= utc_now(),
+                        or_(
+                            RideAssignment.expires_at.is_(None),
+                            RideAssignment.expires_at <= utc_now(),
+                        ),
                     )
                     .order_by(RideAssignment.expires_at.asc())
                     .limit(batch_size)
