@@ -3295,6 +3295,9 @@
                 if (ride.status === 'PAUSED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">PAUSED</span>';
                 if (ride.status === 'COMPLETED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">COMPLETED</span>';
                 if (ride.status === 'REQUESTED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold animate-pulse">REQUESTED</span>';
+                const dispatchState = ride.current_offer
+                    ? 'OFFERED · ' + Number(ride.current_offer.expires_in_seconds || 0) + 's remaining'
+                    : (ride.dispatch_status || '—');
 
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-surface/50 transition-colors';
@@ -3311,7 +3314,7 @@
                     </td>
                     <td class="py-3.5 px-4 font-mono font-bold text-emerald-glow">${ride.fare}</td>
                     <td class="py-3.5 px-4 text-slate-400 font-mono">${ride.payment}</td>
-                    <td class="py-3.5 px-4">${statusBadge}</td>
+                    <td class="py-3.5 px-4">${statusBadge}<div class="mt-1 text-[10px] font-mono text-slate-500">Dispatch: ${dispatchState}</div></td>
                     <td class="py-3.5 px-4 text-right">
                         <button onclick="switchTab('map'); showToast('Showing route for #${ride.id.slice(0, 8)}')" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
                             Inspect Route
