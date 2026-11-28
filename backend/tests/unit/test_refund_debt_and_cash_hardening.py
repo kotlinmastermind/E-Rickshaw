@@ -545,7 +545,9 @@ async def test_pending_driver_cannot_go_online_or_operate():
         signup_res = await client.post("/api/v1/auth/signup/driver", json={
             "phone_number": phone,
             "full_name": "Pending Driver Security Test",
-            "password": "SecurePassword123!"
+            "password": "SecurePassword123!",
+            "license_number": f"DL-SEC-{uuid.uuid4().hex[:10].upper()}",
+            "vehicle_type": "SEDAN"
         })
         assert signup_res.status_code == 200
         token = signup_res.json()["access_token"]

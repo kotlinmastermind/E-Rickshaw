@@ -9,6 +9,8 @@ from backend.infrastructure.security.crypto import (
     generate_secure_otp, verify_totp, generate_mfa_secret
 )
 from backend.application.services.driver_service import DriverService
+from backend.application.services.driver_onboarding_service import DriverOnboardingService
+from backend.application.services.user_governance_service import UserGovernanceService
 from backend.application.services.ride_service import RideService
 from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
 from fastapi import HTTPException
@@ -26,8 +28,8 @@ async def test_driver_signup_defaults_to_pending_and_unverified(db_session):
             "phone_number": driver_phone,
             "email": driver_email,
             "password": "StrongPassword123!",
-            "vehicle_name": "Mahindra Treo",
-            "vehicle_no": f"DL-01-PT-{str(unique_suffix)[-4:]}"
+            "license_number": f"DL-APPLICANT-{str(unique_suffix)[-6:]}",
+            "vehicle_type": "SEDAN"
         })
         assert res.status_code == 200, res.text
         data = res.json()
@@ -140,7 +142,8 @@ async def test_admin_approval_lifecycle_and_non_admin_rejection(db_session):
         phone_number=f"+9194{str(unique_suffix)[-8:]}",
         email=f"candidate_driver_{unique_suffix}@erickshaw.in",
         role="driver",
-        is_active=True
+        is_active=True,
+        is_verified=True
     )
     db_session.add(driver_user)
     await db_session.flush()
@@ -213,14 +216,14 @@ async def test_admin_approval_lifecycle_and_non_admin_rejection(db_session):
                 json={"approval_status": "APPROVED"},
                 headers={"Authorization": f"Bearer {admin_token}"}
             )
-            assert res_auth.status_code == 200, res_auth.text
-            assert res_auth.json()["approval_status"] == "APPROVED"
+            assert res_auth.status_code == 409, res_auth.text
+            assert "identity proof" in res_auth.text.lower()
         finally:
             app.dependency_overrides.pop(get_current_admin, None)
 
-        # Verify DB status updated
+        # Verify DB status remains pending after an incomplete approval attempt.
         await db_session.refresh(driver_profile)
-        assert driver_profile.approval_status == "APPROVED"
+        assert driver_profile.approval_status == "PENDING"
 
 
 @pytest.mark.asyncio
@@ -249,6 +252,50 @@ async def test_existing_approved_driver_retains_status_and_goes_online(db_sessio
     service = DriverService(db_session)
     result = await service.toggle_availability(user.id, is_online=True)
     assert result["is_online"] is True
+
+
+@pytest.mark.asyncio
+async def test_driver_profiles_are_never_synthesized_for_non_driver_accounts(db_session):
+    user = User(
+        phone_number=f"+9191{uuid.uuid4().int % 100000000:08d}",
+        full_name="Ordinary Customer",
+        role="customer",
+        is_active=True
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as service_error:
+        await DriverService(db_session).get_or_create_profile(user.id)
+    assert service_error.value.status_code == 404
+
+    with pytest.raises(HTTPException) as onboarding_error:
+        await DriverOnboardingService(db_session).get_or_create_driver(user.id)
+    assert onboarding_error.value.status_code == 404
+
+    await db_session.refresh(user)
+    assert user.role == "customer"
+    assert (await db_session.execute(
+        select(DriverProfile).where(DriverProfile.user_id == user.id)
+    )).scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_generic_password_registration_cannot_create_driver_accounts(db_session):
+    service = UserGovernanceService(db_session)
+    phone = f"+9192{uuid.uuid4().int % 100000000:08d}"
+    with pytest.raises(HTTPException) as exc_info:
+        await service.register_with_password(
+            email=f"alternate_driver_{uuid.uuid4().hex[:8]}@example.com",
+            password="StrongPassword123!",
+            full_name="Alternate Signup",
+            phone_number=phone,
+            role="driver"
+        )
+    assert exc_info.value.status_code == 403
+    assert (await db_session.execute(
+        select(User).where(User.phone_number == phone)
+    )).scalar_one_or_none() is None
 
 
 @pytest.mark.asyncio

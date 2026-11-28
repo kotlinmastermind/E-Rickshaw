@@ -4,8 +4,8 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from backend.domain.models import (
-    User, CustomerProfile, DriverProfile, DriverDocument,
-    Ride, RideStatusEvent, FareRule, VehicleCategory,
+    User, CustomerProfile, DriverProfile, DriverDocument, DriverVehicleAssignment,
+    DriverVehicleInspection, Vehicle, Ride, RideStatusEvent, FareRule, VehicleCategory,
     Payment, Notification, DriverAvailability, Wallet, WalletTransaction
 )
 from backend.application.services.admin_service import AdminService
@@ -164,7 +164,8 @@ async def test_admin_driver_approval_workflow_and_notification(db_session):
         phone_number=f"+91987{suffix}9",
         full_name="Driver Applicant",
         role="driver",
-        is_active=True
+        is_active=True,
+        is_verified=True
     )
     db_session.add(driver_user)
     await db_session.flush()
@@ -176,9 +177,46 @@ async def test_admin_driver_approval_workflow_and_notification(db_session):
         onboarding_step="DOCUMENTS_UPLOADED"
     )
     db_session.add(driver_profile)
+    await db_session.flush()
+
+    category = VehicleCategory(code=f"ONB_{suffix}", name="E-Rickshaw", capacity=4, is_active=True)
+    db_session.add(category)
+    await db_session.flush()
+    vehicle = Vehicle(
+        category_id=category.id,
+        make="Mahindra",
+        model="Treo",
+        year=2025,
+        license_plate=f"DL-ONB-{suffix}",
+        is_active=True
+    )
+    db_session.add(vehicle)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=driver_profile.id, vehicle_id=vehicle.id, is_active=True))
+    for index, document_type in enumerate(["DRIVING_LICENSE", "IDENTITY_PROOF", "VEHICLE_REGISTRATION", "INSURANCE"]):
+        db_session.add(DriverDocument(
+            driver_id=driver_profile.id,
+            document_type=document_type,
+            storage_path=f"/docs/{suffix}/{document_type.lower()}.pdf",
+            file_name=f"{document_type.lower()}.pdf",
+            mime_type="application/pdf",
+            file_size_bytes=1024,
+            file_hash_sha256=f"{suffix}-{index}-verified",
+            verification_status="VERIFIED"
+        ))
+    db_session.add(DriverVehicleInspection(
+        driver_id=driver_profile.id,
+        vehicle_id=vehicle.id,
+        inspection_status="APPROVED",
+        verification_status="VERIFIED",
+        verified_by=f"admin_{suffix}",
+        verified_at=datetime.now(timezone.utc),
+        overall_result="PASS",
+        inspected_at=datetime.now(timezone.utc)
+    ))
     await db_session.commit()
 
-    # Admin approves driver
+    # Admin approves driver only after all onboarding prerequisites are complete
     admin_id = f"admin_{suffix}"
     approval_res = await admin_service.review_driver_approval(
         admin_id=admin_id,

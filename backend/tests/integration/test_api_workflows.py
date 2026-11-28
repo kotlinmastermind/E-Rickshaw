@@ -67,6 +67,7 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             "email": "drv1_lifecycle@vaisentra.com",
             "phone_number": drv1_phone,
             "password": "Password123!",
+            "license_number": "MH-DL-LIFECYCLE-0001",
             "vehicle_type": "SEDAN",
             "vehicle_name": "Sedan Prime",
             "vehicle_no": "DL-01-AA-0001"
@@ -82,6 +83,7 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             "email": "drv2_lifecycle@vaisentra.com",
             "phone_number": drv2_phone,
             "password": "Password123!",
+            "license_number": "MH-DL-LIFECYCLE-0002",
             "vehicle_type": "SEDAN",
             "vehicle_name": "Sedan Prime",
             "vehicle_no": "DL-01-AA-0002"
@@ -126,12 +128,94 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
         from backend.api.deps import get_current_admin
         app.dependency_overrides[get_current_admin] = lambda: admin_user
         try:
-            drivers_resp = await client.get("/api/v1/admin/drivers", headers=admin_headers)
-            assert drivers_resp.status_code == 200, f"admin drivers error: {drivers_resp.status_code} - {drivers_resp.text}"
-            drivers_data = drivers_resp.json()
-            drv2_target_lic = f"DL-{drv2_signup.json()['user']['id'][:8].upper()}"
-            drv2_profile = next((d for d in drivers_data if isinstance(d, dict) and d.get("license_number") == drv2_target_lic), drivers_data[0] if drivers_data else {"id": "drv_mock"})
-            await client.put(f"/api/v1/admin/drivers/{drv2_profile['id']}/approval", json={"approval_status": "APPROVED"}, headers=admin_headers)
+            from sqlalchemy import select
+            from datetime import datetime, timezone
+            from backend.domain.models import (
+                DriverProfile, DriverDocument, Vehicle, VehicleCategory,
+                DriverVehicleAssignment, DriverVehicleInspection
+            )
+            drv2_profile = (await db_session.execute(
+                select(DriverProfile).where(DriverProfile.user_id == drv2_signup.json()["user"]["id"])
+            )).scalar_one()
+            drv2_user = await db_session.get(User, drv2_profile.user_id)
+            drv2_user.is_verified = True  # Simulate the successful Twilio Verify step before Admin review.
+            sedan_category = (await db_session.execute(
+                select(VehicleCategory).where(VehicleCategory.code == "SEDAN", VehicleCategory.is_active.is_(True))
+            )).scalar_one()
+            fleet_vehicle = Vehicle(
+                category_id=sedan_category.id,
+                make="Mahindra",
+                model="Treo",
+                year=2025,
+                license_plate="MH-FLEET-LIFECYCLE-0002",
+                is_active=True
+            )
+            db_session.add(fleet_vehicle)
+            await db_session.flush()
+            db_session.add(DriverVehicleAssignment(
+                driver_id=drv2_profile.id,
+                vehicle_id=fleet_vehicle.id,
+                is_active=True
+            ))
+            drv1_profile = (await db_session.execute(
+                select(DriverProfile).where(DriverProfile.user_id == drv1_signup.json()["user"]["id"])
+            )).scalar_one()
+            drv1_user = await db_session.get(User, drv1_profile.user_id)
+            drv1_user.is_verified = True  # Simulate the successful Twilio Verify step for both concurrent candidates.
+            fleet_vehicle1 = Vehicle(
+                category_id=sedan_category.id,
+                make="Mahindra",
+                model="Treo",
+                year=2025,
+                license_plate="MH-FLEET-LIFECYCLE-0001",
+                is_active=True
+            )
+            db_session.add(fleet_vehicle1)
+            await db_session.flush()
+            db_session.add(DriverVehicleAssignment(
+                driver_id=drv1_profile.id,
+                vehicle_id=fleet_vehicle1.id,
+                is_active=True
+            ))
+            for candidate_profile in (drv1_profile, drv2_profile):
+                for index, document_type in enumerate(["DRIVING_LICENSE", "IDENTITY_PROOF", "VEHICLE_REGISTRATION", "INSURANCE"]):
+                    db_session.add(DriverDocument(
+                        driver_id=candidate_profile.id,
+                        document_type=document_type,
+                        storage_path=f"/integration/{candidate_profile.id}/{document_type.lower()}.pdf",
+                        file_name=f"{document_type.lower()}.pdf",
+                        mime_type="application/pdf",
+                        file_size_bytes=1024,
+                        file_hash_sha256=f"{candidate_profile.id}-{index}",
+                        verification_status="VERIFIED"
+                    ))
+            db_session.add(DriverVehicleInspection(
+                driver_id=drv1_profile.id,
+                vehicle_id=fleet_vehicle1.id,
+                inspection_status="APPROVED",
+                verification_status="VERIFIED",
+                verified_by=admin_user.id,
+                verified_at=datetime.now(timezone.utc),
+                overall_result="PASS",
+                inspected_at=datetime.now(timezone.utc)
+            ))
+            db_session.add(DriverVehicleInspection(
+                driver_id=drv2_profile.id,
+                vehicle_id=fleet_vehicle.id,
+                inspection_status="APPROVED",
+                verification_status="VERIFIED",
+                verified_by=admin_user.id,
+                verified_at=datetime.now(timezone.utc),
+                overall_result="PASS",
+                inspected_at=datetime.now(timezone.utc)
+            ))
+            await db_session.commit()
+            approval_resp = await client.put(
+                f"/api/v1/admin/drivers/{drv2_profile.id}/approval",
+                json={"approval_status": "APPROVED"},
+                headers=admin_headers
+            )
+            assert approval_resp.status_code == 200, approval_resp.text
 
             # 4. Calculate Fare Estimate
             cat_resp = await client.get("/api/v1/vehicles/categories")

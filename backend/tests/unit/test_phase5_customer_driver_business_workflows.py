@@ -93,13 +93,22 @@ async def test_driver_registration_and_training_workflow(db_session):
     phone = f"+9197{suffix:08d}"
     email = f"drv_wf_{suffix}@erickshaw.in"
 
-    # 1. Driver Registration
+    # 1. Driver Registration requires the actual licence and a live category.
+    category = VehicleCategory(
+        code=f"DRIVER_SIGNUP_{suffix}",
+        name="Driver Signup Test Category",
+        is_active=True
+    )
+    db_session.add(category)
+    await db_session.flush()
+
     reg_res = await auth_service.register_driver_account(
         phone_number=phone,
         email=email,
         full_name="Workflow Chauffeur",
         password="SecurePassword123!",
-        vehicle_no=f"MH-01-WF-{suffix % 10000}"
+        license_number=f"DL-WF-{suffix}",
+        vehicle_type=category.code
     )
     assert "access_token" in reg_res
     user_id = reg_res["user"]["id"]
@@ -107,6 +116,11 @@ async def test_driver_registration_and_training_workflow(db_session):
     driver_prof = (await db_session.execute(select(DriverProfile).where(DriverProfile.user_id == user_id))).scalar_one_or_none()
     assert driver_prof is not None
     assert driver_prof.approval_status == "PENDING"
+    assert driver_prof.license_number == f"DL-WF-{suffix}"
+    assert driver_prof.preferred_vehicle_categories == category.code
+    assert (await db_session.execute(
+        select(DriverVehicleAssignment).where(DriverVehicleAssignment.driver_id == driver_prof.id)
+    )).scalar_one_or_none() is None
 
     # 2. Driver Training Curriculum & Assessment
     onboarding_service = DriverOnboardingService(db_session)

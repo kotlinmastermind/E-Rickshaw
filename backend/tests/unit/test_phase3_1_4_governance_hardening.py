@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 from backend.main import app
 from backend.domain.models import (
-    User, DriverProfile, DriverDocument, Session, AuditLog,
-    AdminRole, AdminPermission, AdminRolePermission, AdminUserRole
+    User, DriverProfile, DriverDocument, DriverVehicleAssignment, DriverVehicleInspection,
+    Vehicle, VehicleCategory, Session, AuditLog, AdminRole, AdminPermission, AdminRolePermission, AdminUserRole
 )
 from backend.infrastructure.security.crypto import (
     create_jwt_token, hash_secret, generate_secure_otp
@@ -31,7 +31,7 @@ async def test_ordinary_admin_cannot_revoke_verified_document(db_session):
     unique_suffix = uuid.uuid4().int % 100000000
 
     # 1. Driver and verified document
-    driver_user = User(phone_number=f"+9191{str(unique_suffix)[-8:]}", email=f"ord_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
+    driver_user = User(phone_number=f"+9191{str(unique_suffix)[-8:]}", email=f"ord_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True, is_verified=True)
     db_session.add(driver_user)
     await db_session.flush()
 
@@ -311,7 +311,7 @@ async def test_driver_approval_payload_hardening(db_session):
     """Test approval payload validation: legacy status, modern approval_status, conflicts (422), extra fields (422)."""
     unique_suffix = uuid.uuid4().int % 100000000
 
-    driver_user = User(phone_number=f"+9198{str(unique_suffix)[-8:]}", email=f"appr_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
+    driver_user = User(phone_number=f"+9198{str(unique_suffix)[-8:]}", email=f"appr_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True, is_verified=True)
     db_session.add(driver_user)
     await db_session.flush()
 
@@ -331,6 +331,42 @@ async def test_driver_approval_payload_hardening(db_session):
         verification_status="VERIFIED"
     )
     db_session.add(doc)
+
+    category = VehicleCategory(code=f"APPR_{unique_suffix}", name="Approval Test Fleet", is_active=True)
+    db_session.add(category)
+    await db_session.flush()
+    vehicle = Vehicle(
+        category_id=category.id,
+        make="Mahindra",
+        model="Treo",
+        year=2025,
+        license_plate=f"DL-APPR-{str(unique_suffix)[-6:]}",
+        is_active=True
+    )
+    db_session.add(vehicle)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=prof.id, vehicle_id=vehicle.id, is_active=True))
+    for index, document_type in enumerate(["DRIVING_LICENSE", "IDENTITY_PROOF", "VEHICLE_REGISTRATION", "INSURANCE"]):
+        db_session.add(DriverDocument(
+            driver_id=prof.id,
+            document_type=document_type,
+            storage_path=f"/docs/appr/{unique_suffix}/{document_type.lower()}.pdf",
+            file_name=f"{document_type.lower()}.pdf",
+            mime_type="application/pdf",
+            file_size_bytes=1024,
+            file_hash_sha256=f"appr-{unique_suffix}-{index}",
+            verification_status="VERIFIED"
+        ))
+    db_session.add(DriverVehicleInspection(
+        driver_id=prof.id,
+        vehicle_id=vehicle.id,
+        inspection_status="APPROVED",
+        verification_status="VERIFIED",
+        verified_by="test-admin-reviewer",
+        verified_at=datetime.now(timezone.utc),
+        overall_result="PASS",
+        inspected_at=datetime.now(timezone.utc)
+    ))
 
     admin_user = User(phone_number=f"+9199{str(unique_suffix)[-8:]}", email=f"appr_admin_{unique_suffix}@erickshaw.in", role="admin", is_active=True, mfa_enabled=True)
     db_session.add(admin_user)

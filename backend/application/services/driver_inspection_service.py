@@ -388,21 +388,37 @@ class DriverInspectionService:
                 headers={"X-Missing-Photos": ",".join(missing_photos)}
             )
 
-        # 3. Validate Checklist Items
+        # 3. Validate every checklist item explicitly; missing input is never a PASS.
+        if not isinstance(checklist_results, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Every required inspection checklist item must be submitted explicitly."
+            )
+
         failed_items = []
         critical_failures = []
         normalized_checklist = {}
+        missing_checklist_items = []
 
         for key, config in STANDARD_CHECKLIST_ITEMS.items():
-            val = checklist_results.get(key)
+            if key not in checklist_results:
+                missing_checklist_items.append(key)
+                continue
+            val = checklist_results[key]
             if isinstance(val, bool):
                 status_str = "PASS" if val else "FAIL"
             elif isinstance(val, str):
                 status_str = val.upper().strip()
                 if status_str not in ["PASS", "FAIL", "NOT_APPLICABLE"]:
-                    status_str = "PASS"
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid inspection result for checklist item {key}."
+                    )
             else:
-                status_str = "PASS"  # default
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid inspection result for checklist item {key}."
+                )
 
             normalized_checklist[key] = status_str
 
@@ -410,6 +426,12 @@ class DriverInspectionService:
                 failed_items.append(key)
                 if config["critical"]:
                     critical_failures.append(key)
+
+        if missing_checklist_items:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Inspection checklist is incomplete. Missing: " + ", ".join(missing_checklist_items) + "."
+            )
 
         now = datetime.now(timezone.utc)
         insp.odometer_reading = odometer_reading
@@ -669,11 +691,60 @@ class DriverInspectionService:
         if action_clean not in ["APPROVE", "REJECT"]:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Action must be 'APPROVE' or 'REJECT'.")
 
-        stmt = select(DriverVehicleInspection).where(DriverVehicleInspection.id == inspection_id)
+        stmt = (
+            select(DriverVehicleInspection)
+            .options(selectinload(DriverVehicleInspection.photos))
+            .where(DriverVehicleInspection.id == inspection_id)
+        )
         res = await self.db.execute(stmt)
         insp = res.scalar_one_or_none()
         if not insp:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inspection not found.")
+        current_inspection_status = (insp.inspection_status or "").upper()
+        current_verification_status = (insp.verification_status or "").upper()
+        reviewable = (
+            current_inspection_status in {"SUBMITTED", "PENDING_VERIFICATION"}
+            or (
+                current_inspection_status == "APPROVED"
+                and current_verification_status in {"AUTO_APPROVED", "PENDING"}
+            )
+        )
+        if not reviewable:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only a submitted, pending-verification, or system-approved inspection can be reviewed by Admin."
+            )
+
+        if action_clean == "APPROVE":
+            mandatory_categories = set(MANDATORY_PHOTO_CATEGORIES)
+            uploaded_categories = {
+                (photo.photo_category or "").upper()
+                for photo in insp.photos
+                if (photo.upload_status or "").upper() == "COMPLETED"
+            }
+            daily_inspection_evidence = mandatory_categories.issubset(uploaded_categories)
+            onboarding_inspection_evidence = all([
+                insp.photo_front_url,
+                insp.photo_rear_url,
+                insp.photo_left_url,
+                insp.photo_right_url,
+                insp.photo_interior_front_url,
+                insp.photo_interior_rear_url,
+            ])
+            daily_photo_url_evidence = all([
+                insp.odometer_photo_url,
+                insp.photo_front_url,
+                insp.photo_rear_url,
+                insp.photo_left_url,
+                insp.photo_right_url,
+            ])
+            if not insp.checklist_json or not (
+                daily_inspection_evidence or onboarding_inspection_evidence or daily_photo_url_evidence
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Inspection evidence is incomplete; submit the full checklist and all mandatory inspection photographs."
+                )
 
         now = datetime.now(timezone.utc)
         insp.verified_by = admin_user_id

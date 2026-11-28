@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverDocument,
     Ride, RideStatusEvent, FareRule, DriverAvailability,
-    AdministrativeAuditLog, VehicleCategory
+    AdministrativeAuditLog, VehicleCategory, DriverVehicleAssignment, Vehicle, DriverVehicleInspection
 )
 
 class AdminService:
@@ -157,6 +157,75 @@ class AdminService:
     ) -> Dict[str, Any]:
         if status not in ["APPROVED", "REJECTED", "SUSPENDED"]:
             raise HTTPException(status_code=400, detail="Invalid approval status.")
+
+        if status == "APPROVED":
+            driver = await self.db.get(DriverProfile, driver_id)
+            if not driver:
+                raise HTTPException(status_code=404, detail="Driver record not found.")
+            driver_user = await self.db.get(User, driver.user_id)
+            if not driver_user or not driver_user.is_verified:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot approve driver until the registered mobile number has been verified through Twilio OTP."
+                )
+
+            documents = (await self.db.execute(
+                select(DriverDocument).where(DriverDocument.driver_id == driver_id)
+            )).scalars().all()
+            verified_types = {
+                doc.document_type.strip().upper()
+                for doc in documents
+                if (doc.verification_status or "").strip().upper() in {"VERIFIED", "APPROVED"}
+            }
+            required_document_groups = {
+                "driving licence": {"DRIVING_LICENSE"},
+                "identity proof": {"IDENTITY_PROOF", "AADHAAR_CARD", "AADHAAR", "PASSPORT", "VOTER_ID"},
+                "vehicle registration certificate": {"VEHICLE_REGISTRATION", "RC", "RC_BOOK"},
+                "vehicle insurance": {"INSURANCE", "VEHICLE_INSURANCE", "COMMERCIAL_INSURANCE"},
+            }
+            missing_documents = [
+                label for label, aliases in required_document_groups.items()
+                if not verified_types.intersection(aliases)
+            ]
+            if missing_documents:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot approve driver until these document types are verified: " + ", ".join(missing_documents) + "."
+                )
+
+            assignment = (await self.db.execute(
+                select(DriverVehicleAssignment)
+                .join(Vehicle, Vehicle.id == DriverVehicleAssignment.vehicle_id)
+                .where(
+                    DriverVehicleAssignment.driver_id == driver_id,
+                    DriverVehicleAssignment.is_active.is_(True),
+                    Vehicle.is_active.is_(True)
+                )
+                .order_by(DriverVehicleAssignment.assigned_at.desc())
+            )).scalars().first()
+            if not assignment:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot approve driver until Admin creates and activates a real fleet vehicle assignment."
+                )
+
+            inspection = (await self.db.execute(
+                select(DriverVehicleInspection)
+                .where(
+                    DriverVehicleInspection.driver_id == driver_id,
+                    DriverVehicleInspection.vehicle_id == assignment.vehicle_id
+                )
+                .order_by(DriverVehicleInspection.inspected_at.desc())
+            )).scalars().first()
+            inspection_status = (inspection.inspection_status or "").upper() if inspection else ""
+            inspection_verification = (inspection.verification_status or "").upper() if inspection else ""
+            admin_verified = inspection_verification == "VERIFIED" and bool(inspection and inspection.verified_by)
+            system_verified = inspection_verification == "AUTO_APPROVED"
+            if not inspection or inspection_status != "APPROVED" or not (admin_verified or system_verified):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot approve driver until an Admin has reviewed and approved the assigned vehicle inspection."
+                )
 
         stmt = (
             update(DriverProfile)

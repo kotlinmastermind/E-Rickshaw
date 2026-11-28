@@ -7,10 +7,10 @@ from fastapi.responses import Response as FastApiResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.api.deps import get_current_driver, get_current_user
-from backend.domain.models import User
+from backend.api.deps import get_current_driver, get_current_user, get_current_admin
+from backend.domain.models import User, DriverProfile, DriverVehicleInspection, Vehicle
 from backend.infrastructure.database.session import get_db
-from backend.application.services.driver_inspection_service import DriverInspectionService
+from backend.application.services.driver_inspection_service import DriverInspectionService, MANDATORY_PHOTO_CATEGORIES
 from backend.integrations.storage.provider import verify_signed_url_token, get_storage_provider
 
 router = APIRouter(prefix="/drivers/vehicle-inspections", tags=["Driver Vehicle Inspection"])
@@ -24,6 +24,90 @@ class SubmitInspectionPayload(BaseModel):
     odometer_reading: float = Field(..., ge=0, le=999999.0, description="Odometer reading in kilometers")
     checklist_results: Dict[str, Any] = Field(..., description="Checklist item statuses: PASS, FAIL, NOT_APPLICABLE")
     driver_remarks: Optional[str] = Field(None, max_length=1000)
+
+
+class AdminInspectionReviewPayload(BaseModel):
+    action: str = Field(..., pattern="^(APPROVE|REJECT)$")
+    reason: Optional[str] = Field(None, min_length=8, max_length=1000)
+
+
+@router.get("/admin/driver/{driver_id}")
+async def list_driver_inspections_for_admin(
+    driver_id: str,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Return persisted inspection state for Admin KYC review; no synthetic inspection rows."""
+    profile = (await db.execute(
+        select(DriverProfile).where(DriverProfile.id == driver_id)
+    )).scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Driver profile not found.")
+
+    rows = (await db.execute(
+        select(DriverVehicleInspection, Vehicle)
+        .join(Vehicle, Vehicle.id == DriverVehicleInspection.vehicle_id)
+        .where(DriverVehicleInspection.driver_id == driver_id)
+        .order_by(DriverVehicleInspection.created_at.desc())
+    )).all()
+
+    inspections = []
+    for inspection, vehicle in rows:
+        inspections.append({
+            "inspection_id": inspection.id,
+            "vehicle_id": vehicle.id,
+            "vehicle_make": vehicle.make,
+            "vehicle_model": vehicle.model,
+            "license_plate": vehicle.license_plate,
+            "inspection_status": inspection.inspection_status,
+            "verification_status": inspection.verification_status,
+            "verified_by": inspection.verified_by,
+            "verified_at": inspection.verified_at.isoformat() if inspection.verified_at else None,
+            "submitted_at": inspection.submitted_at.isoformat() if inspection.submitted_at else None,
+            "inspected_at": inspection.inspected_at.isoformat() if inspection.inspected_at else None,
+            "rejection_reason": inspection.rejection_reason,
+            "photos_complete": (
+                set(MANDATORY_PHOTO_CATEGORIES).issubset({
+                    (photo.photo_category or "").upper()
+                    for photo in inspection.photos
+                    if (photo.upload_status or "").upper() == "COMPLETED"
+                })
+                or all([
+                    inspection.photo_front_url,
+                    inspection.photo_rear_url,
+                    inspection.photo_left_url,
+                    inspection.photo_right_url,
+                    inspection.photo_interior_front_url,
+                    inspection.photo_interior_rear_url,
+                ])
+                or all([
+                    inspection.odometer_photo_url,
+                    inspection.photo_front_url,
+                    inspection.photo_rear_url,
+                    inspection.photo_left_url,
+                    inspection.photo_right_url,
+                ])
+            ),
+            "has_checklist": bool(inspection.checklist_json),
+        })
+    return {"driver_id": driver_id, "inspections": inspections}
+
+
+@router.put("/admin/{inspection_id}/review")
+async def review_vehicle_inspection(
+    inspection_id: str,
+    payload: AdminInspectionReviewPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """Admin-only review; driver submission never marks an inspection approved."""
+    service = DriverInspectionService(db)
+    return await service.review_inspection_by_admin(
+        inspection_id=inspection_id,
+        admin_user_id=admin.id,
+        action=payload.action,
+        reason=payload.reason
+    )
 
 
 @router.post("/start")

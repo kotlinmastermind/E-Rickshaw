@@ -150,21 +150,10 @@ class DriverOnboardingService:
         res = await self.db.execute(stmt)
         driver = res.scalar_one_or_none()
         if not driver:
-            driver = DriverProfile(
-                user_id=user_id,
-                license_number=f"DL-{user_id[:8].upper()}",
-                approval_status="PENDING",
-                onboarding_step="IDENTITY_SUBMITTED",
-                profile_completeness_percentage=10,
-                preferred_operating_zones="AIRPORT_CORRIDOR,SOUTH_MUMBAI,BKC_FINANCIAL",
-                preferred_vehicle_categories="EXECUTIVE_SEDAN,PRESTIGE_SUV",
-                languages_spoken="English, Hindi, Marathi",
-                service_etiquette_level="Black Sovereign Executive",
-                cabin_music_preference="Classical & Soft Jazz",
-                cabin_temp_celsius=21
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Driver profile not found. Complete driver registration before starting onboarding."
             )
-            self.db.add(driver)
-            await self.db.flush()
         return driver
 
     # =========================================================================
@@ -178,12 +167,16 @@ class DriverOnboardingService:
         # Documents check
         docs_res = await self.db.execute(select(DriverDocument).where(DriverDocument.driver_id == driver.id))
         docs = docs_res.scalars().all()
-        doc_types = {d.document_type: d for d in docs}
+        verified_doc_types = {
+            (doc.document_type or "").strip().upper()
+            for doc in docs
+            if (doc.verification_status or "").strip().upper() in {"VERIFIED", "APPROVED"}
+        }
 
-        has_license = "DRIVING_LICENSE" in doc_types and doc_types["DRIVING_LICENSE"].verification_status == "APPROVED"
-        has_rc = "VEHICLE_REGISTRATION" in doc_types and doc_types["VEHICLE_REGISTRATION"].verification_status == "APPROVED"
-        has_insurance = "INSURANCE" in doc_types and doc_types["INSURANCE"].verification_status == "APPROVED"
-        has_id = "IDENTITY_PROOF" in doc_types and doc_types["IDENTITY_PROOF"].verification_status == "APPROVED"
+        has_license = "DRIVING_LICENSE" in verified_doc_types
+        has_rc = bool(verified_doc_types.intersection({"VEHICLE_REGISTRATION", "RC", "RC_BOOK"}))
+        has_insurance = bool(verified_doc_types.intersection({"INSURANCE", "VEHICLE_INSURANCE", "COMMERCIAL_INSURANCE"}))
+        has_id = bool(verified_doc_types.intersection({"IDENTITY_PROOF", "AADHAAR_CARD", "AADHAAR", "PASSPORT", "VOTER_ID"}))
         all_docs_verified = has_license and has_rc and has_insurance and has_id
 
         # Training progress
@@ -202,14 +195,24 @@ class DriverOnboardingService:
             .order_by(DriverVehicleInspection.inspected_at.desc())
         )
         latest_inspection = i_res.scalars().first()
-        inspection_done = latest_inspection is not None and latest_inspection.inspection_status == "PASSED"
+        inspection_done = (
+            latest_inspection is not None
+            and latest_inspection.inspection_status == "APPROVED"
+            and (
+                latest_inspection.verification_status == "AUTO_APPROVED"
+                or (
+                    latest_inspection.verification_status == "VERIFIED"
+                    and bool(latest_inspection.verified_by)
+                )
+            )
+        )
 
         # Emergency contact & preferences
         has_emergency_contact = bool(driver.emergency_contact_name and driver.emergency_contact_phone)
         policy_acknowledged = driver.policy_acknowledged_at is not None
 
         # Calculate completeness percentage
-        completeness = 10  # Base profile
+        completeness = 0  # No onboarding credit until a real step is completed
         if driver.identity_verified or has_id:
             completeness += 20
         if all_docs_verified:
@@ -245,7 +248,7 @@ class DriverOnboardingService:
         elif len(docs) > 0:
             current_step = "DOCUMENTS_UNDER_AUDIT"
         else:
-            current_step = "IDENTITY_SUBMITTED"
+            current_step = "DOCUMENTS_PENDING"
 
         driver.onboarding_step = current_step
         await self.db.commit()
@@ -297,7 +300,7 @@ class DriverOnboardingService:
 
         return {
             "driver_id": driver.id,
-            "full_name": user.full_name if user else "Executive Chauffeur",
+            "full_name": user.full_name if user else "",
             "phone_number": user.phone_number if user else "",
             "preferred_operating_zones": [value for value in driver.preferred_operating_zones.split(",") if value],
             "preferred_vehicle_categories": [value for value in driver.preferred_vehicle_categories.split(",") if value],
@@ -895,7 +898,7 @@ class DriverOnboardingService:
             "rating_average": driver.rating_average,
             "total_trips": driver.total_trips,
             "years_experience": None,
-            "languages_spoken": driver.languages_spoken.split(", ") if driver.languages_spoken else ["English", "Hindi"],
+            "languages_spoken": [value.strip() for value in driver.languages_spoken.split(",") if value.strip()] if driver.languages_spoken else [],
             "service_etiquette_level": driver.service_etiquette_level,
             "cabin_music_preference": driver.cabin_music_preference,
             "cabin_temp_celsius": driver.cabin_temp_celsius,

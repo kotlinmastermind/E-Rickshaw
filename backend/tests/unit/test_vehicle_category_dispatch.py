@@ -515,25 +515,25 @@ async def test_driver_registration_binds_dynamic_category(db_session):
 
     auth_svc = AuthService(db_session)
     reg_res = await auth_svc.register_driver_account(
-        phone_number=f"+91981{suffix}33",
+        phone_number=f"+91{6_000_000_000 + (int(suffix, 16) % 4_000_000_000):010d}",
         full_name="Bike Captain",
         password="ValidPassword123!",
-        vehicle_type=cat_bike.code,
-        vehicle_name="Ather 450X",
-        vehicle_no=f"DL-01-BK-{suffix}"
+        license_number=f"DL-BIKE-{suffix}",
+        vehicle_type=cat_bike.code
     )
 
     assert "access_token" in reg_res
+    assert reg_res["vehicle"] is None
     user_id = reg_res["user"]["id"]
 
-    # Verify database state
+    # Category intent is persisted; fleet vehicle creation and assignment remain an Admin workflow.
     d_prof = (await db_session.execute(select(DriverProfile).where(DriverProfile.user_id == user_id))).scalar_one()
-    assignment = (await db_session.execute(select(DriverVehicleAssignment).where(DriverVehicleAssignment.driver_id == d_prof.id))).scalar_one()
-    veh = (await db_session.execute(select(Vehicle).where(Vehicle.id == assignment.vehicle_id))).scalar_one()
-
-    assert veh.category_id == cat_bike.id
-    assert veh.model == "Ather 450X"
-    assert veh.license_plate == f"DL-01-BK-{suffix}".upper()
+    assert d_prof.license_number == f"DL-BIKE-{suffix}"
+    assert d_prof.preferred_vehicle_categories == cat_bike.code
+    assignment = (await db_session.execute(
+        select(DriverVehicleAssignment).where(DriverVehicleAssignment.driver_id == d_prof.id)
+    )).scalar_one_or_none()
+    assert assignment is None
 
 
 @pytest.mark.asyncio

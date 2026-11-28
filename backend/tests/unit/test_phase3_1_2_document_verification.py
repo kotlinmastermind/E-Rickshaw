@@ -26,7 +26,8 @@ async def test_admin_document_review_positive_and_audit(db_session):
         phone_number=f"+9198{str(unique_suffix)[-8:]}",
         email=f"doc_driver_{unique_suffix}@erickshaw.in",
         role="driver",
-        is_active=True
+        is_active=True,
+        is_verified=True
     )
     db_session.add(driver_user)
     await db_session.flush()
@@ -296,7 +297,8 @@ async def test_driver_approval_workflow_gated_by_documents(db_session):
         phone_number=f"+9195{str(unique_suffix)[-8:]}",
         email=f"flow_driver_{unique_suffix}@erickshaw.in",
         role="driver",
-        is_active=True
+        is_active=True,
+        is_verified=True
     )
     db_session.add(driver_user)
     await db_session.flush()
@@ -371,20 +373,22 @@ async def test_driver_approval_workflow_gated_by_documents(db_session):
                 await driver_service.toggle_availability(driver_user.id, is_online=True)
             assert exc_info.value.status_code == 403
 
-            # 5. Now explicitly approve driver via admin approval route
+            # 5. One verified commercial document is insufficient for full approval.
             res_approve = await ac.put(
                 f"/api/v1/admin/drivers/{prof.id}/approval",
                 json={"approval_status": "APPROVED"},
                 headers={"Authorization": f"Bearer {admin_token}"}
             )
-            assert res_approve.status_code == 200
-            assert res_approve.json()["approval_status"] == "APPROVED"
+            assert res_approve.status_code == 409
+            assert "driving licence" in res_approve.text.lower()
+            assert "identity proof" in res_approve.text.lower()
 
-            # 6. Driver is now APPROVED and can go online
+            # 6. Driver remains pending and cannot go online.
             await db_session.refresh(db_prof)
-            assert db_prof.approval_status == "APPROVED"
-            avail = await driver_service.toggle_availability(driver_user.id, is_online=True)
-            assert avail["is_online"] is True
+            assert db_prof.approval_status == "PENDING"
+            with pytest.raises(HTTPException) as pending_exc:
+                await driver_service.toggle_availability(driver_user.id, is_online=True)
+            assert pending_exc.value.status_code == 403
         finally:
             app.dependency_overrides.pop(get_current_admin, None)
 

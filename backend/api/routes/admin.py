@@ -565,15 +565,6 @@ async def review_driver(
     if not driver:
         raise HTTPException(status_code=404, detail="Driver record not found.")
 
-    if target_status == "APPROVED":
-        documents = (await db.execute(select(DriverDocument).where(DriverDocument.driver_id == driver_id))).scalars().all()
-        unverified_docs = [doc for doc in documents if doc.verification_status != "VERIFIED"]
-        if unverified_docs:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Cannot approve chauffeur: {len(unverified_docs)} document(s) have not been verified."
-            )
-
     service = AdminService(db)
     return await service.review_driver_approval(
         admin_id=admin.id,
