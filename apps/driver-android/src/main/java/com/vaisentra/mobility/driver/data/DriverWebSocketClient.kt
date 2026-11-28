@@ -208,7 +208,7 @@ object DriverWebSocketClient {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (activeTrackingRideId == rideId) {
+                if (rideTrackingWebSocket === webSocket && activeTrackingRideId == rideId) {
                     rideTrackingWebSocket = null
                     activeTrackingRideId = null
                 }
