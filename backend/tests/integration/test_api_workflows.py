@@ -160,6 +160,8 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             drv1_profile = (await db_session.execute(
                 select(DriverProfile).where(DriverProfile.user_id == drv1_signup.json()["user"]["id"])
             )).scalar_one()
+            drv1_user = await db_session.get(User, drv1_profile.user_id)
+            drv1_user.is_verified = True  # Simulate the successful Twilio Verify step for both concurrent candidates.
             fleet_vehicle1 = Vehicle(
                 category_id=sedan_category.id,
                 make="Mahindra",
@@ -175,17 +177,28 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
                 vehicle_id=fleet_vehicle1.id,
                 is_active=True
             ))
-            for index, document_type in enumerate(["DRIVING_LICENSE", "IDENTITY_PROOF", "VEHICLE_REGISTRATION", "INSURANCE"]):
-                db_session.add(DriverDocument(
-                    driver_id=drv2_profile.id,
-                    document_type=document_type,
-                    storage_path=f"/integration/{drv2_profile.id}/{document_type.lower()}.pdf",
-                    file_name=f"{document_type.lower()}.pdf",
-                    mime_type="application/pdf",
-                    file_size_bytes=1024,
-                    file_hash_sha256=f"{drv2_profile.id}-{index}",
-                    verification_status="VERIFIED"
-                ))
+            for candidate_profile in (drv1_profile, drv2_profile):
+                for index, document_type in enumerate(["DRIVING_LICENSE", "IDENTITY_PROOF", "VEHICLE_REGISTRATION", "INSURANCE"]):
+                    db_session.add(DriverDocument(
+                        driver_id=candidate_profile.id,
+                        document_type=document_type,
+                        storage_path=f"/integration/{candidate_profile.id}/{document_type.lower()}.pdf",
+                        file_name=f"{document_type.lower()}.pdf",
+                        mime_type="application/pdf",
+                        file_size_bytes=1024,
+                        file_hash_sha256=f"{candidate_profile.id}-{index}",
+                        verification_status="VERIFIED"
+                    ))
+            db_session.add(DriverVehicleInspection(
+                driver_id=drv1_profile.id,
+                vehicle_id=fleet_vehicle1.id,
+                inspection_status="APPROVED",
+                verification_status="VERIFIED",
+                verified_by=admin_user.id,
+                verified_at=datetime.now(timezone.utc),
+                overall_result="PASS",
+                inspected_at=datetime.now(timezone.utc)
+            ))
             db_session.add(DriverVehicleInspection(
                 driver_id=drv2_profile.id,
                 vehicle_id=fleet_vehicle.id,
