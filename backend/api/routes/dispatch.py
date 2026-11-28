@@ -79,6 +79,25 @@ async def ingest_driver_telemetry(
 
     driver_id, is_online, is_busy = row[0], bool(row[1]), bool(row[2])
 
+    # The device may report its current ride for compatibility, but it is
+    # never authoritative. Resolve the assigned active ride from PostgreSQL so
+    # a driver cannot publish GPS telemetry into another ride's WebSocket channel.
+    active_ride_stmt = (
+        select(Ride.id)
+        .where(
+            Ride.assigned_driver_id == driver_id,
+            Ride.status.in_(("ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED"))
+        )
+        .limit(2)
+    )
+    active_ride_ids = (await db.execute(active_ride_stmt)).scalars().all()
+    if len(active_ride_ids) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Multiple active rides are assigned to this driver; live ride telemetry is paused pending reconciliation."
+        )
+    authoritative_active_ride_id = active_ride_ids[0] if active_ride_ids else None
+
     service = LiveLocationService(db=db)
     result = await service.ingest_driver_location(
         driver_id=driver_id,
@@ -91,7 +110,7 @@ async def ingest_driver_telemetry(
         location_source=payload.location_source,
         is_online=is_online,
         is_busy=is_busy,
-        active_ride_id=payload.active_ride_id
+        active_ride_id=authoritative_active_ride_id
     )
 
     if result.get("status") == "REJECTED":
