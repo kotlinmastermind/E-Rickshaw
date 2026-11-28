@@ -164,16 +164,43 @@ object DriverWebSocketClient {
                 if (text == "pong") return
                 try {
                     val json = JSONObject(text)
-                    val status = json.optString("status", "").uppercase()
-                    val event = json.optString("event", json.optString("event_type", json.optString("type", ""))).uppercase()
-                    if (status in listOf("CANCELLED", "COMPLETED", "DROPPED", "FINISHED") || event in listOf("RIDE_CANCELLED", "RIDE_COMPLETED")) {
-                        DriverRepository.clearActiveRide()
+                    val eventPayload = json.optJSONObject("payload") ?: json
+                    val event = json.optString("event_type")
+                        .ifBlank { json.optString("event") }
+                        .ifBlank { json.optString("type") }
+                        .uppercase()
+                    if (event == "SESSION_REVOKED") {
+                        Log.w(TAG, "Ride tracking session revoked by backend.")
+                        disconnectAll()
+                        return
+                    }
+
+                    val rideId = eventPayload.optString("ride_id")
+                        .ifBlank { json.optString("ride_id") }
+                    val status = eventPayload.optString("status")
+                        .ifBlank { json.optString("status") }
+                        .ifBlank {
+                            when (event) {
+                                "RIDE_ACCEPTED" -> "ASSIGNED"
+                                "DRIVER_ARRIVED" -> "ARRIVED"
+                                "TRIP_STARTED", "TRIP_RESUMED" -> "IN_PROGRESS"
+                                "TRIP_PAUSED" -> "PAUSED"
+                                "TRIP_COMPLETED", "RIDE_COMPLETED" -> "COMPLETED"
+                                "RIDE_CANCELLED" -> "CANCELLED"
+                                "RIDE_EXPIRED" -> "EXPIRED"
+                                else -> ""
+                            }
+                        }
+                        .uppercase()
+
+                    if (rideId.isNotBlank() && status.isNotBlank()) {
+                        DriverRepository.updateActiveRideStatus(rideId, status)
                         if (status == "CANCELLED" || event == "RIDE_CANCELLED") {
                             DriverRepository.handleRideCancelledByPassenger()
                         }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error in ride tracking message: ${e.message}")
+                    Log.e(TAG, "Error in ride tracking message: ${e.message}", e)
                 }
             }
 
