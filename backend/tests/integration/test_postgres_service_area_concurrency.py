@@ -201,6 +201,7 @@ async def test_postgres_concurrent_ride_creation_vs_service_area_deactivation():
                 orig_commit = s_book.commit
 
                 async def _delayed_commit():
+                    s_book.commit = orig_commit  # type: ignore[method-assign]
                     booking_ready.set()
                     await asyncio.sleep(0.20)
                     await orig_commit()
@@ -258,6 +259,7 @@ async def test_postgres_concurrent_ride_creation_vs_service_area_deactivation():
                 orig_commit = s_admin.commit
 
                 async def _delayed_admin_commit():
+                    s_admin.commit = orig_commit  # type: ignore[method-assign]
                     admin_locked.set()
                     await asyncio.wait_for(booking_about_to_lock.wait(), timeout=5.0)
                     await asyncio.sleep(0.15)
@@ -349,6 +351,7 @@ async def test_postgres_concurrent_pool_creation_vs_service_area_deactivation():
                 orig_commit = s_pool.commit
 
                 async def _delayed_commit():
+                    s_pool.commit = orig_commit  # type: ignore[method-assign]
                     pool_ready.set()
                     await asyncio.sleep(0.20)
                     await orig_commit()
@@ -429,6 +432,7 @@ async def test_postgres_concurrent_pool_creation_vs_service_area_deactivation():
                 orig_commit = s_admin.commit
 
                 async def _delayed_admin_commit():
+                    s_admin.commit = orig_commit  # type: ignore[method-assign]
                     admin_locked.set()
                     await asyncio.wait_for(pool_about_to_lock.wait(), timeout=5.0)
                     await asyncio.sleep(0.15)
