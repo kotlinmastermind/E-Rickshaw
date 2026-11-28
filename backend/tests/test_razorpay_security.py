@@ -8,6 +8,7 @@ import hmac
 import hashlib
 import json
 import uuid
+from unittest.mock import AsyncMock
 from httpx import AsyncClient
 from backend.core.config import settings
 
@@ -152,3 +153,96 @@ async def test_sec_08_customer_to_driver_escalation_blocked(client: AsyncClient,
         headers={"Authorization": f"Bearer {customer_token}"}
     )
     assert resp.status_code == 403
+
+@pytest.mark.asyncio
+async def test_sec_09_webhook_readiness_reflects_required_configuration(
+    client: AsyncClient, monkeypatch
+):
+    """Webhook diagnostics must not report ready when signature verification cannot run."""
+    ready = await client.get("/api/v1/payments/webhook")
+    assert ready.status_code == 200
+    assert ready.json()["status"] == "ready"
+    assert ready.json()["checks"] == {
+        "provider_credentials_configured": True,
+        "webhook_secret_configured": True,
+    }
+
+    monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", "")
+    not_ready = await client.get("/api/v1/payments/webhook")
+    assert not_ready.status_code == 200
+    assert not_ready.json()["status"] == "not_ready"
+    assert not_ready.json()["checks"]["webhook_secret_configured"] is False
+
+@pytest.mark.asyncio
+async def test_reconciliation_cycle_uses_postgres_advisory_lock(monkeypatch):
+    from types import SimpleNamespace
+    from backend.application.services import payment_reconciliation_service as reconciliation
+
+    class FakeResult:
+        def scalar(self):
+            return True
+
+    class FakeSession:
+        def __init__(self):
+            self.statements = []
+            self.committed = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        async def execute(self, statement, params=None):
+            self.statements.append(str(statement))
+            return FakeResult()
+
+        async def commit(self):
+            self.committed = True
+
+    fake_session = FakeSession()
+    monkeypatch.setattr(reconciliation, "async_session_maker", lambda: fake_session)
+    cycle = AsyncMock()
+    monkeypatch.setattr(reconciliation, "_run_reconciliation_cycle", cycle)
+
+    await reconciliation._run_reconciliation_cycle_with_lock()
+
+    assert cycle.await_count == 1
+    assert len(fake_session.statements) == 2
+    assert "pg_try_advisory_lock" in fake_session.statements[0]
+    assert "pg_advisory_unlock" in fake_session.statements[1]
+    assert fake_session.committed is True
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_cycle_skips_when_another_instance_holds_lock(monkeypatch):
+    from types import SimpleNamespace
+    from backend.application.services import payment_reconciliation_service as reconciliation
+
+    class FakeResult:
+        def scalar(self):
+            return False
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        async def execute(self, statement, params=None):
+            return FakeResult()
+
+    monkeypatch.setattr(reconciliation, "async_session_maker", FakeSession)
+    cycle = AsyncMock()
+    monkeypatch.setattr(reconciliation, "_run_reconciliation_cycle", cycle)
+
+    await reconciliation._run_reconciliation_cycle_with_lock()
+
+    cycle.assert_not_awaited()

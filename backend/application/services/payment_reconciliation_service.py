@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select
+from sqlalchemy import select, text
 from backend.infrastructure.database.session import async_session_maker
 from backend.domain.models import (
     Payment,
@@ -296,14 +296,59 @@ class PaymentReconciliationService:
             }
 
 
+# Stable PostgreSQL advisory-lock key shared by every API instance.
+# This prevents each Uvicorn/Gunicorn worker from polling Razorpay independently.
+_PAYMENT_RECONCILIATION_LOCK_KEY = 7_318_420_261
+
+
+async def _run_reconciliation_cycle_with_lock():
+    """Run one cycle under a PostgreSQL session-level lock.
+
+    The lock connection stays checked out for the duration of the cycle. Other
+    API instances skip their cycle while this instance owns the lock. PostgreSQL
+    releases the session-level lock automatically if the process/connection dies.
+    """
+    async with async_session_maker() as lock_session:
+        bind = lock_session.get_bind()
+        if bind.dialect.name != "postgresql":
+            # SQLite-backed unit tests/local development do not provide advisory locks.
+            await _run_reconciliation_cycle()
+            return
+
+        acquired = bool(
+            (
+                await lock_session.execute(
+                    text("SELECT pg_try_advisory_lock(:lock_key)"),
+                    {"lock_key": _PAYMENT_RECONCILIATION_LOCK_KEY},
+                )
+            ).scalar()
+        )
+        if not acquired:
+            logger.debug("Payment reconciliation cycle skipped; another instance owns the worker lock.")
+            return
+
+        try:
+            await _run_reconciliation_cycle()
+        finally:
+            await lock_session.execute(
+                text("SELECT pg_advisory_unlock(:lock_key)"),
+                {"lock_key": _PAYMENT_RECONCILIATION_LOCK_KEY},
+            )
+            await lock_session.commit()
+
+
+async def _run_reconciliation_cycle():
+    await PaymentReconciliationService.reconcile_lost_orders()
+    await PaymentReconciliationService.reconcile_pending_payments()
+    await PaymentReconciliationService.reconcile_pending_refunds()
+    await PaymentReconciliationService.reconcile_refund_liabilities()
+
+
 async def run_payment_reconciliation_loop():
     """Background loop executing payment, order, and refund reconciliation every 300 seconds."""
     while True:
         try:
-            await PaymentReconciliationService.reconcile_lost_orders()
-            await PaymentReconciliationService.reconcile_pending_payments()
-            await PaymentReconciliationService.reconcile_pending_refunds()
-            await PaymentReconciliationService.reconcile_refund_liabilities()
+            await _run_reconciliation_cycle_with_lock()
         except asyncio.CancelledError:
             break
         except Exception as e:
