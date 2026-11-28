@@ -155,10 +155,17 @@ interface DriverApiService {
     ): Response<NotificationInboxResponseDto>
 
     @POST("api/v1/rides/{ride_id}/accept")
-    suspend fun acceptRide(@Path("ride_id") rideId: String): Response<Map<String, Any>>
+    suspend fun acceptRide(
+        @Path("ride_id") rideId: String,
+        @Query("assignment_id") assignmentId: String? = null
+    ): Response<Map<String, Any>>
 
     @POST("api/v1/drivers/dispatch/offers/{ride_id}/reject")
-    suspend fun rejectOffer(@Path("ride_id") rideId: String, @Body body: RejectOfferRequest = RejectOfferRequest()): Response<Map<String, Any>>
+    suspend fun rejectOffer(
+        @Path("ride_id") rideId: String,
+        @Query("assignment_id") assignmentId: String? = null,
+        @Body body: RejectOfferRequest = RejectOfferRequest()
+    ): Response<Map<String, Any>>
 
     @POST("api/v1/rides/{ride_id}/arrived")
     suspend fun markArrived(@Path("ride_id") rideId: String, @Body body: CoordinatePayloadRequest = CoordinatePayloadRequest()): Response<Map<String, Any>>
