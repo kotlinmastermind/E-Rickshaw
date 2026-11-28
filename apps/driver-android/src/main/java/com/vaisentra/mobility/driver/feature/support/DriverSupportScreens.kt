@@ -344,7 +344,7 @@ fun DriverHelpdeskScreen(
                                     serviceLocality = ""
                                     servicePostalCode = ""
                                     DriverRepository.fetchDriverServiceAreaRequests().onSuccess { serviceAreaRequests = it }
-                                    onShowToast("Locality request submitted for operational review.")
+                                    onShowToast(result.getOrNull()?.message ?: "Locality request submitted.")
                                 } else {
                                     onShowToast(result.exceptionOrNull()?.message ?: "Locality request failed.")
                                 }
