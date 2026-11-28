@@ -9,7 +9,7 @@ from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_admin
 from backend.domain.models import (
     DriverProfile, DriverAvailability, DriverLocation, DriverVehicleAssignment,
-    User, Vehicle, VehicleCategory,
+    User, Vehicle, VehicleCategory, DriverServiceAreaAssignment,
 )
 
 router = APIRouter(prefix="/vehicles", tags=["Vehicles & Categories"])
@@ -455,9 +455,38 @@ async def get_nearby_vehicles(
     from sqlalchemy import desc
 
     now = datetime.now(timezone.utc)
+    from backend.application.services.service_area_service import ServiceAreaService
+    service_area_service = ServiceAreaService(db)
+    try:
+        service_area = await service_area_service.resolve_point(latitude, longitude)
+        _, service_polygon, restricted_polygons = await service_area_service.load_area_boundary(service_area.id)
+    except HTTPException as exc:
+        if exc.status_code in (400, 409, 503):
+            return {
+                "customer_latitude": latitude,
+                "customer_longitude": longitude,
+                "radius_km": radius_km,
+                "serviceable": False,
+                "service_area_id": None,
+                "service_area_name": None,
+                "city_code": None,
+                "message": str(exc.detail),
+                "total_available": 0,
+                "vehicles": [],
+            }
+        raise
+
     stmt = (
         select(DriverProfile, DriverAvailability, DriverLocation, User, Vehicle, VehicleCategory)
         .join(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
+        .join(
+            DriverServiceAreaAssignment,
+            and_(
+                DriverServiceAreaAssignment.driver_id == DriverProfile.id,
+                DriverServiceAreaAssignment.service_area_id == service_area.id,
+                DriverServiceAreaAssignment.is_active.is_(True),
+            ),
+        )
         .join(DriverLocation, DriverLocation.driver_id == DriverProfile.id)
         .join(User, User.id == DriverProfile.user_id)
         .join(
@@ -515,6 +544,11 @@ async def get_nearby_vehicles(
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         dist_km = round(6371.0 * c, 2)
 
+        if not service_area_service.location_is_inside_boundary(
+            loc.latitude, loc.longitude, service_polygon, restricted_polygons
+        ):
+            continue
+
         if dist_km <= radius_km:
             eta_mins = max(int(round((dist_km / 22.0) * 60.0)), 2)
             vehicles.append({
@@ -550,6 +584,15 @@ async def get_nearby_vehicles(
         "customer_latitude": latitude,
         "customer_longitude": longitude,
         "radius_km": radius_km,
+        "serviceable": True,
+        "service_area_id": service_area.id,
+        "service_area_name": service_area.name,
+        "city_code": service_area.city_code,
+        "message": (
+            "Operational service is configured for this locality."
+            if vehicles else
+            "This locality is configured, but no eligible nearby driver is currently visible. Dispatch may search the wider service area."
+        ),
         "total_available": len(vehicles),
         "vehicles": vehicles
     }

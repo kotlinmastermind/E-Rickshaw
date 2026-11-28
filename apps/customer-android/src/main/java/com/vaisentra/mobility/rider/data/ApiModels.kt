@@ -451,6 +451,11 @@ data class NearbyVehicleDto(
 )
 
 data class NearbyVehiclesResponse(
+    @SerializedName("serviceable") val serviceable: Boolean = false,
+    @SerializedName("service_area_id") val serviceAreaId: String? = null,
+    @SerializedName("service_area_name") val serviceAreaName: String? = null,
+    @SerializedName("city_code") val cityCode: String? = null,
+    @SerializedName("message") val message: String? = null,
     @SerializedName("total_available") val totalAvailable: Int = 0,
     @SerializedName("vehicles") val vehicles: List<NearbyVehicleDto> = emptyList()
 )
