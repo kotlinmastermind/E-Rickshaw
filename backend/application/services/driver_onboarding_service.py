@@ -167,12 +167,16 @@ class DriverOnboardingService:
         # Documents check
         docs_res = await self.db.execute(select(DriverDocument).where(DriverDocument.driver_id == driver.id))
         docs = docs_res.scalars().all()
-        doc_types = {d.document_type: d for d in docs}
+        verified_doc_types = {
+            (doc.document_type or "").strip().upper()
+            for doc in docs
+            if (doc.verification_status or "").strip().upper() in {"VERIFIED", "APPROVED"}
+        }
 
-        has_license = "DRIVING_LICENSE" in doc_types and doc_types["DRIVING_LICENSE"].verification_status in {"VERIFIED", "APPROVED"}
-        has_rc = "VEHICLE_REGISTRATION" in doc_types and doc_types["VEHICLE_REGISTRATION"].verification_status in {"VERIFIED", "APPROVED"}
-        has_insurance = "INSURANCE" in doc_types and doc_types["INSURANCE"].verification_status in {"VERIFIED", "APPROVED"}
-        has_id = "IDENTITY_PROOF" in doc_types and doc_types["IDENTITY_PROOF"].verification_status in {"VERIFIED", "APPROVED"}
+        has_license = "DRIVING_LICENSE" in verified_doc_types
+        has_rc = bool(verified_doc_types.intersection({"VEHICLE_REGISTRATION", "RC", "RC_BOOK"}))
+        has_insurance = bool(verified_doc_types.intersection({"INSURANCE", "VEHICLE_INSURANCE", "COMMERCIAL_INSURANCE"}))
+        has_id = bool(verified_doc_types.intersection({"IDENTITY_PROOF", "AADHAAR_CARD", "AADHAAR", "PASSPORT", "VOTER_ID"}))
         all_docs_verified = has_license and has_rc and has_insurance and has_id
 
         # Training progress
