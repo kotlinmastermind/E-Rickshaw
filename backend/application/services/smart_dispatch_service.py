@@ -523,10 +523,23 @@ class SmartDispatchService:
         if not assignment:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dispatch offer not found.")
 
-        if assignment.status == "ACCEPTED":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer already accepted.")
+        if assignment.status != "OFFERED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Offer is no longer available (current status: {assignment.status})."
+            )
 
         now = utc_now()
+        if assignment.expires_at is None or ensure_utc(assignment.expires_at) <= now:
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Dispatch offer has expired or has no valid expiry.")
+
+        ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
+        ride = (await self.db.execute(ride_stmt)).scalar_one_or_none()
+        if not ride:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+        if ride.status != RideStatus.REQUESTED.value or ride.assigned_driver_id is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride is no longer accepting dispatch responses.")
+
         assignment.status = "REJECTED"
         assignment.is_accepted = False
         assignment.rejection_reason = reason
