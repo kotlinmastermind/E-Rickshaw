@@ -106,9 +106,13 @@ class AdvancedRideRequestPayload(BaseModel):
 
 class ScheduleRidePayload(BaseModel):
     estimate_id: str
-    category_id: Optional[str] = None
+    category_id: str
     pickup_address: str
     destination_address: str
+    pickup_latitude: float = Field(..., ge=-90.0, le=90.0)
+    pickup_longitude: float = Field(..., ge=-180.0, le=180.0)
+    destination_latitude: float = Field(..., ge=-90.0, le=90.0)
+    destination_longitude: float = Field(..., ge=-180.0, le=180.0)
     scheduled_pickup_time: datetime
     payment_method: str = "UPI"
     promo_code: Optional[str] = None
@@ -321,6 +325,10 @@ async def schedule_ride(
         category_id=payload.category_id,
         pickup_address=payload.pickup_address,
         destination_address=payload.destination_address,
+        pickup_latitude=payload.pickup_latitude,
+        pickup_longitude=payload.pickup_longitude,
+        destination_latitude=payload.destination_latitude,
+        destination_longitude=payload.destination_longitude,
         payment_method=payload.payment_method,
         is_scheduled=True,
         scheduled_pickup_time=payload.scheduled_pickup_time,
