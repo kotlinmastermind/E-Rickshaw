@@ -213,7 +213,16 @@ fun OtpVerifyScreen(
 ) {
     var otpCode by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var isResending by remember { mutableStateOf(false) }
+    var secondsRemaining by remember { mutableIntStateOf(60) }
     val coroutineScope = rememberCoroutineScope() // Compose-safe coroutine scope
+
+    LaunchedEffect(secondsRemaining) {
+        if (secondsRemaining > 0) {
+            kotlinx.coroutines.delay(1000)
+            secondsRemaining--
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -303,10 +312,35 @@ fun OtpVerifyScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
             Text(
-                text = "Resend Code in 28s",
-                color = TextDim,
+                text = when {
+                    isResending -> "Sending new code..."
+                    secondsRemaining > 0 -> "Resend code in ${secondsRemaining}s"
+                    else -> "Resend verification code"
+                },
+                color = if (secondsRemaining == 0 && !isResending) ElectricCyan else TextDim,
                 fontSize = 12.sp,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .clickable(enabled = secondsRemaining == 0 && !isResending && !isLoading) {
+                        coroutineScope.launch {
+                            isResending = true
+                            try {
+                                val result = withContext(Dispatchers.IO) {
+                                    RiderRepository.requestOtp(phone)
+                                }
+                                if (result.isSuccess) {
+                                    secondsRemaining = 60
+                                    DialogController.showToast("New verification code sent.")
+                                } else {
+                                    DialogController.showToast(
+                                        result.exceptionOrNull()?.message ?: "Unable to resend verification code."
+                                    )
+                                }
+                            } finally {
+                                isResending = false
+                            }
+                        }
+                    }
             )
         }
     }
