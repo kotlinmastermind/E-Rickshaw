@@ -353,8 +353,11 @@ object DriverRepository {
             if (res.isSuccessful) {
                 Result.success(true)
             } else {
-                val errMsg = res.errorBody()?.string() ?: "Failed to send OTP (HTTP ${res.code()})"
-                Log.w(TAG, "requestOtp failed: $errMsg")
+                val errMsg = parseApiErrorMessage(
+                    res.errorBody()?.string(),
+                    "Unable to send verification code (HTTP ${res.code()}). Please try again."
+                )
+                Log.w(TAG, "requestOtp failed: HTTP ${res.code()}")
                 Result.failure(IllegalStateException(errMsg))
             }
         } catch (e: Exception) {
