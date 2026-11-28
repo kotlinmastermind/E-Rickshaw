@@ -26,7 +26,8 @@ async def test_admin_document_review_positive_and_audit(db_session):
         phone_number=f"+9198{str(unique_suffix)[-8:]}",
         email=f"doc_driver_{unique_suffix}@erickshaw.in",
         role="driver",
-        is_active=True
+        is_active=True,
+        is_verified=True
     )
     db_session.add(driver_user)
     await db_session.flush()
