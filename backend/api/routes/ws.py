@@ -499,7 +499,10 @@ async def driver_dispatch_websocket(
                 fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else ride.estimated_fare_cents
                 from backend.application.services.commission_service import CommissionService
                 commission_estimate = await CommissionService.estimate_for_ride(db, ride)
-                remaining_seconds = max(0, int((assignment.expires_at - now).total_seconds()))
+                expires_at = assignment.expires_at
+                if expires_at and expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                remaining_seconds = max(0, int((expires_at - now).total_seconds())) if expires_at else 0
                 reconciled_offer = {
                     "event": "DISPATCH_OFFER",
                     "ride_id": ride.id,
@@ -518,7 +521,7 @@ async def driver_dispatch_websocket(
                     "pickup_distance_km": None,
                     "pickup_duration_minutes": None,
                     "timeout_seconds": remaining_seconds,
-                    "expires_at": assignment.expires_at.isoformat() if assignment.expires_at else None
+                    "expires_at": expires_at.isoformat() if expires_at else None
                 }
                 await websocket.send_json(reconciled_offer)
                 logger.info(
