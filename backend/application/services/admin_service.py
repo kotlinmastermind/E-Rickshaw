@@ -175,7 +175,7 @@ class AdminService:
                 "driving licence": {"DRIVING_LICENSE"},
                 "identity proof": {"IDENTITY_PROOF", "AADHAAR_CARD", "AADHAAR", "PASSPORT", "VOTER_ID"},
                 "vehicle registration certificate": {"VEHICLE_REGISTRATION", "RC", "RC_BOOK"},
-                "vehicle insurance": {"INSURANCE", "VEHICLE_INSURANCE"},
+                "vehicle insurance": {"INSURANCE", "VEHICLE_INSURANCE", "COMMERCIAL_INSURANCE"},
             }
             missing_documents = [
                 label for label, aliases in required_document_groups.items()
