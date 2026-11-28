@@ -52,9 +52,24 @@ def _sanitize_provider_payload(payload: Optional[Dict[str, Any]]) -> str:
     return json.dumps(sanitized, ensure_ascii=False)
 
 def _provider_reference_id(payout: DriverPayoutRequest) -> str:
-    """Return an attempt-scoped provider reference so delayed events cannot settle a later retry."""
+    """Return an attempt-scoped provider reference within Razorpay's 40-character limit."""
     retry_count = int(payout.retry_count or 0)
-    return payout.id if retry_count == 0 else f"{payout.id}:retry:{retry_count}"
+    return payout.id if retry_count == 0 else f"r{retry_count}-{payout.id.replace('-', '')}"
+
+
+def _payout_id_from_provider_reference(reference_id: str) -> Optional[str]:
+    """Resolve the payout UUID from either its initial or compact retry-scoped reference."""
+    if len(reference_id) == 36:
+        return reference_id
+    if not reference_id.startswith("r") or "-" not in reference_id:
+        return None
+    attempt, compact_id = reference_id[1:].split("-", 1)
+    if not attempt.isdigit() or len(compact_id) != 32 or any(ch not in "0123456789abcdef" for ch in compact_id.lower()):
+        return None
+    return (
+        f"{compact_id[0:8]}-{compact_id[8:12]}-{compact_id[12:16]}-"
+        f"{compact_id[16:20]}-{compact_id[20:32]}"
+    )
 
 
 class PayoutExecutionService:
@@ -972,12 +987,13 @@ class PayoutExecutionService:
                 )
             ).scalar_one_or_none()
         if not payout and reference_id:
-            payout_id_from_reference = reference_id.split(":retry:", 1)[0]
-            payout = (
-                await session.execute(
-                    select(DriverPayoutRequest).where(DriverPayoutRequest.id == payout_id_from_reference).with_for_update()
-                )
-            ).scalar_one_or_none()
+            payout_id_from_reference = _payout_id_from_provider_reference(reference_id)
+            if payout_id_from_reference:
+                payout = (
+                    await session.execute(
+                        select(DriverPayoutRequest).where(DriverPayoutRequest.id == payout_id_from_reference).with_for_update()
+                    )
+                ).scalar_one_or_none()
 
         if not payout:
             inbox.status = "PROCESSED"
