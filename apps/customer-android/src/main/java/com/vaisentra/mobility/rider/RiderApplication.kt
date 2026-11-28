@@ -19,13 +19,13 @@ class RiderApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         Log.i("RiderGo", "RiderGo Application initialized with Material 3 & FastAPI network client.")
-        
-        // Dynamic backend base URL configuration (can point to local FastAPI or Cloud Render deployment)
-        NetworkClient.baseUrl = "https://api.vaisentratechnologies.in/"
+
+        // NetworkClient.baseUrl comes from the active product flavor's BuildConfig.
+        // Preserve it so dev, staging, and production use their configured endpoints.
         com.vaisentra.mobility.rider.fcm.RiderFcmManager.init(this)
         com.vaisentra.mobility.rider.fcm.RiderFcmManager.syncTokenIfAuthenticated(this)
 
-        // Non-blocking warmup ping to awaken sleeping Render container
+        // Warm up the same endpoint selected for Retrofit requests.
         warmupAndKeepAliveBackend(NetworkClient.baseUrl)
     }
 
@@ -51,10 +51,9 @@ class RiderApplication : Application() {
                 } catch (e: Exception) {
                     Log.w("RiderApp", "Backend warmup ping pending or retry: ${e.message}")
                 }
-                // Ping every 9 minutes to keep Render container warm while user has app open
+                // Ping every 9 minutes while the app process is alive.
                 delay(9 * 60 * 1000L)
             }
         }
     }
 }
-
