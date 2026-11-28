@@ -1865,6 +1865,50 @@ object DriverRepository {
         }
     }
 
+    suspend fun fetchDriverServiceAreaRequests(): Result<List<DriverServiceAreaRequestDto>> {
+        return try {
+            val response = DriverNetworkClient.apiService.getDriverServiceAreaRequests()
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                Result.success(body)
+            } else {
+                Result.failure(IllegalStateException("Could not load service-area requests: HTTP ${response.code()}"))
+            }
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+    }
+
+    suspend fun submitDriverServiceAreaRequest(
+        stateName: String,
+        districtName: String,
+        localityName: String,
+        postalCode: String?,
+        latitude: Double,
+        longitude: Double
+    ): Result<Boolean> {
+        return try {
+            val response = DriverNetworkClient.apiService.submitDriverServiceAreaRequest(
+                CreateDriverServiceAreaRequest(
+                    stateName = stateName.trim(),
+                    districtName = districtName.trim(),
+                    localityName = localityName.trim(),
+                    postalCode = postalCode?.trim()?.takeIf { it.isNotEmpty() },
+                    latitude = latitude,
+                    longitude = longitude
+                )
+            )
+            if (response.isSuccessful) {
+                Result.success(true)
+            } else {
+                val detail = response.errorBody()?.string()?.take(240)
+                Result.failure(IllegalStateException(detail ?: "Locality request failed: HTTP ${response.code()}"))
+            }
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+    }
+
     suspend fun fetchNotifications(): Result<List<NotificationItemDto>> {
         return try {
             val res = DriverNetworkClient.apiService.getNotificationsInbox(unreadOnly = false, limit = 30)
