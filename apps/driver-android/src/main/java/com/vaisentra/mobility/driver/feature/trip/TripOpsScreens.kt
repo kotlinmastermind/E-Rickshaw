@@ -44,15 +44,15 @@ fun IncomingOfferScreen(
     }
 
     val offer = activeOffer
-    var secondsLeft by remember(offer?.rideId) { mutableIntStateOf(offer?.timeoutSeconds ?: 25) }
+    var secondsLeft by remember(offer?.rideId, offer?.assignmentId) { mutableIntStateOf(offer?.timeoutSeconds ?: 0) }
 
-    LaunchedEffect(offer?.rideId) {
+    LaunchedEffect(offer?.rideId, offer?.assignmentId) {
         if (offer != null) {
             while (secondsLeft > 0) {
                 kotlinx.coroutines.delay(1.seconds)
                 secondsLeft--
             }
-            DriverRepository.rejectOffer(offer.rideId, "DISPATCH_TIMEOUT")
+            DriverRepository.fetchActiveOffers()
             onRejectOffer()
         }
     }
