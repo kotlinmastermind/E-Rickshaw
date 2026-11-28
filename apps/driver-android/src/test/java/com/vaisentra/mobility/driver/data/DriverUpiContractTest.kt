@@ -32,6 +32,15 @@ class DriverUpiContractTest {
     }
 
     @Test
+    fun rupeesToPaise_preservesTwoDecimalPrecisionAndRejectsFractionalPaise() {
+        assertEquals(10099L, rupeesToPaise(100.99))
+        assertEquals(10090L, rupeesToPaise(100.90))
+        assertEquals(null, rupeesToPaise(100.999))
+        assertEquals(null, rupeesToPaise(Double.NaN))
+        assertEquals(null, rupeesToPaise(-1.0))
+    }
+
+    @Test
     fun payoutRequest_preservesExplicitIdempotencyKeyAndIntegerPaiseAmount() {
         val dto = PayoutRequestDto(
             amountCents = 125000L,
