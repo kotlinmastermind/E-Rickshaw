@@ -374,6 +374,7 @@ class PayoutExecutionService:
                 "execution_mode": "MANUAL_TRANSFER",
                 "amount_cents": payout.amount_cents,
                 "masked_destination": dest["masked_destination"],
+                "evidence_notes": clean_evidence[:240],
                 "initiated_at": now.isoformat(),
             }),
         ))
