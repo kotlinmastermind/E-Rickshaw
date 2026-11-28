@@ -293,6 +293,15 @@ async def test_manual_transfer_two_step_workflow_and_illegal_transitions(client,
         assert conf_res.status_code == 200
         assert conf_res.json()["status"] == "PAID"
 
+        # A manually confirmed transfer is terminal; the generic failure endpoint cannot reverse it.
+        manual_paid_fail = await client.post(
+            f"/api/v1/admin/payouts/{payout_id}/fail",
+            json={"failure_reason": "Attempted manual reversal after confirmation"},
+        )
+        assert manual_paid_fail.status_code == 409
+        await db_session.refresh(wallet)
+        assert wallet.balance_cents == 35000
+
         # Duplicate manual confirmation rejected
         dup_conf = await client.post(f"/api/v1/admin/payouts/{payout_id}/confirm-manual-transfer", json={})
         assert dup_conf.status_code == 400
