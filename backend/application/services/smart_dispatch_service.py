@@ -365,7 +365,27 @@ class SmartDispatchService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dispatch offer not found.")
 
         if assignment.status == "ACCEPTED":
-            return {"status": "ACCEPTED", "message": "Offer already accepted.", "ride_id": ride_id}
+            accepted_ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
+            accepted_ride = (await self.db.execute(accepted_ride_stmt)).scalar_one_or_none()
+            if (
+                not accepted_ride
+                or accepted_ride.assigned_driver_id != driver.id
+                or accepted_ride.status not in (
+                    RideStatus.ASSIGNED.value,
+                    RideStatus.ARRIVED.value,
+                    RideStatus.IN_PROGRESS.value,
+                    RideStatus.PAUSED.value,
+                )
+            ):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Accepted offer no longer matches the authoritative ride assignment.")
+            accepted_at = ensure_utc(assignment.responded_at) or ensure_utc(accepted_ride.assigned_at)
+            return {
+                "status": "ACCEPTED",
+                "message": "Offer already accepted.",
+                "ride_id": ride_id,
+                "driver_id": driver.id,
+                "assigned_at": accepted_at.isoformat() if accepted_at else None,
+            }
 
         if assignment.status != "OFFERED":
             raise HTTPException(
