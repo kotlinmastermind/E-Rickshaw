@@ -67,6 +67,7 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             "email": "drv1_lifecycle@vaisentra.com",
             "phone_number": drv1_phone,
             "password": "Password123!",
+            "license_number": "MH-DL-LIFECYCLE-0001",
             "vehicle_type": "SEDAN",
             "vehicle_name": "Sedan Prime",
             "vehicle_no": "DL-01-AA-0001"
@@ -82,6 +83,7 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             "email": "drv2_lifecycle@vaisentra.com",
             "phone_number": drv2_phone,
             "password": "Password123!",
+            "license_number": "MH-DL-LIFECYCLE-0002",
             "vehicle_type": "SEDAN",
             "vehicle_name": "Sedan Prime",
             "vehicle_no": "DL-01-AA-0002"
@@ -129,7 +131,7 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             drivers_resp = await client.get("/api/v1/admin/drivers", headers=admin_headers)
             assert drivers_resp.status_code == 200, f"admin drivers error: {drivers_resp.status_code} - {drivers_resp.text}"
             drivers_data = drivers_resp.json()
-            drv2_target_lic = f"DL-{drv2_signup.json()['user']['id'][:8].upper()}"
+            drv2_target_lic = "MH-DL-LIFECYCLE-0002"
             drv2_profile = next((d for d in drivers_data if isinstance(d, dict) and d.get("license_number") == drv2_target_lic), drivers_data[0] if drivers_data else {"id": "drv_mock"})
             await client.put(f"/api/v1/admin/drivers/{drv2_profile['id']}/approval", json={"approval_status": "APPROVED"}, headers=admin_headers)
 
