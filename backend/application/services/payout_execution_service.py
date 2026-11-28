@@ -36,7 +36,6 @@ ALLOWED_PAYOUT_TRANSITIONS = {
     "PROCESSING": {"PAID", "FAILED"},
     "PAID": {"FAILED"},  # RazorpayX may reverse a processed payout after bank reconciliation.
     "FAILED": {"APPROVED"},
-    "PAID": set(),
     "REJECTED": set(),
 }
 
