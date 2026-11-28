@@ -1337,21 +1337,6 @@ object RiderRepository {
         }
     }
 
-    suspend fun purchaseGiftCard(amountRupees: Int, sender: String, recipientPhone: String): Result<Boolean> {
-        return try {
-            val res = NetworkClient.apiService.purchaseGiftCard(
-                mapOf(
-                    "amount_cents" to amountRupees * 100,
-                    "sender_name" to sender,
-                    "recipient_phone" to recipientPhone
-                )
-            )
-            Result.success(res.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
     suspend fun redeemGiftCard(code: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.redeemGiftCard(mapOf("code" to code))
