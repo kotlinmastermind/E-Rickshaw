@@ -1,6 +1,7 @@
 """
 Unit tests for LiveLocationService & fast Redis geospatial indexing.
 """
+import asyncio
 import pytest
 import time
 from backend.application.services.live_location_service import LiveLocationService
@@ -237,3 +238,81 @@ async def test_inflight_ride_websocket_rejects_driver_after_approval_removed(mon
 
     assert authorized is False
     assert db.calls == 2
+
+
+
+@pytest.mark.asyncio
+async def test_out_of_order_location_update_cannot_overwrite_newer_snapshot():
+    service = LiveLocationService(db=None)
+    driver_id = "driver_stale_snapshot_001"
+    newer_lat, newer_lng = 25.5941, 85.1376
+    from backend.application.services.h3_geospatial_service import h3_service
+    newer_cell = h3_service.get_h3_cell(newer_lat, newer_lng)
+    newer_epoch = time.time() + 30
+    newer_payload = {
+        "driver_id": driver_id,
+        "latitude": newer_lat,
+        "longitude": newer_lng,
+        "h3_cell": newer_cell,
+        "is_online": True,
+        "is_busy": False,
+        "recorded_at": "future-test-snapshot",
+        "epoch_timestamp": newer_epoch,
+    }
+    await redis_client.set_json(f"driver:location:{driver_id}", newer_payload, ex=180)
+    await redis_client.set(f"driver:last_seen:{driver_id}", str(newer_epoch), ex=180)
+    await redis_client.set(f"driver:h3_cell:{driver_id}", newer_cell, ex=180)
+    await redis_client.sadd(f"h3:drivers:{newer_cell}", driver_id)
+
+    result = await service.ingest_driver_location(
+        driver_id=driver_id,
+        latitude=28.6139,
+        longitude=77.2090,
+        is_online=True,
+        is_busy=False,
+    )
+
+    assert result["status"] == "REJECTED"
+    assert result["reason"] == "STALE_LOCATION_UPDATE"
+    cached = await redis_client.get_json(f"driver:location:{driver_id}")
+    assert cached["latitude"] == newer_lat
+    assert cached["longitude"] == newer_lng
+    assert cached["h3_cell"] == newer_cell
+    assert await redis_client.get(f"driver:h3_cell:{driver_id}") == newer_cell
+    assert driver_id in await redis_client.smembers(f"h3:drivers:{newer_cell}")
+
+
+@pytest.mark.asyncio
+async def test_concurrent_location_updates_leave_one_consistent_h3_membership():
+    service = LiveLocationService(db=None)
+    driver_id = "driver_concurrent_index_001"
+
+    await asyncio.gather(
+        service.ingest_driver_location(
+            driver_id=driver_id,
+            latitude=28.6139,
+            longitude=77.2090,
+            is_online=True,
+            is_busy=False,
+        ),
+        service.ingest_driver_location(
+            driver_id=driver_id,
+            latitude=25.5941,
+            longitude=85.1376,
+            is_online=True,
+            is_busy=False,
+        ),
+    )
+
+    cached = await redis_client.get_json(f"driver:location:{driver_id}")
+    indexed_cell = await redis_client.get(f"driver:h3_cell:{driver_id}")
+    assert cached is not None
+    assert indexed_cell == cached["h3_cell"]
+
+    cell_members = await redis_client.smembers(f"h3:drivers:{indexed_cell}")
+    assert driver_id in cell_members
+    other_cell = h3_service.get_h3_cell(
+        25.5941 if cached["latitude"] == 28.6139 else 28.6139,
+        85.1376 if cached["longitude"] == 77.2090 else 77.2090,
+    )
+    assert driver_id not in await redis_client.smembers(f"h3:drivers:{other_cell}")
