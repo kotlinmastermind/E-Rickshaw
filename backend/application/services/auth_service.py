@@ -488,7 +488,7 @@ class AuthService:
         profile = CustomerProfile(user_id=user.id)
         self.db.add(profile)
 
-        wallet = Wallet(user_id=user.id, balance_cents=100000)
+        wallet = Wallet(user_id=user.id, balance_cents=0)
         self.db.add(wallet)
 
         pref = UserPreferences(user_id=user.id)
