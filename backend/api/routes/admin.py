@@ -792,6 +792,14 @@ class GeofencePayload(BaseModel):
     city_code: Optional[str] = Field(None, min_length=2, max_length=32)
     surge_multiplier: float = 1.0
 
+class DriverServiceAreaRequestApprovalPayload(BaseModel):
+    service_area_id: str = Field(..., min_length=1, max_length=36)
+
+
+class DriverServiceAreaRequestRejectionPayload(BaseModel):
+    reason: str = Field(..., min_length=8, max_length=1000)
+
+
 class VerifyPointPayload(BaseModel):
     latitude: float
     longitude: float
@@ -2419,3 +2427,179 @@ async def admin_reject_payout_account(
         "is_primary": account.is_primary,
         "rejection_reason": account.rejection_reason,
     }
+
+
+@router.get("/service-area-requests")
+async def list_driver_service_area_requests(
+    status_filter: str = Query("PENDING", alias="status", pattern="^(PENDING|APPROVED|REJECTED|ALL)$"),
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.domain.models import DriverServiceAreaRequest
+    stmt = (
+        select(DriverServiceAreaRequest, DriverProfile, User)
+        .join(DriverProfile, DriverProfile.id == DriverServiceAreaRequest.driver_id)
+        .join(User, User.id == DriverProfile.user_id)
+        .order_by(DriverServiceAreaRequest.created_at.desc())
+        .limit(200)
+    )
+    if status_filter != "ALL":
+        stmt = stmt.where(DriverServiceAreaRequest.status == status_filter)
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "request_id": request.id,
+            "driver_id": driver.id,
+            "driver_name": driver_user.full_name,
+            "driver_phone": driver_user.phone_number,
+            "driver_approval_status": driver.approval_status,
+            "state_name": request.state_name,
+            "district_name": request.district_name,
+            "locality_name": request.locality_name,
+            "postal_code": request.postal_code,
+            "latitude": request.latitude,
+            "longitude": request.longitude,
+            "status": request.status,
+            "service_area_id": request.service_area_id,
+            "admin_response": request.admin_response,
+            "created_at": request.created_at.isoformat(),
+        }
+        for request, driver, driver_user in rows
+    ]
+
+
+@router.post("/service-area-requests/{request_id}/approve")
+async def approve_driver_service_area_request(
+    request_id: str,
+    payload: DriverServiceAreaRequestApprovalPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.domain.models import (
+        DriverServiceAreaRequest, DriverServiceAreaAssignment, GeofenceZone, GeofenceZoneAudit,
+    )
+    from backend.application.services.service_area_service import ServiceAreaService
+
+    request = (await db.execute(
+        select(DriverServiceAreaRequest)
+        .where(DriverServiceAreaRequest.id == request_id)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Service-area request not found.")
+    if request.status != "PENDING":
+        raise HTTPException(status_code=409, detail=f"Request is already {request.status}.")
+
+    driver = await db.get(DriverProfile, request.driver_id)
+    if not driver or driver.approval_status != "APPROVED":
+        raise HTTPException(status_code=409, detail="Driver must complete onboarding and be approved before area assignment.")
+    driver_user = await db.get(User, driver.user_id)
+    if not driver_user or not driver_user.is_active:
+        raise HTTPException(status_code=409, detail="Inactive driver accounts cannot be assigned to an operating area.")
+
+    zone = await db.get(GeofenceZone, payload.service_area_id)
+    if not zone or not zone.is_active or zone.zone_type != "SERVICE_AREA":
+        raise HTTPException(status_code=409, detail="Select an active SERVICE_AREA polygon. No area is created from a driver's point location.")
+    if not zone.city_code or not zone.city_code.strip():
+        raise HTTPException(status_code=409, detail="The selected service area has no city code; configure it before approval.")
+
+    now = datetime.now(timezone.utc)
+    active_tariff_id = (await db.execute(
+        select(FareRule.id)
+        .join(VehicleCategory, VehicleCategory.id == FareRule.category_id)
+        .join(Vehicle, Vehicle.category_id == VehicleCategory.id)
+        .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+        .where(
+            DriverVehicleAssignment.driver_id == driver.id,
+            DriverVehicleAssignment.is_active.is_(True),
+            Vehicle.is_active.is_(True),
+            FareRule.city_code == zone.city_code,
+            FareRule.is_active.is_(True),
+            FareRule.workflow_status.in_(["ACTIVE", "APPROVED"]),
+            FareRule.effective_from <= now,
+            or_(FareRule.effective_until.is_(None), FareRule.effective_until > now),
+            VehicleCategory.is_active.is_(True),
+        )
+        .limit(1)
+    )).scalar_one_or_none()
+    if not active_tariff_id:
+        raise HTTPException(status_code=409, detail="No active fare tariff is configured for this service area's city code. Configure a tariff before assigning the driver.")
+
+    resolved_area = await ServiceAreaService(db).resolve_point(
+        request.latitude, request.longitude
+    )
+    if resolved_area.id != zone.id:
+        raise HTTPException(status_code=409, detail="The submitted coordinates resolve to a different operational service area.")
+
+    assignment = (await db.execute(
+        select(DriverServiceAreaAssignment)
+        .where(
+            DriverServiceAreaAssignment.driver_id == driver.id,
+            DriverServiceAreaAssignment.service_area_id == zone.id,
+        )
+        .with_for_update()
+    )).scalar_one_or_none()
+    if assignment is None:
+        assignment = DriverServiceAreaAssignment(
+            driver_id=driver.id,
+            service_area_id=zone.id,
+            is_active=True,
+            assigned_by_user_id=admin.id,
+        )
+        db.add(assignment)
+    else:
+        assignment.is_active = True
+        assignment.revoked_at = None
+        assignment.assigned_by_user_id = admin.id
+
+    request.status = "APPROVED"
+    request.service_area_id = zone.id
+    request.admin_response = "Approved and assigned to the configured operational service area."
+    request.reviewed_by_user_id = admin.id
+    request.reviewed_at = datetime.now(timezone.utc)
+    db.add(GeofenceZoneAudit(
+        zone_id=zone.id,
+        admin_user_id=admin.id,
+        action="AREA_REQ_APPROVED",
+        new_state_json=json.dumps({"request_id": request.id, "driver_id": driver.id}),
+    ))
+    await db.commit()
+    return {
+        "request_id": request.id,
+        "driver_id": driver.id,
+        "service_area_id": zone.id,
+        "status": request.status,
+        "message": "Driver assigned to the configured service area.",
+    }
+
+
+@router.post("/service-area-requests/{request_id}/reject")
+async def reject_driver_service_area_request(
+    request_id: str,
+    payload: DriverServiceAreaRequestRejectionPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from backend.domain.models import DriverServiceAreaRequest, GeofenceZoneAudit
+
+    request = (await db.execute(
+        select(DriverServiceAreaRequest)
+        .where(DriverServiceAreaRequest.id == request_id)
+        .with_for_update()
+    )).scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Service-area request not found.")
+    if request.status != "PENDING":
+        raise HTTPException(status_code=409, detail=f"Request is already {request.status}.")
+
+    request.status = "REJECTED"
+    request.admin_response = payload.reason.strip()
+    request.reviewed_by_user_id = admin.id
+    request.reviewed_at = datetime.now(timezone.utc)
+    db.add(GeofenceZoneAudit(
+        admin_user_id=admin.id,
+        action="AREA_REQ_REJECTED",
+        new_state_json=json.dumps({"request_id": request.id, "driver_id": request.driver_id, "reason": request.admin_response}),
+    ))
+    await db.commit()
+    return {"request_id": request.id, "status": request.status, "admin_response": request.admin_response}

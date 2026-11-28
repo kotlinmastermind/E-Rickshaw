@@ -1,4 +1,6 @@
 import os
+import json
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Response
 from fastapi.responses import FileResponse
@@ -8,7 +10,7 @@ from sqlalchemy import select
 
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_driver, get_current_admin, get_current_user
-from backend.domain.models import User, DriverProfile, DriverDocument
+from backend.domain.models import User, DriverProfile, DriverDocument, DriverServiceAreaRequest
 from backend.application.services.driver_onboarding_service import DriverOnboardingService
 from backend.integrations.storage.provider import get_storage_provider, verify_signed_url_token
 from backend.core.config import settings
@@ -416,3 +418,172 @@ async def list_driver_onboarding_tickets(user: User = Depends(get_current_admin)
 @router.patch("/admin/tickets/{ticket_id}")
 async def review_driver_onboarding_ticket(ticket_id: str, payload: OnboardingTicketReviewPayload, user: User = Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     return await DriverOnboardingService(db).review_onboarding_ticket(ticket_id, payload.status, payload.admin_response)
+
+
+class DriverServiceAreaRequestPayload(BaseModel):
+    state_name: str = Field(..., min_length=2, max_length=80)
+    district_name: str = Field(..., min_length=2, max_length=100)
+    locality_name: str = Field(..., min_length=2, max_length=120)
+    postal_code: Optional[str] = Field(None, pattern=r"^\d{6}$")
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+
+
+@router.post("/service-area-requests", status_code=status.HTTP_201_CREATED)
+async def submit_driver_service_area_request(
+    payload: DriverServiceAreaRequestPayload,
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db),
+):
+    """Submit a locality request; this does not activate service or bypass review."""
+    driver = (await db.execute(
+        select(DriverProfile).where(DriverProfile.user_id == user.id)
+    )).scalar_one_or_none()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver profile not found.")
+
+    pending = (await db.execute(
+        select(DriverServiceAreaRequest)
+        .where(
+            DriverServiceAreaRequest.driver_id == driver.id,
+            DriverServiceAreaRequest.status == "PENDING",
+        )
+        .order_by(DriverServiceAreaRequest.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if pending:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "A service-area request is already awaiting review.", "request_id": pending.id},
+        )
+
+    values = payload.model_dump()
+    values.update({
+        "state_name": payload.state_name.strip(),
+        "district_name": payload.district_name.strip(),
+        "locality_name": payload.locality_name.strip(),
+    })
+    if not values["state_name"] or not values["district_name"] or not values["locality_name"]:
+        raise HTTPException(status_code=422, detail="State, district, and locality are required.")
+    request = DriverServiceAreaRequest(driver_id=driver.id, **values)
+    db.add(request)
+    from sqlalchemy.exc import IntegrityError
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A service-area request is already awaiting review for this driver.")
+
+    # Existing fully configured areas can onboard an already-approved driver
+    # immediately. New/unknown localities remain pending until a real polygon
+    # and active tariff are configured by an administrator.
+    if driver.approval_status == "APPROVED" and user.is_active:
+        from sqlalchemy import or_
+        from backend.domain.models import (
+            DriverServiceAreaAssignment, FareRule, VehicleCategory, GeofenceZoneAudit,
+            DriverVehicleAssignment, Vehicle,
+        )
+        from backend.application.services.service_area_service import ServiceAreaService
+        try:
+            zone = await ServiceAreaService(db).resolve_point(payload.latitude, payload.longitude)
+            now = datetime.now(timezone.utc)
+            tariff_id = (await db.execute(
+                select(FareRule.id)
+                .join(VehicleCategory, VehicleCategory.id == FareRule.category_id)
+                .join(Vehicle, Vehicle.category_id == VehicleCategory.id)
+                .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+                .where(
+                    DriverVehicleAssignment.driver_id == driver.id,
+                    DriverVehicleAssignment.is_active.is_(True),
+                    Vehicle.is_active.is_(True),
+                    FareRule.city_code == zone.city_code,
+                    FareRule.is_active.is_(True),
+                    FareRule.workflow_status.in_(["ACTIVE", "APPROVED"]),
+                    FareRule.effective_from <= now,
+                    or_(FareRule.effective_until.is_(None), FareRule.effective_until > now),
+                    VehicleCategory.is_active.is_(True),
+                )
+                .limit(1)
+            )).scalar_one_or_none()
+            if tariff_id:
+                assignment = (await db.execute(
+                    select(DriverServiceAreaAssignment).where(
+                        DriverServiceAreaAssignment.driver_id == driver.id,
+                        DriverServiceAreaAssignment.service_area_id == zone.id,
+                    )
+                )).scalar_one_or_none()
+                if assignment is None:
+                    db.add(DriverServiceAreaAssignment(
+                        driver_id=driver.id,
+                        service_area_id=zone.id,
+                        is_active=True,
+                    ))
+                else:
+                    assignment.is_active = True
+                    assignment.revoked_at = None
+                request.status = "APPROVED"
+                request.service_area_id = zone.id
+                request.admin_response = "Automatically assigned to an existing active service area with a configured tariff."
+                request.reviewed_at = now
+                db.add(GeofenceZoneAudit(
+                    zone_id=zone.id,
+                    action="AREA_AUTO_ASSIGNED",
+                    new_state_json=json.dumps({"request_id": request.id, "driver_id": driver.id}),
+                ))
+            else:
+                request.admin_response = "Pending review: an active tariff is not configured for this locality."
+        except HTTPException as area_error:
+            request.admin_response = f"Pending review: {area_error.detail}"
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A service-area request is already awaiting review for this driver.",
+        )
+    await db.refresh(request)
+    return {
+        "request_id": request.id,
+        "status": request.status,
+        "message": (
+            "You have been assigned to the existing operational service area."
+            if request.status == "APPROVED"
+            else "Locality request submitted. Service starts after an approved operational boundary, active tariff, and driver assignment are in place."
+        ),
+        "created_at": request.created_at.isoformat(),
+    }
+
+
+@router.get("/service-area-requests")
+async def list_my_driver_service_area_requests(
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db),
+):
+    driver = (await db.execute(
+        select(DriverProfile).where(DriverProfile.user_id == user.id)
+    )).scalar_one_or_none()
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver profile not found.")
+    rows = (await db.execute(
+        select(DriverServiceAreaRequest)
+        .where(DriverServiceAreaRequest.driver_id == driver.id)
+        .order_by(DriverServiceAreaRequest.created_at.desc())
+        .limit(20)
+    )).scalars().all()
+    return [
+        {
+            "request_id": row.id,
+            "state_name": row.state_name,
+            "district_name": row.district_name,
+            "locality_name": row.locality_name,
+            "postal_code": row.postal_code,
+            "status": row.status,
+            "service_area_id": row.service_area_id,
+            "admin_response": row.admin_response,
+            "created_at": row.created_at.isoformat(),
+            "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+        }
+        for row in rows
+    ]
