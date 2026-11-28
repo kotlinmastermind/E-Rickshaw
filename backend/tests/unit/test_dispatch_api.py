@@ -201,8 +201,16 @@ async def test_dispatch_api_endpoints(db_session):
             assert unauthorized_status.status_code == 404
             app.dependency_overrides[get_current_user] = lambda: cust_user
 
-            # 5. Driver Accepts Offer
-            resp_accept = await client.post(f"/api/v1/dispatch/offer/{ride.id}/accept")
+            # 5. Driver Accepts the exact persisted offer, not another attempt for this ride.
+            wrong_assignment = await client.post(
+                f"/api/v1/dispatch/offer/{ride.id}/accept",
+                params={"assignment_id": "not-this-assignment"},
+            )
+            assert wrong_assignment.status_code == 404
+            resp_accept = await client.post(
+                f"/api/v1/dispatch/offer/{ride.id}/accept",
+                params={"assignment_id": status_data["current_offer"]["assignment_id"]},
+            )
             assert resp_accept.status_code == 200, resp_accept.text
             accept_data = resp_accept.json()
             assert accept_data["status"] == "ACCEPTED"
