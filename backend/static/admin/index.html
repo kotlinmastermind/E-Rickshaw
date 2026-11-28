@@ -3870,7 +3870,7 @@
                         'Verification: ' + (inspection.verification_status || 'PENDING') +
                         ' · Photos: ' + (inspection.photos_complete ? 'complete' : 'incomplete') +
                         ' · Checklist: ' + (inspection.has_checklist ? 'submitted' : 'missing'));
-                    if (String(inspection.inspection_status || '').toUpperCase() === 'SUBMITTED') {
+                    if (['SUBMITTED', 'PENDING_VERIFICATION'].includes(String(inspection.inspection_status || '').toUpperCase())) {
                         const actions = document.createElement('div');
                         actions.className = 'flex gap-2 mt-2';
                         const approve = document.createElement('button');
