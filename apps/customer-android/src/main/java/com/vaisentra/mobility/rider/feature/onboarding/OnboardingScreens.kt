@@ -130,6 +130,8 @@ fun BrandSplashScreen(onNavigate: (String) -> Unit = {}) {
 fun PhoneAuthScreen(onNavigate: (String) -> Unit,onOtpSent: (String) -> Unit
 ) {
     var phone by remember { mutableStateOf("") }
+    var isRequestingOtp by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
 
     Column(
@@ -155,20 +157,32 @@ fun PhoneAuthScreen(onNavigate: (String) -> Unit,onOtpSent: (String) -> Unit
             Spacer(modifier = Modifier.height(16.dp))
 
             NeoButton(
-                text = "Send 6-Digit OTP",
+                text = if (isRequestingOtp) "Sending OTP..." else "Send 6-Digit OTP",
                 onClick = {
                     val cleanPhone = phone.trim()
                     if (cleanPhone.length < 10) {
-                        DialogController.showToast("Please enter a valid 10-digit mobile number")
+                        DialogController.showToast("Please enter a valid mobile number")
                         return@NeoButton
                     }
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        RiderRepository.requestOtp(phone)
+                    if (isRequestingOtp) return@NeoButton
+                    coroutineScope.launch {
+                        isRequestingOtp = true
+                        try {
+                            val result = withContext(Dispatchers.IO) {
+                                RiderRepository.requestOtp(cleanPhone)
+                            }
+                            if (result.isSuccess) {
+                                DialogController.showToast("Verification code sent. Check your SMS.")
+                                onOtpSent(cleanPhone)
+                            } else {
+                                DialogController.showToast(
+                                    result.exceptionOrNull()?.message ?: "Unable to send verification code. Please try again."
+                                )
+                            }
+                        } finally {
+                            isRequestingOtp = false
+                        }
                     }
-                    DialogController.showToast("OTP code requested via Twilio for $cleanPhone")
-                    // Phone number ke saath OtpVerifyScreen par bhejein
-                    onOtpSent(cleanPhone)
-
                 },
                 icon = "📩"
             )
@@ -199,7 +213,16 @@ fun OtpVerifyScreen(
 ) {
     var otpCode by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var isResending by remember { mutableStateOf(false) }
+    var secondsRemaining by remember { mutableIntStateOf(60) }
     val coroutineScope = rememberCoroutineScope() // Compose-safe coroutine scope
+
+    LaunchedEffect(secondsRemaining) {
+        if (secondsRemaining > 0) {
+            kotlinx.coroutines.delay(1000)
+            secondsRemaining--
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -216,7 +239,7 @@ fun OtpVerifyScreen(
 
         NeoCard {
             Text(
-                text = "Code sent via Twilio / Supabase to +91 $phone",
+                text = "Code sent via Twilio Verify to $phone",
                 color = TextMuted,
                 fontSize = 13.sp
             )
@@ -289,10 +312,35 @@ fun OtpVerifyScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
             Text(
-                text = "Resend Code in 28s",
-                color = TextDim,
+                text = when {
+                    isResending -> "Sending new code..."
+                    secondsRemaining > 0 -> "Resend code in ${secondsRemaining}s"
+                    else -> "Resend verification code"
+                },
+                color = if (secondsRemaining == 0 && !isResending) ElectricCyan else TextDim,
                 fontSize = 12.sp,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .clickable(enabled = secondsRemaining == 0 && !isResending && !isLoading) {
+                        coroutineScope.launch {
+                            isResending = true
+                            try {
+                                val result = withContext(Dispatchers.IO) {
+                                    RiderRepository.requestOtp(phone)
+                                }
+                                if (result.isSuccess) {
+                                    secondsRemaining = 60
+                                    DialogController.showToast("New verification code sent.")
+                                } else {
+                                    DialogController.showToast(
+                                        result.exceptionOrNull()?.message ?: "Unable to resend verification code."
+                                    )
+                                }
+                            } finally {
+                                isResending = false
+                            }
+                        }
+                    }
             )
         }
     }

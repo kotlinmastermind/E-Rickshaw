@@ -66,13 +66,13 @@ fun PilotLoginScreen(onNavigate: (String) -> Unit) {
                 val otpRes = DriverRepository.requestOtp(fullPhone)
                 isRequesting = false
                 if (otpRes.isSuccess) {
-                    DriverDialogController.showToast("OTP sent to $fullPhone")
+                    DriverDialogController.showToast("OTP sent. Check your SMS.")
+                    onNavigate("auth_otp")
                 } else {
                     DriverDialogController.showToast(
-                        otpRes.exceptionOrNull()?.message ?: "Enter verification passcode to proceed"
+                        otpRes.exceptionOrNull()?.message ?: "Unable to send verification code. Please try again."
                     )
                 }
-                onNavigate("auth_otp")
             }
         },
         onPasswordLoginClick = { rawPhone, pwd ->
@@ -559,7 +559,7 @@ fun PilotPasswordRecoveryScreen(onNavigate: (String) -> Unit) {
 @Composable
 fun PilotOtpScreen(onNavigate: (String) -> Unit) {
     val scope = rememberCoroutineScope()
-    var secondsRemaining by remember { mutableIntStateOf(30) }
+    var secondsRemaining by remember { mutableIntStateOf(60) }
     var isVerifying by remember { mutableStateOf(false) }
     val targetPhone = DriverRepository.pendingAuthPhone
 
@@ -612,13 +612,21 @@ fun PilotOtpScreen(onNavigate: (String) -> Unit) {
         },
         onResendClick = {
             if (secondsRemaining == 0 && targetPhone.isNotBlank()) {
-                secondsRemaining = 30
                 scope.launch {
-                    val resendRes = DriverRepository.requestOtp(targetPhone)
-                    if (resendRes.isSuccess) {
-                        DriverDialogController.showToast("New OTP sent to $targetPhone")
-                    } else {
-                        DriverDialogController.showToast("Failed to resend OTP.")
+                    if (isVerifying) return@launch
+                    isVerifying = true
+                    try {
+                        val resendRes = DriverRepository.requestOtp(targetPhone)
+                        if (resendRes.isSuccess) {
+                            secondsRemaining = 60
+                            DriverDialogController.showToast("New verification code sent.")
+                        } else {
+                            DriverDialogController.showToast(
+                                resendRes.exceptionOrNull()?.message ?: "Unable to resend verification code."
+                            )
+                        }
+                    } finally {
+                        isVerifying = false
                     }
                 }
             }

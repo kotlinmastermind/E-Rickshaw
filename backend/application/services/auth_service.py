@@ -2,6 +2,7 @@ import re
 import json
 import uuid
 import logging
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +40,7 @@ class AuthService:
 
         # Reserve the resend window atomically before contacting Twilio. A separate
         # EXISTS followed by SET allows concurrent workers to send duplicate SMS.
-        cooldown_key = f"otp_cooldown:{norm_phone}"
+        cooldown_key = f"otp_cooldown:{hashlib.sha256(norm_phone.encode('utf-8')).hexdigest()}"
         try:
             reserved = await redis_client.set_nx_strict(
                 cooldown_key,
@@ -62,19 +63,31 @@ class AuthService:
         sms_provider = get_sms_provider()
         try:
             await sms_provider.send_verification_otp(norm_phone)
-        except Exception:
-            # Do not strand a user behind a cooldown when Twilio did not accept the request.
-            try:
-                await redis_client.delete_strict(cooldown_key)
-            except Exception:
-                logger.warning("Unable to release OTP cooldown after provider failure; TTL will expire naturally.")
+        except Exception as provider_error:
+            # Release only when the provider definitively rejected the request. A timeout,
+            # connection reset, or 5xx can happen after Twilio accepted the SMS; retaining
+            # the reservation prevents a retry from charging/sending a duplicate message.
+            definitive_rejection = (
+                isinstance(provider_error, HTTPException)
+                and provider_error.status_code in {
+                    status.HTTP_400_BAD_REQUEST,
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                }
+            )
+            if definitive_rejection:
+                try:
+                    await redis_client.delete_strict(cooldown_key)
+                except Exception:
+                    logger.warning("Unable to release OTP cooldown after definitive provider rejection; TTL will expire naturally.")
+            else:
+                logger.warning("OTP send outcome is ambiguous; retaining cooldown to prevent duplicate SMS.")
             raise
 
         phone_masked = f"{norm_phone[-4:].rjust(len(norm_phone), '*')}"
         return {
             "message": f"Verification passcode dispatched to {phone_masked} via Twilio.",
             "phone_masked": phone_masked,
-            "expires_in_seconds": settings.OTP_EXPIRE_SECONDS
         }
 
     async def verify_otp(
@@ -107,7 +120,10 @@ class AuthService:
                 detail="Administrator accounts cannot be self-registered via OTP."
             )
         if target_role not in ("customer", "driver"):
-            target_role = "customer"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported account type for OTP sign-in.",
+            )
 
         # 1. Twilio Verify API check (NO BYPASS)
         sms_provider = get_sms_provider()
@@ -159,13 +175,19 @@ class AuthService:
         else:
             if not user.is_active:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated. Please contact support.")
-            # A successful Twilio Verify check is authoritative for the phone number.
-            user.is_verified = True
-            if (user.role or "").lower() in ("admin", "superadmin", "super administrator"):
+            existing_role = (user.role or "").lower().strip()
+            if existing_role in ("admin", "superadmin", "super administrator"):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Administrator accounts cannot sign in via OTP. Use administrator password and MFA sign-in."
                 )
+            if existing_role != target_role:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This mobile number is registered for a different account type. Use the matching app.",
+                )
+            # A successful Twilio Verify check is authoritative for the phone number.
+            user.is_verified = True
             # If user provided their full name and previous full name was placeholder, update it
             if full_name and full_name.strip() and user.full_name in ("Valued Customer", "Driver Partner", None, ""):
                 user.full_name = full_name.strip()

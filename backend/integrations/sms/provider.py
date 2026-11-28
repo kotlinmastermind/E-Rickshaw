@@ -188,7 +188,29 @@ class TwilioVerifyProvider(SMSProvider):
             except Exception:
                 pass
             err_code = resp_data.get("code")
-            logger.warning(f"[TWILIO_VERIFY_CHECK_ERROR] HTTP {response.status_code} Code {err_code}: {resp_data.get('message')}")
+            # Distinguish an invalid/expired user code from provider outages and
+            # throttling. Returning False for a 5xx incorrectly tells users their
+            # correct OTP is invalid and can trigger unnecessary repeated checks.
+            logger.warning(
+                "[TWILIO_VERIFY_CHECK_ERROR] HTTP %s Code %s",
+                response.status_code,
+                err_code,
+            )
+            if response.status_code == 429 or err_code in (60202, 60203):
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too many verification attempts. Please wait before trying again.",
+                )
+            if response.status_code in (401, 403) or response.status_code >= 500:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Verification service is temporarily unavailable. Please try again shortly.",
+                )
+            if response.status_code == 400 and err_code == 60200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="The verification request is invalid. Please request a new code.",
+                )
             return False
 
 

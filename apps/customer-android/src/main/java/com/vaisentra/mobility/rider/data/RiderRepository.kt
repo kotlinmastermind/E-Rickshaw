@@ -172,7 +172,15 @@ object RiderRepository {
     suspend fun requestOtp(phone: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.sendOtp(OtpSendRequest(phone))
-            Result.success(res.isSuccessful)
+            if (res.isSuccessful) {
+                Result.success(true)
+            } else {
+                val error = parseApiErrorMessage(
+                    res.errorBody()?.string(),
+                    "Unable to send verification code (HTTP ${res.code()}). Please try again."
+                )
+                Result.failure(IllegalStateException(error))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
