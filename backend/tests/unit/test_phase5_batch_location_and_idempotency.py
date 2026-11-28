@@ -188,6 +188,30 @@ async def test_ride_request_idempotency_key_replay():
         conflict = await client.post("/api/v1/rides/request", json=changed_payload, headers=headers)
         assert conflict.status_code == 409
 
+        # Scheduled booking uses the same authoritative estimate and route binding.
+        estimate_response = await client.post("/api/v1/fares/estimate", json={
+            "category_id": cat.id,
+            "pickup_latitude": 28.6328,
+            "pickup_longitude": 77.2195,
+            "destination_latitude": 28.6129,
+            "destination_longitude": 77.2295,
+        })
+        assert estimate_response.status_code == 200, estimate_response.text
+        estimate_id = estimate_response.json()["estimate_id"]
+        scheduled_response = await client.post("/api/v1/rides/schedule", json={
+            "estimate_id": estimate_id,
+            "category_id": cat.id,
+            "pickup_address": "Connaught Place Inner Circle",
+            "destination_address": "India Gate C-Hexagon",
+            "pickup_latitude": 28.6328,
+            "pickup_longitude": 77.2195,
+            "destination_latitude": 28.6129,
+            "destination_longitude": 77.2295,
+            "scheduled_pickup_time": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        }, headers=headers)
+        assert scheduled_response.status_code == 200, scheduled_response.text
+        assert scheduled_response.json()["is_scheduled"] is True
+
     # Verify only ONE ride was created in database
     async with async_session_maker() as session:
         rides = (await session.execute(
