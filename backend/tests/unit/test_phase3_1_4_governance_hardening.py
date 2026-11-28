@@ -31,7 +31,7 @@ async def test_ordinary_admin_cannot_revoke_verified_document(db_session):
     unique_suffix = uuid.uuid4().int % 100000000
 
     # 1. Driver and verified document
-    driver_user = User(phone_number=f"+9191{str(unique_suffix)[-8:]}", email=f"ord_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
+    driver_user = User(phone_number=f"+9191{str(unique_suffix)[-8:]}", email=f"ord_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True, is_verified=True)
     db_session.add(driver_user)
     await db_session.flush()
 
