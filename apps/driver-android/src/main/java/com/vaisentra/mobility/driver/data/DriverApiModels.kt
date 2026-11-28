@@ -947,3 +947,11 @@ data class DriverServiceAreaRequestDto(
     @SerializedName("created_at") val createdAt: String = "",
     @SerializedName("reviewed_at") val reviewedAt: String? = null
 )
+
+
+data class DriverServiceAreaRequestSubmitResponse(
+    @SerializedName("request_id") val requestId: String = "",
+    @SerializedName("status") val status: String = "",
+    @SerializedName("message") val message: String = "",
+    @SerializedName("created_at") val createdAt: String = ""
+)
