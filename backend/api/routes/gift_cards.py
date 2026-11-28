@@ -28,7 +28,7 @@ class GiftCardPurchasePayload(BaseModel):
     sender_name: Optional[str] = Field(None, max_length=128)
     message: Optional[str] = Field(None, max_length=500)
     delivery_method: str = Field("IN_APP", description="IN_APP, SMS, or EMAIL")
-    payment_method: str = Field("UPI", description="UPI, WALLET, or CARD")
+    payment_method: str = Field("WALLET", description="WALLET; external gateway checkout is not wired into gift-card issuance")
     idempotency_key: str = Field(..., min_length=8, max_length=128)
 
 
