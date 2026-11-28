@@ -97,3 +97,14 @@ async def test_admin_console_does_not_advertise_unverified_live_state():
     assert "scheduleAdminRideSnapshotRefresh();" in html
     assert "_nativeFetch('/api/v1/admin/live-feed'" in html
     assert "STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];" in html
+
+    # Transient Admin WebSocket failures keep polling alive and retry indefinitely
+    # with capped exponential backoff; only an authorization close prompts login.
+    assert "function scheduleAdminWebSocketReconnect(reason)" in html
+    assert "const _adminWsReconnectMaxDelayMs = 30000;" in html
+    assert "Math.min(2000 * (2 ** exponent), _adminWsReconnectMaxDelayMs)" in html
+    assert "scheduleAdminWebSocketReconnect(`socket closed (${event.code})`);" in html
+    assert "scheduleAdminWebSocketReconnect('connection or ticket request failed');" in html
+    assert "if (!isCurrentSocket || !STATE.adminToken) return;" in html
+    assert "if (event.code === 1008)" in html
+    assert "_adminWsMaxReconnectAttempts" not in html
