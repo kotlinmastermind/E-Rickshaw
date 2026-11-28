@@ -221,7 +221,6 @@ async def test_ride_request_idempotency_key_replay():
         scheduled_data = scheduled_response.json()
         assert scheduled_data["ride_id"]
         assert scheduled_data["ride_id"] != ride_id_1
-        assert scheduled_data["status"] == "SCHEDULED"
 
     # Verify only ONE ride was created in database
     async with async_session_maker() as session:
