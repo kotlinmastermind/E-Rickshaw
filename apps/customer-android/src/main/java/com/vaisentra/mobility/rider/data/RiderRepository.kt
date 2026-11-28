@@ -1751,12 +1751,21 @@ object RiderRepository {
 
     suspend fun purchaseGiftCard(req: GiftCardPurchaseRequest): Result<GiftCardPurchaseResponse> {
         val currentUid = NetworkClient.currentUserId()
-        val recipientScope = req.recipientEmail ?: req.recipientPhone ?: req.recipientName ?: "IN_APP"
-        val recipientDigest = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(recipientScope.toByteArray(Charsets.UTF_8))
-            .take(8)
+        val requestFingerprint = listOf(
+            req.amountCents.toString(),
+            req.cardDesign,
+            req.recipientName.orEmpty(),
+            req.recipientEmail.orEmpty(),
+            req.recipientPhone.orEmpty(),
+            req.senderName.orEmpty(),
+            req.message.orEmpty(),
+            req.deliveryMethod,
+        ).joinToString("\u001f")
+        val requestDigest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(requestFingerprint.toByteArray(Charsets.UTF_8))
+            .take(12)
             .joinToString("") { "%02x".format(it) }
-        val intentScopeKey = "GIFT_CARD_PURCHASE_${currentUid ?: "anon"}_${req.amountCents}_$recipientDigest"
+        val intentScopeKey = "GIFT_CARD_PURCHASE_${currentUid ?: "anon"}_$requestDigest"
         val idempotencyKey = NetworkClient.checkoutSessionStore.getOrCreateScopedIdempotencyKey(
             intentScopeKey,
             "giftcard"
