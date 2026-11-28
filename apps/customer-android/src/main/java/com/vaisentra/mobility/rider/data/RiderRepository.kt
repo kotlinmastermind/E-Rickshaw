@@ -562,6 +562,7 @@ object RiderRepository {
                         )
                     } else if (res.isSuccessful && (updated == null || updated.status in listOf("COMPLETED", "CANCELLED", "EXPIRED"))) {
                         _activeRide.value = null
+                        RiderWebSocketClient.disconnect()
                     }
                 } catch (_: Exception) {
                 }
@@ -582,10 +583,12 @@ object RiderRepository {
                         vehiclePlate = ride.driver?.licenseNumber ?: ride.vehiclePlate
                     )
                     _activeRide.value = resolved
+                    RiderWebSocketClient.connectRideTracking(ride.id)
                     startActiveRideSyncLoop(ride.id)
                     Result.success(resolved)
                 } else {
                     _activeRide.value = null
+                    RiderWebSocketClient.disconnect()
                     Result.success(null)
                 }
             } else {
