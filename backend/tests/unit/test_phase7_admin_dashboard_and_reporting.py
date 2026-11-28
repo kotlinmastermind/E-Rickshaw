@@ -164,7 +164,8 @@ async def test_admin_driver_approval_workflow_and_notification(db_session):
         phone_number=f"+91987{suffix}9",
         full_name="Driver Applicant",
         role="driver",
-        is_active=True
+        is_active=True,
+        is_verified=True
     )
     db_session.add(driver_user)
     await db_session.flush()
