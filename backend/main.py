@@ -30,6 +30,7 @@ from backend.api.routes import fleet, tracking_public
 from backend.application.services.sla_escalation_service import SlaEscalationService
 from backend.application.services.driver_incentive_service import DriverIncentiveService
 from backend.application.services.payment_reconciliation_service import run_payment_reconciliation_loop
+from backend.application.services.smart_dispatch_service import run_dispatch_expiry_reaper_loop
 
 # 2. Worker loops add karein:
 async def _run_sla_escalation_worker():
@@ -220,6 +221,9 @@ async def lifespan(app: FastAPI):
     sla_worker = asyncio.create_task(_run_sla_escalation_worker(), name="sla-escalations")
     recon_worker = asyncio.create_task(run_payment_reconciliation_loop(), name="payment-reconciliation")
     incentives_worker = asyncio.create_task(_run_driver_incentives_worker(), name="driver-incentives")
+    dispatch_expiry_worker = asyncio.create_task(
+        run_dispatch_expiry_reaper_loop(), name="dispatch-expiry-reaper"
+    )
     try:
         yield
     finally:
@@ -227,7 +231,8 @@ async def lifespan(app: FastAPI):
         sla_worker.cancel()
         recon_worker.cancel()
         incentives_worker.cancel()
-        for t in [dispatcher, sla_worker, recon_worker, incentives_worker]:
+        dispatch_expiry_worker.cancel()
+        for t in [dispatcher, sla_worker, recon_worker, incentives_worker, dispatch_expiry_worker]:
             try:
                 await t
             except asyncio.CancelledError:
