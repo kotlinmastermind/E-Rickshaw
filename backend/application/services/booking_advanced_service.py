@@ -248,6 +248,9 @@ class BookingAdvancedService:
                 ret_time = ret_time.replace(tzinfo=timezone.utc)
 
             # Create paired return ride with reversed pickup and destination
+            if ride.service_area_id:
+                from backend.application.services.service_area_service import ServiceAreaService
+                await ServiceAreaService(self.db).lock_active_service_area_for_booking(ride.service_area_id)
             ret_ride = Ride(
                 customer_id=ride.customer_id,
                 vehicle_category_id=ride.vehicle_category_id,

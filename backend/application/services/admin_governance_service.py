@@ -835,6 +835,14 @@ class AdminGovernanceService:
                 f"Active geofence '{zone.name}' has invalid polygon data; operation blocked.",
             ) from exc
 
+    async def _get_geofence_for_update(self, zone_id: str) -> Optional[GeofenceZone]:
+        return (await self.db.execute(
+            select(GeofenceZone)
+            .where(GeofenceZone.id == zone_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )).scalar_one_or_none()
+
     async def _ensure_can_deactivate_service_area(self, zone: GeofenceZone) -> None:
         if str(zone.zone_type or "").strip().upper() != "SERVICE_AREA" or not zone.is_active:
             return
@@ -946,10 +954,10 @@ class AdminGovernanceService:
             raise HTTPException(422, "Every boundary vertex must contain numeric latitude and longitude values.")
         if any(not math.isfinite(p["lat"]) or not math.isfinite(p["lng"]) or not -90 <= p["lat"] <= 90 or not -180 <= p["lng"] <= 180 for p in points) or len({(p["lat"], p["lng"]) for p in points}) < 3:
             raise HTTPException(422, "Boundary vertices must be valid geographic coordinates with at least three distinct points.")
-        zone = await self.db.get(GeofenceZone, zone_id) if zone_id else None
+        zone = await self._get_geofence_for_update(zone_id) if zone_id else None
         if zone_id and not zone:
             raise HTTPException(404, "Service zone not found.")
-        if zone is not None and not values["is_active"]:
+        if zone is not None and (not values["is_active"] or values["zone_type"] != "SERVICE_AREA"):
             await self._ensure_can_deactivate_service_area(zone)
         overlaps = await self.geofence_preview(points, zone_id)
         if values["zone_type"] == "SERVICE_AREA" and values["is_active"]:
@@ -1001,7 +1009,7 @@ class AdminGovernanceService:
         return {"id": zone.id, "name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "is_active": zone.is_active, "overlap_warnings": overlaps}
 
     async def delete_geofence(self, admin_id: str, zone_id: str) -> Dict[str, Any]:
-        zone = await self.db.get(GeofenceZone, zone_id)
+        zone = await self._get_geofence_for_update(zone_id)
         if not zone:
             raise HTTPException(404, "Service zone not found.")
         await self._ensure_can_deactivate_service_area(zone)

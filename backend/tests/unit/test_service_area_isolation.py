@@ -447,3 +447,106 @@ async def test_admin_geofence_lifecycle_active_ride_protection_malformed_fail_cl
             await db_session.commit()
     finally:
         app.dependency_overrides.pop(get_current_admin, None)
+
+
+@pytest.mark.asyncio
+async def test_service_area_booking_lock_and_admin_for_update_protection(db_session, customer_user):
+    """Verify PostgreSQL lock SQL clauses (FOR SHARE / FOR UPDATE) and PooledTrip/reclassification guards."""
+    import json
+    import uuid
+    from fastapi import HTTPException
+    from sqlalchemy.dialects import postgresql
+    from backend.application.services.admin_governance_service import AdminGovernanceService
+    from backend.application.services.service_area_service import ServiceAreaService
+    from backend.domain.models import PooledTrip, VehicleCategory
+
+    delhi_area = (await db_session.execute(
+        select(GeofenceZone).where(
+            GeofenceZone.city_code == "DELHI_NCR",
+            GeofenceZone.zone_type == "SERVICE_AREA",
+        )
+    )).scalars().first()
+    assert delhi_area is not None
+
+    # 1. Verify SQL statements use PostgreSQL FOR SHARE (booking) and FOR UPDATE (admin)
+    executed_sql: list[str] = []
+    pg_dialect = postgresql.dialect()
+    orig_execute = db_session.execute
+
+    async def _recording_execute(stmt, *args, **kwargs):
+        if hasattr(stmt, "compile"):
+            executed_sql.append(str(stmt.compile(dialect=pg_dialect)))
+        return await orig_execute(stmt, *args, **kwargs)
+
+    db_session.execute = _recording_execute
+    try:
+        sas = ServiceAreaService(db_session)
+        resolved = await sas.resolve_route(
+            pickup_lat=28.6315,
+            pickup_lng=77.2167,
+            destination_lat=28.6129,
+            destination_lng=77.2295,
+            lock_for_booking=True,
+        )
+        assert resolved.id == delhi_area.id
+        assert any("FOR SHARE" in sql for sql in executed_sql)
+    finally:
+        db_session.execute = orig_execute
+
+    # 2. Verify active PooledTrip blocks BOTH deactivation and zone_type reclassification via _get_geofence_for_update
+    admin_user = User(
+        id=str(uuid.uuid4()),
+        phone_number="+919900001388",
+        email="pool_lock_admin@erickshaw.in",
+        full_name="Pool Lock Admin",
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    cat = (await db_session.execute(select(VehicleCategory))).scalars().first()
+    db_session.add(admin_user)
+    await db_session.flush()
+
+    active_pool = PooledTrip(
+        id=str(uuid.uuid4()),
+        service_area_id=delhi_area.id,
+        vehicle_category_id=cat.id,
+        status="OPEN",
+        max_seats=4,
+        reserved_seats=1,
+    )
+    db_session.add(active_pool)
+    await db_session.commit()
+
+    executed_sql.clear()
+    db_session.execute = _recording_execute
+    try:
+        gov = AdminGovernanceService(db_session)
+        with pytest.raises(HTTPException) as reclassify_exc:
+            await gov.save_geofence(
+                admin_user.id,
+                delhi_area.id,
+                {
+                    "name": delhi_area.name,
+                    "zone_type": "RESTRICTED",
+                    "city_code": "DELHI_NCR",
+                    "coordinates": json.loads(delhi_area.coordinates_json),
+                    "surge_multiplier": 1.0,
+                    "is_active": True,
+                },
+            )
+        assert reclassify_exc.value.status_code == 409
+        assert any("FOR UPDATE" in sql for sql in executed_sql)
+    finally:
+        db_session.execute = orig_execute
+
+    # 3. Lock helper fails closed (409) when zone has been deactivated
+    active_pool.status = "COMPLETED"
+    delhi_area.is_active = False
+    await db_session.commit()
+    with pytest.raises(HTTPException) as inactive_exc:
+        await ServiceAreaService(db_session).lock_active_service_area_for_booking(delhi_area.id)
+    assert inactive_exc.value.status_code == 409
+
+    delhi_area.is_active = True
+    await db_session.commit()
