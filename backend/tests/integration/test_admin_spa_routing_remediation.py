@@ -97,6 +97,19 @@ async def test_admin_console_does_not_advertise_unverified_live_state():
     assert "scheduleAdminRideSnapshotRefresh();" in html
     assert "_nativeFetch('/api/v1/admin/live-feed'" in html
     assert "STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];" in html
+    assert "ride.current_offer" in html
+    assert "Dispatch: ${dispatchState}" in html
+
+    admin_routes_path = os.path.join(os.path.dirname(STATIC_ADMIN_DIR), "api", "routes", "admin.py")
+    with open(admin_routes_path, "r", encoding="utf-8") as source:
+        admin_routes = source.read()
+    assert '"dispatch_status": "OFFERED" if offer_is_live' in admin_routes
+    assert '"current_offer": current_offer' in admin_routes
+
+    governance_path = os.path.join(os.path.dirname(STATIC_ADMIN_DIR), "application", "services", "admin_governance_service.py")
+    with open(governance_path, "r", encoding="utf-8") as source:
+        governance = source.read()
+    assert '"offer_history"' in governance
 
     # Transient Admin WebSocket failures keep polling alive and retry indefinitely
     # with capped exponential backoff; only an authorization close prompts login.
