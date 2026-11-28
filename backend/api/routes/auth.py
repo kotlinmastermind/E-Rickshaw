@@ -363,9 +363,8 @@ async def driver_signup(payload: DriverSignupPayload, request: Request, db: Asyn
         full_name=payload.full_name,
         password=payload.password,
         username=payload.username,
+        license_number=payload.license_number,
         vehicle_type=payload.vehicle_type,
-        vehicle_name=payload.vehicle_name,
-        vehicle_no=payload.vehicle_no,
         ip_address=ip,
         user_agent=ua
     )
