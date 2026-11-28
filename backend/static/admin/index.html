@@ -4052,7 +4052,20 @@
         let _adminWsConnecting = false;
         let _adminWsReconnectTimer = null;
         let _adminWsReconnectAttempts = 0;
-        const _adminWsMaxReconnectAttempts = 3;
+        const _adminWsReconnectMaxDelayMs = 30000;
+
+        function scheduleAdminWebSocketReconnect(reason) {
+            if (!STATE.adminToken || _adminWsReconnectTimer) return;
+            const exponent = Math.min(_adminWsReconnectAttempts, 4);
+            const retryDelayMs = Math.min(2000 * (2 ** exponent), _adminWsReconnectMaxDelayMs);
+            _adminWsReconnectAttempts += 1;
+            console.warn(`Admin WebSocket reconnect scheduled in ${retryDelayMs}ms (${reason || 'connection interrupted'}).`);
+            _adminWsReconnectTimer = setTimeout(() => {
+                _adminWsReconnectTimer = null;
+                initWebSocket();
+            }, retryDelayMs);
+        }
+
         async function initWebSocket() {
             if (!STATE.adminToken || _adminWsConnecting) return;
             if (STATE.ws && (STATE.ws.readyState === WebSocket.CONNECTING || STATE.ws.readyState === WebSocket.OPEN)) return;
@@ -4071,13 +4084,17 @@
                     if (ticketRes.status === 401 || ticketRes.status === 403) {
                         openAdminLoginModal();
                     } else {
-                        console.warn('Admin WebSocket ticket unavailable; polling remains active.');
+                        console.warn('Admin WebSocket ticket unavailable; authenticated polling remains active.');
+                        scheduleAdminWebSocketReconnect(`ticket HTTP ${ticketRes.status}`);
                     }
                     return;
                 }
 
                 const ticketData = await ticketRes.json();
-                if (!ticketData.ticket || !STATE.adminToken) return;
+                if (!ticketData.ticket || !STATE.adminToken) {
+                    scheduleAdminWebSocketReconnect('ticket response missing a usable ticket');
+                    return;
+                }
 
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${protocol}//${window.location.host}/api/v1/ws/admin/telemetry?ticket=${encodeURIComponent(ticketData.ticket)}`;
@@ -4086,9 +4103,9 @@
 
                 socket.onopen = () => {
                     if (STATE.ws !== socket) return;
-                    // Reset the retry budget only after a successful authenticated handshake.
+                    // Reset the backoff only after a successful authenticated handshake.
                     _adminWsReconnectAttempts = 0;
-                    document.getElementById('connection-label').innerText = 'LIVE WS (SUPABASE AWS)';
+                    document.getElementById('connection-label').innerText = 'LIVE WS';
                     document.getElementById('connection-status-pill').className = 'flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-dim border border-emerald-glow/30 text-xs text-emerald-glow font-mono';
                 };
 
@@ -4101,35 +4118,25 @@
                 };
 
                 socket.onclose = (event) => {
-                    if (STATE.ws === socket) STATE.ws = null;
-                    // A server-side rejection before WebSocket upgrade is exposed by browsers
-                    // as close code 1006 (the HTTP 403 response is not available to JS).
+                    const isCurrentSocket = STATE.ws === socket;
+                    if (isCurrentSocket) STATE.ws = null;
+                    if (!isCurrentSocket || !STATE.adminToken) return;
+
+                    // Policy close indicates an authorization/session problem. Transient
+                    // network/server closes must not force a valid Admin to sign in again.
                     if (event.code === 1008) {
-                        _adminWsReconnectAttempts = _adminWsMaxReconnectAttempts;
                         openAdminLoginModal();
                         return;
                     }
-                    if (!STATE.adminToken || _adminWsReconnectTimer) return;
-
-                    _adminWsReconnectAttempts += 1;
-                    if (_adminWsReconnectAttempts >= _adminWsMaxReconnectAttempts) {
-                        console.warn('Admin WebSocket could not authenticate/connect after bounded retries; stopping reconnects.');
-                        openAdminLoginModal();
-                        return;
-                    }
-
-                    const retryDelayMs = 5000 * _adminWsReconnectAttempts;
-                    _adminWsReconnectTimer = setTimeout(() => {
-                        _adminWsReconnectTimer = null;
-                        initWebSocket();
-                    }, retryDelayMs);
+                    scheduleAdminWebSocketReconnect(`socket closed (${event.code})`);
                 };
 
                 socket.onerror = () => {
-                    // Authenticated HTTP polling remains the fallback.
+                    // onclose schedules a retry; authenticated HTTP polling remains active.
                 };
             } catch (e) {
                 console.warn('Admin WebSocket connection unavailable; polling remains active.', e);
+                scheduleAdminWebSocketReconnect('connection or ticket request failed');
             } finally {
                 _adminWsConnecting = false;
             }
