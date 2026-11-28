@@ -576,6 +576,25 @@ object DriverRepository {
         _currentRideId.value = ""
     }
 
+    fun updateActiveRideStatus(rideId: String, status: String) {
+        val normalizedStatus = status.trim().uppercase()
+        if (rideId.isBlank() || normalizedStatus.isBlank()) return
+        val currentRide = _activeRide.value
+        if (currentRide == null || currentRide.id != rideId) {
+            // The WebSocket snapshot may arrive before the REST active-ride fetch.
+            scope.launch { fetchActiveRide() }
+            return
+        }
+        if (normalizedStatus in setOf("COMPLETED", "CANCELLED", "EXPIRED")) {
+            clearActiveRide()
+            return
+        }
+        if (normalizedStatus in setOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED")) {
+            _activeRide.value = currentRide.copy(status = normalizedStatus)
+            _currentRideId.value = rideId
+        }
+    }
+
     suspend fun fetchUnreadNotificationsCount(): Result<Int> {
         return try {
             val res = DriverNetworkClient.apiService.getNotificationsInbox(unreadOnly = true, limit = 1)
