@@ -422,5 +422,5 @@ interface DriverApiService {
     @GET("api/v1/payments/ride/{ride_id}/status")
     suspend fun getRidePaymentStatus(
         @Path("ride_id") rideId: String
-    ): Response<Map<String, Any>>
+    ): Response<RidePaymentStatusDto>
 }
