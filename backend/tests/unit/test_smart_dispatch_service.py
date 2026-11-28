@@ -3,6 +3,7 @@ Unit and lifecycle tests for SmartDispatchService.
 """
 import uuid
 import pytest
+from fastapi import HTTPException
 from datetime import datetime, timezone
 from sqlalchemy import select
 
@@ -302,3 +303,171 @@ async def test_smart_dispatch_rejection_and_exhaustion(db_session):
 
     r_expired = (await db_session.execute(select(Ride).where(Ride.id == ride.id))).scalar_one()
     assert r_expired.status == "EXPIRED"
+
+
+async def _create_dispatch_fixture(db_session):
+    """Build a real service-area ride and one fully eligible driver without dispatching."""
+    suffix = uuid.uuid4().hex[:6]
+    service_area = (
+        await db_session.execute(
+            select(GeofenceZone).where(
+                GeofenceZone.city_code == "DELHI_NCR",
+                GeofenceZone.zone_type == "SERVICE_AREA",
+            )
+        )
+    ).scalars().one()
+
+    category = VehicleCategory(
+        id=f"dispatch_cat_{suffix}",
+        code=f"DISPATCH_{suffix}",
+        name="Dispatch Test E-Rickshaw",
+        is_active=True,
+    )
+    fare_rule = FareRule(
+        id=f"dispatch_fare_{suffix}",
+        category_id=category.id,
+        base_fare_cents=3000,
+        per_km_cents=1000,
+        per_minute_cents=200,
+        minimum_fare_cents=3000,
+        is_active=True,
+    )
+    driver_user = User(
+        phone_number=f"+91981{suffix}11",
+        full_name="Dispatch Eligibility Driver",
+        role="driver",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add_all([category, fare_rule, driver_user])
+    await db_session.flush()
+
+    driver = DriverProfile(
+        id=f"dispatch_driver_{suffix}",
+        user_id=driver_user.id,
+        license_number=f"DL-DISPATCH-{suffix}",
+        approval_status="APPROVED",
+    )
+    vehicle = Vehicle(
+        id=f"dispatch_vehicle_{suffix}",
+        category_id=category.id,
+        make="Test",
+        model="E-Rickshaw",
+        year=2025,
+        license_plate=f"DL-DSP-{suffix}",
+        is_active=True,
+    )
+    availability = DriverAvailability(
+        driver_id=driver.id,
+        is_online=True,
+        is_busy=False,
+    )
+    db_session.add_all([driver, vehicle, availability])
+    await db_session.flush()
+    db_session.add_all([
+        DriverServiceAreaAssignment(
+            driver_id=driver.id,
+            service_area_id=service_area.id,
+            is_active=True,
+        ),
+        DriverVehicleAssignment(
+            driver_id=driver.id,
+            vehicle_id=vehicle.id,
+            is_active=True,
+        ),
+    ])
+
+    customer_user = User(
+        phone_number=f"+91981{suffix}12",
+        full_name="Dispatch Test Customer",
+        role="customer",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(customer_user)
+    await db_session.flush()
+    customer = CustomerProfile(user_id=customer_user.id)
+    db_session.add(customer)
+    await db_session.flush()
+
+    ride = Ride(
+        service_area_id=service_area.id,
+        customer_id=customer.id,
+        vehicle_category_id=category.id,
+        fare_rule_id=fare_rule.id,
+        start_otp="123456",
+        status="REQUESTED",
+        pickup_address="Connaught Place, New Delhi",
+        pickup_latitude=28.6150,
+        pickup_longitude=77.2100,
+        destination_address="India Gate, New Delhi",
+        destination_latitude=28.6129,
+        destination_longitude=77.2295,
+        estimated_distance_km=3.5,
+        estimated_duration_minutes=12.0,
+        estimated_fare_cents=15000,
+        requested_at=datetime.now(timezone.utc),
+    )
+    db_session.add(ride)
+    await db_session.commit()
+
+    await LiveLocationService(db=db_session).ingest_driver_location(
+        driver_id=driver.id,
+        latitude=28.6250,
+        longitude=77.2200,
+        is_online=True,
+        is_busy=False,
+    )
+    return driver_user, driver, vehicle, availability, ride
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eligibility_change", ["approval", "vehicle", "availability"])
+async def test_dispatch_offer_acceptance_revalidates_current_driver_eligibility(
+    db_session, eligibility_change
+):
+    driver_user, driver, vehicle, availability, ride = await _create_dispatch_fixture(db_session)
+    dispatch = SmartDispatchService(db_session)
+    offer = await dispatch.search_and_dispatch(ride.id, max_rings=2)
+
+    assert offer is not None
+    assert offer.driver_id == driver.id
+    assert offer.status == "OFFERED"
+
+    if eligibility_change == "approval":
+        driver.approval_status = "PENDING"
+    elif eligibility_change == "vehicle":
+        vehicle.is_active = False
+    else:
+        availability.is_online = False
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await dispatch.accept_offer(driver_user_id=driver_user.id, ride_id=ride.id)
+
+    assert exc_info.value.status_code in (403, 409)
+    await db_session.refresh(ride)
+    await db_session.refresh(offer)
+    assert ride.status == "REQUESTED"
+    assert ride.assigned_driver_id is None
+    assert offer.status == "OFFERED"
+
+
+@pytest.mark.asyncio
+async def test_smart_dispatch_excludes_inactive_driver_accounts(db_session):
+    driver_user, driver, _, _, ride = await _create_dispatch_fixture(db_session)
+    driver_user.is_active = False
+    await db_session.commit()
+
+    dispatch = SmartDispatchService(db_session)
+    offer = await dispatch.search_and_dispatch(ride.id, max_rings=2)
+
+    assert offer is None
+    await db_session.refresh(ride)
+    assert ride.status == "EXPIRED"
+    assignments = (
+        await db_session.execute(
+            select(RideAssignment).where(RideAssignment.ride_id == ride.id)
+        )
+    ).scalars().all()
+    assert assignments == []
