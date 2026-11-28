@@ -62,8 +62,19 @@ async def update_dispatch_preferences(payload: DispatchPreferencesPayload, user:
     return await DriverTripOperationsService(db).update_preferences(user.id, payload.model_dump(exclude_unset=True))
 
 @router.post("/dispatch/offers/{ride_id}/reject")
-async def reject_dispatch_offer(ride_id: str, payload: RejectOfferPayload, user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
-    return await SmartDispatchService(db).reject_offer(driver_user_id=user.id, ride_id=ride_id, reason=payload.reason)
+async def reject_dispatch_offer(
+    ride_id: str,
+    payload: RejectOfferPayload,
+    assignment_id: Optional[str] = Query(None),
+    user: User = Depends(get_current_driver),
+    db: AsyncSession = Depends(get_db),
+):
+    return await SmartDispatchService(db).reject_offer(
+        driver_user_id=user.id,
+        ride_id=ride_id,
+        reason=payload.reason,
+        assignment_id=assignment_id,
+    )
 
 class AvailabilityPayload(BaseModel):
     is_online: bool
