@@ -41,6 +41,7 @@ class DriverService:
         avail_res = await self.db.execute(avail_stmt)
         if not avail_res.scalar_one_or_none():
             self.db.add(DriverAvailability(driver_id=driver.id, is_online=False, is_busy=False))
+        await self.db.flush()
         return driver
 
     async def upload_document(self, user_id: str, document_type: str, file: UploadFile) -> Dict[str, Any]:
