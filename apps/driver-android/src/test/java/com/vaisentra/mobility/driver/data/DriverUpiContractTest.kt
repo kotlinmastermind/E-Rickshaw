@@ -55,6 +55,27 @@ class DriverUpiContractTest {
     }
 
     @Test
+    fun payoutHistory_deserializesFailureAndRetryMetadata() {
+        val raw = """
+            {
+              "id": "pay_002",
+              "amount_cents": 12500,
+              "status": "FAILED",
+              "execution_mode": "RAZORPAYX",
+              "bank_account_mask": "UPI ••••@bank",
+              "failure_reason": "Beneficiary bank returned transfer",
+              "retry_count": 2,
+              "failed_at": "2026-11-28T10:30:00Z"
+            }
+        """.trimIndent()
+        val item = gson.fromJson(raw, PayoutHistoryItemDto::class.java)
+        assertEquals("FAILED", item.status)
+        assertEquals(2, item.retryCount)
+        assertEquals("Beneficiary bank returned transfer", item.failureReason)
+        assertEquals("2026-11-28T10:30:00Z", item.failedAt)
+    }
+
+    @Test
     fun payoutHistory_deserializesAuthoritativeBackendStates() {
         val raw = """
             {
