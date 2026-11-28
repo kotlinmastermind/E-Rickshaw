@@ -297,7 +297,8 @@ async def test_driver_approval_workflow_gated_by_documents(db_session):
         phone_number=f"+9195{str(unique_suffix)[-8:]}",
         email=f"flow_driver_{unique_suffix}@erickshaw.in",
         role="driver",
-        is_active=True
+        is_active=True,
+        is_verified=True
     )
     db_session.add(driver_user)
     await db_session.flush()
