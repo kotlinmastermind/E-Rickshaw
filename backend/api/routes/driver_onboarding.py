@@ -422,7 +422,7 @@ class DriverServiceAreaRequestPayload(BaseModel):
     state_name: str = Field(..., min_length=2, max_length=80)
     district_name: str = Field(..., min_length=2, max_length=100)
     locality_name: str = Field(..., min_length=2, max_length=120)
-    postal_code: Optional[str] = Field(None, pattern=r"^\\d{6}$")
+    postal_code: Optional[str] = Field(None, pattern=r"^\d{6}$")
     latitude: float = Field(..., ge=-90, le=90)
     longitude: float = Field(..., ge=-180, le=180)
 
