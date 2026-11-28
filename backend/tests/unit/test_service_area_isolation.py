@@ -130,7 +130,7 @@ async def test_driver_can_submit_one_pending_locality_request(db_session):
 @pytest.mark.asyncio
 async def test_admin_approval_assigns_driver_only_inside_configured_area(db_session):
     import json
-    from backend.domain.models import DriverServiceAreaAssignment, VehicleCategory, FareRule
+    from backend.domain.models import DriverServiceAreaAssignment, VehicleCategory, FareRule, Vehicle, DriverVehicleAssignment
 
     driver_user = User(
         phone_number="+919900001236",
@@ -167,6 +167,17 @@ async def test_admin_approval_assigns_driver_only_inside_configured_area(db_sess
     category = VehicleCategory(code="AREA-TEST-CAT", name="Area Test Vehicle", is_active=True)
     db_session.add_all([driver, area, category])
     await db_session.flush()
+    vehicle = Vehicle(
+        category_id=category.id,
+        make="Test",
+        model="E-Rickshaw",
+        year=2025,
+        license_plate="AREA-TEST-002",
+        is_active=True,
+    )
+    db_session.add(vehicle)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=driver.id, vehicle_id=vehicle.id, is_active=True))
     db_session.add(FareRule(
         category_id=category.id,
         city_code="TEST_LOCALITY",
@@ -241,6 +252,17 @@ async def test_approved_driver_auto_joins_existing_area_when_tariff_is_ready(db_
     category = VehicleCategory(code="AUTO-JOIN-CAT", name="Auto Join Vehicle", is_active=True)
     db_session.add_all([driver, area, category])
     await db_session.flush()
+    vehicle = Vehicle(
+        category_id=category.id,
+        make="Test",
+        model="E-Rickshaw",
+        year=2025,
+        license_plate="AREA-TEST-003",
+        is_active=True,
+    )
+    db_session.add(vehicle)
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=driver.id, vehicle_id=vehicle.id, is_active=True))
     db_session.add(FareRule(
         category_id=category.id,
         city_code="AUTO_JOIN_CITY",
