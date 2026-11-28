@@ -263,6 +263,7 @@ class DriverEligibilityService:
             query = query.where(
                 Vehicle.category_id.is_not(None),
                 Vehicle.is_active.is_(True),
+                VehicleCategory.is_active.is_(True),
                 DriverVehicleAssignment.is_active.is_(True)
             )
 
