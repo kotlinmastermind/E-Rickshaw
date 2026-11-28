@@ -630,6 +630,7 @@ async def ride_tracking_websocket(
         return
 
     # Ride ownership & authorization validation
+    authorized_driver_id = None
     if role not in ("admin", "superadmin"):
         try:
             async with async_session_maker() as db:
@@ -655,6 +656,9 @@ async def ride_tracking_websocket(
 
                 is_customer = ride.customer_id in cust_ids or ride.customer_id == user_id
                 is_driver = bool(ride.assigned_driver_id and (ride.assigned_driver_id in driver_ids or ride.assigned_driver_id == user_id))
+
+                if is_driver:
+                    authorized_driver_id = ride.assigned_driver_id
 
                 if not (is_customer or is_driver):
                     logger.warning(
@@ -694,12 +698,73 @@ async def ride_tracking_websocket(
     except Exception as snap_err:
         logger.debug(f"Could not send initial snapshot for ride {ride_id}: {snap_err}")
 
+    # Revalidate long-lived subscriptions; the initial handshake is not a
+    # permanent authorization grant. A server-side timeout also checks idle sockets.
+    reauth_interval = max(5, int(getattr(settings, "RIDE_TRACKING_WS_REAUTH_SECONDS", 30)))
+    last_reauth_time = time.monotonic()
     try:
         while True:
-            data = await websocket.receive_text()
+            try:
+                data = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=reauth_interval
+                )
+            except asyncio.TimeoutError:
+                data = None
+
+            now_monotonic = time.monotonic()
+            if data == "ping" or now_monotonic - last_reauth_time >= reauth_interval:
+                is_authorized = await verify_inflight_driver_authorization(
+                    user_id,
+                    session_id,
+                    role,
+                    authorized_driver_id or "",
+                    raw_token
+                )
+
+                # A driver must remain assigned to this exact ride while subscribed.
+                if is_authorized and role == "driver":
+                    try:
+                        async with async_session_maker() as db:
+                            current_ride = await db.get(Ride, ride_id)
+                            is_authorized = bool(
+                                current_ride
+                                and authorized_driver_id
+                                and current_ride.assigned_driver_id == authorized_driver_id
+                            )
+                    except Exception:
+                        logger.exception(
+                            "Ride tracking re-authorization lookup failed for ride %s.",
+                            ride_id
+                        )
+                        is_authorized = False
+
+                if not is_authorized:
+                    logger.warning(
+                        "Closing ride tracking WebSocket after authorization changed: "
+                        "ride_id=%s user_id=%s role=%s",
+                        ride_id,
+                        user_id,
+                        role
+                    )
+                    try:
+                        await websocket.send_json({
+                            "event_type": "SESSION_REVOKED",
+                            "ride_id": ride_id,
+                            "reason": "RIDE_TRACKING_AUTHORIZATION_CHANGED"
+                        })
+                    except Exception:
+                        pass
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    break
+
+                last_reauth_time = now_monotonic
+
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
+        pass
+    finally:
         ws_manager.disconnect_ride(ride_id, websocket)
 
 
