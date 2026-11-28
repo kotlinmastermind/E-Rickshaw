@@ -160,6 +160,17 @@ async def test_ride_cannot_have_multiple_accepted_drivers(db_session):
     d_prof2 = DriverProfile(id=str(uuid.uuid4()), user_id=d_user2.id, license_number=f"DL-{suffix}-2", approval_status="APPROVED")
     db_session.add_all([d_prof1, d_prof2])
     await db_session.flush()
+    # Acceptance now revalidates the live operational vehicle and availability.
+    # Give the first driver the same complete eligibility state as a real candidate.
+    d_avail1 = DriverAvailability(driver_id=d_prof1.id, is_online=True, is_busy=False)
+    vehicle1 = Vehicle(
+        id=str(uuid.uuid4()), category_id=cat.id, make="Test", model="E-Rickshaw",
+        year=2025, license_plate=f"DL-MULTI-{suffix}", is_active=True,
+    )
+    db_session.add_all([d_avail1, vehicle1])
+    await db_session.flush()
+    db_session.add(DriverVehicleAssignment(driver_id=d_prof1.id, vehicle_id=vehicle1.id, is_active=True))
+    await db_session.flush()
     db_session.add_all([
         DriverServiceAreaAssignment(driver_id=d_prof1.id, service_area_id=service_area.id),
         DriverServiceAreaAssignment(driver_id=d_prof2.id, service_area_id=service_area.id),
