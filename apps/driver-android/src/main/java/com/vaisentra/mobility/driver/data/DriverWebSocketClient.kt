@@ -20,6 +20,7 @@ object DriverWebSocketClient {
     private const val TAG = "DriverWebSocket"
     private var dispatchWebSocket: WebSocket? = null
     private var rideTrackingWebSocket: WebSocket? = null
+    private var activeTrackingRideId: String? = null
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -146,7 +147,9 @@ object DriverWebSocketClient {
             Log.w(TAG, "Cannot connect Ride Tracking WebSocket: authToken is null/blank.")
             return
         }
+        if (rideTrackingWebSocket != null && activeTrackingRideId == rideId) return
         disconnectRideTracking()
+        activeTrackingRideId = rideId
 
         val targetUrl = "${buildWsBaseUrl()}/api/v1/ws/rides/$rideId/tracking"
         val request = Request.Builder()
@@ -205,12 +208,18 @@ object DriverWebSocketClient {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                rideTrackingWebSocket = null
+                if (activeTrackingRideId == rideId) {
+                    rideTrackingWebSocket = null
+                    activeTrackingRideId = null
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "Ride tracking WebSocket failure: ${t.message}")
-                rideTrackingWebSocket = null
+                if (activeTrackingRideId == rideId) {
+                    rideTrackingWebSocket = null
+                    activeTrackingRideId = null
+                }
             }
         })
     }
@@ -220,6 +229,7 @@ object DriverWebSocketClient {
             rideTrackingWebSocket?.close(1000, "Trip concluded")
         } catch (_: Exception) {}
         rideTrackingWebSocket = null
+        activeTrackingRideId = null
     }
 
     fun disconnectAll() {
