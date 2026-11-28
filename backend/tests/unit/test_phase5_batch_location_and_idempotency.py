@@ -161,6 +161,14 @@ async def test_ride_request_idempotency_key_replay():
         r_bad3 = await client.post("/api/v1/rides/request", json=bad_p3, headers=headers)
         assert r_bad3.status_code == 404
 
+        # Estimate-backed bookings must include both route endpoints so the backend
+        # can bind the submitted route to the persisted fare snapshot.
+        bad_route = dict(payload)
+        bad_route.pop("destination_longitude")
+        r_bad_route = await client.post("/api/v1/rides/request", json=bad_route, headers=headers)
+        assert r_bad_route.status_code == 400
+        assert "coordinates are required" in r_bad_route.text
+
         # First request: should create ride
         resp1 = await client.post("/api/v1/rides/request", json=payload, headers=headers)
         assert resp1.status_code == 200, resp1.text
@@ -179,6 +187,40 @@ async def test_ride_request_idempotency_key_replay():
         changed_payload = dict(payload, destination_address="Railway Station Gate 2")
         conflict = await client.post("/api/v1/rides/request", json=changed_payload, headers=headers)
         assert conflict.status_code == 409
+
+        # Clear the first active ride so this customer can exercise the scheduled path.
+        cancel_response = await client.post(
+            f"/api/v1/rides/{ride_id_1}/cancel",
+            json={"reason": "Test scheduled booking"},
+            headers=headers,
+        )
+        assert cancel_response.status_code == 200, cancel_response.text
+
+        # Scheduled booking uses the same authoritative estimate and route binding.
+        estimate_response = await client.post("/api/v1/fares/estimate", json={
+            "category_id": cat.id,
+            "pickup_latitude": 28.6328,
+            "pickup_longitude": 77.2195,
+            "destination_latitude": 28.6129,
+            "destination_longitude": 77.2295,
+        })
+        assert estimate_response.status_code == 200, estimate_response.text
+        estimate_id = estimate_response.json()["estimate_id"]
+        scheduled_response = await client.post("/api/v1/rides/schedule", json={
+            "estimate_id": estimate_id,
+            "category_id": cat.id,
+            "pickup_address": "Connaught Place Inner Circle",
+            "destination_address": "India Gate C-Hexagon",
+            "pickup_latitude": 28.6328,
+            "pickup_longitude": 77.2195,
+            "destination_latitude": 28.6129,
+            "destination_longitude": 77.2295,
+            "scheduled_pickup_time": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        }, headers=headers)
+        assert scheduled_response.status_code == 200, scheduled_response.text
+        scheduled_data = scheduled_response.json()
+        assert scheduled_data["ride_id"]
+        assert scheduled_data["ride_id"] != ride_id_1
 
     # Verify only ONE ride was created in database
     async with async_session_maker() as session:

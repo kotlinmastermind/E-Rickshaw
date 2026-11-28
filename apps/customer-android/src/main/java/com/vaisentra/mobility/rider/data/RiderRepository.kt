@@ -952,21 +952,61 @@ object RiderRepository {
                 )
             }
 
+            if (_categories.value.isEmpty()) {
+                val categoriesResult = fetchVehicleCategories()
+                if (categoriesResult.isFailure) {
+                    return Result.failure(
+                        categoriesResult.exceptionOrNull()
+                            ?: IllegalStateException("Unable to load active vehicle categories.")
+                    )
+                }
+            }
+            val selectedCategory = _categories.value.firstOrNull {
+                it.id == draft.selectedCategoryCode || it.code == draft.selectedCategoryCode
+            } ?: return Result.failure(
+                IllegalStateException("Select an active vehicle category before scheduling a ride.")
+            )
+
+            val estimateResponse = NetworkClient.apiService.getFareEstimate(
+                FareEstimateRequest(
+                    categoryId = selectedCategory.id,
+                    pickupLatitude = pLat,
+                    pickupLongitude = pLng,
+                    destinationLatitude = dLat,
+                    destinationLongitude = dLng
+                )
+            )
+            val estimate = if (estimateResponse.isSuccessful) estimateResponse.body() else null
+            if (estimate == null || estimate.estimateId.isBlank()) {
+                val error = parseApiErrorMessage(
+                    estimateResponse.errorBody()?.string(),
+                    "A valid fare estimate is unavailable for this route."
+                )
+                return Result.failure(IllegalStateException(error))
+            }
+
             val res = NetworkClient.apiService.scheduleRide(
                 mapOf(
+                    "estimate_id" to estimate.estimateId,
+                    "category_id" to selectedCategory.id,
                     "pickup_address" to pickup,
                     "destination_address" to dest,
                     "pickup_latitude" to pLat,
                     "pickup_longitude" to pLng,
                     "destination_latitude" to dLat,
                     "destination_longitude" to dLng,
+                    "payment_method" to draft.paymentMethod,
                     "scheduled_pickup_time" to pickupTimeIso
                 )
             )
             if (res.isSuccessful) {
                 Result.success(true)
             } else {
-                Result.failure(IllegalStateException("Schedule ride failed: HTTP ${res.code()}"))
+                val error = parseApiErrorMessage(
+                    res.errorBody()?.string(),
+                    "Schedule ride failed: HTTP ${res.code()}"
+                )
+                Result.failure(IllegalStateException(error))
             }
         } catch (e: Exception) {
             Result.failure(e)
