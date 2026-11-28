@@ -215,24 +215,35 @@ async def trigger_dispatch_search(
 @router.post("/offer/{ride_id}/accept")
 async def accept_dispatch_offer(
     ride_id: str,
+    assignment_id: Optional[str] = Query(None),
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
 ):
-    """Driver accepts an active dispatch offer atomically."""
+    """Driver accepts the exact active dispatch assignment atomically."""
     svc = SmartDispatchService(db)
-    return await svc.accept_offer(driver_user_id=user.id, ride_id=ride_id)
+    return await svc.accept_offer(
+        driver_user_id=user.id,
+        ride_id=ride_id,
+        assignment_id=assignment_id,
+    )
 
 
 @router.post("/offer/{ride_id}/reject")
 async def reject_dispatch_offer(
     ride_id: str,
     payload: OfferRejectionRequest,
+    assignment_id: Optional[str] = Query(None),
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
 ):
-    """Driver declines an offer; triggers immediate cascading dispatch to next candidate."""
+    """Driver declines the exact active assignment and cascades to the next candidate."""
     svc = SmartDispatchService(db)
-    return await svc.reject_offer(driver_user_id=user.id, ride_id=ride_id, reason=payload.reason)
+    return await svc.reject_offer(
+        driver_user_id=user.id,
+        ride_id=ride_id,
+        reason=payload.reason,
+        assignment_id=assignment_id,
+    )
 
 
 @router.get("/status/{ride_id}")
