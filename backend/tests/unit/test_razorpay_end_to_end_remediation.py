@@ -1096,6 +1096,20 @@ async def test_notification_webhooks_diagnostic_sync_concurrent_refunds_and_dup_
         # a concurrent session rollback can therefore roll back another session's
         # transaction. True concurrency is covered by the PostgreSQL integration test.
         from backend.infrastructure.database.session import async_session_maker
+        concurrent_pay = Payment(
+            user_id=user.id,
+            amount_cents=35000,
+            currency="INR",
+            purpose="RIDE_FARE",
+            status="CAPTURED",
+            payment_method="RAZORPAY",
+            provider_name="RAZORPAY",
+            provider_order_id=f"order_sync_refund_{uuid.uuid4().hex[:10]}",
+            provider_payment_id=f"pay_sync_refund_{uuid.uuid4().hex[:10]}",
+            idempotency_key=f"idem_sync_refund_{uuid.uuid4().hex[:10]}",
+        )
+        db_session.add(concurrent_pay)
+        await db_session.commit()
         ref_count = 0
 
         async def _processed_refund(**kwargs):
