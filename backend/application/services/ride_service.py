@@ -265,6 +265,7 @@ class RideService:
             pickup_lng=estimate.pickup_longitude,
             destination_lat=estimate.destination_latitude,
             destination_lng=estimate.destination_longitude,
+            lock_for_booking=True,
         )
         for stop_data in stops or []:
             try:

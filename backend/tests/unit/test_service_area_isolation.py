@@ -297,3 +297,256 @@ async def test_approved_driver_auto_joins_existing_area_when_tariff_is_ready(db_
         )
     )).scalar_one_or_none()
     assert assignment is not None
+
+
+@pytest.mark.asyncio
+async def test_admin_geofence_lifecycle_active_ride_protection_malformed_fail_closed_and_auth(
+    db_session, client, customer_user, customer_token
+):
+    import json
+    import uuid
+    from httpx import ASGITransport, AsyncClient
+    from backend.main import app
+    from backend.api.deps import get_current_admin
+    from backend.domain.models import (
+        CustomerProfile, FareRule, GeofenceZoneAudit, Ride, VehicleCategory,
+    )
+
+    unauth_del = await client.delete("/api/v1/admin/geofences/nonexistent-id")
+    assert unauth_del.status_code == 401
+
+    cust_del = await client.delete(
+        "/api/v1/admin/geofences/nonexistent-id",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert cust_del.status_code == 403
+
+    admin_user = User(
+        id=str(uuid.uuid4()),
+        phone_number="+919900001299",
+        email="area_admin_lifecycle@erickshaw.in",
+        full_name="Area Lifecycle Admin",
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(admin_user)
+    await db_session.flush()
+
+    delhi_area = (await db_session.execute(
+        select(GeofenceZone).where(
+            GeofenceZone.city_code == "DELHI_NCR",
+            GeofenceZone.zone_type == "SERVICE_AREA",
+        )
+    )).scalars().first()
+    cust_profile = (await db_session.execute(
+        select(CustomerProfile).where(CustomerProfile.user_id == customer_user.id)
+    )).scalar_one()
+    cat = (await db_session.execute(select(VehicleCategory))).scalars().first()
+    rule = (await db_session.execute(select(FareRule).where(FareRule.city_code == "DELHI_NCR"))).scalars().first()
+
+    active_ride = Ride(
+        id=str(uuid.uuid4()),
+        customer_id=cust_profile.id,
+        vehicle_category_id=cat.id,
+        fare_rule_id=rule.id,
+        service_area_id=delhi_area.id,
+        status="REQUESTED",
+        pickup_address="Connaught Place",
+        pickup_latitude=28.6315,
+        pickup_longitude=77.2167,
+        destination_address="India Gate",
+        destination_latitude=28.6129,
+        destination_longitude=77.2295,
+        start_otp="1234",
+        estimated_distance_km=3.0,
+        estimated_duration_minutes=10.0,
+        estimated_fare_cents=5000,
+    )
+    db_session.add(active_ride)
+    await db_session.commit()
+
+    app.dependency_overrides[get_current_admin] = lambda: admin_user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            # 1. Both DELETE and PUT (is_active=False) must block deactivation while an active ride exists
+            del_blocked = await ac.delete(f"/api/v1/admin/geofences/{delhi_area.id}")
+            assert del_blocked.status_code == 409
+
+            put_blocked = await ac.put(
+                f"/api/v1/admin/geofences/{delhi_area.id}",
+                json={
+                    "name": delhi_area.name,
+                    "zone_type": "SERVICE_AREA",
+                    "city_code": "DELHI_NCR",
+                    "coordinates": json.loads(delhi_area.coordinates_json),
+                    "surge_multiplier": 1.0,
+                    "is_active": False,
+                },
+            )
+            assert put_blocked.status_code == 409
+
+            # 2. Complete the ride -> deactivation succeeds via DELETE and records audit
+            active_ride.status = "COMPLETED"
+            await db_session.commit()
+
+            del_ok = await ac.delete(f"/api/v1/admin/geofences/{delhi_area.id}")
+            assert del_ok.status_code == 200
+            assert del_ok.json()["is_active"] is False
+            assert del_ok.json()["status"] == "DEACTIVATED"
+
+            # 3. Reactivate via PUT and confirm consistent UPDATED state + audit entries
+            put_reactivate = await ac.put(
+                f"/api/v1/admin/geofences/{delhi_area.id}",
+                json={
+                    "name": delhi_area.name,
+                    "zone_type": "SERVICE_AREA",
+                    "city_code": "DELHI_NCR",
+                    "coordinates": json.loads(delhi_area.coordinates_json),
+                    "surge_multiplier": 1.0,
+                    "is_active": True,
+                },
+            )
+            assert put_reactivate.status_code == 200
+            assert put_reactivate.json()["is_active"] is True
+            assert put_reactivate.json()["status"] == "UPDATED"
+
+            audits = (await db_session.execute(
+                select(GeofenceZoneAudit).where(GeofenceZoneAudit.zone_id == delhi_area.id)
+            )).scalars().all()
+            actions = [a.action for a in audits]
+            assert "DEACTIVATED" in actions
+            assert "ACTIVATED" in actions
+
+            # 4. Malformed active polygon must fail closed (503) in listing and preview
+            corrupt = GeofenceZone(
+                name="Broken Active Zone",
+                zone_type="RESTRICTED",
+                coordinates_json="not-valid-json",
+                is_active=True,
+            )
+            db_session.add(corrupt)
+            await db_session.commit()
+
+            list_res = await ac.get("/api/v1/admin/geofences")
+            assert list_res.status_code == 503
+
+            preview_res = await ac.post(
+                "/api/v1/admin/geofences/preview",
+                json={
+                    "coordinates": [
+                        {"lat": 20.0, "lng": 75.0},
+                        {"lat": 20.1, "lng": 75.0},
+                        {"lat": 20.1, "lng": 75.1},
+                    ]
+                },
+            )
+            assert preview_res.status_code == 503
+
+            await db_session.delete(corrupt)
+            await db_session.commit()
+    finally:
+        app.dependency_overrides.pop(get_current_admin, None)
+
+
+@pytest.mark.asyncio
+async def test_service_area_booking_lock_and_admin_for_update_protection(db_session, customer_user):
+    """Verify PostgreSQL lock SQL clauses (FOR SHARE / FOR UPDATE) and PooledTrip/reclassification guards."""
+    import json
+    import uuid
+    from fastapi import HTTPException
+    from sqlalchemy.dialects import postgresql
+    from backend.application.services.admin_governance_service import AdminGovernanceService
+    from backend.application.services.service_area_service import ServiceAreaService
+    from backend.domain.models import PooledTrip, VehicleCategory
+
+    delhi_area = (await db_session.execute(
+        select(GeofenceZone).where(
+            GeofenceZone.city_code == "DELHI_NCR",
+            GeofenceZone.zone_type == "SERVICE_AREA",
+        )
+    )).scalars().first()
+    assert delhi_area is not None
+
+    # 1. Verify SQL statements use PostgreSQL FOR SHARE (booking) and FOR UPDATE (admin)
+    executed_sql: list[str] = []
+    pg_dialect = postgresql.dialect()
+    orig_execute = db_session.execute
+
+    async def _recording_execute(stmt, *args, **kwargs):
+        if hasattr(stmt, "compile"):
+            executed_sql.append(str(stmt.compile(dialect=pg_dialect)))
+        return await orig_execute(stmt, *args, **kwargs)
+
+    db_session.execute = _recording_execute
+    try:
+        sas = ServiceAreaService(db_session)
+        resolved = await sas.resolve_route(
+            pickup_lat=28.6315,
+            pickup_lng=77.2167,
+            destination_lat=28.6129,
+            destination_lng=77.2295,
+            lock_for_booking=True,
+        )
+        assert resolved.id == delhi_area.id
+        assert any("FOR SHARE" in sql for sql in executed_sql)
+    finally:
+        db_session.execute = orig_execute
+
+    # 2. Verify active PooledTrip blocks BOTH deactivation and zone_type reclassification via _get_geofence_for_update
+    admin_user = User(
+        id=str(uuid.uuid4()),
+        phone_number="+919900001388",
+        email="pool_lock_admin@erickshaw.in",
+        full_name="Pool Lock Admin",
+        role="admin",
+        is_active=True,
+        is_verified=True,
+    )
+    cat = (await db_session.execute(select(VehicleCategory))).scalars().first()
+    db_session.add(admin_user)
+    await db_session.flush()
+
+    active_pool = PooledTrip(
+        id=str(uuid.uuid4()),
+        service_area_id=delhi_area.id,
+        vehicle_category_id=cat.id,
+        status="OPEN",
+        max_seats=4,
+        reserved_seats=1,
+    )
+    db_session.add(active_pool)
+    await db_session.commit()
+
+    executed_sql.clear()
+    db_session.execute = _recording_execute
+    try:
+        gov = AdminGovernanceService(db_session)
+        with pytest.raises(HTTPException) as reclassify_exc:
+            await gov.save_geofence(
+                admin_user.id,
+                delhi_area.id,
+                {
+                    "name": delhi_area.name,
+                    "zone_type": "RESTRICTED",
+                    "city_code": "DELHI_NCR",
+                    "coordinates": json.loads(delhi_area.coordinates_json),
+                    "surge_multiplier": 1.0,
+                    "is_active": True,
+                },
+            )
+        assert reclassify_exc.value.status_code == 409
+        assert any("FOR UPDATE" in sql for sql in executed_sql)
+    finally:
+        db_session.execute = orig_execute
+
+    # 3. Lock helper fails closed (409) when zone has been deactivated
+    active_pool.status = "COMPLETED"
+    delhi_area.is_active = False
+    await db_session.commit()
+    with pytest.raises(HTTPException) as inactive_exc:
+        await ServiceAreaService(db_session).lock_active_service_area_for_booking(delhi_area.id)
+    assert inactive_exc.value.status_code == 409
+
+    delhi_area.is_active = True
+    await db_session.commit()

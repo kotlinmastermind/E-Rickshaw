@@ -264,7 +264,9 @@ class PoolService:
         if exp < datetime.now(timezone.utc):
             raise HTTPException(status_code=status.HTTP_410_GONE, detail="Fare estimate has expired. Please recalculate.")
         from backend.application.services.service_area_service import ServiceAreaService
-        service_area = await ServiceAreaService(self.db).resolve_route(pickup_lat, pickup_lng, dest_lat, dest_lng)
+        service_area = await ServiceAreaService(self.db).resolve_route(
+            pickup_lat, pickup_lng, dest_lat, dest_lng, lock_for_booking=True
+        )
         if any(abs(actual - quoted) > 0.0005 for actual, quoted in (
             (pickup_lat, estimate.pickup_latitude), (pickup_lng, estimate.pickup_longitude),
             (dest_lat, estimate.destination_latitude), (dest_lng, estimate.destination_longitude),

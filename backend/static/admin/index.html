@@ -1494,6 +1494,7 @@
                             <tr>
                                 <th class="py-3 px-4">Zone Name</th>
                                 <th class="py-3 px-4">Zone Type</th>
+                                <th class="py-3 px-4">City Code</th>
                                 <th class="py-3 px-4">Surge Multiplier</th>
                                 <th class="py-3 px-4">Polygon Vertices</th>
                                 <th class="py-3 px-4">Status</th>
@@ -1502,7 +1503,7 @@
                         </thead>
                         <tbody id="geofences-table-body" class="divide-y divide-border text-slate-300">
                             <tr>
-                                <td colspan="6" class="py-6 text-center text-slate-500 font-mono">Loading geofences from
+                                <td colspan="7" class="py-6 text-center text-slate-500 font-mono">Loading geofences from
                                     database...</td>
                             </tr>
                         </tbody>
@@ -5411,13 +5412,17 @@
                 const headers = {};
                 if (STATE.adminToken) headers['Authorization'] = `Bearer ${STATE.adminToken}`;
                 const res = await fetch('/api/v1/admin/geofences', { headers });
-                if (res.ok) {
-                    STATE.geofences = await res.json();
-                    renderGeofencesTable();
-                    updateSurgeZoneDropdown();
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    showToast(err.detail || 'Failed to load geofences', 'error');
+                    return;
                 }
+                STATE.geofences = await res.json();
+                renderGeofencesTable();
+                updateSurgeZoneDropdown();
             } catch (err) {
                 console.error('Error loading geofences:', err);
+                showToast('Network error loading geofences', 'error');
             }
         }
 
@@ -5634,7 +5639,7 @@
             const list = STATE.geofences || [];
             tbody.innerHTML = '';
             if (list.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-500 font-mono">No geofence boundaries configured yet.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" class="py-6 text-center text-slate-500 font-mono">No geofence boundaries configured yet.</td></tr>`;
                 return;
             }
             list.forEach(z => {
@@ -5646,15 +5651,24 @@
                     coordsCount = Array.isArray(coords) ? coords.length : 0;
                 } catch (e) { }
 
+                const safeZoneName = escHtml(z.name || '');
+                const safeZoneId = escHtml(String(z.id || '').slice(0, 8));
+                const safeZoneType = escHtml(z.zone_type || '');
+                const safeCityCode = escHtml(z.city_code || '—');
+                const toggleBtn = z.zone_type === 'SERVICE_AREA'
+                    ? `<button type="button" data-toggle-zone-id="${escHtml(z.id || '')}" class="px-2.5 py-1 rounded-lg ${z.is_active ? 'bg-crimson-dim text-crimson-glow border border-crimson-glow/30 hover:opacity-90' : 'bg-emerald-dim text-emerald-glow border border-emerald-glow/30 hover:opacity-90'} text-[11px] font-semibold mr-2">${z.is_active ? 'Deactivate' : 'Activate'}</button>`
+                    : '';
+
                 tr.innerHTML = `
                     <td class="py-3 px-4 font-semibold text-white flex items-center gap-2">
                         <i data-lucide="map-pin" class="w-4 h-4 text-cyan-glow"></i>
                         <div>
-                            <div>${z.name}</div>
-                            <span class="text-[10px] text-slate-500 font-mono">#${z.id.slice(0, 8)}</span>
+                            <div>${safeZoneName}</div>
+                            <span class="text-[10px] text-slate-500 font-mono">#${safeZoneId}</span>
                         </div>
                     </td>
-                    <td class="py-3 px-4 text-cyan-glow font-mono text-xs">${z.zone_type}</td>
+                    <td class="py-3 px-4 text-cyan-glow font-mono text-xs">${safeZoneType}</td>
+                    <td class="py-3 px-4 font-mono text-xs text-slate-200">${safeCityCode}</td>
                     <td class="py-3 px-4 font-mono font-bold text-amber-glow">${(z.surge_multiplier || 1.0).toFixed(1)}x</td>
                     <td class="py-3 px-4 font-mono text-slate-300">${coordsCount} Vertices</td>
                     <td class="py-3 px-4">
@@ -5662,12 +5676,24 @@
                             ${z.is_active ? 'ACTIVE' : 'INACTIVE'}
                         </span>
                     </td>
-                    <td class="py-3 px-4 text-right">
-                        <button onclick="switchTab('map'); showToast('Previewing ${z.name} boundary on live map')" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
+                    <td class="py-3 px-4 text-right whitespace-nowrap">
+                        ${toggleBtn}
+                        <button type="button" data-preview-zone-name="${safeZoneName}" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
                             View Map
                         </button>
                     </td>
                 `;
+                const toggleControl = tr.querySelector('[data-toggle-zone-id]');
+                if (toggleControl) {
+                    toggleControl.addEventListener('click', () => toggleServiceAreaStatus(z.id));
+                }
+                const previewControl = tr.querySelector('[data-preview-zone-name]');
+                if (previewControl) {
+                    previewControl.addEventListener('click', () => {
+                        switchTab('map');
+                        showToast(`Previewing ${z.name} boundary on live map`);
+                    });
+                }
                 tbody.appendChild(tr);
             });
             lucide.createIcons();
@@ -5683,21 +5709,27 @@
                     ? { method: 'DELETE', headers }
                     : { method: 'PUT', headers, body: JSON.stringify({
                         name: zone.name, zone_type: zone.zone_type, city_code: zone.city_code,
-                        coordinates: zone.coordinates, surge_multiplier: zone.surge_multiplier || 1.0
+                        coordinates: zone.coordinates, surge_multiplier: zone.surge_multiplier || 1.0,
+                        is_active: true
                     }) };
                 const res = await fetch('/api/v1/admin/geofences/' + encodeURIComponent(zoneId), options);
+                const payload = await res.json().catch(() => ({}));
                 if (!res.ok) {
-                    const err = await res.json();
-                    showToast(err.detail || 'Service-area update failed', 'error');
+                    showToast(payload.detail || 'Service-area update failed', 'error');
                     return;
                 }
                 const refreshed = await fetch('/api/v1/admin/geofences', { headers });
-                if (refreshed.ok) {
-                    STATE.geofences = await refreshed.json();
-                    renderGeofencesTable();
-                    updateSurgeZoneDropdown();
+                if (!refreshed.ok) {
+                    const refreshErr = await refreshed.json().catch(() => ({}));
+                    showToast(refreshErr.detail || 'Service area updated, but refreshing list failed', 'error');
+                    return;
                 }
-                showToast(zone.is_active ? 'Service area deactivated' : 'Service area activated');
+                STATE.geofences = await refreshed.json();
+                renderGeofencesTable();
+                updateSurgeZoneDropdown();
+                const updatedZone = (STATE.geofences || []).find(item => item.id === zoneId);
+                const isNowActive = updatedZone ? Boolean(updatedZone.is_active) : Boolean(payload.is_active);
+                showToast(isNowActive ? 'Service area activated' : 'Service area deactivated');
             } catch (err) {
                 showToast('Network error while updating service area', 'error');
             }

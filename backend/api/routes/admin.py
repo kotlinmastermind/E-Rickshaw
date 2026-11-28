@@ -830,6 +830,11 @@ class GeofencePayload(BaseModel):
     coordinates: List[dict]  # [{"lat": 19.0, "lng": 72.8}, ...]
     city_code: Optional[str] = Field(None, min_length=2, max_length=32)
     surge_multiplier: float = 1.0
+    is_active: bool = True
+
+class GeofencePreviewPayload(BaseModel):
+    coordinates: List[dict]
+    zone_id: Optional[str] = None
 
 class DriverServiceAreaRequestApprovalPayload(BaseModel):
     service_area_id: str = Field(..., min_length=1, max_length=36)
@@ -1150,6 +1155,15 @@ async def create_geofence(
     })
     return {**result, "status": "CREATED", "zone_id": result["id"]}
 
+@router.post("/geofences/preview")
+async def preview_geofence(
+    payload: GeofencePreviewPayload,
+    admin: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    overlaps = await AdminGovernanceService(db).geofence_preview(payload.coordinates, payload.zone_id)
+    return {"overlap_warnings": overlaps}
+
 @router.put("/geofences/{zone_id}")
 async def update_geofence(
     zone_id: str,
@@ -1166,9 +1180,9 @@ async def update_geofence(
         "city_code": payload.city_code,
         "coordinates": payload.coordinates,
         "surge_multiplier": payload.surge_multiplier,
-        "is_active": True,
+        "is_active": payload.is_active,
     })
-    return {**result, "status": "UPDATED", "zone_id": result["id"]}
+    return {**result, "status": "UPDATED" if result["is_active"] else "DEACTIVATED", "zone_id": result["id"]}
 
 
 @router.delete("/geofences/{zone_id}")
@@ -1177,19 +1191,7 @@ async def deactivate_geofence(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    existing = await db.get(GeofenceZone, zone_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="Geofence zone not found.")
-    import json
-    result = await AdminGovernanceService(db).save_geofence(admin.id, zone_id, {
-        "name": existing.name,
-        "zone_type": existing.zone_type,
-        "city_code": existing.city_code,
-        "coordinates": json.loads(existing.coordinates_json),
-        "surge_multiplier": existing.surge_multiplier,
-        "is_active": False,
-    })
-    return {**result, "status": "DEACTIVATED", "zone_id": result["id"]}
+    return await AdminGovernanceService(db).delete_geofence(admin.id, zone_id)
 
 
 @router.get("/geofences")
@@ -1197,20 +1199,7 @@ async def list_geofences(
     admin: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    zones = await AdminAdvancedService.list_geofences(db)
-    import json
-    return [
-        {
-            "id": z.id,
-            "name": z.name,
-            "zone_type": z.zone_type,
-            "city_code": z.city_code,
-            "coordinates": json.loads(z.coordinates_json),
-            "is_active": z.is_active,
-            "surge_multiplier": z.surge_multiplier
-        }
-        for z in zones
-    ]
+    return await AdminGovernanceService(db).list_geofences()
 
 @router.put("/drivers/{driver_id}/service-areas/{service_area_id}")
 async def assign_driver_to_service_area(

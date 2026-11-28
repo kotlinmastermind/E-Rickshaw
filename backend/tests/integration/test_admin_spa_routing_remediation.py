@@ -124,3 +124,9 @@ async def test_admin_console_does_not_advertise_unverified_live_state():
     assert "if (!isCurrentSocket || !STATE.adminToken) return;" in html
     assert "if (event.code === 1008)" in html
     assert "_adminWsMaxReconnectAttempts" not in html
+
+    # Geofence table exposes city_code and toggleServiceAreaStatus() without fabricating success
+    assert "City Code" in html
+    assert "data-toggle-zone-id=" in html
+    assert "toggleServiceAreaStatus(z.id)" in html
+    assert "const updatedZone = (STATE.geofences || []).find(item => item.id === zoneId);" in html

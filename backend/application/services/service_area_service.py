@@ -27,6 +27,24 @@ class ServiceAreaService:
             return None
         return polygon if len(polygon) >= 3 else None
 
+    async def lock_active_service_area_for_booking(self, service_area_id: str) -> GeofenceZone:
+        """Acquire a transaction-scoped FOR SHARE lock on an operational SERVICE_AREA so
+        concurrent admin deactivation (FOR UPDATE) must serialize with active booking creation."""
+        zone = (
+            await self.db.execute(
+                select(GeofenceZone)
+                .where(GeofenceZone.id == service_area_id)
+                .with_for_update(read=True)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if not zone or not zone.is_active or str(zone.zone_type or "").strip().upper() != "SERVICE_AREA":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Selected service area is no longer active for booking.",
+            )
+        return zone
+
     async def resolve_route(
         self,
         pickup_lat: float,
@@ -34,6 +52,7 @@ class ServiceAreaService:
         destination_lat: float,
         destination_lng: float,
         requested_city_code: Optional[str] = None,
+        lock_for_booking: bool = False,
     ) -> GeofenceZone:
         zones = (await self.db.execute(
             select(GeofenceZone).where(
@@ -71,6 +90,8 @@ class ServiceAreaService:
                 detail="Route falls inside overlapping active service areas. Resolve the overlapping service-area configuration before booking.",
             )
         zone = matches[0]
+        if lock_for_booking:
+            zone = await self.lock_active_service_area_for_booking(zone.id)
         _, service_polygon, restricted_polygons = await self.load_area_boundary(zone.id)
         if not self.location_is_inside_boundary(pickup_lat, pickup_lng, service_polygon, restricted_polygons):
             raise HTTPException(status_code=400, detail="Pickup is inside a restricted zone or outside the active service boundary.")
