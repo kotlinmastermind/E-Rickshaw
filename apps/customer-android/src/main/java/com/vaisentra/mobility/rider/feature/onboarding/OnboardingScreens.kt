@@ -239,7 +239,7 @@ fun OtpVerifyScreen(
 
         NeoCard {
             Text(
-                text = "Code sent via Twilio / Supabase to +91 $phone",
+                text = "Code sent via Twilio Verify to $phone",
                 color = TextMuted,
                 fontSize = 13.sp
             )
