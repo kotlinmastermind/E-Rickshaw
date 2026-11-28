@@ -54,6 +54,7 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
     val categories by RiderRepository.categories.collectAsState()
     val fareRules by RiderRepository.fareRules.collectAsState()
     val nearbyVehicles by RiderRepository.nearbyVehicles.collectAsState()
+    val pickupServiceability by RiderRepository.pickupServiceability.collectAsState()
     val bookingDraft by RiderRepository.bookingDraft.collectAsState()
     val wallet by RiderRepository.wallet.collectAsState()
 
@@ -399,10 +400,19 @@ fun MapHomeScreen(onNavigate: (String) -> Unit) {
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(2.dp))
-                        val nearbyText = if (nearbyVehicles.isNotEmpty()) "${nearbyVehicles.size} EV Pilots Nearby" else "No EV Pilots Nearby"
+                        val nearbyText = when {
+                            pickupServiceability?.serviceable == false -> "Service not active in this locality"
+                            pickupServiceability?.serviceable == true && nearbyVehicles.isNotEmpty() -> "${nearbyVehicles.size} eligible EV Pilots nearby"
+                            pickupServiceability?.serviceable == true -> "Locality active • no nearby pilot currently visible"
+                            else -> "Checking locality availability..."
+                        }
                         Text(
                             text = "Pickup: ${bookingDraft.pickupAddress} • $nearbyText",
-                            color = if (nearbyVehicles.isNotEmpty()) ElectricCyan else TextMuted,
+                            color = when {
+                                pickupServiceability?.serviceable == false -> CrimsonRed
+                                pickupServiceability?.serviceable == true && nearbyVehicles.isNotEmpty() -> ElectricCyan
+                                else -> TextMuted
+                            },
                             fontSize = 11.sp,
                             maxLines = 1
                         )
