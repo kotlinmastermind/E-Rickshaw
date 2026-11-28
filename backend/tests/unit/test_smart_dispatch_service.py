@@ -150,7 +150,17 @@ async def test_smart_dispatch_lifecycle(db_session):
     # Verify offer safety key
     assert await redis_client.exists(f"dispatch:offer:{ride.id}:{driver_profile.id}") is True
 
-    # 5. Driver Accepts Offer
+    # 5. A persisted offer without a real expiry is not a live offer.
+    assignment.expires_at = None
+    await db_session.commit()
+    with pytest.raises(HTTPException) as no_expiry_error:
+        await dispatch_svc.accept_offer(driver_user_id=driver_user.id, ride_id=ride.id)
+    assert no_expiry_error.value.status_code == 410
+
+    assignment.expires_at = datetime.now(timezone.utc) + timedelta(seconds=20)
+    await db_session.commit()
+
+    # Driver accepts the still-live offer through the authoritative lifecycle.
     res = await dispatch_svc.accept_offer(driver_user_id=driver_user.id, ride_id=ride.id)
     assert res["status"] == "ACCEPTED"
 
