@@ -42,7 +42,12 @@ class UserGovernanceService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Administrator accounts cannot be self-registered."
             )
-        if normalized_role not in ("customer", "driver"):
+        if normalized_role == "driver":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Driver accounts must use the dedicated driver registration flow with a real driving licence and active vehicle category."
+            )
+        if normalized_role != "customer":
             normalized_role = "customer"
 
         # Check existing email
