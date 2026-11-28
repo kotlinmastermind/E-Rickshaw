@@ -62,6 +62,14 @@ def upgrade() -> None:
         ["service_area_id"],
     )
     op.create_index(
+        "uq_driver_area_request_one_pending_per_driver",
+        "driver_service_area_requests",
+        ["driver_id"],
+        unique=True,
+        postgresql_where=sa.text("status = 'PENDING'"),
+        sqlite_where=sa.text("status = 'PENDING'"),
+    )
+    op.create_index(
         "ix_driver_area_request_driver_status",
         "driver_service_area_requests",
         ["driver_id", "status"],
@@ -76,6 +84,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_driver_area_request_status_created", table_name="driver_service_area_requests")
     op.drop_index("ix_driver_area_request_driver_status", table_name="driver_service_area_requests")
+    op.drop_index("uq_driver_area_request_one_pending_per_driver", table_name="driver_service_area_requests")
     op.drop_index("ix_driver_service_area_requests_service_area_id", table_name="driver_service_area_requests")
     op.drop_index("ix_driver_service_area_requests_status", table_name="driver_service_area_requests")
     op.drop_index("ix_driver_service_area_requests_driver_id", table_name="driver_service_area_requests")
