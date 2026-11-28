@@ -5,6 +5,7 @@ import asyncio
 import pytest
 import time
 from backend.application.services.live_location_service import LiveLocationService
+from backend.application.services.h3_geospatial_service import h3_service
 from backend.infrastructure.cache.redis_client import redis_client
 from backend.api.routes.ws import ws_manager
 
@@ -246,7 +247,6 @@ async def test_out_of_order_location_update_cannot_overwrite_newer_snapshot():
     service = LiveLocationService(db=None)
     driver_id = "driver_stale_snapshot_001"
     newer_lat, newer_lng = 25.5941, 85.1376
-    from backend.application.services.h3_geospatial_service import h3_service
     newer_cell = h3_service.get_h3_cell(newer_lat, newer_lng)
     newer_epoch = time.time() + 30
     newer_payload = {
