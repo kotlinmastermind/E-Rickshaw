@@ -27,7 +27,7 @@ object DriverNetworkClient {
     private const val KEY_PROFILE_PHOTO = "driver_profile_photo_uri"
     private const val KEY_CUSTOM_BASE_URL = "driver_custom_base_url"
 
-    const val DEFAULT_RENDER_URL = "https://e-rickshaw-z32z.onrender.com/"
+    const val DEFAULT_RENDER_URL = "https://api.vaisentratechnologies.in/"
     const val LOCAL_EMULATOR_URL = "http://10.0.2.2:8000/"
 
     private var sharedPrefs: SharedPreferences? = null
