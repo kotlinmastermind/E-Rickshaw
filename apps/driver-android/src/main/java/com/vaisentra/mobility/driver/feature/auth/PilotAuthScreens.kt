@@ -122,6 +122,7 @@ fun PilotSignupScreen(onNavigate: (String) -> Unit) {
     var fullName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var licenseNumber by remember { mutableStateOf("") }
     var selectedCategoryId by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
     var isLoadingCategories by remember { mutableStateOf(true) }
@@ -143,12 +144,6 @@ fun PilotSignupScreen(onNavigate: (String) -> Unit) {
 
     LaunchedEffect(Unit) {
         loadCategories()
-    }
-
-    LaunchedEffect(categories) {
-        if (categories.isNotEmpty() && selectedCategoryId == null) {
-            selectedCategoryId = categories.first().id
-        }
     }
 
     Column(
@@ -181,7 +176,7 @@ fun PilotSignupScreen(onNavigate: (String) -> Unit) {
             fontWeight = FontWeight.ExtraBold
         )
         Text(
-            text = "Register with your verified vehicle category to receive dispatched rides.",
+            text = "Submit your real driving licence and choose your intended vehicle category. Fleet assignment follows document review.",
             color = PilotTextMuted,
             fontSize = 13.sp
         )
@@ -214,8 +209,17 @@ fun PilotSignupScreen(onNavigate: (String) -> Unit) {
             CockpitTextField(
                 value = password,
                 onValueChange = { password = it },
-                placeholder = "Minimum 6 characters",
+                placeholder = "At least 12 characters",
                 label = "Account Password"
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            CockpitTextField(
+                value = licenseNumber,
+                onValueChange = { licenseNumber = it.trimStart().uppercase() },
+                placeholder = "Enter your actual driving licence number",
+                label = "Driving Licence Number"
             )
         }
 
@@ -371,8 +375,12 @@ fun PilotSignupScreen(onNavigate: (String) -> Unit) {
                     DriverDialogController.showToast("Please enter a valid 10-digit mobile number")
                     return@Button
                 }
-                if (password.length < 6) {
-                    DriverDialogController.showToast("Password must be at least 6 characters")
+                if (password.length < 12) {
+                    DriverDialogController.showToast("Password must be at least 12 characters")
+                    return@Button
+                }
+                if (licenseNumber.trim().length < 6) {
+                    DriverDialogController.showToast("Please enter your actual driving licence number")
                     return@Button
                 }
                 val catId = selectedCategoryId
@@ -389,12 +397,13 @@ fun PilotSignupScreen(onNavigate: (String) -> Unit) {
                         phone = fullPhone,
                         fullName = fullName.trim(),
                         password = password,
+                        licenseNumber = licenseNumber.trim(),
                         vehicleType = catId
                     )
                     isSubmitting = false
                     if (res.isSuccess) {
-                        DriverDialogController.showToast("Pilot registered successfully with assigned category!")
-                        onNavigate("duty_dashboard")
+                        DriverDialogController.showToast("Registration submitted. Upload your documents for Admin verification.")
+                        onNavigate("documents")
                     } else {
                         val errMsg = res.exceptionOrNull()?.message ?: "Registration failed. Please try again."
                         DriverDialogController.showToast(errMsg)
@@ -417,7 +426,7 @@ fun PilotSignupScreen(onNavigate: (String) -> Unit) {
                 Text("Registering Pilot...", color = Color(0xFF141210), fontWeight = FontWeight.Bold, fontSize = 16.sp)
             } else {
                 Text(
-                    "Complete Pilot Registration →",
+                    "Submit Driver Registration →",
                     color = if (!selectedCategoryId.isNullOrBlank()) Color(0xFF141210) else Color.Gray,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
