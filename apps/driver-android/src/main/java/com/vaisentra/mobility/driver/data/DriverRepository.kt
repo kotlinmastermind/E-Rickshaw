@@ -555,8 +555,10 @@ object DriverRepository {
                 _activeRide.value = if (isActive) ride else null
                 if (isActive) {
                     _currentRideId.value = ride!!.id
+                    DriverWebSocketClient.connectRideTracking(ride.id)
                 } else {
                     _currentRideId.value = ""
+                    DriverWebSocketClient.disconnectRideTracking()
                 }
                 Result.success(_activeRide.value)
             } else {
@@ -587,6 +589,7 @@ object DriverRepository {
         }
         if (normalizedStatus in setOf("COMPLETED", "CANCELLED", "EXPIRED")) {
             clearActiveRide()
+            DriverWebSocketClient.disconnectRideTracking()
             return
         }
         if (normalizedStatus in setOf("ASSIGNED", "ARRIVED", "IN_PROGRESS", "PAUSED")) {
