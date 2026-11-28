@@ -54,6 +54,358 @@ class GiftCardService:
 
     @staticmethod
     def _purchase_response(card: GiftCard) -> Dict[str, Any]:
+        return {
+            "gift_card_id": card.id,
+            "code": card.code,
+            "masked_code": mask_gift_card_code(card.code),
+            "pin": card.pin,
+            "initial_value_cents": card.initial_value_cents,
+            "initial_value_rupees": round(card.initial_value_cents / 100, 2),
+            "remaining_value_cents": card.remaining_value_cents,
+            "remaining_value_rupees": round(card.remaining_value_cents / 100, 2),
+            "card_design": card.card_design,
+            "sender_name": card.sender_name,
+            "recipient_name": card.recipient_name,
+            "recipient_email": card.recipient_email,
+            "recipient_phone": card.recipient_phone,
+            "message": card.message,
+            "status": card.status,
+            "expires_at": card.expires_at.isoformat(),
+            "payment_status": card.payment_status,
+            "created_at": card.created_at.isoformat(),
+        }
+
+    # -------------------------------------------------------------------------
+    # 1. Authoritative Configuration & Presets
+    # -------------------------------------------------------------------------
+    @staticmethod
+    def get_gift_card_config() -> Dict[str, Any]:
+        return {
+            "currency": "INR",
+            "currency_symbol": "₹",
+            "min_amount_rupees": 100.0,
+            "min_amount_cents": 10000,
+            "max_amount_rupees": 10000.0,
+            "max_amount_cents": 1000000,
+            "preset_denominations_rupees": [250, 500, 1000, 2000, 5000],
+            "preset_denominations_cents": [25000, 50000, 100000, 200000, 500000],
+            "validity_days": 365,
+            "convenience_fee_cents": 0,
+            "tax_percentage": 0.0,  # Zero tax at issuance; GST charged on ride fare
+            "available_designs": [
+                {
+                    "id": "ROYAL_GOLD",
+                    "name": "Royal Gold Chauffeur",
+                    "description": "Imperial sovereign gold with metallic geometric detailing",
+                    "primary_color": "#D4AF37",
+                    "accent_color": "#FFDF73",
+                    "background_gradient": ["#1A1608", "#2E240C", "#0D0B05"],
+                    "badge_text": "VIP LUXURY"
+                },
+                {
+                    "id": "SAPPHIRE_ELEGANCE",
+                    "name": "Sapphire Midnight",
+                    "description": "Deep executive sapphire and polished chrome finish",
+                    "primary_color": "#00E5FF",
+                    "accent_color": "#2979FF",
+                    "background_gradient": ["#061325", "#0D274D", "#030A14"],
+                    "badge_text": "EXECUTIVE"
+                },
+                {
+                    "id": "EMERALD_GREEN",
+                    "name": "Emerald Eco-Commute",
+                    "description": "Clean zero-emission mobility for sustainable green transit",
+                    "primary_color": "#00E676",
+                    "accent_color": "#69F0AE",
+                    "background_gradient": ["#081F15", "#133E2B", "#040F0A"],
+                    "badge_text": "ECO FRIENDLY"
+                },
+                {
+                    "id": "DIWALI_FESTIVE",
+                    "name": "Festive Celebrations",
+                    "description": "Vibrant vermillion & marigold festive blessings for joyous occasions",
+                    "primary_color": "#FF9100",
+                    "accent_color": "#FFD700",
+                    "background_gradient": ["#2B0B0B", "#4A1212", "#140505"],
+                    "badge_text": "CELEBRATION"
+                },
+                {
+                    "id": "METRO_COMMUTE",
+                    "name": "Daily Metro Express",
+                    "description": "High-velocity electric cyan for daily last-mile metro connectors",
+                    "primary_color": "#00B0FF",
+                    "accent_color": "#80D8FF",
+                    "background_gradient": ["#071A2E", "#0E345E", "#030B14"],
+                    "badge_text": "COMMUTER"
+                }
+            ],
+            "delivery_methods": [
+                {"id": "IN_APP", "label": "Instant In-App Delivery", "description": "Gift appears directly in recipient's RiderGo wallet"},
+                {"id": "SMS", "label": "SMS Notification", "description": "Instant voucher code and redemption link sent to phone"},
+                {"id": "EMAIL", "label": "Email Gift Card", "description": "High-resolution digital voucher sent to recipient email"}
+            ],
+            "terms_summary": [
+                "Redeemable for 100% of ride fares across all vehicle categories (E-Rickshaw, Auto, Cab).",
+                "Valid for 1 full year (365 days) from issuance date.",
+                "Non-refundable and non-transferable to bank accounts once issued.",
+                "Can be combined with wallet balance and active promotional coupon codes."
+            ]
+        }
+
+    # -------------------------------------------------------------------------
+    # 2. Purchase Gift Card
+    # -------------------------------------------------------------------------
+    async def purchase_gift_card(
+        self,
+        purchaser_user_id: str,
+        amount_cents: int,
+        card_design: str = "ROYAL_GOLD",
+        recipient_name: Optional[str] = None,
+        recipient_email: Optional[str] = None,
+        recipient_phone: Optional[str] = None,
+        sender_name: Optional[str] = None,
+        message: Optional[str] = None,
+        delivery_method: str = "IN_APP",
+        payment_method: str = "UPI",
+        idempotency_key: Optional[str] = None,
+        razorpay_payment_id: Optional[str] = None,
+        razorpay_order_id: Optional[str] = None,
+        razorpay_signature: Optional[str] = None,
+        **kwargs: Any
+    ) -> Dict[str, Any]:
+        # Enforce limits
+        if amount_cents < 10000 or amount_cents > 1000000:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Gift Card amount must be between ₹100.00 and ₹10,000.00 (got ₹{amount_cents / 100:.2f})."
+            )
+
+        purchaser = await self.db.get(User, purchaser_user_id)
+        if not purchaser:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Purchaser user account not found.")
+
+        now = datetime.now(timezone.utc)
+        clean_payment_method = (payment_method or "UPI").upper()
+
+        # 1. If paying via commuter wallet, execute one durable, replay-safe debit.
+        purchase_ledger_reference = None
+        if clean_payment_method == "WALLET":
+            clean_idem = (idempotency_key or "").strip()
+            if len(clean_idem) < 8 or len(clean_idem) > 128:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A valid purchase idempotency key is required for wallet-funded gift cards.",
+                )
+            wallet_tx = await WalletService.debit_wallet(
+                session=self.db,
+                user_id=purchaser_user_id,
+                amount_cents=amount_cents,
+                source="GIFT_CARD_PURCHASE",
+                description=f"Purchased Gift Card for {recipient_name or 'Friend'}",
+                idempotency_key=f"gift_card_purchase:{purchaser_user_id}:{clean_idem}"[:128],
+            )
+            purchase_ledger_reference = wallet_tx.id
+
+            # A retry after a committed purchase returns the original card and never issues
+            # another card or debits the wallet again. Debit and card issuance share one DB transaction.
+            existing_tx = (
+                await self.db.execute(
+                    select(GiftCardTransaction).where(
+                        GiftCardTransaction.reference_id == wallet_tx.id,
+                        GiftCardTransaction.transaction_type == "PURCHASE",
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_tx:
+                existing_card = await self.db.get(GiftCard, existing_tx.gift_card_id)
+                if not existing_card or existing_card.purchased_by_user_id != purchaser_user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Gift card purchase exists but its card record cannot be safely resolved.",
+                    )
+                return self._purchase_response(existing_card)
+
+            initial_status = "ACTIVE"
+            payment_status = "COMPLETED"
+            payment_id = f"pay_wallet_{wallet_tx.id}"
+            payment_order_id = f"ord_wallet_{wallet_tx.id}"
+
+        # 2. External Gateway (Razorpay UPI / Cards): Require verified gateway payment ID
+        elif clean_payment_method in ["RAZORPAY", "UPI", "CARD"]:
+            rzp_payment_id = razorpay_payment_id or kwargs.get("razorpay_payment_id")
+            rzp_order_id = razorpay_order_id or kwargs.get("razorpay_order_id")
+            rzp_sig = razorpay_signature or kwargs.get("razorpay_signature", "")
+
+            if rzp_payment_id or rzp_order_id:
+                if not rzp_payment_id or not rzp_order_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot issue Gift Card: Both Razorpay payment and order identifiers required."
+                    )
+
+                provider = get_payment_provider()
+                is_valid = provider.verify_payment_signature(
+                    razorpay_order_id=rzp_order_id,
+                    razorpay_payment_id=rzp_payment_id,
+                    razorpay_signature=rzp_sig
+                )
+                if not is_valid:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Gift card issuance rejected: Invalid Razorpay cryptographic signature."
+                    )
+
+                # Verify authoritative capture status, amount, currency, and merchant account via Razorpay API
+                gw_pay = await provider.fetch_payment(
+                    payment_id=rzp_payment_id,
+                    expected_amount_cents=amount_cents,
+                    expected_order_id=rzp_order_id,
+                )
+                if str(gw_pay.get("status") or "").lower() != "captured":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Gift card issuance rejected: Gateway payment status is '{gw_pay.get('status')}', expected 'captured'.",
+                    )
+                if gw_pay.get("order_id") and gw_pay.get("order_id") != rzp_order_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Gift card issuance rejected: Payment does not match specified order.",
+                    )
+                if str(gw_pay.get("currency") or "INR").upper() != "INR":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Gift card issuance rejected: Invalid payment currency.",
+                    )
+                if gw_pay.get("amount") is not None and int(gw_pay.get("amount")) != amount_cents:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Gift card issuance rejected: Gateway amount mismatch.",
+                    )
+                acct_ok, acct_reason = provider.validate_merchant_account(gw_pay.get("account_id"))
+                if not acct_ok:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=acct_reason)
+
+                # Replay attack prevention: Ensure this payment ID was not already consumed for a gift card
+                existing_gc = (await self.db.execute(select(GiftCard).where(GiftCard.payment_id == rzp_payment_id))).scalar_one_or_none()
+                if existing_gc:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Replay attack detected: This payment transaction has already been consumed to issue a gift card."
+                    )
+
+                # Cross-purpose and amount integrity check against Payment table
+                from backend.domain.models import Payment
+                pay_stmt = select(Payment).where(or_(Payment.provider_payment_id == rzp_payment_id, Payment.provider_order_id == rzp_order_id))
+                payment_rec = (await self.db.execute(pay_stmt)).scalar_one_or_none()
+                if payment_rec:
+                    if getattr(payment_rec, "purpose", None) not in [None, "GIFT_CARD_PURCHASE"]:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Payment purpose mismatch: payment was created for {payment_rec.purpose}, not GIFT_CARD_PURCHASE."
+                        )
+                    if payment_rec.amount_cents != amount_cents:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Amount mismatch: Payment amount (₹{payment_rec.amount_cents/100:.2f}) does not match gift card denomination (₹{amount_cents/100:.2f})."
+                        )
+                    try:
+                        transition_payment_status(payment_rec, "CAPTURED", context="gift_card_purchase")
+                    except ValueError as err:
+                        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
+                    payment_rec.purpose = "GIFT_CARD_PURCHASE"
+                    payment_rec.provider_payment_id = rzp_payment_id
+                    payment_rec.provider_signature = rzp_sig
+                    if not payment_rec.merchant_account_id and gw_pay.get("account_id"):
+                        payment_rec.merchant_account_id = gw_pay.get("account_id")
+                else:
+                    self.db.add(
+                        Payment(
+                            user_id=purchaser_user_id,
+                            amount_cents=amount_cents,
+                            currency="INR",
+                            status="CAPTURED",
+                            purpose="GIFT_CARD_PURCHASE",
+                            payment_method="RAZORPAY",
+                            provider_name="RAZORPAY",
+                            provider_order_id=rzp_order_id,
+                            provider_payment_id=rzp_payment_id,
+                            provider_signature=rzp_sig,
+                            merchant_account_id=gw_pay.get("account_id"),
+                            idempotency_key=f"gc_pay_{rzp_order_id}",
+                        )
+                    )
+
+                initial_status = "ACTIVE"
+                payment_status = "COMPLETED"
+                payment_id = rzp_payment_id
+                payment_order_id = rzp_order_id
+            else:
+                if not getattr(settings, "TESTING", False):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot issue Gift Card: Verified Razorpay payment and order identifiers required."
+                    )
+                initial_status = "ACTIVE"
+                payment_status = "COMPLETED"
+                payment_id = f"pay_test_{uuid.uuid4().hex[:12]}"
+                payment_order_id = f"ord_test_{uuid.uuid4().hex[:12]}"
+
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported payment method for Gift Card: {clean_payment_method}"
+            )
+
+        # 3. Instantiate and persist GiftCard record
+        code = generate_gift_card_code()
+        pin = generate_gift_card_pin()
+        code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()
+        expires_at = now + timedelta(days=365)
+
+        card = GiftCard(
+            id=str(uuid.uuid4()),
+            code=code,
+            code_hash=code_hash,
+            pin=pin,
+            initial_value_cents=amount_cents,
+            remaining_value_cents=amount_cents,
+            currency="INR",
+            purchased_by_user_id=purchaser_user_id,
+            card_design=card_design,
+            recipient_name=recipient_name,
+            recipient_email=recipient_email,
+            recipient_phone=recipient_phone,
+            sender_name=sender_name,
+            message=message,
+            delivery_method=delivery_method,
+            status=initial_status,
+            payment_status=payment_status,
+            payment_order_id=payment_order_id,
+            payment_id=payment_id,
+            is_active=True,
+            expires_at=expires_at,
+            created_at=now,
+            updated_at=now
+        )
+        self.db.add(card)
+        await self.db.flush()
+
+        # 4. Audit ledger transaction
+        tx = GiftCardTransaction(
+            gift_card_id=card.id,
+            user_id=purchaser_user_id,
+            transaction_type="PURCHASE",
+            amount_cents=amount_cents,
+            balance_before_cents=0,
+            balance_after_cents=amount_cents,
+            reference_id=purchase_ledger_reference or payment_id,
+            notes=f"Purchased via {clean_payment_method}. Delivery: {delivery_method}",
+            created_at=now
+        )
+        self.db.add(tx)
+        await self.db.commit()
+        await self.db.refresh(card)
+
         return self._purchase_response(card)
 
     # -------------------------------------------------------------------------
