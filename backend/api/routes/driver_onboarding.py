@@ -546,7 +546,11 @@ async def submit_driver_service_area_request(
     return {
         "request_id": request.id,
         "status": request.status,
-        "message": "Locality request submitted. Service starts only after an approved operational boundary and driver assignment are in place.",
+        "message": (
+            "You have been assigned to the existing operational service area."
+            if request.status == "APPROVED"
+            else "Locality request submitted. Service starts after an approved operational boundary, active tariff, and driver assignment are in place."
+        ),
         "created_at": request.created_at.isoformat(),
     }
 
