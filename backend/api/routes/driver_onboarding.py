@@ -465,7 +465,15 @@ async def submit_driver_service_area_request(
         raise HTTPException(status_code=422, detail="State, district, and locality are required.")
     request = DriverServiceAreaRequest(driver_id=driver.id, **values)
     db.add(request)
-    await db.commit()
+    from sqlalchemy.exc import IntegrityError
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A service-area request is already awaiting review for this driver.",
+        )
     await db.refresh(request)
     return {
         "request_id": request.id,
