@@ -86,3 +86,14 @@ async def test_admin_console_does_not_advertise_unverified_live_state():
     assert "CONNECTING TO ADMIN API" in html
     assert "if (!response.ok)" in html
     assert "setAdminConnectionStatus('unavailable')" in html
+
+    # Admin telemetry accepts the legacy location event emitted by the FastAPI
+    # compatibility route and rejects out-of-order GPS samples.
+    assert "'DRIVER.LOCATION.UPDATED': 'DRIVER_LOCATION_UPDATE'" in html
+    assert "incomingTimestamp < currentTimestamp" in html
+
+    # Ride lifecycle events reconcile against the persisted live-feed snapshot,
+    # including rides missing from the Admin's previously loaded list.
+    assert "scheduleAdminRideSnapshotRefresh();" in html
+    assert "_nativeFetch('/api/v1/admin/live-feed'" in html
+    assert "STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];" in html
