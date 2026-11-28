@@ -20,9 +20,73 @@ from backend.integrations.notifications.provider import get_notification_provide
 from backend.application.services.promo_pass_service import PromoPassService
 
 class RideService:
+    ROUTE_ESTIMATE_COORDINATE_TOLERANCE_KM = 0.1
+    PRICE_LOCK_COORDINATE_TOLERANCE_KM = 2.0
+
     def __init__(self, db: AsyncSession):
         self.db = db
         self.notifier = get_notification_provider()
+
+    @staticmethod
+    def _coordinate_distance_km(
+        latitude_a: float,
+        longitude_a: float,
+        latitude_b: float,
+        longitude_b: float,
+    ) -> float:
+        """Return great-circle distance between two WGS84 coordinate pairs."""
+        import math
+
+        lat_a, lon_a, lat_b, lon_b = map(
+            math.radians,
+            (latitude_a, longitude_a, latitude_b, longitude_b),
+        )
+        delta_lat = lat_b - lat_a
+        delta_lon = lon_b - lon_a
+        haversine = (
+            math.sin(delta_lat / 2) ** 2
+            + math.cos(lat_a) * math.cos(lat_b) * math.sin(delta_lon / 2) ** 2
+        )
+        return 6371.0 * 2 * math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine))
+
+    @classmethod
+    def _validate_estimate_route_coordinates(
+        cls,
+        estimate: FareEstimate,
+        pickup_latitude: Optional[float],
+        pickup_longitude: Optional[float],
+        destination_latitude: Optional[float],
+        destination_longitude: Optional[float],
+    ) -> None:
+        supplied = (
+            pickup_latitude,
+            pickup_longitude,
+            destination_latitude,
+            destination_longitude,
+        )
+        if not any(value is not None for value in supplied):
+            return
+        if any(value is None for value in supplied):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pickup and destination coordinates must be supplied together when booking with a fare estimate.",
+            )
+
+        for label, requested_lat, requested_lng, estimated_lat, estimated_lng in (
+            ("Pickup", pickup_latitude, pickup_longitude, estimate.pickup_latitude, estimate.pickup_longitude),
+            ("Destination", destination_latitude, destination_longitude, estimate.destination_latitude, estimate.destination_longitude),
+        ):
+            deviation_km = cls._coordinate_distance_km(
+                requested_lat, requested_lng, estimated_lat, estimated_lng
+            )
+            if deviation_km > cls.ROUTE_ESTIMATE_COORDINATE_TOLERANCE_KM:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"{label} location no longer matches the fare estimate "
+                        f"({deviation_km * 1000:.0f}m deviation). Recalculate the fare before booking."
+                    ),
+                )
 
     async def create_ride_request(
         self,
@@ -86,6 +150,13 @@ class RideService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Vehicle category mismatch: Estimate belongs to category '{candidate_est.category_id}' but ride requested '{cat.name}'."
                     )
+                self._validate_estimate_route_coordinates(
+                    candidate_est,
+                    pickup_latitude,
+                    pickup_longitude,
+                    destination_latitude,
+                    destination_longitude,
+                )
                 estimate = candidate_est
             else:
                 # Check persisted 24h price lock with row-level lock to prevent concurrent double-booking
@@ -114,17 +185,25 @@ class RideService:
                             detail="Price lock has expired. Please recalculate fare."
                         )
 
-                    # Verify route corridor deviation if client passed pickup coordinates
-                    if pickup_latitude is not None and pickup_longitude is not None:
-                        import math
-                        d_lat = math.radians(pickup_latitude - candidate_lock.pickup_latitude)
-                        d_lng = math.radians(pickup_longitude - candidate_lock.pickup_longitude)
-                        a = math.sin(d_lat / 2)**2 + math.cos(math.radians(candidate_lock.pickup_latitude)) * math.cos(math.radians(pickup_latitude)) * math.sin(d_lng / 2)**2
-                        p_dist_km = 6371.0 * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
-                        if p_dist_km > 2.0:
+                    # Bind both route endpoints to the stored price lock. A pickup-only
+                    # check allowed a changed destination to reuse an unrelated fare.
+                    for label, requested_lat, requested_lng, locked_lat, locked_lng in (
+                        ("Pickup", pickup_latitude, pickup_longitude, candidate_lock.pickup_latitude, candidate_lock.pickup_longitude),
+                        ("Destination", destination_latitude, destination_longitude, candidate_lock.destination_latitude, candidate_lock.destination_longitude),
+                    ):
+                        if requested_lat is None or requested_lng is None:
+                            continue
+                        deviation_km = self._coordinate_distance_km(
+                            requested_lat, requested_lng, locked_lat, locked_lng
+                        )
+                        if deviation_km > self.PRICE_LOCK_COORDINATE_TOLERANCE_KM:
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
-                                detail=f"Pickup location deviates {p_dist_km:.1f}km from the locked price route corridor (max allowed: 2.0km). Please generate a live fare estimate."
+                                detail=(
+                                    f"{label} location deviates {deviation_km:.1f}km from the locked price route "
+                                    f"(maximum allowed: {self.PRICE_LOCK_COORDINATE_TOLERANCE_KM:.1f}km). "
+                                    "Please generate a live fare estimate."
+                                ),
                             )
 
                     matched_price_lock = candidate_lock
