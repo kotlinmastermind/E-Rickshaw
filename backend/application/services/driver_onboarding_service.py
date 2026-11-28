@@ -198,8 +198,13 @@ class DriverOnboardingService:
         inspection_done = (
             latest_inspection is not None
             and latest_inspection.inspection_status == "APPROVED"
-            and latest_inspection.verification_status == "VERIFIED"
-            and bool(latest_inspection.verified_by)
+            and (
+                latest_inspection.verification_status == "AUTO_APPROVED"
+                or (
+                    latest_inspection.verification_status == "VERIFIED"
+                    and bool(latest_inspection.verified_by)
+                )
+            )
         )
 
         # Emergency contact & preferences
