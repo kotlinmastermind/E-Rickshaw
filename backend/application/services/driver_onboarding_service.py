@@ -191,7 +191,12 @@ class DriverOnboardingService:
             .order_by(DriverVehicleInspection.inspected_at.desc())
         )
         latest_inspection = i_res.scalars().first()
-        inspection_done = latest_inspection is not None and latest_inspection.inspection_status == "PASSED"
+        inspection_done = (
+            latest_inspection is not None
+            and latest_inspection.inspection_status == "APPROVED"
+            and latest_inspection.verification_status == "VERIFIED"
+            and bool(latest_inspection.verified_by)
+        )
 
         # Emergency contact & preferences
         has_emergency_contact = bool(driver.emergency_contact_name and driver.emergency_contact_phone)
