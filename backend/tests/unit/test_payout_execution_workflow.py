@@ -487,7 +487,37 @@ async def test_provider_execution_webhooks_timeout_reconciliation_and_retry(clie
     assert late_wh.json()["status"] == "IGNORED_OUT_OF_ORDER"
     assert late_wh.json()["payout_status"] == "PAID"
 
+    # A later bank/clearing-house reversal after PAID must restore the held payout amount once.
+    reversed_body = json.dumps({
+        "event": "payout.reversed",
+        "payload": {"payout": {"entity": {
+            "id": "pout_rx_002",
+            "reference_id": retry_reference_id,
+            "status": "reversed",
+            "failure_reason": "Beneficiary bank returned the transfer",
+        }}},
+    }).encode()
+    reversed_sig = hmac.new(wh_secret.encode(), reversed_body, hashlib.sha256).hexdigest()
+    reversed_wh = await client.post(
+        "/api/v1/payments/payouts/webhook",
+        content=reversed_body,
+        headers={"X-Razorpay-Signature": reversed_sig},
+    )
+    assert reversed_wh.status_code == 200
+    assert reversed_wh.json()["payout_status"] == "FAILED"
+
+    # Duplicate reversal delivery cannot credit the DriverWallet twice.
+    duplicate_reversal = await client.post(
+        "/api/v1/payments/payouts/webhook",
+        content=reversed_body,
+        headers={"X-Razorpay-Signature": reversed_sig},
+    )
+    assert duplicate_reversal.status_code == 200
+    assert duplicate_reversal.json()["status"] == "ALREADY_PROCESSED"
+    await db_session.refresh(wallet)
+    assert wallet.balance_cents == 90000
+
     inv = await PayoutExecutionService.reconcile_payout_invariants(db_session, payout_id)
     assert inv["is_balanced"] is True
     assert inv["commission_settlement_count"] == 1
-    assert inv["wallet_balance_cents"] == 40000
+    assert inv["wallet_balance_cents"] == 90000
