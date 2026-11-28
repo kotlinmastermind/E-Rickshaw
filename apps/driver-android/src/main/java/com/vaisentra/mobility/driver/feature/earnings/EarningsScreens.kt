@@ -1076,7 +1076,15 @@ fun InstantPayoutScreen(
 
             CockpitTextField(
                 value = withdrawAmount,
-                onValueChange = { withdrawAmount = it.filter { ch -> ch.isDigit() || ch == '.' }.take(12) },
+                onValueChange = { raw ->
+                    val candidate = raw.filter { ch -> ch.isDigit() || ch == '.' }.take(12)
+                    val decimalIndex = candidate.indexOf('.')
+                    if (candidate.count { it == '.' } <= 1 &&
+                        (decimalIndex < 0 || candidate.length - decimalIndex - 1 <= 2)
+                    ) {
+                        withdrawAmount = candidate
+                    }
+                },
                 label = "Withdrawal Amount (₹)",
                 placeholder = "Enter amount"
             )
