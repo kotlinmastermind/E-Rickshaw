@@ -369,7 +369,7 @@ class SmartDispatchService:
         assign_stmt = (
             select(RideAssignment)
             .where(*assign_filters)
-            .order_by(RideAssignment.offered_at.desc(), RideAssignment.created_at.desc())
+            .order_by(RideAssignment.offered_at.desc(), RideAssignment.id.desc())
             .limit(1)
             .with_for_update()
         )
