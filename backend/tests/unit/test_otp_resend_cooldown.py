@@ -80,3 +80,17 @@ async def test_definitive_provider_rejection_releases_reserved_cooldown(monkeypa
 
     assert exc.value.status_code == 400
     release.assert_awaited_once_with(f"otp_cooldown:{hashlib.sha256('+919876543210'.encode('utf-8')).hexdigest()}")
+
+
+
+@pytest.mark.asyncio
+async def test_otp_send_does_not_claim_provider_expiry_from_local_settings(monkeypatch):
+    monkeypatch.setattr(auth_service.redis_client, "set_nx_strict", AsyncMock(return_value=True))
+    provider = AsyncMock()
+    monkeypatch.setattr(auth_service, "get_sms_provider", lambda: provider)
+
+    result = await AuthService(db=None).request_otp("+919876543210")
+
+    assert result["phone_masked"].endswith("3210")
+    assert "expires_in_seconds" not in result
+    provider.send_verification_otp.assert_awaited_once_with("+919876543210")
