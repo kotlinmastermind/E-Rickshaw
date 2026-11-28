@@ -299,9 +299,6 @@ interface RiderApiService {
     @POST("api/v1/wallets/auto-topup/config")
     suspend fun configureAutoTopup(@Body body: Map<String, @JvmSuppressWildcards Any>): Response<Map<String, Any>>
 
-    @POST("api/v1/wallets/gift-cards/purchase")
-    suspend fun purchaseGiftCard(@Body body: Map<String, @JvmSuppressWildcards Any>): Response<Map<String, Any>>
-
     @POST("api/v1/wallets/gift-cards/redeem")
     suspend fun redeemGiftCard(@Body body: Map<String, String>): Response<Map<String, Any>>
 

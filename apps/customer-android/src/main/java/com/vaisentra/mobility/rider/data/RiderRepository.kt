@@ -1337,21 +1337,6 @@ object RiderRepository {
         }
     }
 
-    suspend fun purchaseGiftCard(amountRupees: Int, sender: String, recipientPhone: String): Result<Boolean> {
-        return try {
-            val res = NetworkClient.apiService.purchaseGiftCard(
-                mapOf(
-                    "amount_cents" to amountRupees * 100,
-                    "sender_name" to sender,
-                    "recipient_phone" to recipientPhone
-                )
-            )
-            Result.success(res.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
     suspend fun redeemGiftCard(code: String): Result<Boolean> {
         return try {
             val res = NetworkClient.apiService.redeemGiftCard(mapOf("code" to code))
@@ -1765,10 +1750,35 @@ object RiderRepository {
     }
 
     suspend fun purchaseGiftCard(req: GiftCardPurchaseRequest): Result<GiftCardPurchaseResponse> {
+        val currentUid = NetworkClient.currentUserId()
+        val requestFingerprint = listOf(
+            req.amountCents.toString(),
+            req.cardDesign,
+            req.recipientName.orEmpty(),
+            req.recipientEmail.orEmpty(),
+            req.recipientPhone.orEmpty(),
+            req.senderName.orEmpty(),
+            req.message.orEmpty(),
+            req.deliveryMethod,
+        ).joinToString("\u001f")
+        val requestDigest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(requestFingerprint.toByteArray(Charsets.UTF_8))
+            .take(12)
+            .joinToString("") { "%02x".format(it) }
+        val intentScopeKey = "GIFT_CARD_PURCHASE_${currentUid ?: "anon"}_$requestDigest"
+        val idempotencyKey = NetworkClient.checkoutSessionStore.getOrCreateScopedIdempotencyKey(
+            intentScopeKey,
+            "giftcard"
+        )
+        val safeRequest = req.copy(
+            paymentMethod = "WALLET",
+            idempotencyKey = idempotencyKey
+        )
         return try {
-            val res = NetworkClient.apiService.purchaseGiftCard(req)
+            val res = NetworkClient.apiService.purchaseGiftCard(safeRequest)
             val body = res.body()
             if (res.isSuccessful && body != null) {
+                NetworkClient.checkoutSessionStore.clearScopedIdempotencyKey(intentScopeKey)
                 fetchMyGiftCards()
                 fetchWalletBalance()
                 Result.success(body)
@@ -1777,6 +1787,7 @@ object RiderRepository {
                 Result.failure(IllegalStateException(err))
             }
         } catch (e: Exception) {
+            // Keep the same key after transport failures: the server may have committed the purchase.
             Result.failure(e)
         }
     }

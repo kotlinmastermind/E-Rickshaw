@@ -127,7 +127,7 @@ data class RideBookingRequest(
     @SerializedName("pickup_longitude") val pickupLongitude: Double,
     @SerializedName("destination_latitude") val destinationLatitude: Double,
     @SerializedName("destination_longitude") val destinationLongitude: Double,
-    @SerializedName("payment_method") val paymentMethod: String = "UPI",
+    @SerializedName("payment_method") val paymentMethod: String = "WALLET",
     @SerializedName("booking_mode") val bookingMode: String = "STANDARD",
     @SerializedName("business_cost_center") val businessCostCenter: String? = null,
     @SerializedName("promo_code") val promoCode: String? = null,

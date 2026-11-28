@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from backend.domain.models import User, GiftCard, GiftCardTransaction, Wallet
 from backend.application.services.gift_card_service import GiftCardService
+from backend.application.services.wallet_service import WalletService
 
 
 @pytest.mark.asyncio
@@ -86,6 +87,63 @@ async def test_purchase_gift_card_success(db_session):
     assert txs[0].transaction_type == "PURCHASE"
     assert txs[0].amount_cents == 50000
     assert txs[0].balance_after_cents == 50000
+
+
+@pytest.mark.asyncio
+async def test_wallet_gift_card_purchase_retry_is_idempotent(db_session):
+    """A retry returns the same issued card and never debits the wallet twice."""
+    uid = uuid.uuid4().hex[:6]
+    purchaser = User(
+        phone_number=f"+91982{uid}1",
+        full_name="Wallet Gift Buyer",
+        role="customer",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(purchaser)
+    await db_session.flush()
+    await WalletService.credit_wallet(
+        session=db_session,
+        user_id=purchaser.id,
+        amount_cents=50000,
+        source="TEST_SEED",
+        idempotency_key=f"gift_seed_{uuid.uuid4().hex[:12]}",
+    )
+    await db_session.commit()
+
+    service = GiftCardService(db_session)
+    request = {
+        "purchaser_user_id": purchaser.id,
+        "amount_cents": 50000,
+        "card_design": "ROYAL_GOLD",
+        "recipient_name": "Retry Recipient",
+        "payment_method": "WALLET",
+        "idempotency_key": "giftcard_wallet_retry_001",
+    }
+    first = await service.purchase_gift_card(**request)
+    replay = await service.purchase_gift_card(**request)
+
+    assert replay["gift_card_id"] == first["gift_card_id"]
+    assert replay["code"] == first["code"]
+    assert replay["pin"] == first["pin"]
+
+    wallet = (await db_session.execute(
+        select(Wallet).where(Wallet.user_id == purchaser.id)
+    )).scalar_one()
+    assert wallet.balance_cents == 0
+
+    cards = (await db_session.execute(
+        select(GiftCard).where(GiftCard.purchased_by_user_id == purchaser.id)
+    )).scalars().all()
+    assert len(cards) == 1
+
+    purchase_rows = (await db_session.execute(
+        select(GiftCardTransaction).where(
+            GiftCardTransaction.gift_card_id == first["gift_card_id"],
+            GiftCardTransaction.transaction_type == "PURCHASE",
+        )
+    )).scalars().all()
+    assert len(purchase_rows) == 1
 
 
 @pytest.mark.asyncio

@@ -28,8 +28,8 @@ class GiftCardPurchasePayload(BaseModel):
     sender_name: Optional[str] = Field(None, max_length=128)
     message: Optional[str] = Field(None, max_length=500)
     delivery_method: str = Field("IN_APP", description="IN_APP, SMS, or EMAIL")
-    payment_method: str = Field("UPI", description="UPI, WALLET, or CARD")
-    idempotency_key: Optional[str] = None
+    payment_method: str = Field("WALLET", description="WALLET; external gateway checkout is not wired into gift-card issuance")
+    idempotency_key: str = Field(..., min_length=8, max_length=128)
 
 
 class GiftCardBalancePayload(BaseModel):
@@ -61,7 +61,12 @@ async def purchase_gift_card(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Purchases a new gift card with payment validation and cryptographic code generation."""
+    """Purchases a gift card from wallet balance with payment validation and cryptographic code generation."""
+    if payload.payment_method.strip().upper() != "WALLET":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Gift-card checkout currently supports wallet balance only; unverified direct UPI/card collection is disabled.",
+        )
     service = GiftCardService(db)
     return await service.purchase_gift_card(
         purchaser_user_id=current_user.id,

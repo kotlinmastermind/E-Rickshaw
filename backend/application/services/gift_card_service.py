@@ -52,6 +52,29 @@ class GiftCardService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    def _purchase_response(card: GiftCard) -> Dict[str, Any]:
+        return {
+            "gift_card_id": card.id,
+            "code": card.code,
+            "masked_code": mask_gift_card_code(card.code),
+            "pin": card.pin,
+            "initial_value_cents": card.initial_value_cents,
+            "initial_value_rupees": round(card.initial_value_cents / 100, 2),
+            "remaining_value_cents": card.remaining_value_cents,
+            "remaining_value_rupees": round(card.remaining_value_cents / 100, 2),
+            "card_design": card.card_design,
+            "sender_name": card.sender_name,
+            "recipient_name": card.recipient_name,
+            "recipient_email": card.recipient_email,
+            "recipient_phone": card.recipient_phone,
+            "message": card.message,
+            "status": card.status,
+            "expires_at": card.expires_at.isoformat(),
+            "payment_status": card.payment_status,
+            "created_at": card.created_at.isoformat(),
+        }
+
     # -------------------------------------------------------------------------
     # 1. Authoritative Configuration & Presets
     # -------------------------------------------------------------------------
@@ -164,20 +187,65 @@ class GiftCardService:
         now = datetime.now(timezone.utc)
         clean_payment_method = (payment_method or "UPI").upper()
 
-        # 1. If paying via commuter wallet, execute atomic debit
+        # 1. If paying via commuter wallet, execute one durable, replay-safe debit.
+        purchase_ledger_reference = None
         if clean_payment_method == "WALLET":
-            await WalletService.debit_wallet(
+            clean_idem = (idempotency_key or "").strip()
+            if len(clean_idem) < 8 or len(clean_idem) > 128:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A valid purchase idempotency key is required for wallet-funded gift cards.",
+                )
+            wallet_tx = await WalletService.debit_wallet(
                 session=self.db,
                 user_id=purchaser_user_id,
                 amount_cents=amount_cents,
                 source="GIFT_CARD_PURCHASE",
                 description=f"Purchased Gift Card for {recipient_name or 'Friend'}",
-                idempotency_key=idempotency_key or f"gc_deb_{uuid.uuid4()}"
+                idempotency_key="gc_" + hashlib.sha256(
+                    f"{purchaser_user_id}:{clean_idem}".encode("utf-8")
+                ).hexdigest(),
             )
+            purchase_ledger_reference = wallet_tx.id
+
+            # A retry after a committed purchase returns the original card and never issues
+            # another card or debits the wallet again. Debit and card issuance share one DB transaction.
+            existing_tx = (
+                await self.db.execute(
+                    select(GiftCardTransaction).where(
+                        GiftCardTransaction.reference_id == wallet_tx.id,
+                        GiftCardTransaction.transaction_type == "PURCHASE",
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_tx:
+                existing_card = await self.db.get(GiftCard, existing_tx.gift_card_id)
+                if not existing_card or existing_card.purchased_by_user_id != purchaser_user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Gift card purchase exists but its card record cannot be safely resolved.",
+                    )
+                same_intent = (
+                    existing_card.initial_value_cents == amount_cents
+                    and existing_card.card_design == card_design
+                    and existing_card.recipient_name == recipient_name
+                    and existing_card.recipient_email == recipient_email
+                    and existing_card.recipient_phone == recipient_phone
+                    and existing_card.sender_name == sender_name
+                    and existing_card.message == message
+                    and existing_card.delivery_method == delivery_method
+                )
+                if not same_intent:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Gift-card idempotency key was already used for a different purchase request.",
+                    )
+                return self._purchase_response(existing_card)
+
             initial_status = "ACTIVE"
             payment_status = "COMPLETED"
-            payment_id = f"pay_wallet_{uuid.uuid4().hex[:12]}"
-            payment_order_id = f"ord_wallet_{uuid.uuid4().hex[:12]}"
+            payment_id = f"pay_wallet_{wallet_tx.id}"
+            payment_order_id = f"ord_wallet_{wallet_tx.id}"
 
         # 2. External Gateway (Razorpay UPI / Cards): Require verified gateway payment ID
         elif clean_payment_method in ["RAZORPAY", "UPI", "CARD"]:
@@ -269,7 +337,7 @@ class GiftCardService:
                 else:
                     self.db.add(
                         Payment(
-                            user_id=buyer_user_id,
+                            user_id=purchaser_user_id,
                             amount_cents=amount_cents,
                             currency="INR",
                             status="CAPTURED",
@@ -347,7 +415,7 @@ class GiftCardService:
             amount_cents=amount_cents,
             balance_before_cents=0,
             balance_after_cents=amount_cents,
-            reference_id=payment_id,
+            reference_id=purchase_ledger_reference or payment_id,
             notes=f"Purchased via {clean_payment_method}. Delivery: {delivery_method}",
             created_at=now
         )
@@ -355,26 +423,7 @@ class GiftCardService:
         await self.db.commit()
         await self.db.refresh(card)
 
-        return {
-            "gift_card_id": card.id,
-            "code": card.code,  # Unmasked code provided only on initial purchase response
-            "masked_code": mask_gift_card_code(card.code),
-            "pin": card.pin,
-            "initial_value_cents": card.initial_value_cents,
-            "initial_value_rupees": round(card.initial_value_cents / 100, 2),
-            "remaining_value_cents": card.remaining_value_cents,
-            "remaining_value_rupees": round(card.remaining_value_cents / 100, 2),
-            "card_design": card.card_design,
-            "sender_name": card.sender_name,
-            "recipient_name": card.recipient_name,
-            "recipient_email": card.recipient_email,
-            "recipient_phone": card.recipient_phone,
-            "message": card.message,
-            "status": card.status,
-            "expires_at": card.expires_at.isoformat(),
-            "payment_status": card.payment_status,
-            "created_at": card.created_at.isoformat()
-        }
+        return self._purchase_response(card)
 
     # -------------------------------------------------------------------------
     # 3. Balance Check
