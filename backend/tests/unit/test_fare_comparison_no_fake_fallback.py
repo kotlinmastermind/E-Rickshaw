@@ -329,6 +329,41 @@ async def test_create_ride_rejects_nonexistent_and_mismatched_estimate(db_sessio
     assert incomplete_route.value.status_code == 400
     assert "coordinates must be supplied together" in incomplete_route.value.detail
 
+    # Price locks retain the wider pickup corridor, but both endpoints must stay
+    # bound to the route whose fare was locked.
+    price_lock = FarePriceLock(
+        id=f"lock_{suffix}",
+        customer_id=cust_prof.id,
+        category_id=cat_rickshaw.id,
+        fare_rule_id=rule_rick.id,
+        pickup_latitude=28.6328,
+        pickup_longitude=77.2195,
+        destination_latitude=28.6129,
+        destination_longitude=77.2295,
+        distance_km=3.5,
+        duration_minutes=12.0,
+        locked_fare_cents=4800,
+        status="ACTIVE",
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=12),
+    )
+    db_session.add(price_lock)
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as changed_locked_destination:
+        await service.create_ride_request(
+            customer_user_id=cust_user.id,
+            category_id=cat_rickshaw.id,
+            estimate_id=price_lock.id,
+            pickup_address="Gate 1",
+            destination_address="Different city",
+            pickup_latitude=28.6328,
+            pickup_longitude=77.2195,
+            destination_latitude=25.5941,
+            destination_longitude=85.1376,
+        )
+    assert changed_locked_destination.value.status_code == 400
+    assert "Destination location deviates" in changed_locked_destination.value.detail
+
 @pytest.mark.asyncio
 async def test_cash_collection_rejects_zero_fare(db_session):
     """
