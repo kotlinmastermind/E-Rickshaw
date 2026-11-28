@@ -292,12 +292,10 @@ class SmartDispatchService:
             "timestamp": utc_now().isoformat()
         }
 
-        # Publish to both identifiers because clients may authenticate with either
-        # the DriverProfile ID or the owning User ID. Each worker's subscriber
-        # forwards the event to its locally connected socket.
+        # Driver WebSocket sessions subscribe to the canonical DriverProfile
+        # channel (and the User channel only for legacy publishers). Publishing
+        # once avoids duplicate offer frames on sockets subscribed to both.
         await redis_client.publish(f"driver:dispatch:{candidate.driver_id}", driver_payload)
-        if candidate.user_id and candidate.user_id != candidate.driver_id:
-            await redis_client.publish(f"driver:dispatch:{candidate.user_id}", driver_payload)
 
         # 2. Event to passenger ride channel
         passenger_payload = {
