@@ -142,7 +142,8 @@ async def test_admin_approval_lifecycle_and_non_admin_rejection(db_session):
         phone_number=f"+9194{str(unique_suffix)[-8:]}",
         email=f"candidate_driver_{unique_suffix}@erickshaw.in",
         role="driver",
-        is_active=True
+        is_active=True,
+        is_verified=True
     )
     db_session.add(driver_user)
     await db_session.flush()
