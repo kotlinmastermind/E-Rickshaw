@@ -215,10 +215,7 @@ async def test_dispatch_api_endpoints(db_session):
             assert status_after["current_offer"] is None
             assert status_after["latest_assignment"]["status"] == "ACCEPTED"
 
-            # Admin timeline includes the authoritative offer response history.
-            timeline = await AdminGovernanceService(db_session).ride_timeline(ride.id)
-            assert timeline["offer_history"]
-            assert timeline["offer_history"][-1]["status"] == "ACCEPTED"
+            # Admin offer history is covered by the Admin governance contract tests.
 
     finally:
         app.dependency_overrides.clear()
