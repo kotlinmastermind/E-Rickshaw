@@ -340,6 +340,39 @@ async def test_capture_guards_amount_currency_reuse_and_downgrade(db_session):
         await db_session.refresh(pay_captured)
         assert pay_captured.status == "CAPTURED"
 
+        # A different captured payment ID for the SAME order is a duplicate-charge anomaly.
+        duplicate_capture_id = f"pay_second_capture_{uuid.uuid4().hex[:8]}"
+        duplicate_capture_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": duplicate_capture_id,
+                        "order_id": pay_captured.provider_order_id,
+                        "amount": 30000,
+                        "currency": "INR",
+                        "status": "captured",
+                    }
+                }
+            },
+        }).encode("utf-8")
+        duplicate_result = await service.process_webhook(
+            duplicate_capture_body,
+            _sign(duplicate_capture_body, wh_secret),
+        )
+        assert duplicate_result["status"] == "DUPLICATE_ORDER_PAYMENT_ANOMALY"
+        await db_session.refresh(pay_captured)
+        assert pay_captured.provider_payment_id != duplicate_capture_id
+        duplicate_anomaly = (
+            await db_session.execute(
+                select(PaymentReconciliationAnomaly).where(
+                    PaymentReconciliationAnomaly.payment_id == pay_captured.id,
+                    PaymentReconciliationAnomaly.anomaly_type == "DOUBLE_ORDER_PAYMENT",
+                )
+            )
+        ).scalar_one_or_none()
+        assert duplicate_anomaly is not None
+
         # 2. Reusing pay_captured.provider_payment_id on pay_open fails with 409
         reuse_body = json.dumps({
             "event": "payment.captured",
