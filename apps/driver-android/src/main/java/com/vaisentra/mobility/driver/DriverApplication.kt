@@ -36,7 +36,7 @@ class DriverApplication : Application() {
         com.vaisentra.mobility.driver.fcm.DriverFcmManager.init(this)
 
         // Configure default backend endpoint pointing to FastAPI server
-        DriverNetworkClient.baseUrl = "https://e-rickshaw-z32z.onrender.com/"
+        DriverNetworkClient.baseUrl = DriverNetworkClient.DEFAULT_RENDER_URL
         com.vaisentra.mobility.driver.fcm.DriverFcmManager.syncTokenIfAuthenticated(this)
 
         // Asynchronous non-blocking warm-up ping to wake up sleeping Render container immediately on startup
