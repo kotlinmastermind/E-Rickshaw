@@ -760,6 +760,13 @@ class PayoutExecutionService:
             )
 
         provider_meta = json.loads(payout.provider_metadata_json or "{}") if payout.provider_metadata_json else {}
+        if payout.status == "PAID" and (
+            payout.execution_mode != "RAZORPAYX" or not provider_meta.get("provider_failure_confirmed")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A paid payout can only be reversed after authoritative RazorpayX reversal confirmation.",
+            )
         if payout.execution_mode == "RAZORPAYX" and (
             (payout.status in {"PROCESSING", "PAID"} or provider_meta.get("uncertain_outcome"))
             and not provider_meta.get("provider_failure_confirmed")
