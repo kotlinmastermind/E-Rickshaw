@@ -311,7 +311,7 @@ async def test_driver_approval_payload_hardening(db_session):
     """Test approval payload validation: legacy status, modern approval_status, conflicts (422), extra fields (422)."""
     unique_suffix = uuid.uuid4().int % 100000000
 
-    driver_user = User(phone_number=f"+9198{str(unique_suffix)[-8:]}", email=f"appr_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True)
+    driver_user = User(phone_number=f"+9198{str(unique_suffix)[-8:]}", email=f"appr_drv_{unique_suffix}@erickshaw.in", role="driver", is_active=True, is_verified=True)
     db_session.add(driver_user)
     await db_session.flush()
 
