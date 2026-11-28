@@ -222,7 +222,7 @@ async def test_admin_approval_assigns_driver_only_inside_configured_area(db_sess
 @pytest.mark.asyncio
 async def test_approved_driver_auto_joins_existing_area_when_tariff_is_ready(db_session):
     import json
-    from backend.domain.models import DriverServiceAreaAssignment, VehicleCategory, FareRule
+    from backend.domain.models import DriverServiceAreaAssignment, VehicleCategory, FareRule, Vehicle, DriverVehicleAssignment
 
     driver_user = User(
         phone_number="+919900001238",
