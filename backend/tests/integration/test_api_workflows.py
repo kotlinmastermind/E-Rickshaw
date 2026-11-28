@@ -157,6 +157,24 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
                 vehicle_id=fleet_vehicle.id,
                 is_active=True
             ))
+            drv1_profile = (await db_session.execute(
+                select(DriverProfile).where(DriverProfile.user_id == drv1_signup.json()["user"]["id"])
+            )).scalar_one()
+            fleet_vehicle1 = Vehicle(
+                category_id=sedan_category.id,
+                make="Mahindra",
+                model="Treo",
+                year=2025,
+                license_plate="MH-FLEET-LIFECYCLE-0001",
+                is_active=True
+            )
+            db_session.add(fleet_vehicle1)
+            await db_session.flush()
+            db_session.add(DriverVehicleAssignment(
+                driver_id=drv1_profile.id,
+                vehicle_id=fleet_vehicle1.id,
+                is_active=True
+            ))
             for index, document_type in enumerate(["DRIVING_LICENSE", "IDENTITY_PROOF", "VEHICLE_REGISTRATION", "INSURANCE"]):
                 db_session.add(DriverDocument(
                     driver_id=drv2_profile.id,
