@@ -433,7 +433,6 @@ fun BuyGiftCardScreen(onNavigate: (String) -> Unit) {
     var senderName by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("Wishing you smooth journeys and royal comfort!") }
     var deliveryMethod by remember { mutableStateOf("IN_APP") }
-    var paymentMethod by remember { mutableStateOf("UPI") }
 
     var isSubmitting by remember { mutableStateOf(false) }
     var purchaseSuccessData by remember { mutableStateOf<GiftCardPurchaseResponse?>(null) }
@@ -639,7 +638,7 @@ fun BuyGiftCardScreen(onNavigate: (String) -> Unit) {
 
         // Submit Button
         NeoButton(
-            text = if (isSubmitting) "Processing Secure Payment..." else "Pay ₹$finalAmount & Issue Gift Card",
+            text = if (isSubmitting) "Processing Wallet Purchase..." else "Pay ₹$finalAmount from Wallet",
             enabled = !isSubmitting && finalAmount >= 100 && finalAmount <= 10000,
             onClick = {
                 val isEmail = recipientContact.contains("@")
@@ -654,7 +653,7 @@ fun BuyGiftCardScreen(onNavigate: (String) -> Unit) {
                     senderName = senderName.ifBlank { null },
                     message = message.ifBlank { null },
                     deliveryMethod = deliveryMethod,
-                    paymentMethod = paymentMethod
+                    paymentMethod = "WALLET"
                 )
 
                 isSubmitting = true
