@@ -269,7 +269,7 @@ async def get_dispatch_status(
         involved_assignment_id = (await db.execute(involved_stmt)).scalar_one_or_none()
         if ride.assigned_driver_id != driver_id and not involved_assignment_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
-    elif role not in ("admin", "super_admin"):
+    elif role not in ("admin", "super_admin", "superadmin", "super administrator"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view dispatch status.")
 
     # Fetch latest assignment
