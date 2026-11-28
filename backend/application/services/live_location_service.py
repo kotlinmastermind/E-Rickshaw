@@ -351,10 +351,38 @@ class LiveLocationService:
                 "epoch_timestamp": epoch_time
             }
 
-            await redis_client.set_json(f"driver:location:{driver_id}", payload, ex=LOCATION_TTL_SECONDS)
-            await redis_client.set(f"driver:last_seen:{driver_id}", str(epoch_time), ex=LOCATION_TTL_SECONDS)
-            await self._update_h3_cell_membership(driver_id, h3_cell)
-            reindexed_count += 1
+            try:
+                async with redis_client.distributed_lock(
+                    f"driver:location:index-lock:{driver_id}",
+                    timeout_seconds=10,
+                    retry_delay_seconds=0.05,
+                    max_retries=40,
+                ):
+                    current_payload = await redis_client.get_json(f"driver:location:{driver_id}")
+                    try:
+                        current_epoch = float(current_payload.get("epoch_timestamp")) if isinstance(current_payload, dict) else None
+                    except (TypeError, ValueError):
+                        current_epoch = None
+
+                    # A database rebuild must never overwrite a newer live Redis ping.
+                    if current_epoch is not None and current_epoch > epoch_time:
+                        continue
+
+                    await redis_client.set_json(
+                        f"driver:location:{driver_id}",
+                        payload,
+                        ex=LOCATION_TTL_SECONDS,
+                    )
+                    await redis_client.set(
+                        f"driver:last_seen:{driver_id}",
+                        str(epoch_time),
+                        ex=LOCATION_TTL_SECONDS,
+                    )
+                    await self._update_h3_cell_membership(driver_id, h3_cell)
+                    reindexed_count += 1
+            except TimeoutError:
+                logger.warning("Skipping H3 rebuild for driver %s because its location index is busy.", driver_id)
+                continue
 
         logger.info(f"Rebuilt Redis H3 spatial index: {reindexed_count} active drivers re-indexed from DB.")
         return reindexed_count
