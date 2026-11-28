@@ -1355,6 +1355,33 @@ object DriverRepository {
         }
     }
 
+    suspend fun addPayoutUpiAccount(upiVpa: String, holderName: String): Result<Boolean> {
+        val cleanVpa = upiVpa.trim()
+        val cleanHolder = holderName.trim()
+        if (cleanVpa.isBlank() || cleanHolder.isBlank()) {
+            return Result.failure(IllegalArgumentException("UPI ID and beneficiary name are required."))
+        }
+        return try {
+            val res = DriverNetworkClient.apiService.addPayoutAccount(
+                AddPayoutAccountRequest(
+                    accountType = "UPI",
+                    upiVpa = cleanVpa,
+                    beneficiaryName = cleanHolder,
+                    accountHolderName = cleanHolder
+                )
+            )
+            if (res.isSuccessful) {
+                fetchPayoutAccounts()
+                Result.success(true)
+            } else {
+                val err = res.errorBody()?.string() ?: "HTTP ${res.code()}"
+                Result.failure(IllegalStateException(err))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun reportRouteDeviation(
         rideId: String,
         lat: Double,

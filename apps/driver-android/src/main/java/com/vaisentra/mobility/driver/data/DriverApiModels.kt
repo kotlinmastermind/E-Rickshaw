@@ -745,9 +745,10 @@ data class ClaimNoShowRequest(
 
 data class AddPayoutAccountRequest(
     @SerializedName("account_type") val accountType: String = "BANK_ACCOUNT",
-    @SerializedName("account_number") val accountNumber: String,
-    @SerializedName("ifsc_code") val ifscCode: String,
-    @SerializedName("routing_number") val routingNumber: String = ifscCode,
+    @SerializedName("account_number") val accountNumber: String? = null,
+    @SerializedName("ifsc_code") val ifscCode: String? = null,
+    @SerializedName("routing_number") val routingNumber: String? = ifscCode,
+    @SerializedName("upi_vpa") val upiVpa: String? = null,
     @SerializedName("beneficiary_name") val beneficiaryName: String,
     @SerializedName("account_holder_name") val accountHolderName: String = beneficiaryName,
     @SerializedName("bank_name") val bankName: String? = null
