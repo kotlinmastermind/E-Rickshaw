@@ -552,7 +552,9 @@ object RiderRepository {
                 try {
                     val res = NetworkClient.apiService.getActiveRide()
                     val updated = res.body()?.activeRide
-                    if (res.isSuccessful && updated != null && updated.id == rideId) {
+                    if (res.isSuccessful && updated != null && updated.id == rideId &&
+                        updated.status !in listOf("COMPLETED", "CANCELLED", "EXPIRED")
+                    ) {
                         // Nested driver object se name/phone/rating top-level par copy karein
                         _activeRide.value = updated.copy(
                             driverName = updated.driver?.name ?: updated.driverName,
