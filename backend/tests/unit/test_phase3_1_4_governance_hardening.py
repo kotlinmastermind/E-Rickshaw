@@ -360,7 +360,10 @@ async def test_driver_approval_payload_hardening(db_session):
     db_session.add(DriverVehicleInspection(
         driver_id=prof.id,
         vehicle_id=vehicle.id,
-        inspection_status="PASSED",
+        inspection_status="APPROVED",
+        verification_status="VERIFIED",
+        verified_by="test-admin-reviewer",
+        verified_at=datetime.now(timezone.utc),
         overall_result="PASS",
         inspected_at=datetime.now(timezone.utc)
     ))
