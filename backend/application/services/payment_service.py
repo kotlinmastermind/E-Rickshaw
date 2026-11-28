@@ -2232,6 +2232,33 @@ class PaymentService:
                 )
 
         elif webhook_event in ("payment.captured", "order.paid"):
+            if (
+                payment.status in {"CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "PAID", "SETTLED", "SUCCESS"}
+                and payment.provider_payment_id
+                and payment.provider_payment_id != provider_payment_id
+            ):
+                reason = (
+                    f"Multiple Razorpay payment IDs were captured for order {order_id}: "
+                    f"existing={payment.provider_payment_id}, incoming={provider_payment_id}. "
+                    "The second capture was not applied to the internal ledger."
+                )
+                await self._record_anomaly_and_require_reconciliation(
+                    inbox=inbox,
+                    anomaly_type="DOUBLE_ORDER_PAYMENT",
+                    payment=payment,
+                    parsed=parsed,
+                    reason=reason,
+                    now=now,
+                )
+                return {
+                    "status": "DUPLICATE_ORDER_PAYMENT_ANOMALY",
+                    "event": webhook_event,
+                    "payment_id": payment.id,
+                    "order_id": order_id,
+                    "provider_payment_id": provider_payment_id,
+                    "message": reason,
+                }
+
             if gw_amount != payment.amount_cents:
                 reason = (
                     f"Capture amount mismatch for payment {payment.id}: "
