@@ -428,9 +428,10 @@ object DriverRepository {
 
     suspend fun registerDriver(
         phone: String,
-        fullName: String = "Rohit Kumar",
-        password: String = "DriverPass123456!",
-        vehicleType: String = "E_RICKSHAW_STANDARD"
+        fullName: String,
+        password: String,
+        licenseNumber: String,
+        vehicleType: String
     ): Result<Boolean> {
         return try {
             val digits = phone.filter { it.isDigit() }
@@ -438,10 +439,9 @@ object DriverRepository {
             val res = DriverNetworkClient.apiService.registerDriver(
                 DriverSignupRequest(
                     phoneNumber = normPhone,
-                    email = "driver_${digits.takeLast(6)}@vaisentra.com",
                     fullName = fullName,
                     password = password,
-                    username = "driver_${digits.takeLast(6)}",
+                    licenseNumber = licenseNumber,
                     vehicleType = vehicleType
                 )
             )
