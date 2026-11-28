@@ -374,8 +374,8 @@ class SmartDispatchService:
             )
 
         now = utc_now()
-        if assignment.expires_at and ensure_utc(assignment.expires_at) < now:
-            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Dispatch offer has expired.")
+        if assignment.expires_at is None or ensure_utc(assignment.expires_at) <= now:
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Dispatch offer has expired or has no valid expiry.")
 
         # Row-level lock on Ride
         ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
@@ -445,6 +445,7 @@ class SmartDispatchService:
         # Update ride
         ride.status = RideStatus.ASSIGNED.value
         ride.assigned_driver_id = driver.id
+        ride.vehicle_id = driver_vehicle.id
         ride.assigned_at = now
 
         # Update the already locked availability row to busy.
