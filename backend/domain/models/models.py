@@ -148,7 +148,7 @@ class DriverProfile(Base):
     academy_level: Mapped[str] = mapped_column(String(64), default="Training not completed")
 
     # Part 9 Driver Onboarding, Identity & Preferences (Features 201, 202, 214, 215, 216, 218, 219, 221, 222, 223, 224)
-    onboarding_step: Mapped[str] = mapped_column(String(32), default="IDENTITY_SUBMITTED")  # IDENTITY_SUBMITTED, DOCUMENTS_PENDING, BACKGROUND_CHECK, TRAINING_COMPLETED, INSPECTION_PENDING, APPROVED, ACTIVE
+    onboarding_step: Mapped[str] = mapped_column(String(32), default="DOCUMENTS_PENDING")  # IDENTITY_SUBMITTED, DOCUMENTS_PENDING, BACKGROUND_CHECK, TRAINING_COMPLETED, INSPECTION_PENDING, APPROVED, ACTIVE
     profile_completeness_percentage: Mapped[int] = mapped_column(Integer, default=0)
     identity_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     identity_reverification_due: Mapped[bool] = mapped_column(Boolean, default=False)
