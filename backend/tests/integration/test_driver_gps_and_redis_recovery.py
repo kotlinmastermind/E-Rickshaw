@@ -262,6 +262,48 @@ async def test_stale_online_gps_snapshot_cannot_reindex_offline_driver(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_delayed_unavailable_cleanup_preserves_new_online_driver(db_session):
+    """A stale cleanup cannot remove a driver who is now online and free."""
+    suffix = uuid.uuid4().hex[:6]
+    user = User(
+        phone_number=f"+91987{suffix}04",
+        full_name="Reactivated GPS Driver",
+        role="driver",
+        is_active=True,
+        is_verified=True,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    profile = DriverProfile(
+        id=str(uuid.uuid4()),
+        user_id=user.id,
+        license_number=f"DL-REONLINE-{suffix}",
+        approval_status="APPROVED",
+    )
+    db_session.add(profile)
+    await db_session.flush()
+    db_session.add(DriverAvailability(driver_id=profile.id, is_online=True, is_busy=False))
+    await db_session.commit()
+
+    live_loc = LiveLocationService(db=db_session)
+    result = await live_loc.ingest_driver_location(
+        driver_id=profile.id,
+        latitude=28.6139,
+        longitude=77.2090,
+        is_online=True,
+        is_busy=False,
+    )
+    cell = result["h3_cell"]
+    assert profile.id in await redis_client.smembers(f"h3:drivers:{cell}")
+
+    # Simulate a delayed cleanup from an earlier offline/busy transition.
+    await live_loc.remove_driver_from_h3_index(profile.id)
+
+    assert profile.id in await redis_client.smembers(f"h3:drivers:{cell}")
+    assert await redis_client.get(f"driver:h3_cell:{profile.id}") == cell
+
+
+@pytest.mark.asyncio
 async def test_offline_cleanup_removes_from_h3_index(db_session):
     """
     Task 2: Verify that when a driver goes offline, they are immediately
