@@ -152,3 +152,22 @@ async def test_sec_08_customer_to_driver_escalation_blocked(client: AsyncClient,
         headers={"Authorization": f"Bearer {customer_token}"}
     )
     assert resp.status_code == 403
+
+@pytest.mark.asyncio
+async def test_sec_09_webhook_readiness_reflects_required_configuration(
+    client: AsyncClient, monkeypatch
+):
+    """Webhook diagnostics must not report ready when signature verification cannot run."""
+    ready = await client.get("/api/v1/payments/webhook")
+    assert ready.status_code == 200
+    assert ready.json()["status"] == "ready"
+    assert ready.json()["checks"] == {
+        "provider_credentials_configured": True,
+        "webhook_secret_configured": True,
+    }
+
+    monkeypatch.setattr(settings, "RAZORPAY_WEBHOOK_SECRET", "")
+    not_ready = await client.get("/api/v1/payments/webhook")
+    assert not_ready.status_code == 200
+    assert not_ready.json()["status"] == "not_ready"
+    assert not_ready.json()["checks"]["webhook_secret_configured"] is False
