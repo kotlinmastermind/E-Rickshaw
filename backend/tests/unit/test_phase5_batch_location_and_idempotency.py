@@ -188,6 +188,14 @@ async def test_ride_request_idempotency_key_replay():
         conflict = await client.post("/api/v1/rides/request", json=changed_payload, headers=headers)
         assert conflict.status_code == 409
 
+        # Clear the first active ride so this customer can exercise the scheduled path.
+        cancel_response = await client.post(
+            f"/api/v1/rides/{ride_id_1}/cancel",
+            json={"reason": "Test scheduled booking"},
+            headers=headers,
+        )
+        assert cancel_response.status_code == 200, cancel_response.text
+
         # Scheduled booking uses the same authoritative estimate and route binding.
         estimate_response = await client.post("/api/v1/fares/estimate", json={
             "category_id": cat.id,
