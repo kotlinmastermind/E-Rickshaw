@@ -20,20 +20,21 @@ from backend.application.services.safety_advanced_service import SafetyAdvancedS
 router = APIRouter(prefix="/drivers/safety", tags=["Driver safety & support"])
 
 async def driver_for(user: User, db: AsyncSession) -> DriverProfile:
+    # Safety routes are driver-only. Never promote an arbitrary authenticated
+    # account or auto-create an approved profile from a read/action endpoint.
+    if (user.role or "").strip().lower() != "driver":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access restricted: this account is not registered as a driver."
+        )
+
     result = await db.execute(select(DriverProfile).where(DriverProfile.user_id == user.id))
     driver = result.scalar_one_or_none()
     if not driver:
-        driver = DriverProfile(
-            user_id=user.id,
-            license_number=f"DL-{user.id[:8].upper()}",
-            approval_status="APPROVED"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No driver profile found for this account. Complete driver registration and onboarding."
         )
-        db.add(driver)
-        await db.flush()
-    if user.role.lower() != "driver":
-        user.role = "driver"
-        db.add(user)
-        await db.commit()
     return driver
 
 class PreferencesPayload(BaseModel):
