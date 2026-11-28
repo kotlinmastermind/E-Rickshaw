@@ -925,3 +925,25 @@ data class NavigationGuidanceResponseDto(
     @SerializedName("points") val points: List<RoutePointDto> = emptyList(),
     @SerializedName("steps") val steps: List<NavigationStepDto> = emptyList()
 )
+
+data class CreateDriverServiceAreaRequest(
+    @SerializedName("state_name") val stateName: String,
+    @SerializedName("district_name") val districtName: String,
+    @SerializedName("locality_name") val localityName: String,
+    @SerializedName("postal_code") val postalCode: String? = null,
+    @SerializedName("latitude") val latitude: Double,
+    @SerializedName("longitude") val longitude: Double
+)
+
+data class DriverServiceAreaRequestDto(
+    @SerializedName("request_id") val requestId: String = "",
+    @SerializedName("state_name") val stateName: String = "",
+    @SerializedName("district_name") val districtName: String = "",
+    @SerializedName("locality_name") val localityName: String = "",
+    @SerializedName("postal_code") val postalCode: String? = null,
+    @SerializedName("status") val status: String = "",
+    @SerializedName("service_area_id") val serviceAreaId: String? = null,
+    @SerializedName("admin_response") val adminResponse: String? = null,
+    @SerializedName("created_at") val createdAt: String = "",
+    @SerializedName("reviewed_at") val reviewedAt: String? = null
+)
