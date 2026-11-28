@@ -4,6 +4,7 @@ Unit and lifecycle tests for SmartDispatchService.
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 from datetime import datetime, timezone, timedelta
@@ -20,7 +21,7 @@ from backend.infrastructure.cache.redis_client import redis_client
 
 
 @pytest.mark.asyncio
-async def test_smart_dispatch_lifecycle(db_session):
+async def test_smart_dispatch_lifecycle(db_session, monkeypatch):
     suffix = uuid.uuid4().hex[:6]
     service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
 
@@ -139,6 +140,9 @@ async def test_smart_dispatch_lifecycle(db_session):
 
     # 4. Run Smart Dispatch
     dispatch_svc = SmartDispatchService(db_session)
+    from backend.application.services import smart_dispatch_service as dispatch_module
+    ride_broadcast = AsyncMock()
+    monkeypatch.setattr(dispatch_module.ws_manager, "broadcast_to_ride", ride_broadcast)
     assignment = await dispatch_svc.search_and_dispatch(ride.id, max_rings=2)
 
     assert assignment is not None
@@ -176,6 +180,22 @@ async def test_smart_dispatch_lifecycle(db_session):
     # Verify driver availability set to busy
     avail_updated = (await db_session.execute(select(DriverAvailability).where(DriverAvailability.driver_id == driver_profile.id))).scalar_one()
     assert avail_updated.is_busy is True
+
+    # The customer tracking socket consumes the established RIDE_ACCEPTED contract.
+    accepted_events = [
+        call.args[1] for call in ride_broadcast.await_args_list
+        if call.args and isinstance(call.args[1], dict)
+    ]
+    assert any(
+        event.get("event_type") == "RIDE_ACCEPTED"
+        and event.get("payload", {}).get("status") == "ASSIGNED"
+        for event in accepted_events
+    )
+
+    # A retry by the same assigned driver is idempotent and returns the same assignment.
+    repeated = await dispatch_svc.accept_offer(driver_user_id=driver_user.id, ride_id=ride.id)
+    assert repeated["status"] == "ACCEPTED"
+    assert repeated["driver_id"] == driver_profile.id
 
     # Verify lock released
     assert await redis_client.exists(f"dispatch:lock:{driver_profile.id}") is False
