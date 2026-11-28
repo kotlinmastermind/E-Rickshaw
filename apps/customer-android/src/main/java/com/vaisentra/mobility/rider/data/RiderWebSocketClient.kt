@@ -57,6 +57,13 @@ object RiderWebSocketClient {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!isCurrentRideTrackingCallback(
+                        this@RiderWebSocketClient.webSocket,
+                        webSocket,
+                        activeRideId,
+                        rideId
+                    )
+                ) return
                 try {
                     val json = JSONObject(text)
                     val eventType = json.optString("event_type")

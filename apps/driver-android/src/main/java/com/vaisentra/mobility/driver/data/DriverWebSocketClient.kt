@@ -59,6 +59,7 @@ object DriverWebSocketClient {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (this@DriverWebSocketClient.dispatchWebSocket !== webSocket) return
                 if (text == "pong") return
                 try {
                     val json = JSONObject(text)
@@ -131,12 +132,16 @@ object DriverWebSocketClient {
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "Driver Dispatch WebSocket closed: $code $reason")
-                dispatchWebSocket = null
+                if (this@DriverWebSocketClient.dispatchWebSocket === webSocket) {
+                    this@DriverWebSocketClient.dispatchWebSocket = null
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "Driver Dispatch WebSocket failure (${response?.code}): ${t.message}")
-                dispatchWebSocket = null
+                if (this@DriverWebSocketClient.dispatchWebSocket === webSocket) {
+                    this@DriverWebSocketClient.dispatchWebSocket = null
+                }
             }
         })
     }
@@ -164,6 +169,13 @@ object DriverWebSocketClient {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!isCurrentRideTrackingCallback(
+                        this@DriverWebSocketClient.rideTrackingWebSocket,
+                        webSocket,
+                        activeTrackingRideId,
+                        rideId
+                    )
+                ) return
                 if (text == "pong") return
                 try {
                     val json = JSONObject(text)
@@ -216,7 +228,7 @@ object DriverWebSocketClient {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "Ride tracking WebSocket failure: ${t.message}")
-                if (activeTrackingRideId == rideId) {
+                if (rideTrackingWebSocket === webSocket && activeTrackingRideId == rideId) {
                     rideTrackingWebSocket = null
                     activeTrackingRideId = null
                 }
