@@ -682,10 +682,21 @@ class SmartDispatchService:
                 ):
                     ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
                     ride = (await session.execute(ride_stmt)).scalar_one_or_none()
+                    now = utc_now()
                     if not ride or ride.status != RideStatus.REQUESTED.value or ride.assigned_driver_id is not None:
+                        assignment.status = "CANCELLED"
+                        assignment.is_accepted = False
+                        assignment.rejection_reason = "RIDE_NO_LONGER_REQUESTED"
+                        assignment.responded_at = now
+                        await batch_optimizer.release_driver_lock(driver_id, ride_id)
+                        await redis_client.delete(f"dispatch:offer:{ride_id}:{driver_id}")
+                        await redis_client.delete(f"driver:active_offer:{driver_id}")
+                        driver_profile = await session.get(DriverProfile, driver_id)
+                        if driver_profile:
+                            await redis_client.delete(f"driver:active_offer:{driver_profile.user_id}")
+                        await session.commit()
                         return
 
-                    now = utc_now()
                     assignment.status = "REJECTED"
                     assignment.is_accepted = False
                     assignment.rejection_reason = "DISPATCH_TIMEOUT"
