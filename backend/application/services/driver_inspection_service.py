@@ -509,7 +509,6 @@ class DriverInspectionService:
             .where(
                 DriverVehicleInspection.driver_id == driver_id,
                 DriverVehicleInspection.vehicle_id == vehicle_id,
-                DriverVehicleInspection.inspection_date == today
             )
             .order_by(DriverVehicleInspection.created_at.desc())
             .limit(1)
@@ -517,7 +516,16 @@ class DriverInspectionService:
         res = await self.db.execute(stmt)
         insp = res.scalar_one_or_none()
 
-        if not insp:
+        # Legacy inspection rows may have a null inspection_date while retaining
+        # an authoritative inspected_at timestamp. Accept only when that timestamp
+        # falls on the current India-local day; an explicitly stale date still fails.
+        inspection_day = insp.inspection_date if insp else None
+        if insp and inspection_day is None and insp.inspected_at:
+            inspected_at = insp.inspected_at
+            if inspected_at.tzinfo is None:
+                inspected_at = inspected_at.replace(tzinfo=timezone.utc)
+            inspection_day = inspected_at.astimezone(ZoneInfo("Asia/Kolkata")).date()
+        if not insp or inspection_day != today:
             return (
                 False,
                 "INSPECTION_REQUIRED",
