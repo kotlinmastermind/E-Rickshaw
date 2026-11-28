@@ -1228,3 +1228,41 @@ class DriverServiceAreaAssignment(Base):
         UniqueConstraint("driver_id", "service_area_id", name="uq_driver_service_area_assignment"),
         Index("ix_driver_service_area_active", "service_area_id", "is_active", "driver_id"),
     )
+
+
+class DriverServiceAreaRequest(Base):
+    """Driver-submitted request to start operating in a locality.
+
+    A request never creates or activates a service polygon. Admin approval must
+    bind it to an already configured, active SERVICE_AREA polygon.
+    """
+    __tablename__ = "driver_service_area_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    driver_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("driver_profiles.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    state_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    district_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    locality_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    postal_code: Mapped[Optional[str]] = mapped_column(String(6), nullable=True)
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="PENDING", index=True)
+    service_area_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("geofence_zones.id", ondelete="RESTRICT"),
+        nullable=True, index=True,
+    )
+    admin_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reviewed_by_user_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        Index("ix_driver_area_request_driver_status", "driver_id", "status"),
+        Index("ix_driver_area_request_status_created", "status", "created_at"),
+    )
