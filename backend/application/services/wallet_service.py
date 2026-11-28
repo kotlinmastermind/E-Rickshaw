@@ -161,10 +161,11 @@ class WalletService:
             idem_res = await session.execute(idem_stmt)
             existing = idem_res.scalars().first()
             if existing:
+                expected_type = transaction_type if transaction_type in ["DEBIT", "COMPENSATION_DEBIT"] else "DEBIT"
                 if (
                     existing.wallet_id != wallet.id
                     or existing.amount_cents != amount_cents
-                    or existing.transaction_type != "DEBIT"
+                    or existing.transaction_type != expected_type
                     or existing.source != source
                 ):
                     raise HTTPException(
