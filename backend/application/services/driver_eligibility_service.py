@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.application.services.h3_geospatial_service import h3_service
 from backend.application.services.live_location_service import LiveLocationService, FRESHNESS_THRESHOLD_SECONDS
 from backend.infrastructure.cache.redis_client import redis_client
-from backend.domain.models import DriverProfile, DriverAvailability, DriverVehicleAssignment, Vehicle, DriverWallet
+from backend.domain.models import User, DriverProfile, DriverAvailability, DriverVehicleAssignment, Vehicle, VehicleCategory, DriverWallet
 
 logger = logging.getLogger("backend.dispatch.eligibility")
 
@@ -229,6 +229,7 @@ class DriverEligibilityService:
                 DriverAvailability.is_busy,
                 Vehicle.category_id.label("vehicle_category_id")
             )
+            .join(User, User.id == DriverProfile.user_id)
             .outerjoin(DriverWallet, DriverWallet.driver_id == DriverProfile.id)
             .join(DriverAvailability, DriverAvailability.driver_id == DriverProfile.id)
             .outerjoin(
@@ -239,9 +240,11 @@ class DriverEligibilityService:
                 )
             )
             .outerjoin(Vehicle, Vehicle.id == DriverVehicleAssignment.vehicle_id)
+            .outerjoin(VehicleCategory, VehicleCategory.id == Vehicle.category_id)
             .where(
                 DriverProfile.id.in_(driver_ids),
                 DriverProfile.approval_status == "APPROVED",
+                User.is_active.is_(True),
                 DriverAvailability.is_online.is_(True),
                 DriverAvailability.is_busy.is_(False)
             )
@@ -252,6 +255,7 @@ class DriverEligibilityService:
                 Vehicle.category_id == required_category_id,
                 Vehicle.category_id.is_not(None),
                 Vehicle.is_active.is_(True),
+                VehicleCategory.is_active.is_(True),
                 DriverVehicleAssignment.is_active.is_(True)
             )
         else:
@@ -259,6 +263,7 @@ class DriverEligibilityService:
             query = query.where(
                 Vehicle.category_id.is_not(None),
                 Vehicle.is_active.is_(True),
+                VehicleCategory.is_active.is_(True),
                 DriverVehicleAssignment.is_active.is_(True)
             )
 

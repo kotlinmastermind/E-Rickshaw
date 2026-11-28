@@ -14,7 +14,8 @@ from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.domain.models import (
-    Ride, RideAssignment, DriverProfile, DriverAvailability, RideStatusEvent
+    Ride, RideAssignment, DriverProfile, DriverAvailability, RideStatusEvent,
+    User, Vehicle, VehicleCategory, DriverVehicleAssignment
 )
 from backend.domain.state_machine.ride_state_machine import RideStateMachine, RideStatus, ActorRole
 from backend.application.services.live_location_service import LiveLocationService
@@ -333,6 +334,11 @@ class SmartDispatchService:
         driver = await self._resolve_driver(driver_user_id)
         if not driver:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found.")
+        driver_user = await self.db.get(User, driver.user_id)
+        if not driver_user or not driver_user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver account is inactive and cannot accept dispatch offers.")
+        if driver.approval_status != "APPROVED":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver approval is no longer active; this offer cannot be accepted.")
 
         # Row-level lock on assignment
         assign_stmt = (
@@ -379,6 +385,43 @@ class SmartDispatchService:
         await service_areas.require_driver_assignment(driver.id, ride.service_area_id)
         await service_areas.require_fresh_driver_inside(driver.id, ride.service_area_id)
 
+        # Revalidate the exact operational vehicle at acceptance time. An offer
+        # may outlive a vehicle deactivation, reassignment, or category change.
+        vehicle_stmt = (
+            select(Vehicle)
+            .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
+            .join(VehicleCategory, VehicleCategory.id == Vehicle.category_id)
+            .where(
+                DriverVehicleAssignment.driver_id == driver.id,
+                DriverVehicleAssignment.is_active.is_(True),
+                Vehicle.is_active.is_(True),
+                Vehicle.category_id == ride.vehicle_category_id,
+                VehicleCategory.is_active.is_(True),
+            )
+            .with_for_update()
+            .limit(1)
+        )
+        driver_vehicle = (await self.db.execute(vehicle_stmt)).scalars().first()
+        if not driver_vehicle:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Driver no longer has an active assigned vehicle matching this ride's category.",
+            )
+
+        # The driver must still be online and free; an offer is not a reservation
+        # of availability and can become stale while it is in flight.
+        avail_stmt = (
+            select(DriverAvailability)
+            .where(DriverAvailability.driver_id == driver.id)
+            .with_for_update()
+        )
+        avail = (await self.db.execute(avail_stmt)).scalars().first()
+        if not avail or not avail.is_online or avail.is_busy:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Driver is no longer online and available to accept this ride.",
+            )
+
         # Validate state transition via authoritative state machine
         RideStateMachine.validate_transition(ride.status, RideStatus.ASSIGNED.value, ActorRole.DRIVER.value)
 
@@ -392,13 +435,9 @@ class SmartDispatchService:
         ride.assigned_driver_id = driver.id
         ride.assigned_at = now
 
-        # Update driver availability to busy
-        avail_stmt = select(DriverAvailability).where(DriverAvailability.driver_id == driver.id).with_for_update()
-        avail_res = await self.db.execute(avail_stmt)
-        avail = avail_res.scalar_one_or_none()
-        if avail:
-            avail.is_busy = True
-            avail.updated_at = now
+        # Update the already locked availability row to busy.
+        avail.is_busy = True
+        avail.updated_at = now
 
         # Remove from H3 search index so driver is not candidate for other rides
         await self.live_loc.remove_driver_from_h3_index(driver.id)
