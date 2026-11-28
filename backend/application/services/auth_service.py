@@ -88,7 +88,6 @@ class AuthService:
         return {
             "message": f"Verification passcode dispatched to {phone_masked} via Twilio.",
             "phone_masked": phone_masked,
-            "expires_in_seconds": settings.OTP_EXPIRE_SECONDS
         }
 
     async def verify_otp(
