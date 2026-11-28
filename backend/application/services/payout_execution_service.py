@@ -34,6 +34,7 @@ ALLOWED_PAYOUT_TRANSITIONS = {
     "APPROVED": {"AWAITING_MANUAL_TRANSFER", "PROCESSING", "PAID", "FAILED", "REJECTED"},
     "AWAITING_MANUAL_TRANSFER": {"PAID", "FAILED"},
     "PROCESSING": {"PAID", "FAILED"},
+    "PAID": {"FAILED"},  # RazorpayX may reverse a processed payout after bank reconciliation.
     "FAILED": {"APPROVED"},
     "PAID": set(),
     "REJECTED": set(),
@@ -640,7 +641,9 @@ class PayoutExecutionService:
         ).scalar_one_or_none()
         if not payout:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout request not found.")
-        if payout.status in TERMINAL_PAYOUT_STATUSES:
+        if payout.status in TERMINAL_PAYOUT_STATUSES and not (
+            payout.status == "PAID" and payout.execution_mode == "RAZORPAYX"
+        ):
             return payout
 
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -751,7 +754,7 @@ class PayoutExecutionService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout request not found.")
         if payout.status == "FAILED":
             return payout
-        if payout.status not in {"APPROVED", "AWAITING_MANUAL_TRANSFER", "PROCESSING"}:
+        if payout.status not in {"APPROVED", "AWAITING_MANUAL_TRANSFER", "PROCESSING", "PAID"}:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot mark payout FAILED from status {payout.status}.",
@@ -759,7 +762,7 @@ class PayoutExecutionService:
 
         provider_meta = json.loads(payout.provider_metadata_json or "{}") if payout.provider_metadata_json else {}
         if payout.execution_mode == "RAZORPAYX" and (
-            (payout.status == "PROCESSING" or provider_meta.get("uncertain_outcome"))
+            (payout.status in {"PROCESSING", "PAID"} or provider_meta.get("uncertain_outcome"))
             and not provider_meta.get("provider_failure_confirmed")
         ):
             raise HTTPException(
@@ -1018,8 +1021,11 @@ class PayoutExecutionService:
                 detail="Stale or mismatched provider payout event rejected.",
             )
 
-        # Out-of-order / terminal protection
-        if payout.status in TERMINAL_PAYOUT_STATUSES:
+        # A processed payout may later be reversed by the beneficiary bank/clearing house.
+        # All other events after a terminal state remain out-of-order and are ignored.
+        if payout.status in TERMINAL_PAYOUT_STATUSES and not (
+            payout.status == "PAID" and event_name == "payout.reversed"
+        ):
             inbox.status = "PROCESSED"
             inbox.processed_at = now
             await session.commit()
@@ -1044,7 +1050,10 @@ class PayoutExecutionService:
                     },
                 )
         elif event_name in {"payout.failed", "payout.reversed", "payout.rejected"}:
-            if payout.status in {"APPROVED", "PROCESSING"}:
+            eligible_statuses = {"APPROVED", "PROCESSING"}
+            if event_name == "payout.reversed":
+                eligible_statuses.add("PAID")
+            if payout.status in eligible_statuses:
                 payout.provider_payout_id = provider_payout_id or payout.provider_payout_id
                 confirmed_meta = json.loads(_sanitize_provider_payload(entity))
                 confirmed_meta["provider_failure_confirmed"] = True
