@@ -286,6 +286,49 @@ async def test_create_ride_rejects_nonexistent_and_mismatched_estimate(db_sessio
     assert exc_400.value.status_code == 400
     assert "Vehicle category mismatch" in exc_400.value.detail
 
+    # A valid estimate cannot be reused after the customer changes either route endpoint.
+    with pytest.raises(HTTPException) as changed_pickup:
+        await service.create_ride_request(
+            customer_user_id=cust_user.id,
+            category_id=cat_rickshaw.id,
+            estimate_id=est_rick.id,
+            pickup_address="Changed pickup",
+            destination_address="Gate 2",
+            pickup_latitude=25.5941,
+            pickup_longitude=85.1376,
+            destination_latitude=28.6129,
+            destination_longitude=77.2295,
+        )
+    assert changed_pickup.value.status_code == 409
+    assert "Pickup location no longer matches" in changed_pickup.value.detail
+
+    with pytest.raises(HTTPException) as changed_destination:
+        await service.create_ride_request(
+            customer_user_id=cust_user.id,
+            category_id=cat_rickshaw.id,
+            estimate_id=est_rick.id,
+            pickup_address="Gate 1",
+            destination_address="Changed destination",
+            pickup_latitude=28.6328,
+            pickup_longitude=77.2195,
+            destination_latitude=25.5941,
+            destination_longitude=85.1376,
+        )
+    assert changed_destination.value.status_code == 409
+    assert "Destination location no longer matches" in changed_destination.value.detail
+
+    with pytest.raises(HTTPException) as incomplete_route:
+        await service.create_ride_request(
+            customer_user_id=cust_user.id,
+            category_id=cat_rickshaw.id,
+            estimate_id=est_rick.id,
+            pickup_address="Gate 1",
+            destination_address="Gate 2",
+            pickup_latitude=28.6328,
+        )
+    assert incomplete_route.value.status_code == 400
+    assert "coordinates must be supplied together" in incomplete_route.value.detail
+
 @pytest.mark.asyncio
 async def test_cash_collection_rejects_zero_fare(db_session):
     """
