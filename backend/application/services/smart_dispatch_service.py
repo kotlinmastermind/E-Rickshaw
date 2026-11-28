@@ -392,16 +392,43 @@ class SmartDispatchService:
             )
 
         now = utc_now()
-        if assignment.expires_at is None or ensure_utc(assignment.expires_at) <= now:
-            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Dispatch offer has expired or has no valid expiry.")
 
-        # Row-level lock on Ride
+        # Lock and inspect the ride before checking expiry or driver availability.
+        # A concurrent retry by the same driver is idempotent after the first
+        # request commits; a different driver receives a deterministic 409.
         ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
         ride_res = await self.db.execute(ride_stmt)
         ride = ride_res.scalar_one_or_none()
 
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+        accepted_states = (
+            RideStatus.ASSIGNED.value,
+            RideStatus.ARRIVED.value,
+            RideStatus.IN_PROGRESS.value,
+            RideStatus.PAUSED.value,
+        )
+        if ride.status in accepted_states or ride.assigned_driver_id is not None:
+            if ride.assigned_driver_id == driver.id and ride.status in accepted_states:
+                assignment.status = "ACCEPTED"
+                assignment.is_accepted = True
+                assignment.responded_at = assignment.responded_at or ride.assigned_at or now
+                await self.db.commit()
+                accepted_at = ensure_utc(assignment.responded_at)
+                return {
+                    "status": "ACCEPTED",
+                    "message": "Offer already accepted.",
+                    "ride_id": ride_id,
+                    "driver_id": driver.id,
+                    "assigned_at": accepted_at.isoformat() if accepted_at else None,
+                }
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride has already been assigned to another driver or is no longer accepting offers.")
+
+        if ride.status != RideStatus.REQUESTED.value:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride is no longer accepting dispatch responses.")
+        if assignment.expires_at is None or ensure_utc(assignment.expires_at) <= now:
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Dispatch offer has expired or has no valid expiry.")
+
         if not ride.service_area_id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride has no validated service area.")
         from backend.application.services.service_area_service import ServiceAreaService
