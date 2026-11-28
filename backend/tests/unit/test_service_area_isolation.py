@@ -206,3 +206,71 @@ async def test_admin_approval_assigns_driver_only_inside_configured_area(db_sess
         )
     )).scalar_one_or_none()
     assert assignment is not None
+
+
+@pytest.mark.asyncio
+async def test_approved_driver_auto_joins_existing_area_when_tariff_is_ready(db_session):
+    import json
+    from backend.domain.models import DriverServiceAreaAssignment, VehicleCategory, FareRule
+
+    driver_user = User(
+        phone_number="+919900001238",
+        full_name="Auto Area Driver",
+        role="driver",
+        is_active=True,
+    )
+    db_session.add(driver_user)
+    await db_session.flush()
+    driver = DriverProfile(
+        user_id=driver_user.id,
+        license_number="AREA-REQUEST-003",
+        approval_status="APPROVED",
+    )
+    area = GeofenceZone(
+        name="Auto Join Test Area",
+        city_code="AUTO_JOIN_CITY",
+        zone_type="SERVICE_AREA",
+        coordinates_json=json.dumps([
+            {"lat": 9.0, "lng": 9.0},
+            {"lat": 11.0, "lng": 9.0},
+            {"lat": 11.0, "lng": 11.0},
+            {"lat": 9.0, "lng": 11.0},
+        ]),
+        is_active=True,
+    )
+    category = VehicleCategory(code="AUTO-JOIN-CAT", name="Auto Join Vehicle", is_active=True)
+    db_session.add_all([driver, area, category])
+    await db_session.flush()
+    db_session.add(FareRule(
+        category_id=category.id,
+        city_code="AUTO_JOIN_CITY",
+        base_fare_cents=1000,
+        per_km_cents=500,
+        per_minute_cents=100,
+        minimum_fare_cents=1500,
+        is_active=True,
+        workflow_status="ACTIVE",
+    ))
+    await db_session.flush()
+
+    result = await submit_driver_service_area_request(
+        DriverServiceAreaRequestPayload(
+            state_name="Test State",
+            district_name="Test District",
+            locality_name="Auto Join Locality",
+            latitude=10.0,
+            longitude=10.0,
+        ),
+        driver_user,
+        db_session,
+    )
+    assert result["status"] == "APPROVED"
+
+    assignment = (await db_session.execute(
+        select(DriverServiceAreaAssignment).where(
+            DriverServiceAreaAssignment.driver_id == driver.id,
+            DriverServiceAreaAssignment.service_area_id == area.id,
+            DriverServiceAreaAssignment.is_active.is_(True),
+        )
+    )).scalar_one_or_none()
+    assert assignment is not None
