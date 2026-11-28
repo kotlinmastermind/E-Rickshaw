@@ -12,7 +12,7 @@ from backend.api.deps import get_current_user, get_current_driver
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverAvailability,
     VehicleCategory, FareRule, Ride, Vehicle, DriverVehicleAssignment,
-    GeofenceZone, DriverServiceAreaAssignment, RideAssignment
+    GeofenceZone, DriverServiceAreaAssignment
 )
 
 
