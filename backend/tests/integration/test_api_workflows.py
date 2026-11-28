@@ -169,7 +169,10 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             db_session.add(DriverVehicleInspection(
                 driver_id=drv2_profile.id,
                 vehicle_id=fleet_vehicle.id,
-                inspection_status="PASSED",
+                inspection_status="APPROVED",
+                verification_status="VERIFIED",
+                verified_by=admin_user.id,
+                verified_at=datetime.now(timezone.utc),
                 overall_result="PASS",
                 inspected_at=datetime.now(timezone.utc)
             ))
