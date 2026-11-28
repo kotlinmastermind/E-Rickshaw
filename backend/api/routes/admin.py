@@ -2503,6 +2503,23 @@ async def approve_driver_service_area_request(
     if not zone.city_code or not zone.city_code.strip():
         raise HTTPException(status_code=409, detail="The selected service area has no city code; configure it before approval.")
 
+    now = datetime.now(timezone.utc)
+    active_tariff_id = (await db.execute(
+        select(FareRule.id)
+        .join(VehicleCategory, VehicleCategory.id == FareRule.category_id)
+        .where(
+            FareRule.city_code == zone.city_code,
+            FareRule.is_active.is_(True),
+            FareRule.workflow_status.in_(["ACTIVE", "APPROVED"]),
+            FareRule.effective_from <= now,
+            or_(FareRule.effective_until.is_(None), FareRule.effective_until > now),
+            VehicleCategory.is_active.is_(True),
+        )
+        .limit(1)
+    )).scalar_one_or_none()
+    if not active_tariff_id:
+        raise HTTPException(status_code=409, detail="No active fare tariff is configured for this service area's city code. Configure a tariff before assigning the driver.")
+
     inside = await ServiceAreaService(db).is_driver_inside(
         zone.id, request.latitude, request.longitude
     )
@@ -2538,7 +2555,7 @@ async def approve_driver_service_area_request(
     db.add(GeofenceZoneAudit(
         zone_id=zone.id,
         admin_user_id=admin.id,
-        action="DRIVER_AREA_REQUEST_APPROVED",
+        action="AREA_REQ_APPROVED",
         new_state_json=json.dumps({"request_id": request.id, "driver_id": driver.id}),
     ))
     await db.commit()
@@ -2576,7 +2593,7 @@ async def reject_driver_service_area_request(
     request.reviewed_at = datetime.now(timezone.utc)
     db.add(GeofenceZoneAudit(
         admin_user_id=admin.id,
-        action="DRIVER_AREA_REQUEST_REJECTED",
+        action="AREA_REQ_REJECTED",
         new_state_json=json.dumps({"request_id": request.id, "driver_id": request.driver_id, "reason": request.admin_response}),
     ))
     await db.commit()
