@@ -556,12 +556,9 @@ async def test_dispatch_offer_uses_canonical_cross_worker_delivery_contract(db_s
         ride, candidate, None, assignment, timeout_seconds=20
     )
 
-    assert publish.await_count == 2
+    assert publish.await_count == 1
     calls = {call.args[0]: call.args[1] for call in publish.await_args_list}
-    assert set(calls) == {
-        "driver:dispatch:driver-profile-1",
-        "driver:dispatch:driver-user-1",
-    }
+    assert set(calls) == {"driver:dispatch:driver-profile-1"}
     payload = calls["driver:dispatch:driver-profile-1"]
     assert payload["event"] == "DISPATCH_OFFER"
     assert payload["ride_id"] == ride.id
