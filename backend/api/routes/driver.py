@@ -11,7 +11,7 @@ from backend.domain.models import User
 from backend.infrastructure.security.rate_limiter import device_token_rate_limiter
 from backend.application.services.driver_service import DriverService
 from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
-from backend.application.services.cascading_dispatch_service import CascadingDispatchService
+from backend.application.services.smart_dispatch_service import SmartDispatchService
 
 router = APIRouter(prefix="/drivers", tags=["Driver Operations"])
 
@@ -63,7 +63,7 @@ async def update_dispatch_preferences(payload: DispatchPreferencesPayload, user:
 
 @router.post("/dispatch/offers/{ride_id}/reject")
 async def reject_dispatch_offer(ride_id: str, payload: RejectOfferPayload, user: User = Depends(get_current_driver), db: AsyncSession = Depends(get_db)):
-    return await CascadingDispatchService(db).reject_offer_and_cascade(user.id, ride_id, payload.reason)
+    return await SmartDispatchService(db).reject_offer(driver_user_id=user.id, ride_id=ride_id, reason=payload.reason)
 
 class AvailabilityPayload(BaseModel):
     is_online: bool
