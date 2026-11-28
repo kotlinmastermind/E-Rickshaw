@@ -58,8 +58,8 @@ async def test_driver_signup_and_login_with_mobile(db_session):
             "phone_number": driver_phone,
             "email": driver_email,
             "password": "PilotPassword2026",
-            "vehicle_name": "Piaggio Ape E-City",
-            "vehicle_no": "DL-01-AB-9988"
+            "license_number": f"DL-TEST-{uid}",
+            "vehicle_type": "SEDAN"
         })
         assert signup_res.status_code == 200, signup_res.text
         data = signup_res.json()
