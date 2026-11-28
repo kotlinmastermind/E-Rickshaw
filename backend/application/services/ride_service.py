@@ -212,7 +212,7 @@ class RideService:
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=(
-                                    f"{label} location deviates {deviation_km:.1f}km from the locked price route "
+                                    f"{label} location deviates {deviation_km:.1f}km from the locked price route corridor "
                                     f"(maximum allowed: {self.PRICE_LOCK_COORDINATE_TOLERANCE_KM:.1f}km). "
                                     "Please generate a live fare estimate."
                                 ),
