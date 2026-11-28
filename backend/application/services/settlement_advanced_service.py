@@ -1003,7 +1003,7 @@ class SettlementAdvancedService:
                 payment.refund_lease_expires_at = None
 
             if gw_status == "processed":
-                await payment_svc.apply_confirmed_refund_settlement(
+                settlement_result = await payment_svc.apply_confirmed_refund_settlement(
                     payment=payment,
                     refund_obj=refund,
                     refund_id=real_refund_id,
@@ -1013,6 +1013,21 @@ class SettlementAdvancedService:
                     settled_status="PROCESSED",
                     now=datetime.now(timezone.utc),
                 )
+                # The synchronous Razorpay response is authoritative when it says
+                # "processed". Keep the response row aligned with the settlement
+                # result before commit; this also protects against stale ORM state
+                # if a settlement handler returns a distinct refund instance.
+                settled_refund = settlement_result.get("refund_obj")
+                settled_status = settlement_result.get("refund_status")
+                if settled_status == "PROCESSED" and refund.status != "PROCESSED":
+                    transition_refund_status(
+                        refund,
+                        "PROCESSED",
+                        context="synchronous Razorpay refund confirmed processed",
+                    )
+                if settled_refund is not None and settled_refund is not refund:
+                    if settled_refund.id != refund.id:
+                        raise RuntimeError("Refund settlement returned a different refund record.")
                 await self.db.commit()
                 lease_released = True
             elif gw_status == "failed":
