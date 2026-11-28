@@ -70,9 +70,15 @@ object DriverWebSocketClient {
                             Log.w(TAG, "Dispatch WebSocket session revoked by backend.")
                             disconnectAll()
                         }
-                        eventType == "DISPATCH_OFFER" || json.has("ride_id") -> {
+                        eventType == "DISPATCH_OFFER" -> {
                             val rideId = json.optString("ride_id", "")
-                            if (rideId.isBlank()) return
+                            val assignmentId = json.optString("assignment_id", "")
+                            val expiresAt = json.optString("expires_at", "")
+                            val timeoutSeconds = json.optInt("timeout_seconds", 0)
+                            if (rideId.isBlank() || assignmentId.isBlank() || expiresAt.isBlank() || timeoutSeconds <= 0) {
+                                Log.w(TAG, "Ignoring dispatch offer without a live persisted assignment identity/expiry.")
+                                return
+                            }
 
                             val fareCents = when {
                                 json.has("estimated_fare_cents") && !json.isNull("estimated_fare_cents") ->
@@ -96,23 +102,23 @@ object DriverWebSocketClient {
 
                             val offer = DispatchOfferDto(
                                 rideId = rideId,
-                                assignmentId = json.optString("assignment_id", ""),
-                                passengerName = json.optString("passenger_name", "Commuter Passenger"),
+                                assignmentId = assignmentId,
+                                passengerName = json.optString("passenger_name", ""),
                                 passengerPhone = json.optString("passenger_phone", ""),
                                 passengerRating = json.optDouble("passenger_rating", 0.0),
-                                pickupAddress = json.optString("pickup_address", "Pickup Location"),
+                                pickupAddress = json.optString("pickup_address", ""),
                                 destinationAddress = json.optString(
                                     "destination_address",
-                                    json.optString("destination_area", "Destination")
+                                    json.optString("destination_area", "")
                                 ),
                                 distanceKm = json.optDouble("estimated_trip_distance_km", json.optDouble("distance_km", 0.0)),
                                 pickupDistanceKm = pickupDistKm,
                                 pickupDurationMinutes = pickupEta,
                                 tripDurationMinutes = tripEta,
                                 estimatedFareCents = fareCents,
-                                paymentMode = json.optString("payment_mode", "UPI"),
-                                expiresAt = if (json.isNull("expires_at")) null else json.optString("expires_at"),
-                                timeoutSeconds = json.optInt("timeout_seconds", 25)
+                                paymentMode = json.optString("payment_mode", ""),
+                                expiresAt = expiresAt,
+                                timeoutSeconds = timeoutSeconds
                             )
 
                             // Send delivery acknowledgement expected by backend ws.py
