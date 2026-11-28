@@ -130,7 +130,7 @@ async def test_driver_can_submit_one_pending_locality_request(db_session):
 @pytest.mark.asyncio
 async def test_admin_approval_assigns_driver_only_inside_configured_area(db_session):
     import json
-    from backend.domain.models import DriverServiceAreaAssignment
+    from backend.domain.models import DriverServiceAreaAssignment, VehicleCategory, FareRule
 
     driver_user = User(
         phone_number="+919900001236",
@@ -164,7 +164,19 @@ async def test_admin_approval_assigns_driver_only_inside_configured_area(db_sess
         ]),
         is_active=True,
     )
-    db_session.add_all([driver, area])
+    category = VehicleCategory(code="AREA-TEST-CAT", name="Area Test Vehicle", is_active=True)
+    db_session.add_all([driver, area, category])
+    await db_session.flush()
+    db_session.add(FareRule(
+        category_id=category.id,
+        city_code="TEST_LOCALITY",
+        base_fare_cents=1000,
+        per_km_cents=500,
+        per_minute_cents=100,
+        minimum_fare_cents=1500,
+        is_active=True,
+        workflow_status="ACTIVE",
+    ))
     await db_session.flush()
 
     created = await submit_driver_service_area_request(
