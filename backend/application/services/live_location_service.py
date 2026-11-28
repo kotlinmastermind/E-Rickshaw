@@ -71,17 +71,62 @@ class LiveLocationService:
             "epoch_timestamp": epoch_now
         }
 
-        # 1. Update Redis telemetry cache
+        # Serialize every location/index mutation for this driver across API workers.
+        # Availability is re-read while holding the same lock: a GPS request may have
+        # captured an online/free snapshot before an offline or dispatch transition.
         loc_key = f"driver:location:{driver_id}"
-        await redis_client.set_json(loc_key, location_payload, ex=LOCATION_TTL_SECONDS)
-        await redis_client.set(f"driver:last_seen:{driver_id}", str(epoch_now), ex=LOCATION_TTL_SECONDS)
+        try:
+            async with redis_client.distributed_lock(
+                f"driver:location:index-lock:{driver_id}",
+                timeout_seconds=10,
+                retry_delay_seconds=0.05,
+                max_retries=40,
+            ):
+                if self.db:
+                    availability_stmt = select(DriverAvailability).where(
+                        DriverAvailability.driver_id == driver_id
+                    )
+                    availability = (await self.db.execute(availability_stmt)).scalars().first()
+                    is_online = bool(availability and availability.is_online)
+                    is_busy = bool(availability and availability.is_busy)
+                    location_payload["is_online"] = is_online
+                    location_payload["is_busy"] = is_busy
 
-        # 2. Update H3 spatial index if driver is eligible for dispatch (online & not busy)
-        if h3_cell and is_online and not is_busy:
-            await self._update_h3_cell_membership(driver_id, h3_cell)
-        else:
-            # If driver went offline or busy, remove from H3 dispatch search
-            await self.remove_driver_from_h3_index(driver_id)
+                previous_payload = await redis_client.get_json(loc_key)
+                previous_epoch = None
+                if isinstance(previous_payload, dict):
+                    try:
+                        previous_epoch = float(previous_payload.get("epoch_timestamp"))
+                    except (TypeError, ValueError):
+                        previous_epoch = None
+
+                # A request that waited behind a newer request must not roll the
+                # driver's live position or H3 cell backwards.
+                if previous_epoch is not None and previous_epoch > epoch_now:
+                    return {
+                        "status": "REJECTED",
+                        "reason": "STALE_LOCATION_UPDATE",
+                        "driver_id": driver_id,
+                    }
+
+                await redis_client.set_json(loc_key, location_payload, ex=LOCATION_TTL_SECONDS)
+                await redis_client.set(
+                    f"driver:last_seen:{driver_id}",
+                    str(epoch_now),
+                    ex=LOCATION_TTL_SECONDS,
+                )
+
+                if h3_cell and is_online and not is_busy:
+                    await self._update_h3_cell_membership(driver_id, h3_cell)
+                else:
+                    await self._remove_driver_from_h3_index_locked(driver_id)
+        except TimeoutError:
+            logger.warning("Location index lock unavailable for driver %s; requesting client retry.", driver_id)
+            return {
+                "status": "RETRY",
+                "reason": "LOCATION_INDEX_BUSY",
+                "driver_id": driver_id,
+            }
 
         # 3. Broadcast real-time location to WebSocket ride channel if on active ride
         if active_ride_id:
@@ -164,13 +209,36 @@ class LiveLocationService:
         await redis_client.expire(f"h3:drivers:{new_cell}", CELL_SET_TTL_SECONDS)
         await redis_client.set(cell_key, new_cell, ex=LOCATION_TTL_SECONDS)
 
-    async def remove_driver_from_h3_index(self, driver_id: str) -> None:
-        """Removes driver from all H3 cell search indices when going offline or becoming busy."""
+    async def _remove_driver_from_h3_index_locked(self, driver_id: str) -> None:
+        """Remove H3 membership; caller must hold the driver's location index lock."""
         cell_key = f"driver:h3_cell:{driver_id}"
         current_cell = await redis_client.get(cell_key)
         if current_cell:
             await redis_client.srem(f"h3:drivers:{current_cell}", driver_id)
             await redis_client.delete(cell_key)
+
+    async def remove_driver_from_h3_index(self, driver_id: str) -> None:
+        """Serialize H3 removal with GPS ingestion and every other index mutation."""
+        async with redis_client.distributed_lock(
+            f"driver:location:index-lock:{driver_id}",
+            timeout_seconds=10,
+            retry_delay_seconds=0.05,
+            max_retries=40,
+        ):
+            # A delayed offline/busy cleanup must not undo a later transition
+            # back to online/free. Reconcile against the committed DB state.
+            if self.db:
+                availability_stmt = select(DriverAvailability).where(
+                    DriverAvailability.driver_id == driver_id
+                )
+                availability = (await self.db.execute(availability_stmt)).scalars().first()
+                if availability and availability.is_online and not availability.is_busy:
+                    cached = await redis_client.get_json(f"driver:location:{driver_id}")
+                    cell = cached.get("h3_cell") if isinstance(cached, dict) else None
+                    if cell:
+                        await self._update_h3_cell_membership(driver_id, cell)
+                        return
+            await self._remove_driver_from_h3_index_locked(driver_id)
 
     async def get_driver_live_location(self, driver_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -316,10 +384,38 @@ class LiveLocationService:
                 "epoch_timestamp": epoch_time
             }
 
-            await redis_client.set_json(f"driver:location:{driver_id}", payload, ex=LOCATION_TTL_SECONDS)
-            await redis_client.set(f"driver:last_seen:{driver_id}", str(epoch_time), ex=LOCATION_TTL_SECONDS)
-            await self._update_h3_cell_membership(driver_id, h3_cell)
-            reindexed_count += 1
+            try:
+                async with redis_client.distributed_lock(
+                    f"driver:location:index-lock:{driver_id}",
+                    timeout_seconds=10,
+                    retry_delay_seconds=0.05,
+                    max_retries=40,
+                ):
+                    current_payload = await redis_client.get_json(f"driver:location:{driver_id}")
+                    try:
+                        current_epoch = float(current_payload.get("epoch_timestamp")) if isinstance(current_payload, dict) else None
+                    except (TypeError, ValueError):
+                        current_epoch = None
+
+                    # A database rebuild must never overwrite a newer live Redis ping.
+                    if current_epoch is not None and current_epoch > epoch_time:
+                        continue
+
+                    await redis_client.set_json(
+                        f"driver:location:{driver_id}",
+                        payload,
+                        ex=LOCATION_TTL_SECONDS,
+                    )
+                    await redis_client.set(
+                        f"driver:last_seen:{driver_id}",
+                        str(epoch_time),
+                        ex=LOCATION_TTL_SECONDS,
+                    )
+                    await self._update_h3_cell_membership(driver_id, h3_cell)
+                    reindexed_count += 1
+            except TimeoutError:
+                logger.warning("Skipping H3 rebuild for driver %s because its location index is busy.", driver_id)
+                continue
 
         logger.info(f"Rebuilt Redis H3 spatial index: {reindexed_count} active drivers re-indexed from DB.")
         return reindexed_count

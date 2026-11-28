@@ -115,6 +115,12 @@ async def ingest_driver_telemetry(
 
     if result.get("status") == "REJECTED":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("reason"))
+    if result.get("status") == "RETRY":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Driver location index is busy. Retry the location update shortly.",
+            headers={"Retry-After": "1"},
+        )
 
     return result
 
@@ -187,8 +193,26 @@ async def trigger_dispatch_search(
 ):
     """
     Triggers smart dispatch search for a requested ride.
-    Finds nearest optimal candidate, acquires atomic lock, and issues offer.
+    Customers may dispatch only their own ride; administrators may dispatch
+    operationally. Drivers and unrelated customers cannot trigger another ride.
     """
+    ride_stmt = select(Ride).where(Ride.id == payload.ride_id)
+    ride = (await db.execute(ride_stmt)).scalar_one_or_none()
+    if not ride:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+
+    role = str(user.role or "").strip().lower()
+    if role == "customer":
+        customer_stmt = select(CustomerProfile.id).where(CustomerProfile.user_id == user.id)
+        customer_id = (await db.execute(customer_stmt)).scalar_one_or_none()
+        if not customer_id or ride.customer_id != customer_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+    elif role not in ("admin", "super_admin", "superadmin", "super administrator"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the ride owner or an administrator may trigger dispatch.",
+        )
+
     svc = SmartDispatchService(db)
     assignment = await svc.search_and_dispatch(
         ride_id=payload.ride_id,

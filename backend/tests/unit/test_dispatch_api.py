@@ -177,7 +177,16 @@ async def test_dispatch_api_endpoints(db_session):
             driver_found = any(d["driver_id"] == driver_profile.id for d in nearby_data["drivers"])
             assert driver_found is True
 
-            # 3. Trigger Smart Dispatch Search
+            # Another authenticated customer cannot trigger dispatch for this ride UUID.
+            app.dependency_overrides[get_current_user] = lambda: other_customer_user
+            unauthorized_search = await client.post(
+                "/api/v1/dispatch/search",
+                json={"ride_id": ride.id, "max_rings": 2}
+            )
+            assert unauthorized_search.status_code == 404
+            app.dependency_overrides[get_current_user] = lambda: cust_user
+
+            # 3. Trigger Smart Dispatch Search (ride owner only)
             resp_search = await client.post(
                 "/api/v1/dispatch/search",
                 json={"ride_id": ride.id, "max_rings": 2}
