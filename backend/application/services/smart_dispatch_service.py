@@ -756,6 +756,37 @@ async def run_dispatch_expiry_reaper_loop(poll_interval_seconds: int = 5, batch_
             # expiry and ride state, so workers cannot cascade the same offer twice.
             for assignment_id, ride_id, driver_id in expired_offers:
                 await SmartDispatchService._handle_timeout(ride_id, driver_id, assignment_id)
+
+            # Recover the cascade if a process stopped after persisting a driver
+            # rejection/expiry but before its in-memory background task ran.
+            async with async_session_maker() as session:
+                now = utc_now()
+                terminal_offer_exists = select(RideAssignment.id).where(
+                    RideAssignment.ride_id == Ride.id,
+                    RideAssignment.status.in_(["REJECTED", "EXPIRED", "CANCELLED"]),
+                ).exists()
+                live_offer_exists = select(RideAssignment.id).where(
+                    RideAssignment.ride_id == Ride.id,
+                    RideAssignment.status == "OFFERED",
+                    RideAssignment.expires_at > now,
+                ).exists()
+                pending_result = await session.execute(
+                    select(Ride.id)
+                    .where(
+                        Ride.status == RideStatus.REQUESTED.value,
+                        Ride.assigned_driver_id.is_(None),
+                        Ride.service_area_id.is_not(None),
+                        terminal_offer_exists,
+                        ~live_offer_exists,
+                    )
+                    .order_by(Ride.requested_at.asc())
+                    .limit(batch_size)
+                )
+                pending_ride_ids = list(pending_result.scalars().all())
+
+            for pending_ride_id in pending_ride_ids:
+                async with async_session_maker() as session:
+                    await SmartDispatchService(session).search_and_dispatch(pending_ride_id)
         except asyncio.CancelledError:
             raise
         except Exception:
