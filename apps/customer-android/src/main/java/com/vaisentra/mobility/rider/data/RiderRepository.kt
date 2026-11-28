@@ -1765,10 +1765,26 @@ object RiderRepository {
     }
 
     suspend fun purchaseGiftCard(req: GiftCardPurchaseRequest): Result<GiftCardPurchaseResponse> {
+        val currentUid = NetworkClient.currentUserId()
+        val recipientScope = req.recipientEmail ?: req.recipientPhone ?: req.recipientName ?: "IN_APP"
+        val recipientDigest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(recipientScope.toByteArray(Charsets.UTF_8))
+            .take(8)
+            .joinToString("") { "%02x".format(it) }
+        val intentScopeKey = "GIFT_CARD_PURCHASE_${currentUid ?: "anon"}_${req.amountCents}_$recipientDigest"
+        val idempotencyKey = NetworkClient.checkoutSessionStore.getOrCreateScopedIdempotencyKey(
+            intentScopeKey,
+            "giftcard"
+        )
+        val safeRequest = req.copy(
+            paymentMethod = "WALLET",
+            idempotencyKey = idempotencyKey
+        )
         return try {
-            val res = NetworkClient.apiService.purchaseGiftCard(req)
+            val res = NetworkClient.apiService.purchaseGiftCard(safeRequest)
             val body = res.body()
             if (res.isSuccessful && body != null) {
+                NetworkClient.checkoutSessionStore.clearScopedIdempotencyKey(intentScopeKey)
                 fetchMyGiftCards()
                 fetchWalletBalance()
                 Result.success(body)
@@ -1777,6 +1793,7 @@ object RiderRepository {
                 Result.failure(IllegalStateException(err))
             }
         } catch (e: Exception) {
+            // Keep the same key after transport failures: the server may have committed the purchase.
             Result.failure(e)
         }
     }
