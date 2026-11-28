@@ -9,6 +9,8 @@ from backend.infrastructure.security.crypto import (
     generate_secure_otp, verify_totp, generate_mfa_secret
 )
 from backend.application.services.driver_service import DriverService
+from backend.application.services.driver_onboarding_service import DriverOnboardingService
+from backend.application.services.user_governance_service import UserGovernanceService
 from backend.application.services.ride_service import RideService
 from backend.application.services.driver_trip_operations_service import DriverTripOperationsService
 from fastapi import HTTPException
@@ -249,6 +251,50 @@ async def test_existing_approved_driver_retains_status_and_goes_online(db_sessio
     service = DriverService(db_session)
     result = await service.toggle_availability(user.id, is_online=True)
     assert result["is_online"] is True
+
+
+@pytest.mark.asyncio
+async def test_driver_profiles_are_never_synthesized_for_non_driver_accounts(db_session):
+    user = User(
+        phone_number=f"+9191{uuid.uuid4().int % 100000000:08d}",
+        full_name="Ordinary Customer",
+        role="customer",
+        is_active=True
+    )
+    db_session.add(user)
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as service_error:
+        await DriverService(db_session).get_or_create_profile(user.id)
+    assert service_error.value.status_code == 404
+
+    with pytest.raises(HTTPException) as onboarding_error:
+        await DriverOnboardingService(db_session).get_or_create_driver(user.id)
+    assert onboarding_error.value.status_code == 404
+
+    await db_session.refresh(user)
+    assert user.role == "customer"
+    assert (await db_session.execute(
+        select(DriverProfile).where(DriverProfile.user_id == user.id)
+    )).scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_generic_password_registration_cannot_create_driver_accounts(db_session):
+    service = UserGovernanceService(db_session)
+    phone = f"+9192{uuid.uuid4().int % 100000000:08d}"
+    with pytest.raises(HTTPException) as exc_info:
+        await service.register_with_password(
+            email=f"alternate_driver_{uuid.uuid4().hex[:8]}@example.com",
+            password="StrongPassword123!",
+            full_name="Alternate Signup",
+            phone_number=phone,
+            role="driver"
+        )
+    assert exc_info.value.status_code == 403
+    assert (await db_session.execute(
+        select(User).where(User.phone_number == phone)
+    )).scalar_one_or_none() is None
 
 
 @pytest.mark.asyncio
