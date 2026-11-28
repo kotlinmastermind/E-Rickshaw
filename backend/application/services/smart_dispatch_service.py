@@ -632,6 +632,9 @@ class SmartDispatchService:
                     await batch_optimizer.release_driver_lock(driver_id, ride_id)
                     await redis_client.delete(f"dispatch:offer:{ride_id}:{driver_id}")
                     await redis_client.delete(f"driver:active_offer:{driver_id}")
+                    driver_profile = await session.get(DriverProfile, driver_id)
+                    if driver_profile:
+                        await redis_client.delete(f"driver:active_offer:{driver_profile.user_id}")
 
                     await session.commit()
                     logger.info(f"Offer for ride {ride_id} to driver {driver_id} timed out. Cascading...")
