@@ -225,6 +225,19 @@ class LiveLocationService:
             retry_delay_seconds=0.05,
             max_retries=40,
         ):
+            # A delayed offline/busy cleanup must not undo a later transition
+            # back to online/free. Reconcile against the committed DB state.
+            if self.db:
+                availability_stmt = select(DriverAvailability).where(
+                    DriverAvailability.driver_id == driver_id
+                )
+                availability = (await self.db.execute(availability_stmt)).scalars().first()
+                if availability and availability.is_online and not availability.is_busy:
+                    cached = await redis_client.get_json(f"driver:location:{driver_id}")
+                    cell = cached.get("h3_cell") if isinstance(cached, dict) else None
+                    if cell:
+                        await self._update_h3_cell_membership(driver_id, cell)
+                        return
             await self._remove_driver_from_h3_index_locked(driver_id)
 
     async def get_driver_live_location(self, driver_id: str) -> Optional[Dict[str, Any]]:
