@@ -1018,16 +1018,20 @@ class SettlementAdvancedService:
                 # result before commit; this also protects against stale ORM state
                 # if a settlement handler returns a distinct refund instance.
                 settled_refund = settlement_result.get("refund_obj")
-                settled_status = settlement_result.get("refund_status")
-                if settled_status == "PROCESSED" and refund.status != "PROCESSED":
+                if settled_refund is not None and settled_refund.id != refund.id:
+                    raise RuntimeError("Refund settlement returned a different refund record.")
+                # Persist the provider-confirmed terminal state on the exact row
+                # reserved for this request. Do not rely on an ORM object returned
+                # by a helper after it may have performed an idempotent early return.
+                if int(settlement_result.get("applied_refund") or 0) > 0 and not settlement_result.get("is_anomaly"):
                     transition_refund_status(
                         refund,
                         "PROCESSED",
                         context="synchronous Razorpay refund confirmed processed",
                     )
-                if settled_refund is not None and settled_refund is not refund:
-                    if settled_refund.id != refund.id:
-                        raise RuntimeError("Refund settlement returned a different refund record.")
+                refund.provider_refund_id = str(real_refund_id)
+                refund.arn_reference = real_arn
+                refund.raw_gateway_amount_cents = int(gw_amount)
                 await self.db.commit()
                 lease_released = True
             elif gw_status == "failed":
