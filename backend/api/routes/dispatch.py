@@ -115,6 +115,12 @@ async def ingest_driver_telemetry(
 
     if result.get("status") == "REJECTED":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.get("reason"))
+    if result.get("status") == "RETRY":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Driver location index is busy. Retry the location update shortly.",
+            headers={"Retry-After": "1"},
+        )
 
     return result
 
