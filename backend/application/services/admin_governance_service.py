@@ -1,5 +1,6 @@
 """Audited, permission-scoped administrator workflows."""
 import json
+import math
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,9 +14,10 @@ from backend.core.config import settings
 from backend.domain.models import (
     AdminCalendarEvent, AdminPermission, AdminRecordNote, AdminReviewTemplate,
     AdminRole, AdminRolePermission, AdminUserRole, AdministrativeAuditLog, AuditLog,
-    DriverDocument, DriverProfile, FareRule, GeofenceZone, Ride, RideAssignment,
+    DriverDocument, DriverProfile, FareRule, GeofenceZone, PooledTrip, Ride, RideAssignment,
     RideStatusEvent, Session, User, VehicleCategory, GeofenceZoneAudit,
 )
+from backend.domain.state_machine.ride_state_machine import ACTIVE_RIDE_STATUSES
 
 
 class AdminGovernanceService:
@@ -803,10 +805,85 @@ class AdminGovernanceService:
         await self.db.commit()
         return {"user_id": user_id, "role_id": role_id, "role_name": role.name}
 
+    @staticmethod
+    def _parse_zone_coordinates(coordinates_json: str) -> List[Dict[str, float]]:
+        raw = json.loads(coordinates_json)
+        if not isinstance(raw, list) or len(raw) < 3 or len(raw) > 200:
+            raise ValueError("A service boundary requires 3 to 200 vertices.")
+        points: List[Dict[str, float]] = []
+        for point in raw:
+            if not isinstance(point, dict):
+                raise ValueError("Boundary vertex must be a coordinate object.")
+            lat = float(point["lat"])
+            lng = float(point["lng"])
+            if not math.isfinite(lat) or not math.isfinite(lng):
+                raise ValueError("Boundary coordinate must be finite.")
+            if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+                raise ValueError("Boundary coordinate outside valid range.")
+            points.append({"lat": lat, "lng": lng})
+        if len({(p["lat"], p["lng"]) for p in points}) < 3:
+            raise ValueError("Boundary requires at least three distinct points.")
+        return points
+
+    @classmethod
+    def _require_valid_zone_coordinates(cls, zone: GeofenceZone) -> List[Dict[str, float]]:
+        try:
+            return cls._parse_zone_coordinates(zone.coordinates_json)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                503,
+                f"Active geofence '{zone.name}' has invalid polygon data; operation blocked.",
+            ) from exc
+
+    async def _ensure_can_deactivate_service_area(self, zone: GeofenceZone) -> None:
+        if str(zone.zone_type or "").strip().upper() != "SERVICE_AREA" or not zone.is_active:
+            return
+        active_ride_id = (await self.db.execute(
+            select(Ride.id).where(
+                Ride.service_area_id == zone.id,
+                Ride.status.in_(ACTIVE_RIDE_STATUSES),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if active_ride_id is not None:
+            raise HTTPException(
+                409,
+                "Cannot deactivate an operational service area while active rides are in progress or awaiting dispatch.",
+            )
+        active_pool_id = (await self.db.execute(
+            select(PooledTrip.id).where(
+                PooledTrip.service_area_id == zone.id,
+                PooledTrip.status.in_(("OPEN", "ACTIVE", "FULL")),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if active_pool_id is not None:
+            raise HTTPException(
+                409,
+                "Cannot deactivate an operational service area while active pooled trips are open or in progress.",
+            )
+
     async def list_geofences(self) -> List[Dict[str, Any]]:
-        rows = (await self.db.execute(select(GeofenceZone).order_by(GeofenceZone.name))).scalars().all()
-        return [{"id": z.id, "name": z.name, "zone_type": z.zone_type, "coordinates": json.loads(z.coordinates_json),
-                 "is_active": z.is_active, "surge_multiplier": z.surge_multiplier} for z in rows]
+        rows = (await self.db.execute(
+            select(GeofenceZone).order_by(GeofenceZone.created_at.desc(), GeofenceZone.name.asc())
+        )).scalars().all()
+        items: List[Dict[str, Any]] = []
+        for z in rows:
+            if z.is_active:
+                coordinates = self._require_valid_zone_coordinates(z)
+            else:
+                try:
+                    coordinates = self._parse_zone_coordinates(z.coordinates_json)
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    coordinates = []
+            items.append({
+                "id": z.id,
+                "name": z.name,
+                "zone_type": z.zone_type,
+                "city_code": z.city_code,
+                "coordinates": coordinates,
+                "is_active": z.is_active,
+                "surge_multiplier": z.surge_multiplier,
+            })
+        return items
 
     @staticmethod
     def _orientation(a: Dict[str, float], b: Dict[str, float], c: Dict[str, float]) -> float:
@@ -841,9 +918,21 @@ class AdminGovernanceService:
         return False
 
     async def geofence_preview(self, coordinates: List[Dict[str, float]], zone_id: Optional[str] = None) -> List[Dict[str, str]]:
+        try:
+            points = [{"lat": float(p["lat"]), "lng": float(p["lng"])} for p in coordinates]
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(422, "Every boundary vertex must contain numeric latitude and longitude values.")
+        if len(points) < 3 or len(points) > 200 or any(not math.isfinite(p["lat"]) or not math.isfinite(p["lng"]) or not (-90 <= p["lat"] <= 90) or not (-180 <= p["lng"] <= 180) for p in points) or len({(p["lat"], p["lng"]) for p in points}) < 3:
+            raise HTTPException(422, "Boundary vertices must be valid geographic coordinates with 3 to 200 distinct points.")
         zones = (await self.db.execute(select(GeofenceZone).where(GeofenceZone.is_active.is_(True)))).scalars().all()
-        return [{"id": z.id, "name": z.name, "zone_type": z.zone_type} for z in zones
-                if z.id != zone_id and self.polygons_overlap(coordinates, json.loads(z.coordinates_json))]
+        overlaps: List[Dict[str, str]] = []
+        for z in zones:
+            if z.id == zone_id:
+                continue
+            existing_points = self._require_valid_zone_coordinates(z)
+            if self.polygons_overlap(points, existing_points):
+                overlaps.append({"id": z.id, "name": z.name, "zone_type": z.zone_type})
+        return overlaps
 
     async def save_geofence(self, admin_id: str, zone_id: Optional[str], values: Dict[str, Any], commit: bool = True) -> Dict[str, Any]:
         points = values["coordinates"]
@@ -855,8 +944,13 @@ class AdminGovernanceService:
             points = [{"lat": float(p["lat"]), "lng": float(p["lng"])} for p in points]
         except (KeyError, TypeError, ValueError):
             raise HTTPException(422, "Every boundary vertex must contain numeric latitude and longitude values.")
-        if any(not -90 <= p["lat"] <= 90 or not -180 <= p["lng"] <= 180 for p in points) or len({(p["lat"], p["lng"]) for p in points}) < 3:
+        if any(not math.isfinite(p["lat"]) or not math.isfinite(p["lng"]) or not -90 <= p["lat"] <= 90 or not -180 <= p["lng"] <= 180 for p in points) or len({(p["lat"], p["lng"]) for p in points}) < 3:
             raise HTTPException(422, "Boundary vertices must be valid geographic coordinates with at least three distinct points.")
+        zone = await self.db.get(GeofenceZone, zone_id) if zone_id else None
+        if zone_id and not zone:
+            raise HTTPException(404, "Service zone not found.")
+        if zone is not None and not values["is_active"]:
+            await self._ensure_can_deactivate_service_area(zone)
         overlaps = await self.geofence_preview(points, zone_id)
         if values["zone_type"] == "SERVICE_AREA" and values["is_active"]:
             active_areas = (await self.db.execute(
@@ -868,16 +962,27 @@ class AdminGovernanceService:
             )).scalars().all()
             conflicting = [
                 area.name for area in active_areas
-                if self.polygons_overlap(points, json.loads(area.coordinates_json))
+                if self.polygons_overlap(points, self._require_valid_zone_coordinates(area))
             ]
             if conflicting:
                 raise HTTPException(
                     409,
                     "Operational service areas cannot overlap: " + ", ".join(conflicting[:5]),
                 )
-        zone = await self.db.get(GeofenceZone, zone_id) if zone_id else None
-        if zone_id and not zone: raise HTTPException(404, "Service zone not found.")
-        previous = None if not zone else {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
+        if not zone:
+            previous = None
+        else:
+            try:
+                prev_coords = self._parse_zone_coordinates(zone.coordinates_json)
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                prev_coords = None
+            previous = {
+                "name": zone.name,
+                "zone_type": zone.zone_type,
+                "city_code": zone.city_code,
+                "coordinates": prev_coords,
+                "is_active": zone.is_active,
+            }
         if not zone:
             zone = GeofenceZone(name=values["name"].strip(), zone_type=values["zone_type"], city_code=(values.get("city_code") or "").strip().upper() or None, coordinates_json=json.dumps(points), surge_multiplier=values["surge_multiplier"], is_active=values["is_active"])
             self.db.add(zone)
@@ -890,21 +995,41 @@ class AdminGovernanceService:
         action = "CREATED" if previous is None else ("ACTIVATED" if not previous["is_active"] and zone.is_active else "DEACTIVATED" if previous["is_active"] and not zone.is_active else "UPDATED")
         self.db.add(GeofenceZoneAudit(zone_id=zone.id, admin_user_id=admin_id, action=action,
             previous_state_json=json.dumps(previous) if previous else None, new_state_json=json.dumps(current)))
-        self.audit(admin_id, "SERVICE_ZONE_SAVED", "geofence_zones", zone.id, {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "overlap_warning_count": len(overlaps)})
+        self.audit(admin_id, "SERVICE_ZONE_SAVED", "geofence_zones", zone.id, {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "is_active": zone.is_active, "overlap_warning_count": len(overlaps)})
         if commit:
             await self.db.commit()
         return {"id": zone.id, "name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code, "is_active": zone.is_active, "overlap_warnings": overlaps}
 
     async def delete_geofence(self, admin_id: str, zone_id: str) -> Dict[str, Any]:
         zone = await self.db.get(GeofenceZone, zone_id)
-        if not zone: raise HTTPException(404, "Service zone not found.")
-        previous = {"name": zone.name, "zone_type": zone.zone_type, "coordinates": json.loads(zone.coordinates_json), "is_active": zone.is_active}
+        if not zone:
+            raise HTTPException(404, "Service zone not found.")
+        await self._ensure_can_deactivate_service_area(zone)
+        try:
+            prev_coords = self._parse_zone_coordinates(zone.coordinates_json)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            prev_coords = None
+        previous = {
+            "name": zone.name,
+            "zone_type": zone.zone_type,
+            "city_code": zone.city_code,
+            "coordinates": prev_coords,
+            "is_active": zone.is_active,
+        }
         zone.is_active = False
         self.db.add(GeofenceZoneAudit(zone_id=zone.id, admin_user_id=admin_id, action="DEACTIVATED",
             previous_state_json=json.dumps(previous), new_state_json=json.dumps({**previous, "is_active": False})))
-        self.audit(admin_id, "SERVICE_ZONE_DEACTIVATED", "geofence_zones", zone.id, {"name": zone.name})
+        self.audit(admin_id, "SERVICE_ZONE_DEACTIVATED", "geofence_zones", zone.id, {"name": zone.name, "zone_type": zone.zone_type, "city_code": zone.city_code})
         await self.db.commit()
-        return {"id": zone_id, "is_active": False}
+        return {
+            "id": zone.id,
+            "zone_id": zone.id,
+            "name": zone.name,
+            "zone_type": zone.zone_type,
+            "city_code": zone.city_code,
+            "is_active": False,
+            "status": "DEACTIVATED",
+        }
 
     async def list_geofence_audits(self, zone_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
         stmt = select(GeofenceZoneAudit, User.full_name, GeofenceZone.name).join(User, User.id == GeofenceZoneAudit.admin_user_id).join(GeofenceZone, GeofenceZone.id == GeofenceZoneAudit.zone_id).order_by(desc(GeofenceZoneAudit.created_at)).limit(min(500, max(1, limit)))

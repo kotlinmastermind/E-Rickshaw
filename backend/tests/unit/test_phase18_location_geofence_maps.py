@@ -179,7 +179,22 @@ async def test_part18_geofence_and_governance(db_session):
     service = LocationOpsService(db_session)
 
     # 437 & 438 & 439: Boundary check, Out-of-zone explanation, Vehicle availability
-    # Create test service zone
+    # Isolate from seeded fixture areas so this test controls active polygons explicitly
+    from sqlalchemy import select
+    existing_areas = (await db_session.execute(
+        select(GeofenceZone).where(GeofenceZone.zone_type == "SERVICE_AREA")
+    )).scalars().all()
+    for existing_area in existing_areas:
+        existing_area.is_active = False
+    await db_session.commit()
+
+    # Fail closed when no active SERVICE_AREA polygons exist
+    elig_unconfigured = await service.check_eligibility(28.60, 77.20, 28.65, 77.22)
+    assert elig_unconfigured["eligible"] is False
+    assert elig_unconfigured["coverage_configured"] is False
+    assert elig_unconfigured["status"] == "NOT_CONFIGURED"
+
+    # Create test service zone with city_code matching ServiceAreaService.resolve_route contract
     delhi_poly = [
         {"lat": 28.50, "lng": 77.10},
         {"lat": 28.70, "lng": 77.10},
@@ -188,6 +203,7 @@ async def test_part18_geofence_and_governance(db_session):
     ]
     zone = GeofenceZone(
         name="Delhi Executive Metro Core",
+        city_code="DELHI_NCR",
         zone_type="SERVICE_AREA",
         coordinates_json=json.dumps(delhi_poly),
         is_active=True
@@ -205,6 +221,44 @@ async def test_part18_geofence_and_governance(db_session):
     assert elig_out["eligible"] is False
     assert elig_out["status"] == "OUT_OF_ZONE"
     assert elig_out["nearest_border_distance_km"] > 50.0
+
+    # Cross-area pickup & destination (both individually in different active areas) must fail closed
+    mumbai_zone = GeofenceZone(
+        name="Mumbai Executive Metro Core",
+        city_code="MUMBAI",
+        zone_type="SERVICE_AREA",
+        coordinates_json=json.dumps([
+            {"lat": 18.85, "lng": 72.75},
+            {"lat": 19.20, "lng": 72.75},
+            {"lat": 19.20, "lng": 72.99},
+            {"lat": 18.85, "lng": 72.99},
+        ]),
+        is_active=True,
+    )
+    db_session.add(mumbai_zone)
+    await db_session.commit()
+
+    elig_cross = await service.check_eligibility(28.60, 77.20, 19.00, 72.85)
+    assert elig_cross["eligible"] is False
+    assert elig_cross["status"] == "OUT_OF_ZONE"
+
+    # Malformed active polygon data must fail closed with HTTP 503
+    bad_zone = GeofenceZone(
+        name="Corrupted Active Area",
+        city_code="BAD_CITY",
+        zone_type="SERVICE_AREA",
+        coordinates_json="{broken-json",
+        is_active=True,
+    )
+    db_session.add(bad_zone)
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as bad_exc:
+        await service.check_eligibility(28.60, 77.20, 28.65, 77.22)
+    assert bad_exc.value.status_code == 503
+
+    await db_session.delete(bad_zone)
+    await db_session.commit()
 
     # 440. Demand heat map time filters
     heat = await service.get_demand_heatmap_filtered("MORNING_RUSH", 24, "demand", 5)

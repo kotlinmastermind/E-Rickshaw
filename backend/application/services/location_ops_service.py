@@ -606,23 +606,49 @@ class LocationOpsService:
                 ]
         return results
 
+    @staticmethod
+    def _parse_valid_polygon(zone: GeofenceZone) -> List[Dict[str, float]]:
+        try:
+            raw = json.loads(zone.coordinates_json)
+            if not isinstance(raw, list):
+                raise ValueError("Polygon must be a JSON array")
+            points: List[Dict[str, float]] = []
+            for item in raw:
+                if not isinstance(item, dict):
+                    raise ValueError("Polygon vertex must be an object with lat/lng")
+                lat = float(item["lat"])
+                lng = float(item["lng"])
+                if not math.isfinite(lat) or not math.isfinite(lng):
+                    raise ValueError("Polygon coordinate must be finite")
+                if not (-90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0):
+                    raise ValueError("Polygon coordinate out of range")
+                points.append({"lat": lat, "lng": lng})
+            if len(points) < 3 or len({(p["lat"], p["lng"]) for p in points}) < 3:
+                raise ValueError("Polygon requires at least three distinct points")
+            return points
+        except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Active geofence '{zone.name}' has invalid polygon data; location checks are blocked.",
+            ) from exc
+
     # =========================================================================
     # 437. SERVICE AREA BOUNDARY CHECK & 438. OUT-OF-ZONE EXPLANATION
     # =========================================================================
     async def check_eligibility(self, latitude: float, longitude: float, dest_latitude: Optional[float] = None,
                                 dest_longitude: Optional[float] = None, radius_km: float = 15.0) -> Dict[str, Any]:
+        if (dest_latitude is None) != (dest_longitude is None):
+            raise HTTPException(status_code=422, detail="Provide both destination coordinates or neither.")
+
         zones = (await self.db.execute(select(GeofenceZone).where(GeofenceZone.is_active.is_(True)))).scalars().all()
         service_zones = []
         restricted_zones = []
         for zone in zones:
-            try:
-                points = json.loads(zone.coordinates_json)
-            except (ValueError, TypeError):
-                continue
-            if zone.zone_type == "SERVICE_AREA":
-                service_zones.append((zone, points))
-            if str(zone.zone_type or "").upper() in ("RESTRICTED", "RESTRICTED_ZONE"):
-                restricted_zones.append((zone, points))
+            zone_type = str(zone.zone_type or "").strip().upper()
+            if zone_type == "SERVICE_AREA":
+                service_zones.append((zone, self._parse_valid_polygon(zone)))
+            elif zone_type in ("RESTRICTED", "RESTRICTED_ZONE"):
+                restricted_zones.append((zone, self._parse_valid_polygon(zone)))
 
         points_to_check = [("pickup", latitude, longitude)]
         if dest_latitude is not None and dest_longitude is not None:
@@ -640,24 +666,51 @@ class LocationOpsService:
                 is_in_any = any(point_in_polygon(lat, lng, polygon) for _, polygon in service_zones)
                 if not is_in_any:
                     outside.append(label)
-                    # Estimate distance to nearest service zone centroid
                     min_dist = min(
-                        distance_km(lat, lng, sum(p["lat"] for p in poly)/len(poly), sum(p["lng"] for p in poly)/len(poly))
+                        distance_km(lat, lng, sum(p["lat"] for p in poly) / len(poly), sum(p["lng"] for p in poly) / len(poly))
                         for _, poly in service_zones
                     )
                     nearest_border_distance_km = max(nearest_border_distance_km, round(min_dist, 1))
 
-            eligible = not outside and not restricted
-            status = "ELIGIBLE" if eligible else "OUT_OF_ZONE"
-            if eligible:
-                explanation = "Both pickup and destination locations fall within our active Grand Chauffeur coverage zone."
-            else:
-                explanation = (
-                    f"Selected {', '.join(outside)} is approximately {nearest_border_distance_km} km outside active city boundaries. "
-                    f"To proceed, please set pickup within licensed zones or coordinate a cross-border dispatch via concierge."
+            from backend.application.services.service_area_service import ServiceAreaService
+            service_area_service = ServiceAreaService(self.db)
+            try:
+                if dest_latitude is not None and dest_longitude is not None:
+                    await service_area_service.resolve_route(
+                        pickup_lat=latitude,
+                        pickup_lng=longitude,
+                        destination_lat=dest_latitude,
+                        destination_lng=dest_longitude,
+                    )
+                else:
+                    await service_area_service.resolve_point(latitude, longitude)
+                eligible = not restricted
+                status = "ELIGIBLE" if eligible else "RESTRICTED"
+                if eligible:
+                    explanation = (
+                        "Both pickup and destination locations fall within our active Grand Chauffeur coverage zone."
+                        if dest_latitude is not None
+                        else "Pickup location falls within our active Grand Chauffeur coverage zone."
+                    )
+                else:
+                    explanation = "Selected location falls inside an active restricted zone."
+            except HTTPException as exc:
+                if exc.status_code == 503:
+                    raise
+                eligible = False
+                status = (
+                    "BOUNDARY_CONFLICT" if exc.status_code == 409
+                    else ("RESTRICTED" if restricted else "OUT_OF_ZONE")
                 )
+                if outside:
+                    explanation = (
+                        f"Selected {', '.join(outside)} is approximately {nearest_border_distance_km} km outside active city boundaries. "
+                        f"To proceed, please set pickup within licensed zones or coordinate a cross-border dispatch via concierge."
+                    )
+                else:
+                    explanation = str(exc.detail)
         else:
-            eligible = not restricted
+            eligible = False
             status = "NOT_CONFIGURED" if not restricted else "RESTRICTED"
             explanation = "Service boundaries are not configured; coverage cannot be verified yet."
 
