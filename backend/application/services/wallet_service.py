@@ -155,19 +155,29 @@ class WalletService:
 
         wallet = await WalletService.get_or_create_wallet(session, user_id, for_update=True)
 
-        if not allow_negative and wallet.balance_cents < amount_cents:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Insufficient wallet balance. Available: {wallet.balance_cents} cents, Required: {amount_cents} cents"
-            )
-
         key = idempotency_key or f"tx_deb_{uuid.uuid4()}"
         if idempotency_key:
             idem_stmt = select(WalletTransaction).where(WalletTransaction.idempotency_key == idempotency_key)
             idem_res = await session.execute(idem_stmt)
             existing = idem_res.scalars().first()
             if existing:
+                if (
+                    existing.wallet_id != wallet.id
+                    or existing.amount_cents != amount_cents
+                    or existing.transaction_type != "DEBIT"
+                    or existing.source != source
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Wallet debit idempotency key was already used for a different transaction.",
+                    )
                 return existing
+
+        if not allow_negative and wallet.balance_cents < amount_cents:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient wallet balance. Available: {wallet.balance_cents} cents, Required: {amount_cents} cents"
+            )
 
         new_balance = wallet.balance_cents - amount_cents
         wallet.balance_cents = new_balance
