@@ -161,6 +161,14 @@ async def test_ride_request_idempotency_key_replay():
         r_bad3 = await client.post("/api/v1/rides/request", json=bad_p3, headers=headers)
         assert r_bad3.status_code == 404
 
+        # Estimate-backed bookings must include both route endpoints so the backend
+        # can bind the submitted route to the persisted fare snapshot.
+        bad_route = dict(payload)
+        bad_route.pop("destination_longitude")
+        r_bad_route = await client.post("/api/v1/rides/request", json=bad_route, headers=headers)
+        assert r_bad_route.status_code == 400
+        assert "coordinates are required" in r_bad_route.text
+
         # First request: should create ride
         resp1 = await client.post("/api/v1/rides/request", json=payload, headers=headers)
         assert resp1.status_code == 200, resp1.text
