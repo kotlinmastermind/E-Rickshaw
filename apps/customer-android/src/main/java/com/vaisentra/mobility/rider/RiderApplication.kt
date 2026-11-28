@@ -20,6 +20,9 @@ class RiderApplication : Application() {
         super.onCreate()
         Log.i("RiderGo", "RiderGo Application initialized with Material 3 & FastAPI network client.")
 
+        // Load persisted auth and Mapbox configuration before any startup network work.
+        NetworkClient.init(this)
+
         // NetworkClient.baseUrl comes from the active product flavor's BuildConfig.
         // Preserve it so dev, staging, and production use their configured endpoints.
         com.vaisentra.mobility.rider.fcm.RiderFcmManager.init(this)
