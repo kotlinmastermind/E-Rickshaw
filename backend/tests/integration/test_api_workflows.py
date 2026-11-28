@@ -137,6 +137,8 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             drv2_profile = (await db_session.execute(
                 select(DriverProfile).where(DriverProfile.user_id == drv2_signup.json()["user"]["id"])
             )).scalar_one()
+            drv2_user = await db_session.get(User, drv2_profile.user_id)
+            drv2_user.is_verified = True  # Simulate the successful Twilio Verify step before Admin review.
             sedan_category = (await db_session.execute(
                 select(VehicleCategory).where(VehicleCategory.code == "SEDAN", VehicleCategory.is_active.is_(True))
             )).scalar_one()
