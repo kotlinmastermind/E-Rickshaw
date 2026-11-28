@@ -62,6 +62,33 @@ async def test_pause_resume_broadcasts_authoritative_state(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resume_broadcasts_in_progress_state(monkeypatch):
+    ride = SimpleNamespace(id="ride-2", assigned_driver_id="driver-1", status="PAUSED")
+    db = _PauseDb(ride)
+    service = DriverTripOperationsService(db)
+
+    async def resolve_driver(_user_id):
+        return SimpleNamespace(id="driver-1")
+
+    broadcasts = []
+
+    async def capture_broadcast(ride_id, payload):
+        broadcasts.append((ride_id, payload))
+
+    monkeypatch.setattr(service, "_driver", resolve_driver)
+    monkeypatch.setattr(ws_manager, "broadcast_ride_update", capture_broadcast)
+
+    result = await service.pause_or_resume("ride-2", "user-1", False, "Passenger is ready")
+
+    assert result == {"ride_id": "ride-2", "status": "IN_PROGRESS"}
+    assert ride.status == "IN_PROGRESS"
+    assert db.commits == 1
+    assert len(db.added) == 2
+    assert broadcasts[0][1]["event_type"] == "TRIP_RESUMED"
+    assert broadcasts[0][1]["payload"]["status"] == "IN_PROGRESS"
+
+
+@pytest.mark.asyncio
 async def test_invalid_pause_does_not_write_events_or_commit(monkeypatch):
     ride = SimpleNamespace(id="ride-1", assigned_driver_id="driver-1", status="PAUSED")
     db = _PauseDb(ride)
