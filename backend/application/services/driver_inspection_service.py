@@ -706,7 +706,7 @@ class DriverInspectionService:
             current_inspection_status in {"SUBMITTED", "PENDING_VERIFICATION"}
             or (
                 current_inspection_status == "APPROVED"
-                and current_verification_status == "AUTO_APPROVED"
+                and current_verification_status in {"AUTO_APPROVED", "PENDING"}
             )
         )
         if not reviewable:
