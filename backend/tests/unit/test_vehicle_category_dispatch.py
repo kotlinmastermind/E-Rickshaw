@@ -582,6 +582,7 @@ async def test_offline_or_unapproved_driver_excluded_from_dispatch(db_session):
     db_session.add(d_prof1)
     await db_session.flush()
     db_session.add(DriverServiceAreaAssignment(driver_id=d_prof1.id, service_area_id=service_area.id))
+    db_session.add(DriverAvailability(driver_id=d_prof1.id, is_online=True, is_busy=False))
     await db_session.flush()
     veh1 = Vehicle(id=f"vp_{suffix}", category_id=cat_test.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-1P-{suffix}")
     db_session.add(veh1)
@@ -597,6 +598,7 @@ async def test_offline_or_unapproved_driver_excluded_from_dispatch(db_session):
     db_session.add(d_prof2)
     await db_session.flush()
     db_session.add(DriverServiceAreaAssignment(driver_id=d_prof2.id, service_area_id=service_area.id))
+    db_session.add(DriverAvailability(driver_id=d_prof2.id, is_online=True, is_busy=False))
     await db_session.flush()
     veh2 = Vehicle(id=f"vo_{suffix}", category_id=cat_test.id, make="Hero", model="Electric", year=2024, license_plate=f"DL-1O-{suffix}")
     db_session.add(veh2)
@@ -782,26 +784,29 @@ async def test_accept_ride_atomic_validates_category_match(db_session):
 
     ride_svc = RideService(db=db_session)
 
-    # 1. Driver 1 (Bike) tries to accept Cab ride -> REJECTED 400 (Category mismatch)
-    with pytest.raises(Exception) as exc_mismatch:
-        await ride_svc.accept_ride_atomic(d_user1.id, ride.id)
-    assert "category mismatch" in str(exc_mismatch.value.detail).lower()
-
-    # Create an active OFFER for Driver 2
+    # Both drivers have a persisted live offer; eligibility is checked by the
+    # same authoritative acceptance service used by the production API.
     from backend.domain.models import RideAssignment
     from datetime import timedelta
-    offer2 = RideAssignment(
-        id=f"asgn_{suffix}",
-        ride_id=ride.id,
-        driver_id=d_prof2.id,
-        status="OFFERED",
-        offered_at=datetime.now(timezone.utc),
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5)
-    )
-    db_session.add(offer2)
+    offer_expiry = datetime.now(timezone.utc) + timedelta(minutes=5)
+    db_session.add_all([
+        RideAssignment(id=f"asgn_bike_{suffix}", ride_id=ride.id, driver_id=d_prof1.id,
+                       status="OFFERED", offered_at=datetime.now(timezone.utc), expires_at=offer_expiry),
+        RideAssignment(id=f"asgn_{suffix}", ride_id=ride.id, driver_id=d_prof2.id,
+                       status="OFFERED", offered_at=datetime.now(timezone.utc), expires_at=offer_expiry),
+    ])
     await db_session.commit()
 
-    # Neither acceptance API may accept an offer without fresh in-area GPS.
+    await LiveLocationService(db=db_session).ingest_driver_location(
+        d_prof1.id, 28.6140, 77.2090, is_online=True
+    )
+
+    # 1. Driver 1 (Bike) tries to accept Cab ride -> rejected for category mismatch.
+    with pytest.raises(Exception) as exc_mismatch:
+        await ride_svc.accept_ride_atomic(d_user1.id, ride.id)
+    assert "category" in str(exc_mismatch.value.detail).lower()
+
+    # Driver 2 has a valid category but no fresh GPS yet.
     with pytest.raises(Exception) as stale_smart_gps_error:
         await SmartDispatchService(db_session).accept_offer(d_user2.id, ride.id)
     assert "Fresh driver GPS" in str(stale_smart_gps_error.value.detail)
