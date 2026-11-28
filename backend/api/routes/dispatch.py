@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from backend.infrastructure.database.session import get_db
 from backend.api.deps import get_current_user, get_current_driver
-from backend.domain.models import User, Ride, RideAssignment, DriverProfile, DriverAvailability
+from backend.domain.models import User, Ride, RideAssignment, DriverProfile, DriverAvailability, CustomerProfile
 from backend.application.services.live_location_service import LiveLocationService
 from backend.application.services.smart_dispatch_service import SmartDispatchService
 from backend.application.services.driver_eligibility_service import DriverEligibilityService
@@ -215,24 +215,35 @@ async def trigger_dispatch_search(
 @router.post("/offer/{ride_id}/accept")
 async def accept_dispatch_offer(
     ride_id: str,
+    assignment_id: Optional[str] = Query(None),
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
 ):
-    """Driver accepts an active dispatch offer atomically."""
+    """Driver accepts the exact active dispatch assignment atomically."""
     svc = SmartDispatchService(db)
-    return await svc.accept_offer(driver_user_id=user.id, ride_id=ride_id)
+    return await svc.accept_offer(
+        driver_user_id=user.id,
+        ride_id=ride_id,
+        assignment_id=assignment_id,
+    )
 
 
 @router.post("/offer/{ride_id}/reject")
 async def reject_dispatch_offer(
     ride_id: str,
     payload: OfferRejectionRequest,
+    assignment_id: Optional[str] = Query(None),
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
 ):
-    """Driver declines an offer; triggers immediate cascading dispatch to next candidate."""
+    """Driver declines the exact active assignment and cascades to the next candidate."""
     svc = SmartDispatchService(db)
-    return await svc.reject_offer(driver_user_id=user.id, ride_id=ride_id, reason=payload.reason)
+    return await svc.reject_offer(
+        driver_user_id=user.id,
+        ride_id=ride_id,
+        reason=payload.reason,
+        assignment_id=assignment_id,
+    )
 
 
 @router.get("/status/{ride_id}")
@@ -249,6 +260,29 @@ async def get_dispatch_status(
     if not ride:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
 
+    # A dispatch status lookup is scoped to the ride's customer, an involved
+    # driver, or an administrator; possession of a ride UUID is not authorization.
+    role = str(user.role or "").strip().lower()
+    if role == "customer":
+        customer_stmt = select(CustomerProfile.id).where(CustomerProfile.user_id == user.id)
+        customer_id = (await db.execute(customer_stmt)).scalar_one_or_none()
+        if not customer_id or ride.customer_id != customer_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+    elif role == "driver":
+        driver_stmt = select(DriverProfile.id).where(DriverProfile.user_id == user.id)
+        driver_id = (await db.execute(driver_stmt)).scalar_one_or_none()
+        if not driver_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver profile is required.")
+        involved_stmt = select(RideAssignment.id).where(
+            RideAssignment.ride_id == ride_id,
+            RideAssignment.driver_id == driver_id,
+        ).limit(1)
+        involved_assignment_id = (await db.execute(involved_stmt)).scalar_one_or_none()
+        if ride.assigned_driver_id != driver_id and not involved_assignment_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+    elif role not in ("admin", "super_admin", "superadmin", "super administrator"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view dispatch status.")
+
     # Fetch latest assignment
     assign_stmt = (
         select(RideAssignment)
@@ -261,20 +295,33 @@ async def get_dispatch_status(
 
     now = datetime.now(timezone.utc)
     remaining_sec = 0
+    offer_is_live = False
     if latest_assign and latest_assign.expires_at:
         exp_utc = ensure_utc(latest_assign.expires_at)
         if exp_utc and exp_utc > now:
             remaining_sec = int((exp_utc - now).total_seconds())
+            offer_is_live = (
+                latest_assign.status == "OFFERED"
+                and ride.status == "REQUESTED"
+                and ride.assigned_driver_id is None
+            )
 
     return {
         "ride_id": ride.id,
         "ride_status": ride.status,
         "assigned_driver_id": ride.assigned_driver_id,
         "current_offer": {
-            "assignment_id": latest_assign.id if latest_assign else None,
-            "driver_id": latest_assign.driver_id if latest_assign else None,
-            "status": latest_assign.status if latest_assign else None,
+            "assignment_id": latest_assign.id,
+            "driver_id": latest_assign.driver_id,
+            "status": latest_assign.status,
+            "expires_at": ensure_utc(latest_assign.expires_at).isoformat() if latest_assign.expires_at else None,
             "expires_in_seconds": remaining_sec,
-            "metadata": json.loads(latest_assign.metadata_json) if latest_assign and latest_assign.metadata_json else {}
+            "metadata": json.loads(latest_assign.metadata_json) if latest_assign.metadata_json else {}
+        } if latest_assign and offer_is_live else None,
+        "latest_assignment": {
+            "assignment_id": latest_assign.id,
+            "driver_id": latest_assign.driver_id,
+            "status": latest_assign.status,
+            "expires_at": ensure_utc(latest_assign.expires_at).isoformat() if latest_assign.expires_at else None,
         } if latest_assign else None
     }

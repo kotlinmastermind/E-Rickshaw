@@ -2,9 +2,12 @@
 Unit and lifecycle tests for SmartDispatchService.
 """
 import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 
 from backend.domain.models import (
@@ -18,7 +21,7 @@ from backend.infrastructure.cache.redis_client import redis_client
 
 
 @pytest.mark.asyncio
-async def test_smart_dispatch_lifecycle(db_session):
+async def test_smart_dispatch_lifecycle(db_session, monkeypatch):
     suffix = uuid.uuid4().hex[:6]
     service_area = (await db_session.execute(select(GeofenceZone).where(GeofenceZone.city_code == "DELHI_NCR", GeofenceZone.zone_type == "SERVICE_AREA"))).scalars().one()
 
@@ -137,6 +140,9 @@ async def test_smart_dispatch_lifecycle(db_session):
 
     # 4. Run Smart Dispatch
     dispatch_svc = SmartDispatchService(db_session)
+    from backend.application.services import smart_dispatch_service as dispatch_module
+    ride_broadcast = AsyncMock()
+    monkeypatch.setattr(dispatch_module.ws_manager, "broadcast_to_ride", ride_broadcast)
     assignment = await dispatch_svc.search_and_dispatch(ride.id, max_rings=2)
 
     assert assignment is not None
@@ -148,7 +154,17 @@ async def test_smart_dispatch_lifecycle(db_session):
     # Verify offer safety key
     assert await redis_client.exists(f"dispatch:offer:{ride.id}:{driver_profile.id}") is True
 
-    # 5. Driver Accepts Offer
+    # 5. A persisted offer without a real expiry is not a live offer.
+    assignment.expires_at = None
+    await db_session.commit()
+    with pytest.raises(HTTPException) as no_expiry_error:
+        await dispatch_svc.accept_offer(driver_user_id=driver_user.id, ride_id=ride.id)
+    assert no_expiry_error.value.status_code == 410
+
+    assignment.expires_at = datetime.now(timezone.utc) + timedelta(seconds=20)
+    await db_session.commit()
+
+    # Driver accepts the still-live offer through the authoritative lifecycle.
     res = await dispatch_svc.accept_offer(driver_user_id=driver_user.id, ride_id=ride.id)
     assert res["status"] == "ACCEPTED"
 
@@ -164,6 +180,22 @@ async def test_smart_dispatch_lifecycle(db_session):
     # Verify driver availability set to busy
     avail_updated = (await db_session.execute(select(DriverAvailability).where(DriverAvailability.driver_id == driver_profile.id))).scalar_one()
     assert avail_updated.is_busy is True
+
+    # The customer tracking socket consumes the established RIDE_ACCEPTED contract.
+    accepted_events = [
+        call.args[1] for call in ride_broadcast.await_args_list
+        if call.args and isinstance(call.args[1], dict)
+    ]
+    assert any(
+        event.get("event_type") == "RIDE_ACCEPTED"
+        and event.get("payload", {}).get("status") == "ASSIGNED"
+        for event in accepted_events
+    )
+
+    # A retry by the same assigned driver is idempotent and returns the same assignment.
+    repeated = await dispatch_svc.accept_offer(driver_user_id=driver_user.id, ride_id=ride.id)
+    assert repeated["status"] == "ACCEPTED"
+    assert repeated["driver_id"] == driver_profile.id
 
     # Verify lock released
     assert await redis_client.exists(f"dispatch:lock:{driver_profile.id}") is False
@@ -494,3 +526,67 @@ async def test_smart_dispatch_excludes_inactive_driver_accounts(db_session):
         )
     ).scalars().all()
     assert assignments == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_offer_uses_canonical_cross_worker_delivery_contract(db_session, monkeypatch):
+    from backend.application.services.commission_service import CommissionService
+    from backend.application.services import smart_dispatch_service as dispatch_module
+
+    async def commission_estimate(_db, _ride):
+        return {
+            "estimated_driver_earnings_cents": 9000,
+            "estimated_commission_cents": 1000,
+            "estimated_commission_percentage": 10.0,
+            "commission_classification": "DEFERRED"
+        }
+
+    publish = AsyncMock(return_value=1)
+    broadcast_to_ride = AsyncMock()
+    monkeypatch.setattr(CommissionService, "estimate_for_ride", staticmethod(commission_estimate))
+    monkeypatch.setattr(dispatch_module.redis_client, "publish", publish)
+    monkeypatch.setattr(dispatch_module.ws_manager, "broadcast_to_ride", broadcast_to_ride)
+
+    now = datetime.now(timezone.utc)
+    ride = SimpleNamespace(
+        id="ride-dispatch-contract",
+        final_fare_cents=None,
+        estimated_fare_cents=10000,
+        estimated_distance_km=4.5,
+        estimated_duration_minutes=16,
+        pickup_address="Pickup",
+        pickup_latitude=28.61,
+        pickup_longitude=77.20,
+        destination_address="Destination",
+        destination_latitude=28.62,
+        destination_longitude=77.21,
+        payment_method="UPI",
+    )
+    candidate = SimpleNamespace(
+        driver_id="driver-profile-1",
+        user_id="driver-user-1",
+        road_eta_minutes=3.5,
+        road_distance_km=1.2,
+    )
+    assignment = SimpleNamespace(
+        id="assignment-1",
+        expires_at=now + timedelta(seconds=18),
+    )
+
+    await SmartDispatchService(db_session)._broadcast_offer(
+        ride, candidate, None, assignment, timeout_seconds=20
+    )
+
+    assert publish.await_count == 1
+    calls = {call.args[0]: call.args[1] for call in publish.await_args_list}
+    assert set(calls) == {"driver:dispatch:driver-profile-1"}
+    payload = calls["driver:dispatch:driver-profile-1"]
+    assert payload["event"] == "DISPATCH_OFFER"
+    assert payload["ride_id"] == ride.id
+    assert payload["assignment_id"] == assignment.id
+    assert payload["timeout_seconds"] <= 18
+    assert payload["expires_at"] == assignment.expires_at.isoformat()
+    assert payload["pickup_distance_km"] == 1.2
+    assert payload["estimated_trip_distance_km"] == 4.5
+    assert payload["payment_mode"] == "UPI"
+    broadcast_to_ride.assert_awaited_once()

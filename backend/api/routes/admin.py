@@ -12,7 +12,7 @@ from backend.domain.state_machine.ride_state_machine import ACTIVE_RIDE_STATUSES
 from backend.domain.models import (
     User, Session, DriverProfile, CustomerProfile, Ride, VehicleCategory,
     DriverAvailability, DriverLocation, FareRule, Vehicle, DriverVehicleAssignment, DriverDocument,
-    AdministrativeAuditLog, CustomerKycDocument, CustomerKycAuditLog, GeofenceZone
+    AdministrativeAuditLog, CustomerKycDocument, CustomerKycAuditLog, GeofenceZone, RideAssignment
 )
 from backend.infrastructure.security.crypto import create_jwt_token, decode_jwt_token,hash_secret , verify_password
 from backend.application.services.admin_service import AdminService
@@ -300,6 +300,18 @@ async def get_live_mobility_feed(
         .order_by(Ride.requested_at.desc())
         .limit(100)
     )).scalars().all()
+    active_ride_ids = [ride.id for ride in active_ride_rows]
+    dispatch_assignment_rows = []
+    if active_ride_ids:
+        dispatch_assignment_rows = (await db.execute(
+            select(RideAssignment)
+            .where(RideAssignment.ride_id.in_(active_ride_ids))
+            .order_by(RideAssignment.offered_at.desc())
+        )).scalars().all()
+    latest_dispatch_by_ride = {}
+    for assignment in dispatch_assignment_rows:
+        latest_dispatch_by_ride.setdefault(assignment.ride_id, assignment)
+
     vehicle_ids = {ride.vehicle_id for ride in active_ride_rows if ride.vehicle_id}
     vehicles_by_id = {}
     if vehicle_ids:
@@ -322,6 +334,25 @@ async def get_live_mobility_feed(
         if fare_cents is None:
             fare_cents = ride.estimated_fare_cents
         fare_label = f"₹{fare_cents / 100.0:.2f}" if fare_cents is not None else "Not available"
+        latest_dispatch = latest_dispatch_by_ride.get(ride.id)
+        expires_at = latest_dispatch.expires_at if latest_dispatch else None
+        if expires_at and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        offer_is_live = bool(
+            latest_dispatch
+            and latest_dispatch.status == "OFFERED"
+            and ride.status == "REQUESTED"
+            and ride.assigned_driver_id is None
+            and expires_at
+            and expires_at > now
+        )
+        current_offer = {
+            "assignment_id": latest_dispatch.id,
+            "driver_id": latest_dispatch.driver_id,
+            "status": latest_dispatch.status,
+            "expires_at": expires_at.isoformat(),
+            "expires_in_seconds": max(0, int((expires_at - now).total_seconds())),
+        } if offer_is_live else None
         formatted_rides.append({
             "id": str(ride.id),
             "rider": customer["name"] if customer else "Customer unavailable",
@@ -331,7 +362,15 @@ async def get_live_mobility_feed(
             "drop": ride.destination_address,
             "fare": fare_label,
             "payment": ride.payment_method or "Not recorded",
-            "status": ride.status or "UNKNOWN"
+            "status": ride.status or "UNKNOWN",
+            "dispatch_status": "OFFERED" if offer_is_live else ("SEARCHING" if ride.status == "REQUESTED" else None),
+            "current_offer": current_offer,
+            "latest_assignment": {
+                "assignment_id": latest_dispatch.id,
+                "driver_id": latest_dispatch.driver_id,
+                "status": latest_dispatch.status,
+                "expires_at": expires_at.isoformat() if expires_at else None,
+            } if latest_dispatch else None
         })
 
         if ride.status == "REQUESTED":

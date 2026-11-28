@@ -576,11 +576,12 @@ async def stop_waiting(
 @router.post("/{ride_id}/accept")
 async def accept_ride(
     ride_id: str,
+    assignment_id: Optional[str] = Query(None),
     user: User = Depends(get_current_driver),
     db: AsyncSession = Depends(get_db)
 ):
     service = RideService(db)
-    return await service.accept_ride_atomic(driver_user_id=user.id, ride_id=ride_id)
+    return await service.accept_ride_atomic(driver_user_id=user.id, ride_id=ride_id, assignment_id=assignment_id)
 
 @router.post("/{ride_id}/arrived")
 @router.post("/{ride_id}/arrive")

@@ -730,10 +730,12 @@ fun VasantraRideRequestCard(
     onAccept: () -> Unit = {},
     onReject: () -> Unit = {}
 ) {
-    val pickupDistKm = offer?.effectivePickupDistanceKm ?: 0.8
-    val pickupTimeMin = offer?.effectivePickupDurationMinutes ?: 3
-    val tripDistKm = offer?.effectiveTripDistanceKm ?: 3.5
-    val tripTimeMin = offer?.effectiveTripDurationMinutes ?: 12
+    val pickupSummary = if (offer?.pickupDistanceKm != null && offer.pickupDurationMinutes != null) {
+        "%.1f".format(offer.pickupDistanceKm) + " km • " + offer.pickupDurationMinutes + " min"
+    } else "Unavailable"
+    val tripSummary = if (offer != null && offer.distanceKm > 0.0 && offer.tripDurationMinutes != null) {
+        "%.1f".format(offer.distanceKm) + " km • " + offer.tripDurationMinutes + " min"
+    } else "Unavailable"
     val validEarnings = offer?.estimatedDriverEarningsRupees?.takeIf { it > 0.0 }
 
     Card(
@@ -774,7 +776,7 @@ fun VasantraRideRequestCard(
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = offer?.vehicleCategory?.ifBlank { "Electric Auto / Rickshaw" } ?: "Electric Auto / Rickshaw",
+                            text = offer?.vehicleCategory?.ifBlank { "Category unavailable" } ?: "No active offer",
                             fontSize = 12.sp,
                             color = Color(0xFF6B7280),
                             fontWeight = FontWeight.Medium
@@ -835,7 +837,7 @@ fun VasantraRideRequestCard(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "${"%.1f".format(pickupDistKm)} km • $pickupTimeMin min",
+                            text = pickupSummary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF065F46)
@@ -873,7 +875,7 @@ fun VasantraRideRequestCard(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "${"%.1f".format(tripDistKm)} km • $tripTimeMin min",
+                            text = tripSummary,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF1E40AF)
@@ -918,7 +920,7 @@ fun VasantraRideRequestCard(
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = offer?.pickupAddress?.ifBlank { "Pickup Spot Address" } ?: "Commuter Pickup Spot",
+                                text = offer?.pickupAddress?.takeIf { it.isNotBlank() } ?: "Pickup address unavailable",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF0F172A),
@@ -926,7 +928,7 @@ fun VasantraRideRequestCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "📍 ${"%.1f".format(pickupDistKm)} km away • $pickupTimeMin min away",
+                                text = "📍 " + pickupSummary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF059669)
@@ -964,7 +966,7 @@ fun VasantraRideRequestCard(
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                text = offer?.destinationAddress?.ifBlank { "Destination Area" } ?: "Drop Location Area",
+                                text = offer?.destinationAddress?.takeIf { it.isNotBlank() } ?: "Destination address unavailable",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF0F172A),
@@ -972,7 +974,7 @@ fun VasantraRideRequestCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "🏁 ${"%.1f".format(tripDistKm)} km trip • $tripTimeMin min drive",
+                                text = "🏁 " + tripSummary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF2563EB)

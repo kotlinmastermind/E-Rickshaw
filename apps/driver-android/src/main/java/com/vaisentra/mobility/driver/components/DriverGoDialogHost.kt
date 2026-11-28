@@ -118,13 +118,13 @@ private fun IncomingOfferModal() {
         return
     }
 
-    var timer by remember(currentOffer.rideId) { mutableStateOf(currentOffer.timeoutSeconds.coerceAtLeast(1)) }
-    LaunchedEffect(currentOffer.rideId, timer) {
+    var timer by remember(currentOffer.rideId, currentOffer.assignmentId) { mutableStateOf(currentOffer.timeoutSeconds.coerceAtLeast(0)) }
+    LaunchedEffect(currentOffer.rideId, currentOffer.assignmentId, timer) {
         if (timer > 0) {
             delay(1000)
             timer--
         } else {
-            DriverRepository.rejectOffer(currentOffer.rideId, "DISPATCH_TIMEOUT")
+            DriverRepository.fetchActiveOffers()
             DriverDialogController.dismiss()
         }
     }

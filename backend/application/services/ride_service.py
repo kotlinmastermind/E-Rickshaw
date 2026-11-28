@@ -434,157 +434,30 @@ class RideService:
         except Exception:
             pass
 
-    async def accept_ride_atomic(self, driver_user_id: str, ride_id: str) -> Dict[str, Any]:
+    async def accept_ride_atomic(self, driver_user_id: str, ride_id: str, assignment_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Guarantees strict atomic concurrency control:
-        Only ONE driver can successfully assign a requested ride.
-        Uses a conditional UPDATE matching status == 'REQUESTED' and assigned_driver_id IS NULL.
+        Backward-compatible ride API adapter.
+
+        All offer acceptance invariants live in SmartDispatchService so the
+        /rides and /dispatch APIs cannot diverge on expiry, eligibility,
+        service-area, vehicle, availability, or concurrent assignment checks.
         """
-        # Fetch driver profile & check approval
-        stmt = select(DriverProfile).where(DriverProfile.user_id == driver_user_id)
-        res = await self.db.execute(stmt)
-        driver = res.scalar_one_or_none()
-        if not driver:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found.")
-        
-        if driver.approval_status != "APPROVED":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Chauffeur account is pending verification approval.")
+        from backend.application.services.smart_dispatch_service import SmartDispatchService
 
-        # Re-validate ride existence and vehicle category match
-        stmt_ride = select(Ride).where(Ride.id == ride_id)
-        ride_res = await self.db.execute(stmt_ride)
-        ride_obj = ride_res.scalar_one_or_none()
-        if not ride_obj:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
-        if not ride_obj.service_area_id:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride has no validated operational service area.")
-        from backend.application.services.service_area_service import ServiceAreaService
-        service_areas = ServiceAreaService(self.db)
-        resolved_area = await service_areas.resolve_route(
-            ride_obj.pickup_latitude, ride_obj.pickup_longitude,
-            ride_obj.destination_latitude, ride_obj.destination_longitude,
+        result = await SmartDispatchService(self.db).accept_offer(
+            driver_user_id=driver_user_id,
+            ride_id=ride_id,
+            assignment_id=assignment_id,
         )
-        if resolved_area.id != ride_obj.service_area_id:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride service area no longer matches its route.")
-        await service_areas.require_driver_assignment(driver.id, ride_obj.service_area_id)
-
-        from backend.domain.models import DriverVehicleAssignment, Vehicle
-        stmt_veh = (
-            select(Vehicle)
-            .join(DriverVehicleAssignment, DriverVehicleAssignment.vehicle_id == Vehicle.id)
-            .where(
-                DriverVehicleAssignment.driver_id == driver.id,
-                DriverVehicleAssignment.is_active.is_(True),
-                Vehicle.is_active.is_(True)
-            )
-        )
-        driver_veh = (await self.db.execute(stmt_veh)).scalars().first()
-        if not driver_veh or not driver_veh.category_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Driver does not have an active assigned vehicle."
-            )
-        if driver_veh.category_id != ride_obj.vehicle_category_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Driver vehicle category mismatch. Expected category '{ride_obj.vehicle_category_id}', but driver vehicle is '{driver_veh.category_id}'."
-            )
-
-        await service_areas.require_fresh_driver_inside(driver.id, ride_obj.service_area_id)
-
-        now = datetime.now(timezone.utc)
-        now_naive = now.replace(tzinfo=None)
-
-        from backend.infrastructure.cache.redis_client import redis_client
-        async with redis_client.distributed_lock(f"lock:ride:{ride_id}", timeout_seconds=10):
-            # An authenticated driver can accept only their own live, persisted offer.
-            # Handles both timezone-aware (PostgreSQL) and naive ISO strings (SQLite test environments)
-            offer_result = await self.db.execute(
-                select(RideAssignment).where(
-                    RideAssignment.ride_id == ride_id,
-                    RideAssignment.driver_id == driver.id,
-                    RideAssignment.status == "OFFERED",
-                    or_(
-                        RideAssignment.expires_at.is_(None),
-                        RideAssignment.expires_at > now,
-                        RideAssignment.expires_at > now_naive
-                    )
-                )
-            )
-            offer = offer_result.scalar_one_or_none()
-            if offer is None:
-                raise HTTPException(status_code=409, detail="This dispatch offer expired or is no longer assigned to you.")
-
-            # Atomic conditional update
-            update_stmt = (
-                update(Ride)
-                .where(
-                    and_(
-                        Ride.id == ride_id,
-                        Ride.status == RideStatus.REQUESTED.value,
-                        Ride.assigned_driver_id.is_(None)
-                    )
-                )
-                .values(
-                    status=RideStatus.ASSIGNED.value,
-                    assigned_driver_id=driver.id,
-                    vehicle_id=driver_veh.id,
-                    assigned_at=now
-                )
-            )
-            result = await self.db.execute(update_stmt)
-            if result.rowcount == 0:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="This luxury ride has already been accepted by another chauffeur or is no longer available."
-                )
-
-            # Mark driver availability as busy
-            avail_stmt = (
-                update(DriverAvailability)
-                .where(DriverAvailability.driver_id == driver.id)
-                .values(is_busy=True, updated_at=now)
-            )
-            await self.db.execute(avail_stmt)
-
-            # Record assignment & state event
-            offer.status = "ACCEPTED"
-            offer.is_accepted = True
-            offer.responded_at = now
-
-            # Clear Redis offer safety key & active-offer index
-            try:
-                await redis_client.delete(f"dispatch:offer:{ride_id}:{driver.id}")
-                await redis_client.delete(f"driver:active_offer:{driver.id}")
-                await redis_client.delete(f"driver:active_offer:{driver_user_id}")
-                from backend.application.services.live_location_service import LiveLocationService
-                await LiveLocationService(self.db).remove_driver_from_h3_index(driver.id)
-            except Exception:
-                pass
-
-            event = RideStatusEvent(
-                ride_id=ride_id,
-                previous_status=RideStatus.REQUESTED.value,
-                new_status=RideStatus.ASSIGNED.value,
-                triggered_by_user_id=driver_user_id,
-                trigger_actor=ActorRole.DRIVER.value,
-                notes=f"Accepted by chauffeur {driver.id}"
-            )
-            self.db.add(event)
-            await self.db.commit()
-
-        # Broadcast live status update to WebSocket subscribers
-        await self._broadcast_ride_update(ride_id, RideStatus.ASSIGNED.value)
-
-        # Fetch updated ride
         ride = await self.get_ride_by_id(ride_id)
+        # Preserve the established /rides/{ride_id}/accept response contract.
         return {
-            "ride_id": ride.id,
-            "status": ride.status,
-            "assigned_driver_id": driver.id,
-            "assigned_at": now.isoformat(),
+            "ride_id": result["ride_id"],
+            "status": RideStatus.ASSIGNED.value,
+            "assigned_driver_id": result["driver_id"],
+            "assigned_at": result["assigned_at"],
             "pickup_address": ride.pickup_address,
-            "destination_address": ride.destination_address
+            "destination_address": ride.destination_address,
         }
 
     async def driver_arrived(

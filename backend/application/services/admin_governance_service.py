@@ -314,10 +314,37 @@ class AdminGovernanceService:
         if not ride:
             raise HTTPException(404, "Ride not found.")
         events = (await self.db.execute(select(RideStatusEvent).where(RideStatusEvent.ride_id == ride_id).order_by(RideStatusEvent.created_at.asc()))).scalars().all()
-        return {"ride_id": ride.id, "status": ride.status, "pickup_address": ride.pickup_address,
-                "destination_address": ride.destination_address, "timeline": [{"id": e.id, "previous_status": e.previous_status,
-                    "new_status": e.new_status, "trigger_actor": e.trigger_actor, "notes": e.notes,
-                    "metadata": e.metadata_json, "created_at": e.created_at.isoformat()} for e in events]}
+        assignments = (await self.db.execute(
+            select(RideAssignment)
+            .where(RideAssignment.ride_id == ride_id)
+            .order_by(RideAssignment.offered_at.asc())
+        )).scalars().all()
+        return {
+            "ride_id": ride.id,
+            "status": ride.status,
+            "pickup_address": ride.pickup_address,
+            "destination_address": ride.destination_address,
+            "timeline": [{
+                "id": e.id,
+                "previous_status": e.previous_status,
+                "new_status": e.new_status,
+                "trigger_actor": e.trigger_actor,
+                "notes": e.notes,
+                "metadata": e.metadata_json,
+                "created_at": e.created_at.isoformat()
+            } for e in events],
+            "offer_history": [{
+                "assignment_id": assignment.id,
+                "driver_id": assignment.driver_id,
+                "status": assignment.status,
+                "offered_at": assignment.offered_at.isoformat() if assignment.offered_at else None,
+                "expires_at": assignment.expires_at.isoformat() if assignment.expires_at else None,
+                "responded_at": assignment.responded_at.isoformat() if assignment.responded_at else None,
+                "rejection_reason": assignment.rejection_reason,
+                "escalation_level": assignment.escalation_level,
+                "is_accepted": assignment.is_accepted,
+            } for assignment in assignments],
+        }
 
     async def assign_ride(self, admin_id: str, ride_id: str, driver_id: str, reason: str) -> Dict[str, Any]:
         if len(reason.strip()) < 10:

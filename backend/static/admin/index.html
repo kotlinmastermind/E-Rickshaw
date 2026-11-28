@@ -545,6 +545,16 @@
                         </div>
                     </div>
 
+                    <div id="drawer-dispatch-history" class="glass-card p-3 rounded-xl space-y-2 hidden">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Dispatch & Offer History</span>
+                            <span class="text-[10px] text-slate-500 font-mono">DATABASE RECORDS</span>
+                        </div>
+                        <div id="drawer-dispatch-history-content" class="space-y-2 text-xs text-slate-300">
+                            <p class="text-slate-500">Select a ride to inspect persisted offer events.</p>
+                        </div>
+                    </div>
+
                     <!-- Contact & Compliance -->
                     <div class="glass-card p-3 rounded-xl space-y-2 text-xs">
                         <div class="flex justify-between">
@@ -2941,6 +2951,7 @@
 
         // Open Inspector Drawer for Driver
         function openDriverInspector(driver) {
+            document.getElementById('drawer-dispatch-history')?.classList.add('hidden');
             STATE.selectedEntity = { type: 'driver', data: driver };
             document.getElementById('drawer-avatar').innerText = '👨‍✈️';
             document.getElementById('drawer-title').innerText = driver.name;
@@ -2993,6 +3004,7 @@
 
         // Open Inspector Drawer for Waiting Rider
         function openRiderInspector(rider) {
+            document.getElementById('drawer-dispatch-history')?.classList.add('hidden');
             STATE.selectedEntity = { type: 'rider', data: rider };
             document.getElementById('drawer-avatar').innerText = '🚶';
             document.getElementById('drawer-title').innerText = rider.name;
@@ -3026,7 +3038,97 @@
             lucide.createIcons();
         }
 
+        async function openRideInspector(ride) {
+            if (!ride) return;
+            STATE.selectedEntity = { type: 'ride', data: ride };
+            document.getElementById('drawer-avatar').innerText = '🛺';
+            document.getElementById('drawer-title').innerText = 'Ride #' + String(ride.id || '').slice(0, 8);
+            document.getElementById('drawer-subtitle').innerText = (ride.status || 'UNKNOWN') + ' • ' + (ride.dispatch_status || 'No active offer');
+
+            const dot = document.getElementById('drawer-status-dot');
+            const statusText = document.getElementById('drawer-status-text');
+            const isOffered = Boolean(ride.current_offer);
+            dot.className = 'w-2.5 h-2.5 rounded-full ' + (isOffered ? 'bg-cyan-glow animate-pulse' : 'bg-amber-glow');
+            statusText.className = 'text-xs font-bold ' + (isOffered ? 'text-cyan-glow' : 'text-amber-glow');
+            statusText.innerText = isOffered
+                ? 'OFFER LIVE • ' + Number(ride.current_offer.expires_in_seconds || 0) + 'S LEFT'
+                : (ride.dispatch_status || ride.status || 'STATUS UNAVAILABLE');
+
+            document.getElementById('drawer-battery').innerText = 'Not applicable';
+            document.getElementById('drawer-speed').innerText = 'Not applicable';
+            document.getElementById('drawer-rating').innerText = 'Not available';
+            document.getElementById('drawer-trips').innerText = 'Not available';
+            document.getElementById('drawer-phone').innerText = 'Not available in live ride feed';
+            document.getElementById('drawer-dl').innerText = 'Ride record';
+            document.getElementById('drawer-category').innerText = 'Vehicle category not included in live feed';
+
+            document.getElementById('drawer-trip-card').classList.remove('hidden');
+            document.getElementById('drawer-trip-id').innerText = '#' + String(ride.id || '');
+            document.getElementById('drawer-pickup').innerText = ride.pickup || 'Pickup unavailable';
+            document.getElementById('drawer-drop').innerText = ride.drop || 'Destination unavailable';
+            document.getElementById('drawer-fare').innerText = ride.fare || 'Fare unavailable';
+            document.getElementById('drawer-passenger').innerText = ride.rider || 'Customer unavailable';
+
+            const historyPanel = document.getElementById('drawer-dispatch-history');
+            const historyContent = document.getElementById('drawer-dispatch-history-content');
+            historyPanel.classList.remove('hidden');
+            historyContent.textContent = 'Loading persisted ride and offer history…';
+            document.getElementById('inspector-drawer').classList.remove('translate-x-[110%]');
+            clearRoute();
+            lucide.createIcons();
+
+            try {
+                const response = await _nativeFetch('/api/v1/admin/rides/' + encodeURIComponent(ride.id));
+                if (!response.ok) throw new Error('Ride history request failed (' + response.status + ').');
+                const detail = await response.json();
+                historyContent.innerHTML = '';
+
+                const appendSection = (heading, items, describe) => {
+                    const section = document.createElement('div');
+                    section.className = 'space-y-1.5';
+                    const title = document.createElement('p');
+                    title.className = 'text-[10px] uppercase font-bold tracking-wider text-cyan-glow';
+                    title.textContent = heading + ' (' + items.length + ')';
+                    section.appendChild(title);
+                    if (!items.length) {
+                        const empty = document.createElement('p');
+                        empty.className = 'text-[11px] text-slate-500';
+                        empty.textContent = 'No records.';
+                        section.appendChild(empty);
+                    }
+                    items.forEach(item => {
+                        const row = document.createElement('div');
+                        row.className = 'rounded-lg border border-border/60 bg-surface/60 p-2';
+                        const primary = document.createElement('p');
+                        primary.className = 'text-[11px] font-semibold text-slate-200';
+                        primary.textContent = describe(item);
+                        row.appendChild(primary);
+                        const meta = document.createElement('p');
+                        meta.className = 'mt-1 text-[10px] text-slate-500 break-words';
+                        meta.textContent = item.responded_at || item.created_at || item.offered_at || item.expires_at || 'Timestamp unavailable';
+                        row.appendChild(meta);
+                        section.appendChild(row);
+                    });
+                    historyContent.appendChild(section);
+                };
+
+                appendSection('Dispatch offer attempts', detail.offer_history || [], item => {
+                    const reason = item.rejection_reason ? ' · ' + item.rejection_reason : '';
+                    return String(item.status || 'UNKNOWN') + ' · Driver ' + String(item.driver_id || 'unavailable') + reason;
+                });
+                appendSection('Ride state events', detail.timeline || [], item => {
+                    return String(item.previous_status || 'START') + ' → ' + String(item.new_status || 'UNKNOWN') +
+                        ' · ' + String(item.trigger_actor || 'SYSTEM') +
+                        (item.notes ? ' · ' + String(item.notes) : '');
+                });
+            } catch (error) {
+                historyContent.textContent = 'Persisted history unavailable: ' + String(error.message || error);
+            }
+            lucide.createIcons();
+        }
+
         function closeInspectorDrawer() {
+            document.getElementById('drawer-dispatch-history')?.classList.add('hidden');
             document.getElementById('inspector-drawer').classList.add('translate-x-[110%]');
             clearRoute();
         }
@@ -3295,6 +3397,9 @@
                 if (ride.status === 'PAUSED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold">PAUSED</span>';
                 if (ride.status === 'COMPLETED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-emerald-dim text-emerald-glow font-mono text-[10px] font-bold">COMPLETED</span>';
                 if (ride.status === 'REQUESTED') statusBadge = '<span class="px-2 py-0.5 rounded-md bg-amber-dim text-amber-glow font-mono text-[10px] font-bold animate-pulse">REQUESTED</span>';
+                const dispatchState = ride.current_offer
+                    ? 'OFFERED · ' + Number(ride.current_offer.expires_in_seconds || 0) + 's remaining'
+                    : (ride.dispatch_status || '—');
 
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-surface/50 transition-colors';
@@ -3311,10 +3416,13 @@
                     </td>
                     <td class="py-3.5 px-4 font-mono font-bold text-emerald-glow">${ride.fare}</td>
                     <td class="py-3.5 px-4 text-slate-400 font-mono">${ride.payment}</td>
-                    <td class="py-3.5 px-4">${statusBadge}</td>
+                    <td class="py-3.5 px-4">${statusBadge}<div class="mt-1 text-[10px] font-mono text-slate-500">Dispatch: ${dispatchState}</div></td>
                     <td class="py-3.5 px-4 text-right">
                         <button onclick="switchTab('map'); showToast('Showing route for #${ride.id.slice(0, 8)}')" class="px-2.5 py-1 rounded-lg bg-surface hover:bg-card border border-border text-slate-300 hover:text-cyan-glow text-[11px]">
                             Inspect Route
+                        </button>
+                        <button onclick="openRideInspector(STATE.activeRides.find(item => item.id === '${ride.id}'))" class="ml-1 px-2.5 py-1 rounded-lg bg-cyan-dim hover:bg-cyan-glow/20 border border-cyan-glow/20 text-cyan-glow text-[11px]">
+                            Offer History
                         </button>
                     </td>
                 `;

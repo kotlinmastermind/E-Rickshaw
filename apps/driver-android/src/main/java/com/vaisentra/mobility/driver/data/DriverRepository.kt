@@ -982,9 +982,13 @@ object DriverRepository {
             onComplete(false)
             return
         }
+        val assignmentId = _activeOffer.value
+            ?.takeIf { it.rideId == rideId }
+            ?.assignmentId
+            ?.takeIf { it.isNotBlank() }
         scope.launch {
             try {
-                val res = DriverNetworkClient.apiService.acceptRide(rideId)
+                val res = DriverNetworkClient.apiService.acceptRide(rideId, assignmentId)
                 if (res.isSuccessful) {
                     _currentRideId.value = rideId
                     _activeOffer.value = null
@@ -1003,6 +1007,10 @@ object DriverRepository {
     }
 
     fun rejectOffer(rideId: String, reason: String = "PILOT_DECLINED", onComplete: (Boolean) -> Unit = {}) {
+        val assignmentId = _activeOffer.value
+            ?.takeIf { it.rideId == rideId }
+            ?.assignmentId
+            ?.takeIf { it.isNotBlank() }
         _activeOffer.value = null
         if (rideId.isBlank()) {
             onComplete(false)
@@ -1010,7 +1018,11 @@ object DriverRepository {
         }
         scope.launch {
             try {
-                val res = DriverNetworkClient.apiService.rejectOffer(rideId, RejectOfferRequest(reason = reason))
+                val res = DriverNetworkClient.apiService.rejectOffer(
+                    rideId,
+                    assignmentId,
+                    RejectOfferRequest(reason = reason)
+                )
                 if (!res.isSuccessful) {
                     Log.w(TAG, "rejectOffer failed with HTTP ${res.code()}")
                 }

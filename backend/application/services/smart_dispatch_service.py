@@ -231,12 +231,12 @@ class SmartDispatchService:
             selected_assignment = assignment
 
             # Broadcast WebSocket offer events
-            await self._broadcast_offer(ride, candidate, matching_scored, offer_timeout_sec)
+            await self._broadcast_offer(ride, candidate, matching_scored, assignment, offer_timeout_sec)
 
             # Schedule background watchdog for automated timeout cascade
             try:
                 asyncio.create_task(
-                    self._schedule_timeout_watchdog(ride.id, candidate.driver_id, safety_ttl)
+                    self._schedule_timeout_watchdog(ride.id, candidate.driver_id, assignment.id, safety_ttl)
                 )
             except RuntimeError:
                 pass
@@ -258,18 +258,23 @@ class SmartDispatchService:
         ride: Ride,
         candidate: Any,
         scored: Any,
+        assignment: RideAssignment,
         timeout_seconds: int
     ) -> None:
-        """Sends real-time WebSocket payloads to passenger and driver."""
+        """Publishes one canonical, persisted offer event to the driver's cross-worker channels."""
         fare_cents = ride.final_fare_cents if ride.final_fare_cents is not None else (ride.estimated_fare_cents or 0)
-        road_eta = getattr(candidate, "road_eta_minutes", 5.0)
+        road_eta = getattr(candidate, "road_eta_minutes", None)
         from backend.application.services.commission_service import CommissionService
         commission_estimate = await CommissionService.estimate_for_ride(self.db, ride)
+        expires_at = ensure_utc(assignment.expires_at)
+        remaining_seconds = max(0, int((expires_at - utc_now()).total_seconds())) if expires_at else timeout_seconds
 
-        # 1. Event to driver
+        # Keep this event name aligned with ConnectionManager's Pub/Sub allowlist
+        # and the driver's durable reconnect reconciliation payload.
         driver_payload = {
-            "event": "DISPATCH_OFFER_RECEIVED",
+            "event": "DISPATCH_OFFER",
             "ride_id": ride.id,
+            "assignment_id": assignment.id,
             "pickup_address": ride.pickup_address,
             "pickup_latitude": ride.pickup_latitude,
             "pickup_longitude": ride.pickup_longitude,
@@ -277,15 +282,21 @@ class SmartDispatchService:
             "destination_latitude": ride.destination_latitude,
             "destination_longitude": ride.destination_longitude,
             "estimated_fare_cents": fare_cents,
+            "estimated_trip_distance_km": ride.estimated_distance_km,
+            "trip_duration_minutes": ride.estimated_duration_minutes,
+            "payment_mode": ride.payment_method,
+            "pickup_distance_km": getattr(candidate, "road_distance_km", None),
+            "pickup_duration_minutes": road_eta,
             **commission_estimate,
-            "road_eta_minutes": road_eta,
-            "expires_in_seconds": timeout_seconds,
+            "timeout_seconds": remaining_seconds,
+            "expires_at": expires_at.isoformat() if expires_at else None,
             "timestamp": utc_now().isoformat()
         }
 
-        # Send to driver personal channel
-        target_user = candidate.user_id or candidate.driver_id
-        await ws_manager.send_personal_message(driver_payload, target_user)
+        # Driver WebSocket sessions subscribe to the canonical DriverProfile
+        # channel (and the User channel only for legacy publishers). Publishing
+        # once avoids duplicate offer frames on sockets subscribed to both.
+        await redis_client.publish(f"driver:dispatch:{candidate.driver_id}", driver_payload)
 
         # 2. Event to passenger ride channel
         passenger_payload = {
@@ -322,7 +333,12 @@ class SmartDispatchService:
         })
         return None
 
-    async def accept_offer(self, driver_user_id: str, ride_id: str) -> Dict[str, Any]:
+    async def accept_offer(
+        self,
+        driver_user_id: str,
+        ride_id: str,
+        assignment_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Processes driver acceptance of a dispatch offer:
         1. Validates assignment state and prevents double acceptance.
@@ -341,9 +357,20 @@ class SmartDispatchService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver approval is no longer active; this offer cannot be accepted.")
 
         # Row-level lock on assignment
+        assign_filters = [
+            RideAssignment.ride_id == ride_id,
+            RideAssignment.driver_id == driver.id,
+        ]
+        if assignment_id:
+            assign_filters.append(RideAssignment.id == assignment_id)
+        # Resolve the latest persisted attempt even when it is already terminal.
+        # This lets a late retry receive a deterministic 409/410 instead of a
+        # misleading 404; an explicitly supplied assignment ID remains exact.
         assign_stmt = (
             select(RideAssignment)
-            .where(RideAssignment.ride_id == ride_id, RideAssignment.driver_id == driver.id)
+            .where(*assign_filters)
+            .order_by(RideAssignment.offered_at.desc(), RideAssignment.id.desc())
+            .limit(1)
             .with_for_update()
         )
         res = await self.db.execute(assign_stmt)
@@ -353,7 +380,27 @@ class SmartDispatchService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dispatch offer not found.")
 
         if assignment.status == "ACCEPTED":
-            return {"status": "ACCEPTED", "message": "Offer already accepted.", "ride_id": ride_id}
+            accepted_ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
+            accepted_ride = (await self.db.execute(accepted_ride_stmt)).scalar_one_or_none()
+            if (
+                not accepted_ride
+                or accepted_ride.assigned_driver_id != driver.id
+                or accepted_ride.status not in (
+                    RideStatus.ASSIGNED.value,
+                    RideStatus.ARRIVED.value,
+                    RideStatus.IN_PROGRESS.value,
+                    RideStatus.PAUSED.value,
+                )
+            ):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Accepted offer no longer matches the authoritative ride assignment.")
+            accepted_at = ensure_utc(assignment.responded_at) or ensure_utc(accepted_ride.assigned_at)
+            return {
+                "status": "ACCEPTED",
+                "message": "Offer already accepted.",
+                "ride_id": ride_id,
+                "driver_id": driver.id,
+                "assigned_at": accepted_at.isoformat() if accepted_at else None,
+            }
 
         if assignment.status != "OFFERED":
             raise HTTPException(
@@ -362,16 +409,43 @@ class SmartDispatchService:
             )
 
         now = utc_now()
-        if assignment.expires_at and ensure_utc(assignment.expires_at) < now:
-            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Dispatch offer has expired.")
 
-        # Row-level lock on Ride
+        # Lock and inspect the ride before checking expiry or driver availability.
+        # A concurrent retry by the same driver is idempotent after the first
+        # request commits; a different driver receives a deterministic 409.
         ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
         ride_res = await self.db.execute(ride_stmt)
         ride = ride_res.scalar_one_or_none()
 
         if not ride:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+        accepted_states = (
+            RideStatus.ASSIGNED.value,
+            RideStatus.ARRIVED.value,
+            RideStatus.IN_PROGRESS.value,
+            RideStatus.PAUSED.value,
+        )
+        if ride.status in accepted_states or ride.assigned_driver_id is not None:
+            if ride.assigned_driver_id == driver.id and ride.status in accepted_states:
+                assignment.status = "ACCEPTED"
+                assignment.is_accepted = True
+                assignment.responded_at = assignment.responded_at or ride.assigned_at or now
+                await self.db.commit()
+                accepted_at = ensure_utc(assignment.responded_at)
+                return {
+                    "status": "ACCEPTED",
+                    "message": "Offer already accepted.",
+                    "ride_id": ride_id,
+                    "driver_id": driver.id,
+                    "assigned_at": accepted_at.isoformat() if accepted_at else None,
+                }
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride has already been assigned to another driver or is no longer accepting offers.")
+
+        if ride.status != RideStatus.REQUESTED.value:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride is no longer accepting dispatch responses.")
+        if assignment.expires_at is None or ensure_utc(assignment.expires_at) <= now:
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Dispatch offer has expired or has no valid expiry.")
+
         if not ride.service_area_id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride has no validated service area.")
         from backend.application.services.service_area_service import ServiceAreaService
@@ -433,6 +507,7 @@ class SmartDispatchService:
         # Update ride
         ride.status = RideStatus.ASSIGNED.value
         ride.assigned_driver_id = driver.id
+        ride.vehicle_id = driver_vehicle.id
         ride.assigned_at = now
 
         # Update the already locked availability row to busy.
@@ -465,11 +540,15 @@ class SmartDispatchService:
 
         # Broadcast acceptance
         accept_payload = {
-            "event": "RIDE_ASSIGNED",
+            "event_type": "RIDE_ACCEPTED",
             "ride_id": ride.id,
-            "status": "ASSIGNED",
-            "driver_id": driver.id,
-            "driver_rating": driver.rating_average,
+            "status": RideStatus.ASSIGNED.value,
+            "payload": {
+                "ride_id": ride.id,
+                "status": RideStatus.ASSIGNED.value,
+                "driver_id": driver.id,
+                "driver_rating": driver.rating_average,
+            },
             "timestamp": now.isoformat()
         }
         await ws_manager.broadcast_to_ride(ride.id, accept_payload)
@@ -485,7 +564,8 @@ class SmartDispatchService:
         self,
         driver_user_id: str,
         ride_id: str,
-        reason: str
+        reason: str,
+        assignment_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Handles driver rejection (or timeout):
@@ -499,9 +579,18 @@ class SmartDispatchService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found.")
 
         # Row-level lock on assignment
+        assign_filters = [
+            RideAssignment.ride_id == ride_id,
+            RideAssignment.driver_id == driver.id,
+            RideAssignment.status == "OFFERED",
+        ]
+        if assignment_id:
+            assign_filters.append(RideAssignment.id == assignment_id)
         assign_stmt = (
             select(RideAssignment)
-            .where(RideAssignment.ride_id == ride_id, RideAssignment.driver_id == driver.id)
+            .where(*assign_filters)
+            .order_by(RideAssignment.offered_at.desc())
+            .limit(1)
             .with_for_update()
         )
         res = await self.db.execute(assign_stmt)
@@ -510,10 +599,23 @@ class SmartDispatchService:
         if not assignment:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dispatch offer not found.")
 
-        if assignment.status == "ACCEPTED":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer already accepted.")
+        if assignment.status != "OFFERED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Offer is no longer available (current status: {assignment.status})."
+            )
 
         now = utc_now()
+        if assignment.expires_at is None or ensure_utc(assignment.expires_at) <= now:
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Dispatch offer has expired or has no valid expiry.")
+
+        ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
+        ride = (await self.db.execute(ride_stmt)).scalar_one_or_none()
+        if not ride:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ride not found.")
+        if ride.status != RideStatus.REQUESTED.value or ride.assigned_driver_id is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ride is no longer accepting dispatch responses.")
+
         assignment.status = "REJECTED"
         assignment.is_accepted = False
         assignment.rejection_reason = reason
@@ -542,25 +644,60 @@ class SmartDispatchService:
             "message": "Offer declined. Cascading to next candidate."
         }
 
-    async def _schedule_timeout_watchdog(self, ride_id: str, driver_id: str, delay_sec: int) -> None:
-        """Background task that triggers auto-expiration and cascade if offer isn't answered."""
+    async def _schedule_timeout_watchdog(
+        self, ride_id: str, driver_id: str, assignment_id: str, delay_sec: int
+    ) -> None:
+        """Background task that expires this exact persisted offer if it remains unanswered."""
         await asyncio.sleep(delay_sec)
-        await self._handle_timeout(ride_id, driver_id)
+        await self._handle_timeout(ride_id, driver_id, assignment_id)
 
-    async def _handle_timeout(self, ride_id: str, driver_id: str) -> None:
-        """Inspects if offer is still pending OFFERED; if so, marks REJECTED and cascades."""
+    @staticmethod
+    async def _handle_timeout(ride_id: str, driver_id: str, assignment_id: Optional[str] = None) -> None:
+        """Expire one offer only after its persisted deadline and while its ride is still unassigned."""
         try:
             from backend.infrastructure.database.session import async_session_maker
             async with async_session_maker() as session:
-                assign_stmt = select(RideAssignment).where(
+                assign_filters = [
                     RideAssignment.ride_id == ride_id,
-                    RideAssignment.driver_id == driver_id
-                ).with_for_update()
+                    RideAssignment.driver_id == driver_id,
+                ]
+                if assignment_id:
+                    assign_filters.append(RideAssignment.id == assignment_id)
+                assign_stmt = (
+                    select(RideAssignment)
+                    .where(*assign_filters)
+                    .order_by(RideAssignment.offered_at.desc())
+                    .limit(1)
+                    .with_for_update()
+                )
                 res = await session.execute(assign_stmt)
                 assignment = res.scalar_one_or_none()
 
-                if assignment and assignment.status == "OFFERED":
+                if (
+                    assignment
+                    and assignment.status == "OFFERED"
+                    and (
+                        assignment.expires_at is None
+                        or ensure_utc(assignment.expires_at) <= utc_now()
+                    )
+                ):
+                    ride_stmt = select(Ride).where(Ride.id == ride_id).with_for_update()
+                    ride = (await session.execute(ride_stmt)).scalar_one_or_none()
                     now = utc_now()
+                    if not ride or ride.status != RideStatus.REQUESTED.value or ride.assigned_driver_id is not None:
+                        assignment.status = "CANCELLED"
+                        assignment.is_accepted = False
+                        assignment.rejection_reason = "RIDE_NO_LONGER_REQUESTED"
+                        assignment.responded_at = now
+                        await batch_optimizer.release_driver_lock(driver_id, ride_id)
+                        await redis_client.delete(f"dispatch:offer:{ride_id}:{driver_id}")
+                        await redis_client.delete(f"driver:active_offer:{driver_id}")
+                        driver_profile = await session.get(DriverProfile, driver_id)
+                        if driver_profile:
+                            await redis_client.delete(f"driver:active_offer:{driver_profile.user_id}")
+                        await session.commit()
+                        return
+
                     assignment.status = "REJECTED"
                     assignment.is_accepted = False
                     assignment.rejection_reason = "DISPATCH_TIMEOUT"
@@ -571,6 +708,9 @@ class SmartDispatchService:
                     await batch_optimizer.release_driver_lock(driver_id, ride_id)
                     await redis_client.delete(f"dispatch:offer:{ride_id}:{driver_id}")
                     await redis_client.delete(f"driver:active_offer:{driver_id}")
+                    driver_profile = await session.get(DriverProfile, driver_id)
+                    if driver_profile:
+                        await redis_client.delete(f"driver:active_offer:{driver_profile.user_id}")
 
                     await session.commit()
                     logger.info(f"Offer for ride {ride_id} to driver {driver_id} timed out. Cascading...")
@@ -590,3 +730,67 @@ class SmartDispatchService:
                 await svc.search_and_dispatch(ride_id)
         except Exception as e:
             logger.error(f"Background cascade failed for ride {ride_id}: {e}", exc_info=True)
+
+ 
+async def run_dispatch_expiry_reaper_loop(poll_interval_seconds: int = 5, batch_size: int = 100) -> None:
+    """Recover expired dispatch offers after worker restarts using persisted PostgreSQL deadlines."""
+    from backend.infrastructure.database.session import async_session_maker
+
+    while True:
+        try:
+            async with async_session_maker() as session:
+                expired_result = await session.execute(
+                    select(RideAssignment.id, RideAssignment.ride_id, RideAssignment.driver_id)
+                    .where(
+                        RideAssignment.status == "OFFERED",
+                        or_(
+                            RideAssignment.expires_at.is_(None),
+                            RideAssignment.expires_at <= utc_now(),
+                        ),
+                    )
+                    .order_by(RideAssignment.expires_at.asc())
+                    .limit(batch_size)
+                )
+                expired_offers = expired_result.all()
+
+            # _handle_timeout takes the exact assignment row lock and rechecks
+            # expiry and ride state, so workers cannot cascade the same offer twice.
+            for assignment_id, ride_id, driver_id in expired_offers:
+                await SmartDispatchService._handle_timeout(ride_id, driver_id, assignment_id)
+
+            # Recover the cascade if a process stopped after persisting a driver
+            # rejection/expiry but before its in-memory background task ran.
+            async with async_session_maker() as session:
+                now = utc_now()
+                terminal_offer_exists = select(RideAssignment.id).where(
+                    RideAssignment.ride_id == Ride.id,
+                    RideAssignment.status.in_(["REJECTED", "EXPIRED", "CANCELLED"]),
+                ).exists()
+                live_offer_exists = select(RideAssignment.id).where(
+                    RideAssignment.ride_id == Ride.id,
+                    RideAssignment.status == "OFFERED",
+                    RideAssignment.expires_at > now,
+                ).exists()
+                pending_result = await session.execute(
+                    select(Ride.id)
+                    .where(
+                        Ride.status == RideStatus.REQUESTED.value,
+                        Ride.assigned_driver_id.is_(None),
+                        Ride.service_area_id.is_not(None),
+                        terminal_offer_exists,
+                        ~live_offer_exists,
+                    )
+                    .order_by(Ride.requested_at.asc())
+                    .limit(batch_size)
+                )
+                pending_ride_ids = list(pending_result.scalars().all())
+
+            for pending_ride_id in pending_ride_ids:
+                async with async_session_maker() as session:
+                    await SmartDispatchService(session).search_and_dispatch(pending_ride_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Dispatch expiry reaper cycle failed")
+
+        await asyncio.sleep(max(1, poll_interval_seconds))
