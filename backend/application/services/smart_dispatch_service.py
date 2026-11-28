@@ -284,6 +284,7 @@ class SmartDispatchService:
             "estimated_fare_cents": fare_cents,
             "estimated_trip_distance_km": ride.estimated_distance_km,
             "trip_duration_minutes": ride.estimated_duration_minutes,
+            "payment_mode": ride.payment_method,
             "pickup_distance_km": getattr(candidate, "road_distance_km", None),
             "pickup_duration_minutes": road_eta,
             **commission_estimate,
