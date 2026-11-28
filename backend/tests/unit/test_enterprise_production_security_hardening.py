@@ -578,6 +578,15 @@ async def test_self_registration_and_otp_oauth_cannot_create_or_login_admins(db_
                 role="customer",
             )
         assert exc5.value.status_code == 403
+
+        # A valid OTP for a customer account must not issue a driver-role session.
+        with pytest.raises(Exception) as exc6:
+            await auth.verify_otp(
+                phone_number=customer_user.phone_number,
+                otp_code="123456",
+                role="driver",
+            )
+        assert exc6.value.status_code == 403
     finally:
         auth_mod.get_sms_provider = orig_get_sms
 
