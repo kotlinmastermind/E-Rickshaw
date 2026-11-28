@@ -434,7 +434,7 @@ class RideService:
         except Exception:
             pass
 
-    async def accept_ride_atomic(self, driver_user_id: str, ride_id: str) -> Dict[str, Any]:
+    async def accept_ride_atomic(self, driver_user_id: str, ride_id: str, assignment_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Backward-compatible ride API adapter.
 
@@ -447,6 +447,7 @@ class RideService:
         result = await SmartDispatchService(self.db).accept_offer(
             driver_user_id=driver_user_id,
             ride_id=ride_id,
+            assignment_id=assignment_id,
         )
         ride = await self.get_ride_by_id(ride_id)
         # Preserve the established /rides/{ride_id}/accept response contract.
