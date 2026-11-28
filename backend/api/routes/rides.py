@@ -31,10 +31,10 @@ class RideRequestPayload(BaseModel):
     category_id: Optional[str] = None
     pickup_address: str
     destination_address: str
-    pickup_latitude: Optional[float] = None
-    pickup_longitude: Optional[float] = None
-    destination_latitude: Optional[float] = None
-    destination_longitude: Optional[float] = None
+    pickup_latitude: Optional[float] = Field(None, ge=-90.0, le=90.0)
+    pickup_longitude: Optional[float] = Field(None, ge=-180.0, le=180.0)
+    destination_latitude: Optional[float] = Field(None, ge=-90.0, le=90.0)
+    destination_longitude: Optional[float] = Field(None, ge=-180.0, le=180.0)
     payment_method: str = "UPI"
     is_scheduled: bool = False
     scheduled_pickup_time: Optional[datetime] = None
@@ -263,6 +263,16 @@ async def create_ride_request(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Vehicle category_id is required. Please select a valid active vehicle category."
+        )
+    if payload.estimate_id and any(value is None for value in (
+        payload.pickup_latitude,
+        payload.pickup_longitude,
+        payload.destination_latitude,
+        payload.destination_longitude,
+    )):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pickup and destination coordinates are required when booking with a fare estimate.",
         )
     try:
         return await service.create_ride_request(
