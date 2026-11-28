@@ -61,7 +61,12 @@ async def purchase_gift_card(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Purchases a new gift card with payment validation and cryptographic code generation."""
+    """Purchases a gift card from wallet balance with payment validation and cryptographic code generation."""
+    if payload.payment_method.strip().upper() != "WALLET":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Gift-card checkout currently supports wallet balance only; unverified direct UPI/card collection is disabled.",
+        )
     service = GiftCardService(db)
     return await service.purchase_gift_card(
         purchaser_user_id=current_user.id,
