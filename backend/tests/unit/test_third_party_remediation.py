@@ -48,6 +48,40 @@ async def test_twilio_error_does_not_leak_provider_message():
         assert exc_info.value.status_code == 400
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("http_status", "provider_code", "expected_status"),
+    [
+        (429, 60203, 429),
+        (503, 20500, 502),
+        (401, 20003, 502),
+    ],
+)
+async def test_twilio_verify_check_surfaces_provider_failures_safely(http_status, provider_code, expected_status):
+    provider = TwilioVerifyProvider(account_sid="AC123", auth_token="tok", verify_service_sid="VA123")
+    mock_resp = MagicMock()
+    mock_resp.status_code = http_status
+    mock_resp.json.return_value = {"code": provider_code, "message": "Internal Twilio detail"}
+
+    with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_resp)):
+        with pytest.raises(HTTPException) as exc_info:
+            await provider.verify_otp("+919876543210", "123456")
+
+    assert exc_info.value.status_code == expected_status
+    assert "Internal Twilio detail" not in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_twilio_verify_check_invalid_code_is_not_a_provider_outage():
+    provider = TwilioVerifyProvider(account_sid="AC123", auth_token="tok", verify_service_sid="VA123")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"status": "pending", "valid": False}
+
+    with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_resp)):
+        assert await provider.verify_otp("+919876543210", "123456") is False
+
+
 def test_sms_provider_factory_rejects_unsupported_provider():
     sms_mod._sms_provider_instance = None
     with patch.object(sms_mod.settings, "SMS_PROVIDER", "unsupported_sms"):
