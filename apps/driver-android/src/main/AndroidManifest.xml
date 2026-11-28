@@ -23,13 +23,12 @@
 
     <application
         android:name=".DriverApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="@string/app_name"
         android:roundIcon="@android:drawable/sym_def_app_icon"
         android:supportsRtl="true"
-        android:theme="@style/Theme.DriverGo"
-        android:usesCleartextTraffic="true">
+        android:theme="@style/Theme.DriverGo">
         
         <activity
             android:name=".MainActivity"
