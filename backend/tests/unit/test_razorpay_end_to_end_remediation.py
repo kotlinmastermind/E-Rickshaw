@@ -1091,37 +1091,64 @@ async def test_notification_webhooks_diagnostic_sync_concurrent_refunds_and_dup_
         await db_session.refresh(pay)
         assert pay.status == "CAPTURED"
 
-        # 3. Concurrent partial refunds respect ceiling (only one 35000 refund succeeds out of 50000)
+        # 3. Exercise synchronous processed-refund persistence on SQLite.
+        # SQLite's shared in-memory StaticPool reuses one connection across sessions;
+        # a concurrent session rollback can therefore roll back another session's
+        # transaction. True concurrency is covered by the PostgreSQL integration test.
         from backend.infrastructure.database.session import async_session_maker
+        concurrent_pay = Payment(
+            user_id=user.id,
+            amount_cents=35000,
+            currency="INR",
+            purpose="RIDE_FARE",
+            status="CAPTURED",
+            payment_method="RAZORPAY",
+            provider_name="RAZORPAY",
+            provider_order_id=f"order_sync_refund_{uuid.uuid4().hex[:10]}",
+            provider_payment_id=f"pay_sync_refund_{uuid.uuid4().hex[:10]}",
+            idempotency_key=f"idem_sync_refund_{uuid.uuid4().hex[:10]}",
+        )
+        db_session.add(concurrent_pay)
+        await db_session.commit()
         ref_count = 0
 
-        async def _slow_refund(**kwargs):
+        async def _processed_refund(**kwargs):
             nonlocal ref_count
             ref_count += 1
-            my_ref = ref_count
-            await asyncio.sleep(0.1)
-            return {"id": f"rfnd_c_{my_ref}", "amount": kwargs["amount_cents"], "status": "processed", "acquirer_data": {}}
+            return {
+                "id": f"rfnd_sqlite_{uuid.uuid4().hex[:10]}",
+                "amount": kwargs["amount_cents"],
+                "status": "processed",
+                "acquirer_data": {},
+            }
 
-        async def _try_partial(amt: int):
-            async with async_session_maker() as s:
-                try:
-                    return await SettlementAdvancedService(s).create_refund(
-                        payment_id=pay.id,
-                        amount_cents=amt,
-                        reason="Concurrent partial refund test",
-                        is_partial=True,
-                    )
-                except HTTPException as exc:
-                    return {"error_status": exc.status_code}
+        with patch.object(provider, "create_refund", side_effect=_processed_refund):
+            async with async_session_maker() as refund_db:
+                refund_result = await SettlementAdvancedService(refund_db).create_refund(
+                    payment_id=concurrent_pay.id,
+                    amount_cents=35000,
+                    reason="Synchronous processed refund persistence test",
+                    is_partial=True,
+                )
 
-        with patch.object(provider, "create_refund", side_effect=_slow_refund):
-            p1, p2 = await asyncio.gather(_try_partial(35000), _try_partial(35000))
-
-        outcomes = [p1, p2]
-        assert sum(1 for o in outcomes if o.get("status") == "PROCESSED") == 1
-        # A concurrent request may observe the exhausted refund ceiling (400) or the
-        # active DB reservation lease (409); both are safe fail-closed outcomes.
-        assert sum(1 for o in outcomes if o.get("error_status") in {400, 409}) == 1
+        assert ref_count == 1
+        assert refund_result["status"] == "PROCESSED"
+        assert refund_result["refund_id"].startswith("rfnd_sqlite_")
+        assert refund_result["arn_reference"] == refund_result["refund_id"]
+        async with async_session_maker() as verify_db:
+            persisted_refund = (
+                await verify_db.execute(
+                    select(PaymentRefund).where(PaymentRefund.id == refund_result["internal_refund_id"])
+                )
+            ).scalar_one()
+            persisted_payment = (
+                await verify_db.execute(select(Payment).where(Payment.id == concurrent_pay.id))
+            ).scalar_one()
+            assert persisted_refund.status == "PROCESSED"
+            assert persisted_refund.provider_refund_id == refund_result["refund_id"]
+            assert persisted_refund.arn_reference == refund_result["refund_id"]
+            assert persisted_refund.raw_gateway_amount_cents == 35000
+            assert persisted_payment.refunded_amount_cents == 35000
 
         # 4. Android checkout isolation check (no mutable global checkout state or placeholder keys)
         rider_repo_src = pathlib.Path("apps/customer-android/src/main/java/com/vaisentra/mobility/rider/data/RiderRepository.kt").read_text(encoding="utf-8")

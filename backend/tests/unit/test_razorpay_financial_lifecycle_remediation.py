@@ -340,6 +340,39 @@ async def test_capture_guards_amount_currency_reuse_and_downgrade(db_session):
         await db_session.refresh(pay_captured)
         assert pay_captured.status == "CAPTURED"
 
+        # A different captured payment ID for the SAME order is a duplicate-charge anomaly.
+        duplicate_capture_id = f"pay_second_capture_{uuid.uuid4().hex[:8]}"
+        duplicate_capture_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": duplicate_capture_id,
+                        "order_id": pay_captured.provider_order_id,
+                        "amount": 30000,
+                        "currency": "INR",
+                        "status": "captured",
+                    }
+                }
+            },
+        }).encode("utf-8")
+        duplicate_result = await service.process_webhook(
+            duplicate_capture_body,
+            _sign(duplicate_capture_body, wh_secret),
+        )
+        assert duplicate_result["status"] == "DUPLICATE_ORDER_PAYMENT_ANOMALY"
+        await db_session.refresh(pay_captured)
+        assert pay_captured.provider_payment_id != duplicate_capture_id
+        duplicate_anomaly = (
+            await db_session.execute(
+                select(PaymentReconciliationAnomaly).where(
+                    PaymentReconciliationAnomaly.payment_id == pay_captured.id,
+                    PaymentReconciliationAnomaly.anomaly_type == "DOUBLE_ORDER_PAYMENT",
+                )
+            )
+        ).scalar_one_or_none()
+        assert duplicate_anomaly is not None
+
         # 2. Reusing pay_captured.provider_payment_id on pay_open fails with 409
         reuse_body = json.dumps({
             "event": "payment.captured",
@@ -433,6 +466,106 @@ async def test_capture_guards_amount_currency_reuse_and_downgrade(db_session):
         assert exc_cash.value.status_code == 400
     finally:
         provider.webhook_secret = orig_wh
+
+
+@pytest.mark.asyncio
+async def test_failed_payment_attempt_does_not_close_order_before_successful_retry(db_session):
+    """
+    Razorpay payment.failed is an attempt-level event. A later attempt on the same
+    still-open order may be captured with a different provider payment ID.
+    """
+    user = User(
+        phone_number=f"+9181{uuid.uuid4().hex[:8]}",
+        full_name="Payment Retry User",
+        role="customer",
+    )
+    db_session.add(user)
+    await db_session.flush()
+
+    order_id = f"order_retry_{uuid.uuid4().hex[:10]}"
+    failed_payment_id = f"pay_failed_{uuid.uuid4().hex[:10]}"
+    captured_payment_id = f"pay_captured_{uuid.uuid4().hex[:10]}"
+    payment = Payment(
+        user_id=user.id,
+        amount_cents=24500,
+        currency="INR",
+        purpose="WALLET_TOPUP",
+        status="CREATED",
+        payment_method="RAZORPAY",
+        provider_name="RAZORPAY",
+        provider_order_id=order_id,
+        idempotency_key=f"retry_{order_id}",
+    )
+    db_session.add(payment)
+    await db_session.commit()
+
+    provider = get_payment_provider()
+    original_secret = provider.webhook_secret
+    webhook_secret = "whsec_payment_attempt_retry_2026"
+    provider.webhook_secret = webhook_secret
+    service = PaymentService(db_session)
+
+    try:
+        failed_body = json.dumps({
+            "event": "payment.failed",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": failed_payment_id,
+                        "order_id": order_id,
+                        "amount": 24500,
+                        "currency": "INR",
+                        "status": "failed",
+                    }
+                }
+            },
+        }).encode("utf-8")
+        failed_result = await service.process_webhook(
+            failed_body,
+            _sign(failed_body, webhook_secret),
+        )
+        assert failed_result["status"] == "SUCCESS"
+
+        await db_session.refresh(payment)
+        assert payment.status == "CREATED"
+        assert payment.provider_payment_id is None
+
+        captured_body = json.dumps({
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": captured_payment_id,
+                        "order_id": order_id,
+                        "amount": 24500,
+                        "currency": "INR",
+                        "status": "captured",
+                    }
+                }
+            },
+        }).encode("utf-8")
+        captured_result = await service.process_webhook(
+            captured_body,
+            _sign(captured_body, webhook_secret),
+        )
+        assert captured_result["status"] == "SUCCESS"
+
+        await db_session.refresh(payment)
+        assert payment.status == "CAPTURED"
+        assert payment.provider_payment_id == captured_payment_id
+
+        balance = await WalletService.get_balance(db_session, user.id)
+        assert balance["balance_cents"] == 24500
+        credited = (
+            await db_session.execute(
+                select(WalletTransaction).where(
+                    WalletTransaction.reference_id == captured_payment_id
+                )
+            )
+        ).scalars().all()
+        assert len(credited) == 1
+    finally:
+        provider.webhook_secret = original_secret
 
 
 @pytest.mark.asyncio

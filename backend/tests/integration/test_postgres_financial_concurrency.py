@@ -234,11 +234,21 @@ async def test_postgres_concurrent_identical_and_partial_refunds_enforce_invaria
     outcomes = [p1, p2]
     assert gw_part_calls == 1
     assert sum(1 for o in outcomes if o.get("status") == "PROCESSED") == 1
-    assert sum(1 for o in outcomes if o.get("error_status") == 400) == 1
+    assert sum(1 for o in outcomes if o.get("error_status") in {400, 409}) == 1
 
     async with session_factory() as check_db:
         refreshed_part = (await check_db.execute(select(Payment).where(Payment.id == pay_part_id))).scalar_one()
         assert refreshed_part.refunded_amount_cents == 35000
+        processed_refund = (
+            await check_db.execute(
+                select(PaymentRefund).where(PaymentRefund.payment_id == pay_part_id)
+            )
+        ).scalar_one()
+        assert processed_refund.status == "PROCESSED"
+        assert processed_refund.provider_refund_id
+        assert processed_refund.provider_refund_id.startswith("rfnd_pg_part_")
+        assert processed_refund.arn_reference == processed_refund.provider_refund_id
+        assert processed_refund.raw_gateway_amount_cents == 35000
 
     await engine.dispose()
 
