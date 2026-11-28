@@ -99,6 +99,9 @@ async def test_admin_console_does_not_advertise_unverified_live_state():
     assert "STATE.activeRides = Array.isArray(data.active_rides) ? data.active_rides : [];" in html
     assert "ride.current_offer" in html
     assert "Dispatch: ${dispatchState}" in html
+    assert "function openRideInspector(ride)" in html
+    assert "drawer-dispatch-history-content" in html
+    assert "Offer History" in html
 
     admin_routes_path = os.path.join(os.path.dirname(os.path.dirname(STATIC_ADMIN_DIR)), "api", "routes", "admin.py")
     with open(admin_routes_path, "r", encoding="utf-8") as source:
