@@ -550,10 +550,10 @@ class AuthService:
         license_clean = (license_number or "").strip().upper()
         category_input = (vehicle_type or "").strip()
 
-        phone_digits = "".join(filter(str.isdigit, phone_raw))
-        if len(phone_digits) != 10:
+        phone = normalize_e164_phone(phone_raw)
+        if not phone or not re.fullmatch(r"\+91[6-9]\d{9}", phone):
             raise HTTPException(status_code=400, detail="A valid 10-digit Indian mobile number is required.")
-        phone = f"+91{phone_digits}"
+        phone_digits = phone[3:]
         if len(name_clean) < 2:
             raise HTTPException(status_code=400, detail="Enter the driver's full legal name.")
         if not license_clean or len(license_clean) < 6:
