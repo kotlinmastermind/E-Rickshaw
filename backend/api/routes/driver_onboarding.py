@@ -466,7 +466,12 @@ async def submit_driver_service_area_request(
         raise HTTPException(status_code=422, detail="State, district, and locality are required.")
     request = DriverServiceAreaRequest(driver_id=driver.id, **values)
     db.add(request)
-    await db.flush()
+    from sqlalchemy.exc import IntegrityError
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A service-area request is already awaiting review for this driver.")
 
     # Existing fully configured areas can onboard an already-approved driver
     # immediately. New/unknown localities remain pending until a real polygon
@@ -523,7 +528,6 @@ async def submit_driver_service_area_request(
         except HTTPException as area_error:
             request.admin_response = f"Pending review: {area_error.detail}"
 
-    from sqlalchemy.exc import IntegrityError
     try:
         await db.commit()
     except IntegrityError:
