@@ -80,6 +80,8 @@ object RiderRepository {
 
     private val _nearbyVehicles = MutableStateFlow<List<NearbyVehicleDto>>(emptyList())
     val nearbyVehicles: StateFlow<List<NearbyVehicleDto>> = _nearbyVehicles.asStateFlow()
+    private val _pickupServiceability = MutableStateFlow<NearbyVehiclesResponse?>(null)
+    val pickupServiceability: StateFlow<NearbyVehiclesResponse?> = _pickupServiceability.asStateFlow()
 
     private val _bookingDraft = MutableStateFlow(BookingDraftState())
     val bookingDraft: StateFlow<BookingDraftState> = _bookingDraft.asStateFlow()
@@ -157,7 +159,12 @@ object RiderRepository {
         try {
             val vehRes = NetworkClient.apiService.getNearbyVehicles(lat, lng)
             if (vehRes.isSuccessful && vehRes.body() != null) {
-                _nearbyVehicles.value = vehRes.body()!!.vehicles
+                val availability = vehRes.body()!!
+                _pickupServiceability.value = availability
+                _nearbyVehicles.value = availability.vehicles
+            } else {
+                _pickupServiceability.value = null
+                _nearbyVehicles.value = emptyList()
             }
         } catch (_: Exception) { }
     }
