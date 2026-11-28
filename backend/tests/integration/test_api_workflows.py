@@ -325,6 +325,14 @@ async def test_full_auth_and_ride_lifecycle_with_concurrency(db_session):
             live_locations = LiveLocationService(db=db_session)
             await live_locations.ingest_driver_location(drv1_prof.id, 18.9217, 72.8332, is_online=True)
             await live_locations.ingest_driver_location(drv2_prof.id, 18.9217, 72.8332, is_online=True)
+            # Simulate the Driver app's explicit duty switch; GPS alone is not online authority.
+            for candidate_headers in (drv1_headers, drv2_headers):
+                availability_resp = await client.post(
+                    "/api/v1/drivers/availability",
+                    json={"is_online": True},
+                    headers=candidate_headers,
+                )
+                assert availability_resp.status_code == 200, availability_resp.text
 
             # 6. ATOMIC CONCURRENCY TEST: Two drivers attempt to accept simultaneously
             accept_resp1 = await client.post(f"/api/v1/rides/{ride_id}/accept", headers=drv1_headers)
