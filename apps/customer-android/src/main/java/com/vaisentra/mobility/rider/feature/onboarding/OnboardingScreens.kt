@@ -130,6 +130,8 @@ fun BrandSplashScreen(onNavigate: (String) -> Unit = {}) {
 fun PhoneAuthScreen(onNavigate: (String) -> Unit,onOtpSent: (String) -> Unit
 ) {
     var phone by remember { mutableStateOf("") }
+    var isRequestingOtp by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
 
     Column(
@@ -155,20 +157,32 @@ fun PhoneAuthScreen(onNavigate: (String) -> Unit,onOtpSent: (String) -> Unit
             Spacer(modifier = Modifier.height(16.dp))
 
             NeoButton(
-                text = "Send 6-Digit OTP",
+                text = if (isRequestingOtp) "Sending OTP..." else "Send 6-Digit OTP",
                 onClick = {
                     val cleanPhone = phone.trim()
                     if (cleanPhone.length < 10) {
-                        DialogController.showToast("Please enter a valid 10-digit mobile number")
+                        DialogController.showToast("Please enter a valid mobile number")
                         return@NeoButton
                     }
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        RiderRepository.requestOtp(phone)
+                    if (isRequestingOtp) return@NeoButton
+                    coroutineScope.launch {
+                        isRequestingOtp = true
+                        try {
+                            val result = withContext(Dispatchers.IO) {
+                                RiderRepository.requestOtp(cleanPhone)
+                            }
+                            if (result.isSuccess) {
+                                DialogController.showToast("Verification code sent. Check your SMS.")
+                                onOtpSent(cleanPhone)
+                            } else {
+                                DialogController.showToast(
+                                    result.exceptionOrNull()?.message ?: "Unable to send verification code. Please try again."
+                                )
+                            }
+                        } finally {
+                            isRequestingOtp = false
+                        }
                     }
-                    DialogController.showToast("OTP code requested via Twilio for $cleanPhone")
-                    // Phone number ke saath OtpVerifyScreen par bhejein
-                    onOtpSent(cleanPhone)
-
                 },
                 icon = "📩"
             )
