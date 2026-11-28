@@ -402,7 +402,7 @@ fun PilotSignupScreen(onNavigate: (String) -> Unit) {
                     )
                     isSubmitting = false
                     if (res.isSuccess) {
-                        DriverDialogController.showToast("Registration submitted. Upload your documents for Admin verification.")
+                        DriverDialogController.showToast("Registration submitted. Verify your mobile through OTP sign-in, then upload documents for Admin review.")
                         onNavigate("documents")
                     } else {
                         val errMsg = res.exceptionOrNull()?.message ?: "Registration failed. Please try again."
