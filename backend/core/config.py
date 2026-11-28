@@ -58,8 +58,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))  # 15 minutes short-lived access token
     REFRESH_TOKEN_GRACE_PERIOD_SECONDS: int = int(os.getenv("REFRESH_TOKEN_GRACE_PERIOD_SECONDS", "10"))
     WEBAUTHN_ENABLED: bool = os.getenv("WEBAUTHN_ENABLED", "false").lower() in ("true", "1", "t")
-    OTP_EXPIRE_SECONDS: int = 300  # 5 minutes
-    OTP_MAX_ATTEMPTS: int = 3
+    # Twilio Verify owns OTP expiry and verification-attempt limits. Do not
+    # advertise local values that cannot enforce provider-side verification policy.
     OTP_RESEND_COOLDOWN_SECONDS: int = 60
 
     # Upstash Cloud Redis (In-Memory Cache & Pub/Sub)
