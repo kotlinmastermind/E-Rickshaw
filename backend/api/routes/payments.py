@@ -137,8 +137,21 @@ async def payment_webhook_status():
         SUPPORTED_WEBHOOK_EVENTS,
     )
 
+    from backend.core.config import settings
+
+    provider_credentials_configured = bool(
+        (settings.RAZORPAY_KEY_ID or "").strip()
+        and (settings.RAZORPAY_KEY_SECRET or "").strip()
+    )
+    webhook_secret_configured = bool((settings.RAZORPAY_WEBHOOK_SECRET or "").strip())
+    webhook_ready = provider_credentials_configured and webhook_secret_configured
+
     return {
-        "status": "ready",
+        "status": "ready" if webhook_ready else "not_ready",
+        "checks": {
+            "provider_credentials_configured": provider_credentials_configured,
+            "webhook_secret_configured": webhook_secret_configured,
+        },
         "endpoints": [
             "/api/v1/payments/razorpay/webhook",
             "/api/v1/payments/webhook"
