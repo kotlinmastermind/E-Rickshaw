@@ -228,7 +228,7 @@ object DriverWebSocketClient {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "Ride tracking WebSocket failure: ${t.message}")
-                if (activeTrackingRideId == rideId) {
+                if (rideTrackingWebSocket === webSocket && activeTrackingRideId == rideId) {
                     rideTrackingWebSocket = null
                     activeTrackingRideId = null
                 }
