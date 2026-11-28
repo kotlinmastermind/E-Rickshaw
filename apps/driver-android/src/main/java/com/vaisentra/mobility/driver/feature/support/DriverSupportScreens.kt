@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vaisentra.mobility.driver.components.*
 import com.vaisentra.mobility.driver.data.DriverRepository
+import com.vaisentra.mobility.driver.data.DriverLocationManager
+import com.vaisentra.mobility.driver.data.DriverServiceAreaRequestDto
 import com.vaisentra.mobility.driver.theme.*
 import kotlinx.coroutines.launch
 
@@ -155,6 +157,84 @@ fun FoundItemScreen(
             }
 
             item {
+                CockpitCard {
+                    Text("EXPAND VAISENTRA TO YOUR LOCALITY", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Tell us where you want to operate. A locality request does not activate rides automatically; the operational boundary and tariff must be configured and reviewed first.",
+                        color = CockpitTextMuted,
+                        fontSize = 11.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    CockpitTextField(value = serviceState, onValueChange = { serviceState = it }, label = "State", placeholder = "e.g. Bihar")
+                    Spacer(Modifier.height(7.dp))
+                    CockpitTextField(value = serviceDistrict, onValueChange = { serviceDistrict = it }, label = "District", placeholder = "e.g. Nalanda")
+                    Spacer(Modifier.height(7.dp))
+                    CockpitTextField(value = serviceLocality, onValueChange = { serviceLocality = it }, label = "City / Town / Village / Locality", placeholder = "e.g. Bihar Sharif")
+                    Spacer(Modifier.height(7.dp))
+                    CockpitTextField(value = servicePostalCode, onValueChange = { servicePostalCode = it.filter(Char::isDigit).take(6) }, label = "PIN code (optional)", placeholder = "6-digit PIN")
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (hasFreshGpsFix) "GPS verified: ${"%.5f".format(currentLocation.latitude)}, ${"%.5f".format(currentLocation.longitude)}"
+                        else "A fresh GPS fix (within 2 minutes) is required to submit this locality.",
+                        color = if (hasFreshGpsFix) PilotOnlineGreen else PilotAmber,
+                        fontSize = 10.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    CockpitButton(
+                        text = if (isAreaSubmitting) "Submitting locality..." else "Request Service in This Locality",
+                        enabled = !isAreaSubmitting && hasFreshGpsFix &&
+                            serviceState.trim().length >= 2 &&
+                            serviceDistrict.trim().length >= 2 &&
+                            serviceLocality.trim().length >= 2 &&
+                            (servicePostalCode.isBlank() || servicePostalCode.length == 6),
+                        onClick = {
+                            isAreaSubmitting = true
+                            scope.launch {
+                                val result = DriverRepository.submitDriverServiceAreaRequest(
+                                    stateName = serviceState,
+                                    districtName = serviceDistrict,
+                                    localityName = serviceLocality,
+                                    postalCode = servicePostalCode,
+                                    latitude = currentLocation.latitude,
+                                    longitude = currentLocation.longitude
+                                )
+                                isAreaSubmitting = false
+                                if (result.isSuccess) {
+                                    serviceState = ""
+                                    serviceDistrict = ""
+                                    serviceLocality = ""
+                                    servicePostalCode = ""
+                                    DriverRepository.fetchDriverServiceAreaRequests().onSuccess { serviceAreaRequests = it }
+                                    onShowToast("Locality request submitted for operational review.")
+                                } else {
+                                    onShowToast(result.exceptionOrNull()?.message ?: "Locality request failed.")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            if (serviceAreaRequests.isNotEmpty()) {
+                item {
+                    Text("MY LOCALITY REQUESTS", color = CockpitTextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                items(serviceAreaRequests) { request ->
+                    CockpitCard(cornerRadius = 12.dp) {
+                        Text("${request.localityName}, ${request.districtName}, ${request.stateName}", color = PilotTextWhite, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Status: ${request.status}", color = if (request.status == "APPROVED") PilotOnlineGreen else PilotAmber, fontSize = 11.sp)
+                        request.adminResponse?.takeIf { it.isNotBlank() }?.let {
+                            Spacer(Modifier.height(4.dp))
+                            Text(it, color = CockpitTextMuted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+
+            item {
                 CockpitButton(
                     text = if (isSubmitting) "Submitting to Supabase..." else "Report Found Item & Lock Ticket",
                     enabled = !isSubmitting && itemNotes.trim().isNotEmpty(),
@@ -259,10 +339,21 @@ fun DriverHelpdeskScreen(
     var subject by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
+    var serviceState by remember { mutableStateOf("") }
+    var serviceDistrict by remember { mutableStateOf("") }
+    var serviceLocality by remember { mutableStateOf("") }
+    var servicePostalCode by remember { mutableStateOf("") }
+    var serviceAreaRequests by remember { mutableStateOf<List<DriverServiceAreaRequestDto>>(emptyList()) }
+    var isAreaSubmitting by remember { mutableStateOf(false) }
+    val currentLocation by DriverLocationManager.currentLocation.collectAsState()
+    val hasFreshGpsFix = currentLocation.isLiveGps && currentLocation.hasValidCoordinates() &&
+        currentLocation.lastUpdatedTimestamp > 0L &&
+        System.currentTimeMillis() - currentLocation.lastUpdatedTimestamp <= 120_000L
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         DriverRepository.fetchDriverTickets()
+        DriverRepository.fetchDriverServiceAreaRequests().onSuccess { serviceAreaRequests = it }
     }
 
     Column(
