@@ -388,21 +388,37 @@ class DriverInspectionService:
                 headers={"X-Missing-Photos": ",".join(missing_photos)}
             )
 
-        # 3. Validate Checklist Items
+        # 3. Validate every checklist item explicitly; missing input is never a PASS.
+        if not isinstance(checklist_results, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Every required inspection checklist item must be submitted explicitly."
+            )
+
         failed_items = []
         critical_failures = []
         normalized_checklist = {}
+        missing_checklist_items = []
 
         for key, config in STANDARD_CHECKLIST_ITEMS.items():
-            val = checklist_results.get(key)
+            if key not in checklist_results:
+                missing_checklist_items.append(key)
+                continue
+            val = checklist_results[key]
             if isinstance(val, bool):
                 status_str = "PASS" if val else "FAIL"
             elif isinstance(val, str):
                 status_str = val.upper().strip()
                 if status_str not in ["PASS", "FAIL", "NOT_APPLICABLE"]:
-                    status_str = "PASS"
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid inspection result for checklist item {key}."
+                    )
             else:
-                status_str = "PASS"  # default
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid inspection result for checklist item {key}."
+                )
 
             normalized_checklist[key] = status_str
 
@@ -410,6 +426,12 @@ class DriverInspectionService:
                 failed_items.append(key)
                 if config["critical"]:
                     critical_failures.append(key)
+
+        if missing_checklist_items:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Inspection checklist is incomplete. Missing: " + ", ".join(missing_checklist_items) + "."
+            )
 
         now = datetime.now(timezone.utc)
         insp.odometer_reading = odometer_reading
