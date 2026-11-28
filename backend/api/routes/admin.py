@@ -2525,11 +2525,11 @@ async def approve_driver_service_area_request(
     if not active_tariff_id:
         raise HTTPException(status_code=409, detail="No active fare tariff is configured for this service area's city code. Configure a tariff before assigning the driver.")
 
-    inside = await ServiceAreaService(db).is_driver_inside(
-        zone.id, request.latitude, request.longitude
+    resolved_area = await ServiceAreaService(db).resolve_point(
+        request.latitude, request.longitude
     )
-    if not inside:
-        raise HTTPException(status_code=409, detail="The submitted locality coordinates are outside this service boundary or inside a restricted zone.")
+    if resolved_area.id != zone.id:
+        raise HTTPException(status_code=409, detail="The submitted coordinates resolve to a different operational service area.")
 
     assignment = (await db.execute(
         select(DriverServiceAreaAssignment)
