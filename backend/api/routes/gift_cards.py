@@ -29,7 +29,7 @@ class GiftCardPurchasePayload(BaseModel):
     message: Optional[str] = Field(None, max_length=500)
     delivery_method: str = Field("IN_APP", description="IN_APP, SMS, or EMAIL")
     payment_method: str = Field("UPI", description="UPI, WALLET, or CARD")
-    idempotency_key: Optional[str] = None
+    idempotency_key: str = Field(..., min_length=8, max_length=128)
 
 
 class GiftCardBalancePayload(BaseModel):
