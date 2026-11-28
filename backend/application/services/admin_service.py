@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from backend.domain.models import (
     User, CustomerProfile, DriverProfile, DriverDocument,
     Ride, RideStatusEvent, FareRule, DriverAvailability,
-    AdministrativeAuditLog, VehicleCategory
+    AdministrativeAuditLog, VehicleCategory, DriverVehicleAssignment, Vehicle, DriverVehicleInspection
 )
 
 class AdminService:
@@ -157,6 +157,65 @@ class AdminService:
     ) -> Dict[str, Any]:
         if status not in ["APPROVED", "REJECTED", "SUSPENDED"]:
             raise HTTPException(status_code=400, detail="Invalid approval status.")
+
+        if status == "APPROVED":
+            driver = await self.db.get(DriverProfile, driver_id)
+            if not driver:
+                raise HTTPException(status_code=404, detail="Driver record not found.")
+
+            documents = (await self.db.execute(
+                select(DriverDocument).where(DriverDocument.driver_id == driver_id)
+            )).scalars().all()
+            verified_types = {
+                doc.document_type.strip().upper()
+                for doc in documents
+                if (doc.verification_status or "").strip().upper() in {"VERIFIED", "APPROVED"}
+            }
+            required_document_groups = {
+                "driving licence": {"DRIVING_LICENSE"},
+                "identity proof": {"IDENTITY_PROOF", "AADHAAR_CARD", "AADHAAR", "PASSPORT", "VOTER_ID"},
+                "vehicle registration certificate": {"VEHICLE_REGISTRATION", "RC", "RC_BOOK"},
+                "vehicle insurance": {"INSURANCE", "VEHICLE_INSURANCE"},
+            }
+            missing_documents = [
+                label for label, aliases in required_document_groups.items()
+                if not verified_types.intersection(aliases)
+            ]
+            if missing_documents:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot approve driver until these document types are verified: " + ", ".join(missing_documents) + "."
+                )
+
+            assignment = (await self.db.execute(
+                select(DriverVehicleAssignment)
+                .join(Vehicle, Vehicle.id == DriverVehicleAssignment.vehicle_id)
+                .where(
+                    DriverVehicleAssignment.driver_id == driver_id,
+                    DriverVehicleAssignment.is_active.is_(True),
+                    Vehicle.is_active.is_(True)
+                )
+                .order_by(DriverVehicleAssignment.assigned_at.desc())
+            )).scalars().first()
+            if not assignment:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot approve driver until Admin creates and activates a real fleet vehicle assignment."
+                )
+
+            inspection = (await self.db.execute(
+                select(DriverVehicleInspection)
+                .where(
+                    DriverVehicleInspection.driver_id == driver_id,
+                    DriverVehicleInspection.vehicle_id == assignment.vehicle_id
+                )
+                .order_by(DriverVehicleInspection.inspected_at.desc())
+            )).scalars().first()
+            if not inspection or (inspection.inspection_status or "").upper() != "PASSED":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot approve driver until the assigned vehicle has a passed inspection."
+                )
 
         stmt = (
             update(DriverProfile)
